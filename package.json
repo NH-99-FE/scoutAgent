@@ -3,9 +3,11 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "type":"module",
+  "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "prepare": "husky install",
     "commit": "cz"
   },
@@ -14,6 +16,9 @@
       "path": "node_modules/cz-git"
     }
   },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": "eslint --fix"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
@@ -21,8 +26,16 @@
   "devDependencies": {
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2",
+    "@eslint/js": "^10.0.1",
     "commitizen": "^4.3.1",
     "cz-git": "^1.13.1",
-    "husky": "^9.1.7"
+    "eslint": "^10.4.1",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.6.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.0.5",
+    "typescript-eslint": "^8.60.0"
   }
 }
