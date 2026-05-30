@@ -3,6 +3,7 @@ import tseslint from 'typescript-eslint';
 import reactPlugin from 'eslint-plugin-react';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import reactRefreshPlugin from 'eslint-plugin-react-refresh';
+import prettierConfig from 'eslint-config-prettier';
 import globals from 'globals';
 
 export default tseslint.config(
@@ -13,10 +14,7 @@ export default tseslint.config(
 
   // 基础规则（前后端通用）
   {
-    extends: [
-      js.configs.recommended,
-      ...tseslint.configs.recommended,
-    ],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx,js,jsx}'],
     languageOptions: {
       parserOptions: {
@@ -68,4 +66,7 @@ export default tseslint.config(
       },
     },
   },
+
+  // Prettier：关闭与 ESLint 冲突的格式化规则
+  prettierConfig,
 );
