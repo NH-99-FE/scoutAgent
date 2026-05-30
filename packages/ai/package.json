@@ -1,0 +1,29 @@
+{
+  "name": "@scout-agent/ai",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "openai": "^4.103.0",
+    "partial-json": "^0.1.7",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

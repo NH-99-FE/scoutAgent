@@ -8,7 +8,9 @@
   "scripts": {
     "dev": "pnpm -C packages/webview dev & pnpm -C packages/extension watch",
     "build": "pnpm -C packages/webview build && pnpm -C packages/extension package",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
@@ -52,6 +54,7 @@
     "lint-staged": "^17.0.5",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
-    "typescript-eslint": "^8.60.0"
+    "typescript-eslint": "^8.60.0",
+    "vitest": "^4.1.7"
   }
 }

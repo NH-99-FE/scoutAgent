@@ -1,0 +1,27 @@
+{
+  "name": "@scout-agent/agent",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@scout-agent/ai": "workspace:*",
+    "typebox": "1.1.38"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
