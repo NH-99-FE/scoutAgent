@@ -1,0 +1,64 @@
+{
+  "name": "@scout-agent/extension",
+  "displayName": "Scout Agent",
+  "description": "AI Coding Agent — Chat-driven dev, code gen & edit, context-aware suggest, diagnose & fix",
+  "version": "0.0.1",
+  "type": "module",
+  "publisher": "",
+  "engines": {
+    "vscode": "^1.120.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning",
+    "Chat"
+  ],
+  "activationEvents": [
+    "onView:scout-agent.sidebar"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "scout-agent",
+          "title": "Scout Agent",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "scout-agent": [
+        {
+          "type": "webview",
+          "id": "scout-agent.sidebar",
+          "name": "Scout Agent"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "scout-agent.openSidebar",
+        "title": "Open Scout Agent"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "pnpm run package",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.120.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "esbuild": "^0.27.3",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}

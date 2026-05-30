@@ -1,0 +1,8 @@
+.vscode/**
+.vscode-test/**
+node_modules/**
+src/**
+esbuild.js
+**/*.map
+**/*.ts
+**/.vscode-test.*
