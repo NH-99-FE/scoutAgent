@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      "@scout-agent/ai": ["./packages/ai/src/index.ts"],
+      "@scout-agent/ai/*": ["./packages/ai/src/*"],
+      "@scout-agent/agent": ["./packages/agent/src/index.ts"],
+      "@scout-agent/agent/*": ["./packages/agent/src/*"],
+      "@scout-agent/shared": ["./packages/shared/types.ts"],
+      "@scout-agent/shared/*": ["./packages/shared/*"]
+    }
+  },
+  "include": ["packages/*/src/**/*"],
+  "exclude": ["**/dist/**", "packages/webview/**"]
+}

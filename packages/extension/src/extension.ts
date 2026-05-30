@@ -23,11 +23,13 @@ class ScoutSidebarProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'scout-agent.sidebar';
 
   private _view?: vscode.WebviewView;
+  private readonly _extensionUri: vscode.Uri;
+  private readonly _isDev: boolean;
 
-  constructor(
-    private readonly _extensionUri: vscode.Uri,
-    private readonly _isDev: boolean,
-  ) {}
+  constructor(extensionUri: vscode.Uri, isDev: boolean) {
+    this._extensionUri = extensionUri;
+    this._isDev = isDev;
+  }
 
   public async resolveWebviewView(
     webviewView: vscode.WebviewView,
