@@ -6,6 +6,7 @@ const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
 /**
+ * esbuild 错误格式化插件，将构建错误输出为可点击的文件位置
  * @type {import('esbuild').Plugin}
  */
 const esbuildProblemMatcherPlugin = {
@@ -26,7 +27,7 @@ const esbuildProblemMatcherPlugin = {
 };
 
 /**
- * Copies webview build output into dist/webview/ (production only).
+ * 复制 webview 构建产物到 dist/webview/（仅生产构建时执行）
  * @type {import('esbuild').Plugin}
  */
 const copyWebviewPlugin = {

@@ -6,6 +6,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "dev": "pnpm -C packages/webview dev & pnpm -C packages/extension watch",
+    "build": "pnpm -C packages/webview build && pnpm -C packages/extension package",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
