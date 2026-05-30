@@ -1,5 +1,6 @@
 {
-  "name": "scout",
+  "name": "@scout-agent/monorepo",
+  "private": true,
   "version": "1.0.0",
   "description": "",
   "main": "index.js",

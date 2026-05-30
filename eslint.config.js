@@ -20,6 +20,7 @@ export default tseslint.config(
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module',
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
@@ -29,12 +30,15 @@ export default tseslint.config(
     },
   },
 
-  // 后端（Node.js + TypeScript）
+  // 后端（agent/ai - Node.js + TypeScript）
   {
-    files: ['packages/server/**/*.{ts,js}'],
+    files: ['packages/agent/**/*.{ts,js}', 'packages/ai/**/*.{ts,js}'],
     languageOptions: {
       globals: {
         ...globals.node,
+      },
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname,
       },
     },
     rules: {
@@ -42,14 +46,17 @@ export default tseslint.config(
     },
   },
 
-  // 前端（React + TypeScript）
+  // 前端（webview - React + TypeScript）
   {
-    files: ['packages/client/**/*.{ts,tsx}'],
+    files: ['packages/webview/**/*.{ts,tsx}'],
     ...reactPlugin.configs.flat.recommended,
     ...reactPlugin.configs.flat['jsx-runtime'],
     languageOptions: {
       globals: {
         ...globals.browser,
+      },
+      parserOptions: {
+        tsconfigRootDir: import.meta.dirname + '/packages/webview',
       },
     },
     plugins: {
