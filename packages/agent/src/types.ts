@@ -74,8 +74,8 @@ export interface AfterToolCallResult {
   details?: unknown;
   isError?: boolean;
   /**
-   * Hint that the agent should stop after the current tool batch.
-   * Early termination only happens when every finalized tool result in the batch sets this to true.
+   * 提示 Agent 在当前工具批次后停止。
+   * 仅当批次中每个完成化的工具结果都设为 true 时才提前终止。
    */
   terminate?: boolean;
 }
@@ -94,11 +94,11 @@ export interface BeforeToolCallContext {
 
 /** 传递给 `afterToolCall` 的上下文。 */
 export interface AfterToolCallContext {
-  /** The assistant message that requested the tool call. */
+  /** 请求工具调用的 assistant 消息。 */
   assistantMessage: AssistantMessage;
-  /** The raw tool call block from `assistantMessage.content`. */
+  /** 来自 `assistantMessage.content` 的原始工具调用块。 */
   toolCall: AgentToolCall;
-  /** Validated tool arguments for the target tool schema. */
+  /** 经过目标工具 schema 验证的工具参数。 */
   args: unknown;
   /** 应用 `afterToolCall` 覆盖之前的已执行工具结果。 */
   result: AgentToolResult<any>;
