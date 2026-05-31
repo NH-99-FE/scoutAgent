@@ -61,7 +61,7 @@ async function main() {
     sourcesContent: false,
     platform: 'node',
     outfile: 'dist/extension.js',
-    external: ['vscode'],
+    external: ['vscode', 'jiti'],
     logLevel: 'silent',
     plugins: [esbuildProblemMatcherPlugin, copyWebviewPlugin],
   });

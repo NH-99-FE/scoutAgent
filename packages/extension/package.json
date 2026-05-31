@@ -41,7 +41,82 @@
         "command": "scout-agent.openSidebar",
         "title": "Open Scout Agent"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Scout Agent",
+      "properties": {
+        "scout-agent.anthropicApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Anthropic API key for Claude models"
+        },
+        "scout-agent.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API key for GPT models"
+        },
+        "scout-agent.defaultModel": {
+          "type": "string",
+          "default": "",
+          "description": "Default model ID (e.g. claude-sonnet-4-20250514, gpt-4o)"
+        },
+        "scout-agent.defaultThinkingLevel": {
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "off",
+          "description": "Default thinking level for reasoning models"
+        },
+        "scout-agent.shellPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the shell executable (leave empty for system default)"
+        },
+        "scout-agent.compaction.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic context compaction"
+        },
+        "scout-agent.compaction.reserveTokens": {
+          "type": "number",
+          "default": 16384,
+          "description": "Token budget reserved for new content after compaction"
+        },
+        "scout-agent.compaction.keepRecentTokens": {
+          "type": "number",
+          "default": 20000,
+          "description": "Number of recent tokens to keep during compaction"
+        },
+        "scout-agent.steeringMode": {
+          "type": "string",
+          "enum": [
+            "one-at-a-time",
+            "all"
+          ],
+          "default": "one-at-a-time",
+          "description": "How steering messages are queued: one-at-a-time processes one per turn, all processes all queued messages"
+        },
+        "scout-agent.followUpMode": {
+          "type": "string",
+          "enum": [
+            "one-at-a-time",
+            "all"
+          ],
+          "default": "one-at-a-time",
+          "description": "How follow-up messages are queued: one-at-a-time processes one per turn, all processes all queued messages"
+        },
+        "scout-agent.extensionPaths": {
+          "type": "array",
+          "default": [],
+          "description": "Additional paths to load Scout extensions from"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "pnpm run package",
@@ -53,12 +128,23 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "@scout-agent/agent": "workspace:*",
+    "@scout-agent/ai": "workspace:*",
+    "@scout-agent/shared": "workspace:*",
+    "@sinclair/typebox": "^0.34.0",
+    "diff": "^9.0.0",
+    "yaml": "^2.9.0",
+    "ignore": "^6.0.0",
+    "jiti": "^2.4.2"
+  },
   "devDependencies": {
     "@types/vscode": "^1.120.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "esbuild": "^0.27.3",
-    "typescript": "^5.9.3",
+    "@types/node": "25.9.1",
+    "@types/diff": "^8.0.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2"
   }
