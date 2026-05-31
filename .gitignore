@@ -1,6 +1,9 @@
 node_modules
 dist
 build
+coverage
+.claude
+CLAUDE.md
 
 *.log
 *.tmp
