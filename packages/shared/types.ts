@@ -8,15 +8,34 @@
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high';
 
+// ---------- Session Tree ----------
+
+export interface ScoutSessionTreeNode {
+  id: string;
+  parentId: string | null;
+  timestamp: string;
+  type: string;
+  label?: string;
+  preview?: string;
+  children: ScoutSessionTreeNode[];
+}
+
 // ---------- Webview → Extension ----------
 
 export type WebviewMessage =
   | { type: 'ready' }
   | { type: 'user_message'; text: string }
   | { type: 'abort' }
+  | { type: 'abort_retry' }
   | { type: 'select_model'; modelId: string }
   | { type: 'select_thinking'; level: ThinkingLevel }
-  | { type: 'clear_conversation' };
+  | { type: 'clear_conversation' }
+  | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
+  | { type: 'request_tree' }
+  | { type: 'navigate_tree'; targetId: string; summarize: boolean; customInstructions?: string; label?: string }
+  | { type: 'set_label'; entryId: string; label?: string }
+  | { type: 'continue_session' }
+  | { type: 'delete_session'; sessionId: string; sessionPath: string };
 
 // ---------- 消息内容块 ----------
 
@@ -46,6 +65,7 @@ export interface ScoutUserMessage {
   role: 'user';
   content: string | ScoutContent[];
   timestamp: number;
+  entryId?: string;
 }
 
 export interface ScoutAssistantMessage {
@@ -54,6 +74,7 @@ export interface ScoutAssistantMessage {
   stopReason?: string;
   errorMessage?: string;
   timestamp: number;
+  entryId?: string;
 }
 
 export interface ScoutToolResultMessage {
@@ -63,9 +84,18 @@ export interface ScoutToolResultMessage {
   content: ScoutTextContent[];
   isError: boolean;
   timestamp: number;
+  entryId?: string;
 }
 
-export type ScoutMessage = ScoutUserMessage | ScoutAssistantMessage | ScoutToolResultMessage;
+export interface ScoutBranchSummaryMessage {
+  role: 'branchSummary';
+  summary: string;
+  fromId: string;
+  timestamp: number;
+  entryId?: string;
+}
+
+export type ScoutMessage = ScoutUserMessage | ScoutAssistantMessage | ScoutToolResultMessage | ScoutBranchSummaryMessage;
 
 // ---------- Extension → Webview ----------
 
@@ -75,6 +105,9 @@ export interface ScoutWebviewState {
   modelId: string;
   thinkingLevel: ThinkingLevel;
   errorMessage?: string;
+  sessionId?: string;
+  parentSessionPath?: string;
+  leafId?: string | null;
 }
 
 export interface ScoutConfig {
@@ -110,7 +143,31 @@ export type ScoutAgentEvent =
       isError: boolean;
     };
 
+// ---------- Retry 事件 ----------
+
+export interface ScoutRetryStartEvent {
+  type: 'retry_start';
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  errorMessage: string;
+}
+
+export interface ScoutRetryEndEvent {
+  type: 'retry_end';
+  success: boolean;
+  attempt: number;
+  finalError?: string;
+}
+
 export type ExtensionMessage =
   | { type: 'state_update'; state: ScoutWebviewState }
   | { type: 'agent_event'; event: ScoutAgentEvent }
-  | { type: 'config_update'; config: ScoutConfig };
+  | { type: 'config_update'; config: ScoutConfig }
+  | { type: 'retry_start'; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
+  | { type: 'retry_end'; success: boolean; attempt: number; finalError?: string }
+  | { type: 'fork_result'; success: boolean; error?: string }
+  | { type: 'tree_data'; tree: ScoutSessionTreeNode[]; leafId: string | null }
+  | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }
+  | { type: 'label_result'; success: boolean; error?: string }
+  | { type: 'delete_session_result'; success: boolean; error?: string };
