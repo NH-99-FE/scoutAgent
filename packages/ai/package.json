@@ -18,8 +18,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.52.0",
-    "openai": "^4.103.0",
+    "@anthropic-ai/sdk": "0.91.1",
+    "openai": "6.26.0",
     "partial-json": "^0.1.7",
     "typebox": "1.1.38"
   },
