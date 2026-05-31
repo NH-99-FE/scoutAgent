@@ -1,0 +1,8 @@
+{
+  "name": "@scout-agent/shared",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "types.ts",
+  "types": "types.ts"
+}

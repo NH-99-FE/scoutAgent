@@ -19,7 +19,10 @@
   },
   "dependencies": {
     "@scout-agent/ai": "workspace:*",
-    "typebox": "1.1.38"
+    "@scout-agent/shared": "workspace:*",
+    "ignore": "7.0.5",
+    "typebox": "1.1.38",
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "typescript": "^5.9.3"

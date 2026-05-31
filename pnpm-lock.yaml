@@ -71,9 +71,18 @@ importers:
       '@scout-agent/ai':
         specifier: workspace:*
         version: link:../ai
+      '@scout-agent/shared':
+        specifier: workspace:*
+        version: link:../shared
+      ignore:
+        specifier: 7.0.5
+        version: 7.0.5
       typebox:
         specifier: 1.1.38
         version: 1.1.38
+      yaml:
+        specifier: 2.9.0
+        version: 2.9.0
     devDependencies:
       typescript:
         specifier: ^5.9.3
@@ -6532,8 +6541,7 @@ snapshots:
 
   yallist@3.1.1: {}
 
-  yaml@2.9.0:
-    optional: true
+  yaml@2.9.0: {}
 
   yargs-parser@21.1.1: {}
 
