@@ -3,7 +3,6 @@ dist
 build
 coverage
 .claude
-CLAUDE.md
 
 *.log
 *.tmp
