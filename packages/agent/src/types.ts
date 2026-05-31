@@ -368,6 +368,16 @@ export interface AgentTool<
   /** UI 展示用的人类可读标签。 */
   label: string;
   /**
+   * 系统提示中使用的简短工具描述。
+   * 如果省略，系统提示回退到使用 tool.description（通常太冗长）。
+   */
+  promptSnippet?: string;
+  /**
+   * 附加到系统提示的工具使用指南。
+   * 每个字符串是一个独立的指导原则。
+   */
+  promptGuidelines?: string[];
+  /**
    * 可选的兼容性垫片，用于在 schema 验证前处理原始工具调用参数。
    * 必须返回匹配 `TParameters` 的对象。
    */

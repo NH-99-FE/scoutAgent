@@ -23,6 +23,8 @@ import {
 import {
   compact,
   DEFAULT_COMPACTION_SETTINGS,
+  estimateContextTokens,
+  type ContextUsageEstimate,
   prepareCompaction,
 } from './compaction/compaction.ts';
 import { convertToLlm } from './messages.ts';
@@ -210,6 +212,8 @@ export class AgentHarness<
   private followUpQueueMode: QueueMode;
   private nextTurnQueue: AgentMessage[] = [];
   private handlers = new Map<string, Set<AgentHarnessHandler>>();
+  /** 最近一次 turn 的消息快照，用于 getMessages()/getContextUsage() */
+  private lastTurnMessages: AgentMessage[] = [];
 
   constructor(options: AgentHarnessOptions<TSkill, TPromptTemplate, TTool>) {
     this.env = options.env;
@@ -536,6 +540,8 @@ export class AgentHarness<
   private async handleAgentEvent(event: AgentEvent, signal?: AbortSignal): Promise<void> {
     if (event.type === 'message_end') {
       await this.session.appendMessage(event.message);
+      // 更新消息快照
+      this.lastTurnMessages = [...this.lastTurnMessages, event.message];
       await this.emitAny(event, signal);
       return;
     }
@@ -586,6 +592,8 @@ export class AgentHarness<
   ): Promise<AssistantMessage> {
     let activeTurnState = turnState;
     let messages: AgentMessage[] = [createUserMessage(text, options?.images)];
+    // 更新消息快照：包含新用户消息
+    this.lastTurnMessages = [...this.lastTurnMessages, messages[0]!];
     if (this.nextTurnQueue.length > 0) {
       const queuedMessages = this.nextTurnQueue.splice(0);
       try {
@@ -795,6 +803,8 @@ export class AgentHarness<
         result.details,
         provided !== undefined,
       );
+      // 压缩后重置消息快照（下次 createTurnState 会重建）
+      this.lastTurnMessages = [];
       const entry = await this.session.getEntry(entryId);
       if (entry?.type === 'compaction') {
         await this.emitOwn({
@@ -936,6 +946,17 @@ export class AgentHarness<
 
   getModel(): Model<any> {
     return this.model;
+  }
+
+  getMessages(): AgentMessage[] {
+    // 从 session 上下文构建获取消息
+    // 注意：此方法是同步的，返回最近一次 turnState 的消息快照
+    // 如需最新消息，应使用 session.buildContext()
+    return this.lastTurnMessages;
+  }
+
+  getContextUsage(): ContextUsageEstimate {
+    return estimateContextTokens(this.lastTurnMessages);
   }
 
   getThinkingLevel(): ThinkingLevel {

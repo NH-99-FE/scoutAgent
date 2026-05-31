@@ -7,7 +7,7 @@ export * from './agent.ts';
 // Loop functions
 export * from './agent-loop.ts';
 // Event mapper (Scout 独有)
-export { mapAgentEventToScout } from './event-mapper.ts';
+export { mapAgentEventToScout, convertMessage } from './event-mapper.ts';
 // Harness
 export * from './harness/agent-harness.ts';
 export {
@@ -19,6 +19,7 @@ export {
   prepareBranchEntries,
 } from './harness/compaction/branch-summarization.ts';
 export {
+  type ContextUsageEstimate,
   calculateContextTokens,
   compact,
   DEFAULT_COMPACTION_SETTINGS,
@@ -41,6 +42,7 @@ export * from './harness/session/session.ts';
 export { uuidv7 } from './harness/session/uuid.ts';
 export * from './harness/skills.ts';
 export * from './harness/system-prompt.ts';
+export * from './harness/env/nodejs.ts';
 export * from './harness/types.ts';
 export * from './harness/utils/shell-output.ts';
 export * from './harness/utils/truncate.ts';

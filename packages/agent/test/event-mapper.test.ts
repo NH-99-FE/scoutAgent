@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapAgentEventToScout } from '../src/event-mapper.ts';
 import type { AgentEvent } from '../src/types.ts';
+import type { ScoutAssistantMessage } from '@scout-agent/shared';
 
 // ---------- 夹具：AgentMessage ----------
 
@@ -105,7 +106,7 @@ describe('mapAgentEventToScout', () => {
     expect(result?.type).toBe('message_start');
     if (result?.type === 'message_start') {
       expect(result.message.role).toBe('user');
-      expect(result.message.content).toBe('hello');
+      expect((result.message as ScoutAssistantMessage).content).toBe('hello');
       expect(typeof (result.message as any).timestamp).toBe('number');
     }
   });
@@ -118,7 +119,7 @@ describe('mapAgentEventToScout', () => {
     expect(result?.type).toBe('message_start');
     if (result?.type === 'message_start') {
       expect(result.message.role).toBe('assistant');
-      expect(result.message.content).toEqual([{ type: 'text', text: 'some response' }]);
+      expect((result.message as ScoutAssistantMessage).content).toEqual([{ type: 'text', text: 'some response' }]);
     }
   });
 
@@ -139,7 +140,7 @@ describe('mapAgentEventToScout', () => {
     expect(result?.type).toBe('message_update');
     if (result?.type === 'message_update') {
       expect(result.message.role).toBe('assistant');
-      const content = result.message.content as Array<{ type: string }>;
+      const content = (result.message as ScoutAssistantMessage).content as Array<{ type: string }>;
       expect(content.some((c) => c.type === 'text')).toBe(true);
       expect(content.some((c) => c.type === 'thinking')).toBe(true);
     }

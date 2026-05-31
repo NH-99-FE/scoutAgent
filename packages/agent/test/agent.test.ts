@@ -263,7 +263,7 @@ describe('Agent', () => {
     expect(agent.state.systemPrompt).toBe('Custom prompt');
 
     // Test setModel
-    const newModel = getModel('openai', 'gpt-4o-mini');
+    const newModel = getModel('openai', 'gpt-4o-mini')!;
     agent.state.model = newModel;
     expect(agent.state.model).toBe(newModel);
 

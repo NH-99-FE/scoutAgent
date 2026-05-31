@@ -16,7 +16,7 @@ import {
   toSession,
 } from './repo-utils.ts';
 
-type JsonlSessionRepoFileSystem = Pick<
+export type JsonlSessionRepoFileSystem = Pick<
   FileSystem,
   | 'cwd'
   | 'absolutePath'

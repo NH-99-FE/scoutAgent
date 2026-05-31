@@ -13,12 +13,14 @@ import type {
 import type {
   ScoutAgentEvent,
   ScoutAssistantMessage,
+  ScoutBranchSummaryMessage,
   ScoutContent,
   ScoutMessage,
   ScoutTextContent,
   ScoutToolResultMessage,
   ScoutUserMessage,
 } from '@scout-agent/shared';
+import type { BranchSummaryMessage } from './harness/messages.ts';
 import type { AgentMessage } from './types.ts';
 
 // ---------- 内容块转换 ----------
@@ -63,7 +65,7 @@ function convertToolResultContent(content: ToolResultMessage['content']): ScoutT
 
 // ---------- AgentMessage → ScoutMessage ----------
 
-function convertMessage(message: AgentMessage): ScoutMessage | null {
+export function convertMessage(message: AgentMessage): ScoutMessage | null {
   if (message.role === 'user') {
     const msg = message as UserMessage;
     const scoutMsg: ScoutUserMessage = {
@@ -94,6 +96,17 @@ function convertMessage(message: AgentMessage): ScoutMessage | null {
       toolName: msg.toolName,
       content: convertToolResultContent(msg.content),
       isError: msg.isError,
+      timestamp: msg.timestamp,
+    };
+    return scoutMsg;
+  }
+
+  if (message.role === 'branchSummary') {
+    const msg = message as BranchSummaryMessage;
+    const scoutMsg: ScoutBranchSummaryMessage = {
+      role: 'branchSummary',
+      summary: msg.summary,
+      fromId: msg.fromId,
       timestamp: msg.timestamp,
     };
     return scoutMsg;
