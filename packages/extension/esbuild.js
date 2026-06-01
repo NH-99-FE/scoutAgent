@@ -60,6 +60,9 @@ async function main() {
     sourcemap: !production,
     sourcesContent: false,
     platform: 'node',
+    banner: {
+      js: "import { createRequire as __scoutCreateRequire } from 'node:module';\nconst require = __scoutCreateRequire(import.meta.url);",
+    },
     outfile: 'dist/extension.js',
     external: ['vscode', 'jiti'],
     logLevel: 'silent',
