@@ -29,8 +29,8 @@ import {
   shouldCompact,
   calculateContextTokens,
   estimateContextTokens,
-  NodeExecutionEnv,
 } from '@scout-agent/agent';
+import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import type {
   ScoutAgentEvent,
   ScoutMessage,

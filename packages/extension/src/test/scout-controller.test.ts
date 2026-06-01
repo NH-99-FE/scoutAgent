@@ -105,11 +105,14 @@ vi.mock('vscode', () => ({
 vi.mock('@scout-agent/agent', () => ({
   AgentHarness: vi.fn(),
   JsonlSessionRepo: vi.fn(),
-  NodeExecutionEnv: vi.fn(),
   shouldCompact: vi.fn(),
   calculateContextTokens: vi.fn(() => 0),
   estimateContextTokens: vi.fn(() => ({ tokens: 0, lastUsageIndex: null })),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
+}));
+
+vi.mock('@scout-agent/agent/node', () => ({
+  NodeExecutionEnv: vi.fn(),
 }));
 
 // ---------- Mock @scout-agent/ai ----------

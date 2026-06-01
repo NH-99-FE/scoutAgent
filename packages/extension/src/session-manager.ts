@@ -6,7 +6,8 @@
 
 import * as vscode from 'vscode';
 import type { JsonlSessionMetadata } from '@scout-agent/agent';
-import { JsonlSessionRepo, NodeExecutionEnv, InMemorySessionRepo } from '@scout-agent/agent';
+import { JsonlSessionRepo, InMemorySessionRepo } from '@scout-agent/agent';
+import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import type { JsonlSessionRepoFileSystem, Session } from '@scout-agent/agent';
 import type { ScoutMessage, ScoutSessionTreeNode, ThinkingLevel } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';

@@ -161,11 +161,14 @@ vi.mock('vscode', () => ({
 
 vi.mock('@scout-agent/agent', () => ({
   AgentHarness: MockAgentHarness,
-  NodeExecutionEnv: vi.fn(function (this: any) {}),
   shouldCompact: vi.fn(() => false),
   calculateContextTokens: vi.fn(() => 0),
   estimateContextTokens: vi.fn(() => ({ tokens: 0, lastUsageIndex: null })),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
+}));
+
+vi.mock('@scout-agent/agent/node', () => ({
+  NodeExecutionEnv: vi.fn(function (this: any) {}),
 }));
 
 vi.mock('../protocol/agent-event-mapper.ts', () => ({
