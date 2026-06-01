@@ -41,29 +41,11 @@ describe('findEnvKeys', () => {
   });
 
   it('returns undefined when no env vars are set', () => {
-    saveEnv('ANTHROPIC_OAUTH_TOKEN');
     saveEnv('ANTHROPIC_API_KEY');
-    delete process.env.ANTHROPIC_OAUTH_TOKEN;
     delete process.env.ANTHROPIC_API_KEY;
     try {
       expect(findEnvKeys('anthropic')).toBeUndefined();
     } finally {
-      restoreEnv('ANTHROPIC_OAUTH_TOKEN');
-      restoreEnv('ANTHROPIC_API_KEY');
-    }
-  });
-
-  it('prefers OAUTH token over API key for anthropic', () => {
-    saveEnv('ANTHROPIC_OAUTH_TOKEN');
-    saveEnv('ANTHROPIC_API_KEY');
-    process.env.ANTHROPIC_OAUTH_TOKEN = 'oauth-token';
-    process.env.ANTHROPIC_API_KEY = 'api-key';
-    try {
-      const keys = findEnvKeys('anthropic');
-      expect(keys).toBeDefined();
-      expect(keys![0]).toBe('ANTHROPIC_OAUTH_TOKEN');
-    } finally {
-      restoreEnv('ANTHROPIC_OAUTH_TOKEN');
       restoreEnv('ANTHROPIC_API_KEY');
     }
   });
@@ -76,17 +58,6 @@ describe('findEnvKeys', () => {
       expect(keys).toEqual(['OPENAI_API_KEY']);
     } finally {
       restoreEnv('OPENAI_API_KEY');
-    }
-  });
-
-  it('finds DEEPSEEK_API_KEY for deepseek provider', () => {
-    saveEnv('DEEPSEEK_API_KEY');
-    process.env.DEEPSEEK_API_KEY = 'sk-deepseek-key';
-    try {
-      const keys = findEnvKeys('deepseek');
-      expect(keys).toEqual(['DEEPSEEK_API_KEY']);
-    } finally {
-      restoreEnv('DEEPSEEK_API_KEY');
     }
   });
 });
@@ -118,28 +89,12 @@ describe('getEnvApiKey', () => {
     expect(getEnvApiKey('unknown-provider' as any)).toBeUndefined();
   });
 
-  it('prefers OAUTH token for anthropic', () => {
-    saveEnv('ANTHROPIC_OAUTH_TOKEN');
+  it('returns ANTHROPIC_API_KEY for anthropic', () => {
     saveEnv('ANTHROPIC_API_KEY');
-    process.env.ANTHROPIC_OAUTH_TOKEN = 'oauth-token-value';
-    process.env.ANTHROPIC_API_KEY = 'api-key-value';
+    process.env.ANTHROPIC_API_KEY = 'anthropic-api-key';
     try {
-      expect(getEnvApiKey('anthropic')).toBe('oauth-token-value');
+      expect(getEnvApiKey('anthropic')).toBe('anthropic-api-key');
     } finally {
-      restoreEnv('ANTHROPIC_OAUTH_TOKEN');
-      restoreEnv('ANTHROPIC_API_KEY');
-    }
-  });
-
-  it('falls back to API key when OAUTH is not set', () => {
-    saveEnv('ANTHROPIC_OAUTH_TOKEN');
-    saveEnv('ANTHROPIC_API_KEY');
-    delete process.env.ANTHROPIC_OAUTH_TOKEN;
-    process.env.ANTHROPIC_API_KEY = 'fallback-api-key';
-    try {
-      expect(getEnvApiKey('anthropic')).toBe('fallback-api-key');
-    } finally {
-      restoreEnv('ANTHROPIC_OAUTH_TOKEN');
       restoreEnv('ANTHROPIC_API_KEY');
     }
   });
