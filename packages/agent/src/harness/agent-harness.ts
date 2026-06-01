@@ -753,9 +753,7 @@ export class AgentHarness<
     }
   }
 
-  async compact(
-    customInstructions?: string,
-  ): Promise<{
+  async compact(customInstructions?: string): Promise<{
     summary: string;
     firstKeptEntryId: string;
     tokensBefore: number;
@@ -1096,6 +1094,16 @@ export class AgentHarness<
 
   async waitForIdle(): Promise<void> {
     await this.runPromise;
+  }
+
+  hasPendingMessages(): boolean {
+    return (
+      this.steerQueue.length > 0 || this.followUpQueue.length > 0 || this.nextTurnQueue.length > 0
+    );
+  }
+
+  getSignal(): AbortSignal | undefined {
+    return this.runAbortController?.signal;
   }
 
   subscribe(

@@ -132,9 +132,9 @@ function createExtensionAPI(
       runtime.sendMessage(message);
     },
 
-    sendUserMessage(content: string): void {
+    sendUserMessage(content, options): void {
       runtime.assertActive();
-      runtime.sendUserMessage(content);
+      runtime.sendUserMessage(content, options);
     },
 
     setActiveTools(toolNames: string[]): void {
@@ -147,7 +147,7 @@ function createExtensionAPI(
       return runtime.getActiveTools();
     },
 
-    getAllTools(): string[] {
+    getAllTools() {
       runtime.assertActive();
       return runtime.getAllTools();
     },

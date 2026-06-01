@@ -152,6 +152,30 @@ export interface SessionBeforeCompactResult {
   compaction?: CompactResult;
 }
 
+// ---------- 工具信息 ----------
+
+export type SourceScope = 'user' | 'project' | 'temporary';
+export type SourceOrigin = 'package' | 'top-level';
+
+export interface SourceInfo {
+  path: string;
+  source: string;
+  scope: SourceScope;
+  origin: SourceOrigin;
+  baseDir?: string;
+}
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  parameters: unknown;
+  sourceInfo: SourceInfo;
+}
+
+export interface SendUserMessageOptions {
+  deliverAs?: 'steer' | 'followUp';
+}
+
 // ---------- 扩展上下文 ----------
 
 /**
@@ -164,8 +188,10 @@ export interface ScoutExtensionContext {
   readonly configManager: ConfigManager;
   readonly model: Model<any> | undefined;
   isIdle(): boolean;
+  readonly signal: AbortSignal | undefined;
   abort(): void;
   getSystemPrompt(): string;
+  hasPendingMessages(): boolean;
   compact(): void;
   shutdown(): void;
   /** 切换模型 */
@@ -184,9 +210,12 @@ export interface ScoutExtensionContext {
  */
 export interface ScoutExtensionRuntime {
   sendMessage: (message: string) => void;
-  sendUserMessage: (content: string) => void;
+  sendUserMessage: (
+    content: string | (TextContent | ImageContent)[],
+    options?: SendUserMessageOptions,
+  ) => void;
   getActiveTools: () => string[];
-  getAllTools: () => string[];
+  getAllTools: () => ToolInfo[];
   setActiveTools: (toolNames: string[]) => void;
   refreshTools: () => void;
   assertActive: () => void;
@@ -234,10 +263,13 @@ export interface ScoutExtensionAPI {
   on(event: string, handler: ScoutHandlerFn): void;
   registerTool(tool: ScoutToolDefinition): void;
   sendMessage(message: string): void;
-  sendUserMessage(content: string): void;
+  sendUserMessage(
+    content: string | (TextContent | ImageContent)[],
+    options?: SendUserMessageOptions,
+  ): void;
   setActiveTools(toolNames: string[]): void;
   getActiveTools(): string[];
-  getAllTools(): string[];
+  getAllTools(): ToolInfo[];
   events: EventBus;
 }
 
@@ -259,9 +291,12 @@ export interface LoadExtensionsResult {
 /** bindCore() 接收的动作方法集 */
 export interface ScoutExtensionActions {
   sendMessage: (message: string) => void;
-  sendUserMessage: (content: string) => void;
+  sendUserMessage: (
+    content: string | (TextContent | ImageContent)[],
+    options?: SendUserMessageOptions,
+  ) => void;
   getActiveTools: () => string[];
-  getAllTools: () => string[];
+  getAllTools: () => ToolInfo[];
   setActiveTools: (toolNames: string[]) => void;
   refreshTools: () => void;
 }
@@ -272,6 +307,8 @@ export interface ScoutExtensionContextActions {
   isIdle: () => boolean;
   abort: () => void;
   getSystemPrompt: () => string;
+  hasPendingMessages: () => boolean;
+  getSignal: () => AbortSignal | undefined;
   compact: () => void;
   shutdown: () => void;
   setModel: (modelId: string) => Promise<void>;

@@ -19,6 +19,7 @@ const {
   mockHarnessSetModel,
   mockHarnessSetThinkingLevel,
   mockHarnessCompact,
+  mockHarnessSetTools,
   mockHarnessGetModel,
   mockHarnessGetThinkingLevel,
   mockHarnessOn,
@@ -36,6 +37,7 @@ const {
   const mockHarnessSetModel = vi.fn();
   const mockHarnessSetThinkingLevel = vi.fn();
   const mockHarnessCompact = vi.fn();
+  const mockHarnessSetTools = vi.fn();
   const mockHarnessGetModel = vi.fn(() => ({
     id: 'test-model',
     contextWindow: 200000,
@@ -71,6 +73,12 @@ const {
     this.setModel = mockHarnessSetModel;
     this.setThinkingLevel = mockHarnessSetThinkingLevel;
     this.compact = mockHarnessCompact;
+    this.steer = vi.fn();
+    this.followUp = vi.fn();
+    this.nextTurn = vi.fn();
+    this.setTools = mockHarnessSetTools;
+    this.hasPendingMessages = vi.fn(() => false);
+    this.getSignal = vi.fn(() => undefined);
     this.getModel = mockHarnessGetModel;
     this.getThinkingLevel = mockHarnessGetThinkingLevel;
     this.getContextUsage = mockHarnessGetContextUsage;
@@ -93,6 +101,7 @@ const {
     mockHarnessSetModel,
     mockHarnessSetThinkingLevel,
     mockHarnessCompact,
+    mockHarnessSetTools,
     mockHarnessGetModel,
     mockHarnessGetThinkingLevel,
     mockHarnessOn,
@@ -226,8 +235,17 @@ vi.mock('../system-prompt.ts', () => ({
 }));
 
 vi.mock('../tools/index.ts', () => ({
-  createTools: vi.fn(() => []),
+  createTools: vi.fn((_cwd: string, names: string[]) =>
+    names.map((name) => ({
+      name,
+      label: name,
+      description: `${name} tool`,
+      parameters: {},
+      execute: vi.fn(),
+    })),
+  ),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
+  ALL_TOOL_NAMES: new Set(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']),
 }));
 
 vi.mock('../extensions/index.ts', () => ({

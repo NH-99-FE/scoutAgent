@@ -12,7 +12,6 @@ import type { JsonlSessionRepoFileSystem, Session } from '@scout-agent/agent';
 import type { ScoutMessage, ScoutSessionTreeNode, ThinkingLevel } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
 import { loadSkills } from './skill-loader.ts';
-import { createTools, ALL_TOOL_NAMES } from './tools/index.ts';
 
 // ---------- 内部 Repo 接口（供 JsonlSessionRepo 和 InMemorySessionRepo 共用） ----------
 
@@ -402,20 +401,17 @@ export class SessionManager implements vscode.Disposable {
       sendMessage: (message: string) => {
         this.outputChannel.appendLine(`[scout] Extension message: ${message}`);
       },
-      sendUserMessage: (content: string) => {
-        // 直接调用 harness.steer — 通过 AgentSession 暴露的内部 harness 不可直接访问
-        // 暂时通过 prompt 代替（行为略有差异，但保持接口一致）
-        agentSession.prompt(content);
+      sendUserMessage: (content, options) => {
+        void agentSession.sendUserMessage(content, options);
       },
-      getActiveTools: () => [],
-      getAllTools: () => {
-        const builtin = createTools(this.cwd, Array.from(ALL_TOOL_NAMES), {
-          read: { isVisionModel: () => agentSession.model?.input?.includes('image') ?? false },
-        });
-        return builtin.map((t) => t.name);
+      getActiveTools: () => agentSession.getActiveToolNames(),
+      getAllTools: () => agentSession.getAllToolInfos(),
+      setActiveTools: (toolNames: string[]) => {
+        void agentSession.setActiveTools(toolNames);
       },
-      setActiveTools: (_toolNames: string[]) => {},
-      refreshTools: () => {},
+      refreshTools: () => {
+        void agentSession.refreshTools();
+      },
     };
 
     const contextActions: ScoutExtensionContextActions = {
@@ -424,7 +420,9 @@ export class SessionManager implements vscode.Disposable {
       abort: () => {
         agentSession.abort();
       },
-      getSystemPrompt: () => '',
+      getSystemPrompt: () => agentSession.getSystemPrompt(),
+      hasPendingMessages: () => agentSession.hasPendingMessages(),
+      getSignal: () => agentSession.getAbortSignal(),
       compact: () => {
         agentSession.compact();
       },

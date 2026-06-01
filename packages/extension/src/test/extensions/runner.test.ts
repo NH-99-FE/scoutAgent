@@ -77,6 +77,8 @@ function makeContextActions(): ScoutExtensionContextActions {
     isIdle: vi.fn(() => true),
     abort: vi.fn(),
     getSystemPrompt: vi.fn(() => 'test prompt'),
+    hasPendingMessages: vi.fn(() => false),
+    getSignal: vi.fn(() => undefined),
     compact: vi.fn(),
     shutdown: vi.fn(),
     setModel: vi.fn(async () => {}),
@@ -121,12 +123,15 @@ describe('ScoutExtensionRunner.bindCore', () => {
 describe('ScoutExtensionRunner.createContext', () => {
   it('reflects bindCore context actions', () => {
     const runner = makeRunner([]);
+    const signal = new AbortController().signal;
     const contextActions = makeContextActions();
     contextActions.isIdle = vi.fn(() => false);
+    contextActions.getSignal = vi.fn(() => signal);
     runner.bindCore(makeActions(), contextActions);
 
     const ctx = runner.createContext();
     expect(ctx.isIdle()).toBe(false);
+    expect(ctx.signal).toBe(signal);
     expect(ctx.cwd).toBe('/test/cwd');
   });
 

@@ -56,6 +56,8 @@ export class ScoutExtensionRunner {
   private isIdleFn: () => boolean = () => true;
   private abortFn: () => void = () => {};
   private getSystemPromptFn: () => string = () => '';
+  private hasPendingMessagesFn: () => boolean = () => false;
+  private getSignalFn: () => AbortSignal | undefined = () => undefined;
   private compactFn: () => void = () => {};
   private shutdownFn: () => void = () => {};
   private setModelFn: (modelId: string) => Promise<void> = async () => {};
@@ -99,6 +101,8 @@ export class ScoutExtensionRunner {
     this.isIdleFn = contextActions.isIdle;
     this.abortFn = contextActions.abort;
     this.getSystemPromptFn = contextActions.getSystemPrompt;
+    this.hasPendingMessagesFn = contextActions.hasPendingMessages;
+    this.getSignalFn = contextActions.getSignal;
     this.compactFn = contextActions.compact;
     this.shutdownFn = contextActions.shutdown;
     this.setModelFn = contextActions.setModel;
@@ -137,6 +141,10 @@ export class ScoutExtensionRunner {
         runner.assertActive();
         return runner.isIdleFn();
       },
+      get signal() {
+        runner.assertActive();
+        return runner.getSignalFn();
+      },
       abort: () => {
         runner.assertActive();
         runner.abortFn();
@@ -144,6 +152,10 @@ export class ScoutExtensionRunner {
       getSystemPrompt: () => {
         runner.assertActive();
         return runner.getSystemPromptFn();
+      },
+      hasPendingMessages: () => {
+        runner.assertActive();
+        return runner.hasPendingMessagesFn();
       },
       compact: () => {
         runner.assertActive();

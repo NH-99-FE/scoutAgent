@@ -22,6 +22,12 @@ const {
   mockHarnessSetModel,
   mockHarnessSetThinkingLevel,
   mockHarnessCompact,
+  mockHarnessSteer,
+  mockHarnessFollowUp,
+  mockHarnessNextTurn,
+  mockHarnessSetTools,
+  mockHarnessHasPendingMessages,
+  mockHarnessGetSignal,
   mockHarnessGetModel,
   mockHarnessGetThinkingLevel,
   mockHarnessNavigateTree,
@@ -42,6 +48,12 @@ const {
   const mockHarnessSetModel = vi.fn();
   const mockHarnessSetThinkingLevel = vi.fn();
   const mockHarnessCompact = vi.fn();
+  const mockHarnessSteer = vi.fn();
+  const mockHarnessFollowUp = vi.fn();
+  const mockHarnessNextTurn = vi.fn();
+  const mockHarnessSetTools = vi.fn();
+  const mockHarnessHasPendingMessages = vi.fn(() => false);
+  const mockHarnessGetSignal = vi.fn<() => AbortSignal | undefined>(() => undefined);
   const mockHarnessGetModel = vi.fn(() => ({
     id: 'test-model',
     contextWindow: 200000,
@@ -80,6 +92,12 @@ const {
     this.setModel = mockHarnessSetModel;
     this.setThinkingLevel = mockHarnessSetThinkingLevel;
     this.compact = mockHarnessCompact;
+    this.steer = mockHarnessSteer;
+    this.followUp = mockHarnessFollowUp;
+    this.nextTurn = mockHarnessNextTurn;
+    this.setTools = mockHarnessSetTools;
+    this.hasPendingMessages = mockHarnessHasPendingMessages;
+    this.getSignal = mockHarnessGetSignal;
     this.getModel = mockHarnessGetModel;
     this.getThinkingLevel = mockHarnessGetThinkingLevel;
     this.getContextUsage = mockHarnessGetContextUsage;
@@ -111,6 +129,12 @@ const {
     mockHarnessSetModel,
     mockHarnessSetThinkingLevel,
     mockHarnessCompact,
+    mockHarnessSteer,
+    mockHarnessFollowUp,
+    mockHarnessNextTurn,
+    mockHarnessSetTools,
+    mockHarnessHasPendingMessages,
+    mockHarnessGetSignal,
     mockHarnessGetModel,
     mockHarnessGetThinkingLevel,
     mockHarnessNavigateTree,
@@ -216,8 +240,17 @@ vi.mock('../system-prompt.ts', () => ({
 }));
 
 vi.mock('../tools/index.ts', () => ({
-  createTools: vi.fn(() => []),
+  createTools: vi.fn((_cwd: string, names: string[]) =>
+    names.map((name) => ({
+      name,
+      label: name,
+      description: `${name} tool`,
+      parameters: {},
+      execute: vi.fn(),
+    })),
+  ),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
+  ALL_TOOL_NAMES: new Set(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']),
 }));
 
 vi.mock('../extensions/index.ts', () => ({
@@ -547,6 +580,104 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession();
     await agentSession.compact();
     expect(mockHarnessCompact).toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('exposes active tool names from the harness tool registry', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    expect(agentSession.getActiveToolNames()).toEqual(['read', 'bash', 'edit', 'write']);
+    expect(agentSession.getAllToolInfos()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'read',
+          sourceInfo: expect.objectContaining({ path: '<builtin:read>', source: 'builtin' }),
+        }),
+        expect.objectContaining({
+          name: 'grep',
+          sourceInfo: expect.objectContaining({ path: '<builtin:grep>', source: 'builtin' }),
+        }),
+      ]),
+    );
+    agentSession.dispose();
+  });
+
+  it('setActiveTools updates the harness active tool set', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    await agentSession.setActiveTools(['read', 'grep']);
+
+    expect(agentSession.getActiveToolNames()).toEqual(['read', 'grep']);
+    expect(mockHarnessSetTools).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'read' }),
+        expect.objectContaining({ name: 'grep' }),
+      ]),
+      ['read', 'grep'],
+    );
+    expect(agentSession.getAllToolInfos()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'read' }),
+        expect.objectContaining({ name: 'bash' }),
+        expect.objectContaining({ name: 'grep' }),
+      ]),
+    );
+    agentSession.dispose();
+  });
+
+  it('sendUserMessage prompts when idle and requires deliverAs while streaming', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    await agentSession.sendUserMessage('idle message');
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('idle message');
+
+    mockHarnessPrompt.mockImplementationOnce(() => new Promise(() => {}));
+    void agentSession.prompt('streaming message');
+
+    await expect(agentSession.sendUserMessage('queued message')).rejects.toThrow(
+      'deliverAs: "steer" or "followUp"',
+    );
+    agentSession.dispose();
+  });
+
+  it('sendUserMessage ignores deliverAs while idle and prompts normally', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    await agentSession.sendUserMessage('steer message', { deliverAs: 'steer' });
+    getSubscribeCallback()({ type: 'settled' });
+    await flushMicrotasks();
+    await agentSession.sendUserMessage('follow message', { deliverAs: 'followUp' });
+
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('steer message');
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('follow message');
+    expect(mockHarnessSteer).not.toHaveBeenCalled();
+    expect(mockHarnessFollowUp).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('sendUserMessage supports Pi deliverAs steering behaviors while streaming', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    mockHarnessPrompt.mockImplementationOnce(() => new Promise(() => {}));
+    void agentSession.prompt('streaming message');
+
+    await agentSession.sendUserMessage('steer message', { deliverAs: 'steer' });
+    await agentSession.sendUserMessage('follow message', { deliverAs: 'followUp' });
+
+    expect(mockHarnessSteer).toHaveBeenCalledWith('steer message');
+    expect(mockHarnessFollowUp).toHaveBeenCalledWith('follow message');
+    expect(mockHarnessNextTurn).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('exposes system prompt and pending runtime signal state', async () => {
+    const signal = new AbortController().signal;
+    mockHarnessHasPendingMessages.mockReturnValue(true);
+    mockHarnessGetSignal.mockReturnValue(signal);
+    const agentSession = await makeInitializedAgentSession();
+
+    expect(agentSession.getSystemPrompt()).toBe('System prompt');
+    expect(agentSession.hasPendingMessages()).toBe(true);
+    expect(agentSession.getAbortSignal()).toBe(signal);
     agentSession.dispose();
   });
 });

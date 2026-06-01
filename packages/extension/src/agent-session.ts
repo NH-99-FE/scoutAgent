@@ -5,13 +5,14 @@
 // ============================================================
 
 import * as vscode from 'vscode';
-import type { Model, Api, AssistantMessage } from '@scout-agent/ai';
+import type { Model, Api, AssistantMessage, ImageContent, TextContent } from '@scout-agent/ai';
 import type {
   AgentEvent,
   AgentHarness,
   AgentHarnessEvent,
   AgentHarnessOptions,
   AgentMessage,
+  AgentTool,
   BranchSummaryEntry,
   CompactionEntry,
   ContextUsageEstimate,
@@ -25,11 +26,7 @@ import type {
   SessionTreeEntry,
   Skill,
 } from '@scout-agent/agent';
-import {
-  shouldCompact,
-  calculateContextTokens,
-  estimateContextTokens,
-} from '@scout-agent/agent';
+import { shouldCompact, calculateContextTokens, estimateContextTokens } from '@scout-agent/agent';
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import type {
   ScoutAgentEvent,
@@ -39,9 +36,15 @@ import type {
 } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
-import { createTools, DEFAULT_ACTIVE_TOOL_NAMES, type ToolName } from './tools/index.ts';
+import {
+  createTools,
+  DEFAULT_ACTIVE_TOOL_NAMES,
+  ALL_TOOL_NAMES,
+  type ToolName,
+} from './tools/index.ts';
 import { ScoutExtensionRunner, wrapRegisteredTools } from './extensions/index.ts';
 import { mapAgentEventToScout, convertMessage } from './protocol/agent-event-mapper.ts';
+import type { ToolInfo, SendUserMessageOptions, SourceInfo } from './extensions/types.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
 
 // ---------- 类型守卫 ----------
@@ -90,8 +93,13 @@ export interface AgentSessionOptions {
   outputChannel: vscode.OutputChannel;
   skills: ScoutSkill[];
   extensionRunner?: ScoutExtensionRunner;
-  activeToolNames?: ToolName[];
+  activeToolNames?: string[];
 }
+
+type ToolRegistryEntry = {
+  tool: AgentTool;
+  sourceInfo: SourceInfo;
+};
 
 // ---------- AgentSession ----------
 
@@ -102,7 +110,10 @@ export class AgentSession implements vscode.Disposable {
   private readonly outputChannel: vscode.OutputChannel;
   private readonly skills: ScoutSkill[];
   private extensionRunner?: ScoutExtensionRunner;
-  private activeToolNames: ToolName[];
+  private activeToolNames: string[];
+  private activeToolsCustomized: boolean;
+  private toolRegistry = new Map<string, ToolRegistryEntry>();
+  private lastSystemPrompt = '';
 
   private harness?: AgentHarness;
   private unsubscribeHarness?: () => void;
@@ -148,6 +159,7 @@ export class AgentSession implements vscode.Disposable {
     this.skills = options.skills;
     this.extensionRunner = options.extensionRunner;
     this.activeToolNames = options.activeToolNames ?? [...DEFAULT_ACTIVE_TOOL_NAMES];
+    this.activeToolsCustomized = options.activeToolNames !== undefined;
   }
 
   // ---------- 初始化 ----------
@@ -192,7 +204,7 @@ export class AgentSession implements vscode.Disposable {
 
   // ---------- 运行时操作 ----------
 
-  async prompt(text: string): Promise<void> {
+  async prompt(text: string, options?: { images?: ImageContent[] }): Promise<void> {
     if (!this.harness) return;
 
     this.lastUserMessageText = text;
@@ -201,7 +213,11 @@ export class AgentSession implements vscode.Disposable {
     try {
       this._isStreaming = true;
       this.emit({ type: 'state_change' });
-      await this.harness.prompt(text);
+      if (options) {
+        await this.harness.prompt(text, options);
+      } else {
+        await this.harness.prompt(text);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.outputChannel.appendLine(`[scout] Prompt error: ${errorMessage}`);
@@ -293,6 +309,90 @@ export class AgentSession implements vscode.Disposable {
     this.retryAbortController?.abort();
   }
 
+  async sendUserMessage(
+    content: string | (TextContent | ImageContent)[],
+    options?: SendUserMessageOptions,
+  ): Promise<void> {
+    if (!this.harness) return;
+
+    const { text, images } = this.normalizeUserMessageContent(content);
+    if (!this._isStreaming) {
+      await this.prompt(text, images ? { images } : undefined);
+      return;
+    }
+
+    if (!options?.deliverAs) {
+      throw new Error('sendUserMessage while streaming requires deliverAs: "steer" or "followUp"');
+    }
+
+    if (options?.deliverAs === 'steer') {
+      if (images) {
+        await this.harness.steer(text, { images });
+      } else {
+        await this.harness.steer(text);
+      }
+      return;
+    }
+    if (options?.deliverAs === 'followUp') {
+      if (images) {
+        await this.harness.followUp(text, { images });
+      } else {
+        await this.harness.followUp(text);
+      }
+      return;
+    }
+    await this.prompt(text, images ? { images } : undefined);
+  }
+
+  getActiveToolNames(): string[] {
+    return [...this.activeToolNames];
+  }
+
+  getAllToolInfos(): ToolInfo[] {
+    return [...this.toolRegistry.values()].map((entry) => ({
+      name: entry.tool.name,
+      description: entry.tool.description,
+      parameters: entry.tool.parameters,
+      sourceInfo: entry.sourceInfo,
+    }));
+  }
+
+  async setActiveTools(toolNames: string[]): Promise<void> {
+    const missing = toolNames.filter((name) => !this.toolRegistry.has(name));
+    if (missing.length > 0) {
+      throw new Error(`Unknown tool(s): ${missing.join(', ')}`);
+    }
+
+    this.activeToolsCustomized = true;
+    this.activeToolNames = [...toolNames];
+    await this.applyToolsToHarness();
+    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
+    this.emit({ type: 'state_change' });
+  }
+
+  async refreshTools(): Promise<void> {
+    this.rebuildToolRegistry();
+    this.normalizeActiveToolNames();
+    await this.applyToolsToHarness();
+    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
+    this.emit({ type: 'state_change' });
+  }
+
+  getSystemPrompt(): string {
+    if (!this.lastSystemPrompt) {
+      this.lastSystemPrompt = this.buildCurrentSystemPrompt();
+    }
+    return this.lastSystemPrompt;
+  }
+
+  hasPendingMessages(): boolean {
+    return this.harness?.hasPendingMessages() ?? false;
+  }
+
+  getAbortSignal(): AbortSignal | undefined {
+    return this.harness?.getSignal();
+  }
+
   // ---------- Fork ----------
 
   /**
@@ -342,6 +442,7 @@ export class AgentSession implements vscode.Disposable {
    */
   setExtensionRunner(runner: ScoutExtensionRunner): void {
     this.extensionRunner = runner;
+    void this.refreshTools();
     // 重新桥接扩展钩子到当前 harness
     this.unsubscribeExtensionHooks?.();
     this.unsubscribeExtensionHooks = this.bridgeExtensionHooks();
@@ -523,6 +624,101 @@ export class AgentSession implements vscode.Disposable {
 
   // ---------- 内部：Harness 构建 ----------
 
+  private rebuildToolRegistry(modelOverride?: Model<Api>): void {
+    const model =
+      modelOverride ?? this.harness?.getModel() ?? this.configManager.findDefaultModel();
+    const readOptions = { isVisionModel: () => model?.input.includes('image') ?? false };
+    const builtinTools = createTools(this.cwd, Array.from(ALL_TOOL_NAMES), { read: readOptions });
+    const registry = new Map<string, ToolRegistryEntry>();
+
+    for (const tool of builtinTools) {
+      registry.set(tool.name, {
+        tool,
+        sourceInfo: this.createSyntheticSourceInfo(`<builtin:${tool.name}>`, 'builtin'),
+      });
+    }
+
+    if (this.extensionRunner) {
+      const registeredTools = this.extensionRunner.getAllRegisteredTools();
+      const extensionTools = wrapRegisteredTools(registeredTools, this.extensionRunner);
+      for (let i = 0; i < extensionTools.length; i++) {
+        const tool = extensionTools[i]!;
+        const registered = registeredTools[i]!;
+        registry.set(tool.name, {
+          tool,
+          sourceInfo: this.createSyntheticSourceInfo(registered.sourcePath, 'extension'),
+        });
+      }
+    }
+
+    this.toolRegistry = registry;
+  }
+
+  private normalizeActiveToolNames(): void {
+    if (!this.activeToolsCustomized) {
+      const defaults = DEFAULT_ACTIVE_TOOL_NAMES.filter((name) => this.toolRegistry.has(name));
+      const extensionTools = [...this.toolRegistry.values()]
+        .filter((entry) => entry.sourceInfo.source === 'extension')
+        .map((entry) => entry.tool.name);
+      this.activeToolNames = [...new Set([...defaults, ...extensionTools])];
+      return;
+    }
+
+    this.activeToolNames = this.activeToolNames.filter((name) => this.toolRegistry.has(name));
+  }
+
+  private getActiveTools(): AgentTool[] {
+    return this.activeToolNames
+      .map((name) => this.toolRegistry.get(name)?.tool)
+      .filter((tool): tool is AgentTool => tool !== undefined);
+  }
+
+  private getAllTools(): AgentTool[] {
+    return [...this.toolRegistry.values()].map((entry) => entry.tool);
+  }
+
+  private async applyToolsToHarness(): Promise<void> {
+    if (!this.harness) return;
+    await this.harness.setTools(this.getAllTools(), this.activeToolNames);
+  }
+
+  private buildCurrentSystemPrompt(): string {
+    return this.buildDynamicSystemPrompt(this.getActiveTools());
+  }
+
+  private createSyntheticSourceInfo(path: string, source: string): SourceInfo {
+    return {
+      path,
+      source,
+      scope: 'temporary',
+      origin: 'top-level',
+    };
+  }
+
+  private normalizeUserMessageContent(content: string | (TextContent | ImageContent)[]): {
+    text: string;
+    images?: ImageContent[];
+  } {
+    if (typeof content === 'string') {
+      return { text: content };
+    }
+
+    const textParts: string[] = [];
+    const images: ImageContent[] = [];
+    for (const part of content) {
+      if (part.type === 'text') {
+        textParts.push(part.text);
+      } else {
+        images.push(part);
+      }
+    }
+
+    return {
+      text: textParts.join('\n'),
+      images: images.length > 0 ? images : undefined,
+    };
+  }
+
   /** 重建 AgentHarness（initialize/fork 复用） */
   private async rebuildHarness(): Promise<void> {
     const context = await this.session.buildContext();
@@ -546,33 +742,22 @@ export class AgentSession implements vscode.Disposable {
       cwd: this.cwd,
       shellPath: this.configManager.getShellPath(),
     });
-    const builtinTools = createTools(this.cwd, this.activeToolNames, {
-      read: { isVisionModel: () => model!.input.includes('image') },
-    });
-
-    // 合并扩展工具
-    let tools = builtinTools;
-    if (this.extensionRunner) {
-      const extensionTools = wrapRegisteredTools(
-        this.extensionRunner.getAllRegisteredTools(),
-        this.extensionRunner,
-      );
-      // 扩展工具同名覆盖内置工具
-      const toolMap = new Map(tools.map((t) => [t.name, t]));
-      for (const extTool of extensionTools) {
-        toolMap.set(extTool.name, extTool);
-      }
-      tools = Array.from(toolMap.values());
-    }
+    this.rebuildToolRegistry(model);
+    this.normalizeActiveToolNames();
+    const tools = this.getAllTools();
 
     const harnessOptions: AgentHarnessOptions = {
       env: env as ExecutionEnv,
       session: this.session,
       tools,
+      activeToolNames: this.activeToolNames,
       model,
       thinkingLevel,
       resources: { skills: this.skills as Skill[] },
-      systemPrompt: (ctx) => this.buildDynamicSystemPrompt(ctx.activeTools as typeof tools),
+      systemPrompt: (ctx) => {
+        this.lastSystemPrompt = this.buildDynamicSystemPrompt(ctx.activeTools as typeof tools);
+        return this.lastSystemPrompt;
+      },
       getApiKeyAndHeaders: (m: Model<Api>) => this.getApiKeyAndHeaders(m),
       streamOptions: { timeoutMs: 300000, maxRetries: 2 },
       steeringMode: this.configManager.getSteeringMode(),
@@ -581,6 +766,7 @@ export class AgentSession implements vscode.Disposable {
 
     const { AgentHarness: AgentHarnessClass } = await import('@scout-agent/agent');
     this.harness = new AgentHarnessClass(harnessOptions);
+    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
     this.unsubscribeHarness = this.subscribeToHarness();
 
     // 桥接扩展钩子到 Harness

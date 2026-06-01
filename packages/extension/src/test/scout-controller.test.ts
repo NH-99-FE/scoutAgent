@@ -187,8 +187,17 @@ vi.mock('../system-prompt.ts', () => ({
 }));
 
 vi.mock('../tools/index.ts', () => ({
-  createTools: vi.fn(() => []),
+  createTools: vi.fn((_cwd: string, names: string[]) =>
+    names.map((name) => ({
+      name,
+      label: name,
+      description: `${name} tool`,
+      parameters: {},
+      execute: vi.fn(),
+    })),
+  ),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
+  ALL_TOOL_NAMES: new Set(['read', 'bash', 'edit', 'write', 'grep', 'find', 'ls']),
 }));
 
 // ---------- Tests ----------
