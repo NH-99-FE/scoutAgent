@@ -2,7 +2,7 @@
 // Extension Loader 测试
 // ============================================================
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Type } from '@sinclair/typebox';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,6 +53,20 @@ describe('createExtensionRuntime', () => {
     runtime.invalidate('first');
     runtime.invalidate('second');
     expect(() => runtime.assertActive()).toThrow('first');
+  });
+
+  it('invalidates captured api after session replacement and points to withSession', async () => {
+    const runtime = createExtensionRuntime();
+    let capturedApi: Parameters<ScoutExtensionFactory>[0] | undefined;
+    await loadExtensionFromFactory((api) => {
+      capturedApi = api;
+    }, runtime);
+    runtime.sendUserMessage = vi.fn();
+
+    runtime.invalidate();
+
+    expect(() => capturedApi?.sendUserMessage('continuation')).toThrow('withSession');
+    expect(() => capturedApi?.sendUserMessage('continuation')).toThrow('ctx.newSession()');
   });
 
   it('refreshTools is no-op before bindCore', () => {

@@ -321,6 +321,7 @@ function makeMockExtensionRunner(overrides?: Record<string, unknown>) {
     emitSessionBeforeFork: vi.fn(),
     emitSessionShutdown: vi.fn(),
     emitSessionStart: vi.fn(),
+    createContext: vi.fn(() => ({})),
     invalidate: vi.fn(),
     ...overrides,
   };
@@ -560,6 +561,52 @@ describe('SessionManager — 协调层', () => {
     await manager.newSession();
 
     expect(events).toContain('state_change');
+    manager.dispose();
+  });
+
+  it('newSession emits state_change and reports error when withSession fails after replacement', async () => {
+    const manager = await makeInitializedSessionManager();
+    const replacementRunner = makeMockExtensionRunner();
+    vi.mocked(discoverAndLoadExtensions).mockResolvedValueOnce({
+      extensions: [
+        {
+          path: '<replacement-extension>',
+          resolvedPath: '<replacement-extension>',
+          sourceInfo: {
+            path: '<replacement-extension>',
+            source: 'test',
+            scope: 'temporary',
+            origin: 'top-level',
+          },
+          handlers: new Map(),
+          tools: new Map(),
+        },
+      ],
+      errors: [],
+      runtime: {} as any,
+    });
+    vi.mocked(ScoutExtensionRunner).mockImplementationOnce(function (this: any) {
+      return replacementRunner as any;
+    });
+    const callbackError = new Error('callback failed');
+    const events: string[] = [];
+    manager.subscribe((event) => {
+      events.push(event.type === 'error' ? `error:${event.message}` : event.type);
+    });
+
+    const result = await manager.newSession({
+      withSession: async () => {
+        throw callbackError;
+      },
+    });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.withSessionError).toBe(callbackError);
+    expect(events).toContain('state_change');
+    expect(events).toContain('error:withSession failed: callback failed');
+    expect((manager as any).outputChannel.appendLine).toHaveBeenCalledWith(
+      '[scout] Replacement withSession callback failed: callback failed',
+    );
     manager.dispose();
   });
 

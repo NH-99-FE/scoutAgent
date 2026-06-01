@@ -10,6 +10,7 @@ import type {
   AgentHarnessStreamOptionsPatch,
   AgentToolResult,
   AgentToolUpdateCallback,
+  JsonlSessionMetadata,
   ToolExecutionMode,
 } from '@scout-agent/agent';
 import type {
@@ -227,6 +228,22 @@ export interface SendUserMessageOptions {
   deliverAs?: 'steer' | 'followUp';
 }
 
+export interface SendMessagePayload<TDetails = unknown> {
+  customType: string;
+  content: string | (TextContent | ImageContent)[];
+  display?: boolean;
+  details?: TDetails;
+}
+
+export type SendMessageInput<TDetails = unknown> = string | SendMessagePayload<TDetails>;
+
+export const STALE_EXTENSION_CONTEXT_MESSAGE =
+  'This extension context is stale after session replacement. Do not use a captured scout API or context after ctx.newSession(), ctx.fork(), or ctx.switchSession(). Move post-replacement work into withSession and use the ctx passed to withSession.';
+
+export interface SessionReplacementOptions {
+  withSession?: (ctx: ReplacedSessionContext) => Promise<void>;
+}
+
 // ---------- 扩展上下文 ----------
 
 /**
@@ -251,6 +268,29 @@ export interface ScoutExtensionContext {
   setThinkingLevel(level: string): Promise<void>;
   /** 获取当前上下文 token 用量估算 */
   getContextUsage(): ContextUsageEstimate | undefined;
+  /** Start a new session. Post-replacement work must run inside withSession. */
+  newSession(options?: SessionReplacementOptions): Promise<{ cancelled: boolean }>;
+  /** Fork from a specific entry into a replacement session. */
+  fork(
+    entryId: string,
+    options?: SessionReplacementOptions & { position?: 'before' | 'at' },
+  ): Promise<{ cancelled: boolean }>;
+  /** Switch to another session. */
+  switchSession(
+    sessionMeta: JsonlSessionMetadata,
+    options?: SessionReplacementOptions,
+  ): Promise<{ cancelled: boolean }>;
+}
+
+/**
+ * Fresh context bound to the replacement session after newSession/fork/switchSession.
+ */
+export interface ReplacedSessionContext extends ScoutExtensionContext {
+  sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void>;
+  sendUserMessage(
+    content: string | (TextContent | ImageContent)[],
+    options?: SendUserMessageOptions,
+  ): Promise<void>;
 }
 
 // ---------- 扩展运行时 ----------
@@ -260,7 +300,7 @@ export interface ScoutExtensionContext {
  * 创建时所有动作方法为 throwing stub，bindCore() 替换为真实实现。
  */
 export interface ScoutExtensionRuntime {
-  sendMessage: (message: string) => void;
+  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => void;
   sendUserMessage: (
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
@@ -314,7 +354,7 @@ export type ScoutHandlerFn = (...args: unknown[]) => Promise<unknown>;
 export interface ScoutExtensionAPI {
   on(event: string, handler: ScoutHandlerFn): void;
   registerTool(tool: ScoutToolDefinition): void;
-  sendMessage(message: string): void;
+  sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): void;
   sendUserMessage(
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
@@ -342,7 +382,7 @@ export interface LoadExtensionsResult {
 
 /** bindCore() 接收的动作方法集 */
 export interface ScoutExtensionActions {
-  sendMessage: (message: string) => void;
+  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => void;
   sendUserMessage: (
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
@@ -366,4 +406,13 @@ export interface ScoutExtensionContextActions {
   setModel: (modelId: string) => Promise<void>;
   setThinkingLevel: (level: string) => Promise<void>;
   getContextUsage: () => ContextUsageEstimate | undefined;
+  newSession: (options?: SessionReplacementOptions) => Promise<{ cancelled: boolean }>;
+  fork: (
+    entryId: string,
+    options?: SessionReplacementOptions & { position?: 'before' | 'at' },
+  ) => Promise<{ cancelled: boolean }>;
+  switchSession: (
+    sessionMeta: JsonlSessionMetadata,
+    options?: SessionReplacementOptions,
+  ) => Promise<{ cancelled: boolean }>;
 }

@@ -5,6 +5,7 @@
 
 import type { Model } from '@scout-agent/ai';
 import type { AgentMessage, ContextUsageEstimate } from '@scout-agent/agent';
+import { STALE_EXTENSION_CONTEXT_MESSAGE } from './types.ts';
 import type {
   ScoutExtension,
   ScoutExtensionActions,
@@ -71,6 +72,13 @@ export class ScoutExtensionRunner {
   private setModelFn: (modelId: string) => Promise<void> = async () => {};
   private setThinkingLevelFn: (level: string) => Promise<void> = async () => {};
   private getContextUsageFn: () => ContextUsageEstimate | undefined = () => undefined;
+  private newSessionFn: ScoutExtensionContextActions['newSession'] = async () => ({
+    cancelled: true,
+  });
+  private forkFn: ScoutExtensionContextActions['fork'] = async () => ({ cancelled: true });
+  private switchSessionFn: ScoutExtensionContextActions['switchSession'] = async () => ({
+    cancelled: true,
+  });
 
   // stale 状态
   private staleMessage: string | undefined;
@@ -116,6 +124,9 @@ export class ScoutExtensionRunner {
     this.setModelFn = contextActions.setModel;
     this.setThinkingLevelFn = contextActions.setThinkingLevel;
     this.getContextUsageFn = contextActions.getContextUsage;
+    this.newSessionFn = contextActions.newSession;
+    this.forkFn = contextActions.fork;
+    this.switchSessionFn = contextActions.switchSession;
   }
 
   // ---------- 上下文创建 ----------
@@ -185,6 +196,18 @@ export class ScoutExtensionRunner {
         runner.assertActive();
         return runner.getContextUsageFn();
       },
+      newSession: (options) => {
+        runner.assertActive();
+        return runner.newSessionFn(options);
+      },
+      fork: (entryId, options) => {
+        runner.assertActive();
+        return runner.forkFn(entryId, options);
+      },
+      switchSession: (sessionMeta, options) => {
+        runner.assertActive();
+        return runner.switchSessionFn(sessionMeta, options);
+      },
     };
   }
 
@@ -216,9 +239,7 @@ export class ScoutExtensionRunner {
 
   invalidate(message?: string): void {
     if (!this.staleMessage) {
-      this.staleMessage =
-        message ??
-        'This extension context is stale after session replacement. Do not use a captured context after session changes.';
+      this.staleMessage = message ?? STALE_EXTENSION_CONTEXT_MESSAGE;
       this.runtime.invalidate(this.staleMessage);
     }
   }

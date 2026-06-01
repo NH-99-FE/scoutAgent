@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
 import { createEventBus, type EventBus } from './event-bus.ts';
 import { createSyntheticSourceInfo, type SourceInfo, type SourceOrigin } from '../source-info.ts';
+import { STALE_EXTENSION_CONTEXT_MESSAGE } from './types.ts';
 import type {
   ScoutExtension,
   ScoutExtensionAPI,
@@ -110,9 +111,7 @@ export function createExtensionRuntime(): ScoutExtensionRuntime {
     assertActive,
     invalidate: (message) => {
       if (!state.staleMessage) {
-        state.staleMessage =
-          message ??
-          'This extension context is stale after session replacement. Do not use a captured context after session changes.';
+        state.staleMessage = message ?? STALE_EXTENSION_CONTEXT_MESSAGE;
       }
     },
   };

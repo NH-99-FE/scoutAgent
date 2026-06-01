@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { Type } from '@sinclair/typebox';
+import type { JsonlSessionMetadata } from '@scout-agent/agent';
 import { ScoutExtensionRunner } from '../../extensions/runner.ts';
 import { createExtensionRuntime } from '../../extensions/loader.ts';
 import type {
@@ -109,6 +110,9 @@ function makeContextActions(): ScoutExtensionContextActions {
     setModel: vi.fn(async () => {}),
     setThinkingLevel: vi.fn(async () => {}),
     getContextUsage: vi.fn(() => undefined),
+    newSession: vi.fn(async () => ({ cancelled: false })),
+    fork: vi.fn(async () => ({ cancelled: false })),
+    switchSession: vi.fn(async () => ({ cancelled: false })),
   };
 }
 
@@ -160,6 +164,28 @@ describe('ScoutExtensionRunner.createContext', () => {
     expect(ctx.cwd).toBe('/test/cwd');
   });
 
+  it('exposes session replacement helpers through context actions', async () => {
+    const runner = makeRunner([]);
+    const contextActions = makeContextActions();
+    runner.bindCore(makeActions(), contextActions);
+
+    const ctx = runner.createContext();
+    const metadata = { id: 'target', path: '/sessions/target.jsonl' } as JsonlSessionMetadata;
+    const withSession = vi.fn();
+
+    await expect(ctx.newSession({ withSession })).resolves.toEqual({ cancelled: false });
+    await expect(ctx.fork('entry-1', { position: 'at', withSession })).resolves.toEqual({
+      cancelled: false,
+    });
+    await expect(ctx.switchSession(metadata, { withSession })).resolves.toEqual({
+      cancelled: false,
+    });
+
+    expect(contextActions.newSession).toHaveBeenCalledWith({ withSession });
+    expect(contextActions.fork).toHaveBeenCalledWith('entry-1', { position: 'at', withSession });
+    expect(contextActions.switchSession).toHaveBeenCalledWith(metadata, { withSession });
+  });
+
   it('throws after invalidate', () => {
     const runner = makeRunner([]);
     runner.bindCore(makeActions(), makeContextActions());
@@ -167,6 +193,24 @@ describe('ScoutExtensionRunner.createContext', () => {
     runner.invalidate('gone');
     const ctx = runner.createContext();
     expect(() => ctx.cwd).toThrow('gone');
+  });
+
+  it('invalidates captured ctx after session replacement and points to withSession', async () => {
+    const runner = makeRunner([]);
+    const contextActions = makeContextActions();
+    contextActions.newSession = vi.fn(async () => {
+      runner.invalidate();
+      return { cancelled: false };
+    });
+    runner.bindCore(makeActions(), contextActions);
+
+    const ctx = runner.createContext();
+
+    await expect(ctx.newSession()).resolves.toEqual({ cancelled: false });
+
+    expect(() => ctx.cwd).toThrow('withSession');
+    expect(() => ctx.cwd).toThrow('ctx.newSession()');
+    expect(() => ctx.setModel('test-model')).toThrow('withSession');
   });
 });
 

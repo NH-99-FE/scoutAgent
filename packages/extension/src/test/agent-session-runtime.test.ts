@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AgentSessionRuntime } from '../agent-session-runtime.ts';
 import type { AgentSession } from '../agent-session.ts';
+import type { ReplacedSessionContext } from '../extensions/types.ts';
 
 function makeSession(overrides?: Partial<AgentSession>) {
   return {
@@ -13,6 +14,7 @@ function makeSession(overrides?: Partial<AgentSession>) {
     emitSessionBeforeFork: vi.fn(async () => false),
     emitSessionShutdown: vi.fn(async () => undefined),
     emitSessionStart: vi.fn(async () => undefined),
+    createReplacedSessionContext: vi.fn(() => ({ replacement: true })),
     ...overrides,
   } as unknown as AgentSession;
 }
@@ -106,6 +108,89 @@ describe('AgentSessionRuntime', () => {
     });
     expect(runtime.session).toBe(nextSession);
     expect(events).toEqual(['abort', 'create', 'shutdown', 'dispose', 'rebind', 'start']);
+  });
+
+  it('runs withSession after rebind and session_start using the replacement context', async () => {
+    const events: string[] = [];
+    const oldSession = makeSession({
+      emitSessionShutdown: vi.fn(async () => {
+        events.push('shutdown');
+      }),
+      dispose: vi.fn(() => {
+        events.push('dispose');
+      }),
+    });
+    const replacementCtx = { replacement: true } as unknown as ReplacedSessionContext;
+    const nextSession = makeSession({
+      emitSessionStart: vi.fn(async () => {
+        events.push('start');
+      }),
+      createReplacedSessionContext: vi.fn(() => replacementCtx),
+    });
+    const { repo } = makeRepo();
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(async () => {
+        events.push('create');
+        return { session: nextSession, diagnostics: [] };
+      }),
+    });
+    runtime.setRebindSession(() => {
+      events.push('rebind');
+    });
+
+    const withSession = vi.fn(async (ctx) => {
+      events.push('withSession');
+      expect(ctx).toBe(replacementCtx);
+      expect(runtime.session).toBe(nextSession);
+    });
+
+    await runtime.newSession(repo as any, { withSession });
+
+    expect(withSession).toHaveBeenCalledTimes(1);
+    expect(nextSession.createReplacedSessionContext).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(['create', 'shutdown', 'dispose', 'rebind', 'start', 'withSession']);
+  });
+
+  it('returns withSessionError after replacement instead of rejecting', async () => {
+    const events: string[] = [];
+    const callbackError = new Error('withSession failed');
+    const oldSession = makeSession({
+      emitSessionShutdown: vi.fn(async () => {
+        events.push('shutdown');
+      }),
+      dispose: vi.fn(() => {
+        events.push('dispose');
+      }),
+    });
+    const nextSession = makeSession({
+      emitSessionStart: vi.fn(async () => {
+        events.push('start');
+      }),
+    });
+    const { repo } = makeRepo();
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(async () => {
+        events.push('create');
+        return { session: nextSession, diagnostics: [] };
+      }),
+    });
+    runtime.setRebindSession(() => {
+      events.push('rebind');
+    });
+
+    const result = await runtime.newSession(repo as any, {
+      withSession: async () => {
+        events.push('withSession');
+        throw callbackError;
+      },
+    });
+
+    expect(result.cancelled).toBe(false);
+    expect(result.withSessionError).toBe(callbackError);
+    expect(runtime.session).toBe(nextSession);
+    expect(events).toEqual(['create', 'shutdown', 'dispose', 'rebind', 'start', 'withSession']);
   });
 
   it('runs before-session-invalidate after shutdown and before old session dispose', async () => {

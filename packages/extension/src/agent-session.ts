@@ -47,10 +47,12 @@ import { ScoutExtensionRunner, wrapRegisteredTools } from './extensions/index.ts
 import { mapAgentEventToScout, convertMessage } from './protocol/agent-event-mapper.ts';
 import type {
   ToolInfo,
+  SendMessageInput,
   SendUserMessageOptions,
   SourceInfo,
   SessionShutdownEvent,
   SessionStartEvent,
+  ReplacedSessionContext,
 } from './extensions/types.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
 
@@ -80,6 +82,8 @@ const RETRYABLE_ERROR_PATTERN =
 
 const NON_RETRYABLE_LIMIT_PATTERN =
   /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing/i;
+
+const EXTENSION_MESSAGE_CUSTOM_TYPE = 'extension_message';
 
 // ---------- 事件类型（判别联合） ----------
 
@@ -360,6 +364,20 @@ export class AgentSession implements vscode.Disposable {
     await this.prompt(text, images ? { images } : undefined);
   }
 
+  async sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void> {
+    const payload =
+      typeof message === 'string'
+        ? { customType: EXTENSION_MESSAGE_CUSTOM_TYPE, content: message, display: true }
+        : message;
+    await this.session.appendCustomMessageEntry(
+      payload.customType,
+      payload.content,
+      payload.display ?? true,
+      payload.details,
+    );
+    this.emit({ type: 'state_change' });
+  }
+
   getActiveToolNames(): string[] {
     return [...this.activeToolNames];
   }
@@ -592,6 +610,19 @@ export class AgentSession implements vscode.Disposable {
 
   getScoutMessages(): ScoutMessage[] {
     return this.cachedMessages;
+  }
+
+  createReplacedSessionContext(): ReplacedSessionContext {
+    if (!this.extensionRunner) {
+      throw new Error('No extension runner is available for the replacement session');
+    }
+    const context = Object.defineProperties(
+      {},
+      Object.getOwnPropertyDescriptors(this.extensionRunner.createContext()),
+    ) as ReplacedSessionContext;
+    context.sendMessage = (message) => this.sendMessage(message);
+    context.sendUserMessage = (content, options) => this.sendUserMessage(content, options);
+    return context;
   }
 
   // ---------- 事件订阅 ----------

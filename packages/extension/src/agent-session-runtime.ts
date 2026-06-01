@@ -1,6 +1,11 @@
 import type { JsonlSessionMetadata, Session } from '@scout-agent/agent';
 import type { AgentSession } from './agent-session.ts';
-import type { SessionShutdownEvent, SessionStartEvent } from './extensions/types.ts';
+import type {
+  ReplacedSessionContext,
+  SessionReplacementOptions,
+  SessionShutdownEvent,
+  SessionStartEvent,
+} from './extensions/types.ts';
 
 export interface AgentSessionRuntimeDiagnostic {
   type: 'info' | 'warning' | 'error';
@@ -22,7 +27,10 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 export type AgentSessionReplacementResult = {
   cancelled: boolean;
   teardownError?: unknown;
+  withSessionError?: unknown;
 };
+
+type AgentSessionReplacementOptions = SessionReplacementOptions;
 
 interface SessionRepoLike {
   create(options?: { cwd?: string; id?: string }): Promise<Session>;
@@ -150,9 +158,19 @@ export class AgentSessionRuntime {
     this._modelFallbackMessage = result.modelFallbackMessage;
   }
 
-  private async finishSessionReplacement(sessionStartEvent: SessionStartEvent): Promise<void> {
+  private async finishSessionReplacement(
+    sessionStartEvent: SessionStartEvent,
+    withSession?: (ctx: ReplacedSessionContext) => Promise<void>,
+  ): Promise<unknown | undefined> {
     await this.rebindSession?.(this.session);
     await this.session.emitSessionStart(sessionStartEvent);
+    if (!withSession) return undefined;
+    try {
+      await withSession(this.session.createReplacedSessionContext());
+    } catch (error) {
+      return error;
+    }
+    return undefined;
   }
 
   private attachSuppressed(error: unknown, suppressed: unknown): void {
@@ -168,8 +186,10 @@ export class AgentSessionRuntime {
     targetSessionFile: string | undefined,
     nextRuntime: CreateAgentSessionRuntimeResult,
     sessionStartEvent: SessionStartEvent,
-  ): Promise<unknown | undefined> {
+    options?: AgentSessionReplacementOptions,
+  ): Promise<Pick<AgentSessionReplacementResult, 'teardownError' | 'withSessionError'>> {
     let teardownError: unknown;
+    let withSessionError: unknown;
     try {
       await this.teardownCurrent(reason, targetSessionFile);
     } catch (error) {
@@ -178,7 +198,10 @@ export class AgentSessionRuntime {
 
     this.apply(nextRuntime);
     try {
-      await this.finishSessionReplacement(sessionStartEvent);
+      withSessionError = await this.finishSessionReplacement(
+        sessionStartEvent,
+        options?.withSession,
+      );
     } catch (error) {
       if (teardownError) {
         this.attachSuppressed(error, teardownError);
@@ -186,7 +209,7 @@ export class AgentSessionRuntime {
       throw error;
     }
 
-    return teardownError;
+    return { teardownError, withSessionError };
   }
 
   private async cleanupCreatedSession(repo: SessionRepoLike, session: Session): Promise<void> {
@@ -215,7 +238,10 @@ export class AgentSessionRuntime {
     }
   }
 
-  async newSession(repo: SessionRepoLike): Promise<AgentSessionReplacementResult> {
+  async newSession(
+    repo: SessionRepoLike,
+    options?: AgentSessionReplacementOptions,
+  ): Promise<AgentSessionReplacementResult> {
     const beforeResult = await this.emitBeforeSwitch('new');
     if (beforeResult.cancelled) return beforeResult;
 
@@ -237,18 +263,20 @@ export class AgentSessionRuntime {
       throw error;
     }
 
-    const teardownError = await this.replaceCurrent(
+    const replacementResult = await this.replaceCurrent(
       'new',
       targetMetadata.path,
       nextRuntime,
       sessionStartEvent,
+      options,
     );
-    return { cancelled: false, teardownError };
+    return { cancelled: false, ...replacementResult };
   }
 
   async switchSession(
     repo: SessionRepoLike,
     metadata: JsonlSessionMetadata,
+    options?: AgentSessionReplacementOptions,
   ): Promise<AgentSessionReplacementResult> {
     const beforeResult = await this.emitBeforeSwitch('resume', metadata.path);
     if (beforeResult.cancelled) return beforeResult;
@@ -270,19 +298,21 @@ export class AgentSessionRuntime {
       throw error;
     }
 
-    const teardownError = await this.replaceCurrent(
+    const replacementResult = await this.replaceCurrent(
       'resume',
       targetMetadata.path ?? metadata.path,
       nextRuntime,
       sessionStartEvent,
+      options,
     );
-    return { cancelled: false, teardownError };
+    return { cancelled: false, ...replacementResult };
   }
 
   async fork(
     repo: SessionRepoLike,
     entryId: string,
     position: 'before' | 'at',
+    options?: AgentSessionReplacementOptions,
   ): Promise<AgentSessionReplacementResult> {
     const beforeResult = await this.emitBeforeFork(entryId, position);
     if (beforeResult.cancelled) return beforeResult;
@@ -318,13 +348,14 @@ export class AgentSessionRuntime {
       throw error;
     }
 
-    const teardownError = await this.replaceCurrent(
+    const replacementResult = await this.replaceCurrent(
       'fork',
       targetMetadata.path,
       nextRuntime,
       sessionStartEvent,
+      options,
     );
-    return { cancelled: false, teardownError };
+    return { cancelled: false, ...replacementResult };
   }
 
   async dispose(): Promise<void> {

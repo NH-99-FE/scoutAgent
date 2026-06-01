@@ -39,6 +39,7 @@ const {
   mockSessionGetEntries,
   mockSessionAppendLabel,
   mockSessionAppendCustomEntry,
+  mockSessionAppendCustomMessageEntry,
   mockSessionGetLeafId,
   mockWrapRegisteredTools,
   MockAgentHarness,
@@ -84,6 +85,7 @@ const {
   const mockSessionGetEntries = vi.fn(async () => [] as any[]);
   const mockSessionAppendLabel = vi.fn(async () => 'label-entry-1');
   const mockSessionAppendCustomEntry = vi.fn(async () => 'custom-entry-1');
+  const mockSessionAppendCustomMessageEntry = vi.fn(async () => 'custom-message-entry-1');
   const mockSessionGetLeafId = vi.fn(async () => null as string | null);
   const mockWrapRegisteredTools = vi.fn(() => []);
 
@@ -148,6 +150,7 @@ const {
     mockSessionGetEntries,
     mockSessionAppendLabel,
     mockSessionAppendCustomEntry,
+    mockSessionAppendCustomMessageEntry,
     mockSessionGetLeafId,
     mockWrapRegisteredTools,
     MockAgentHarness,
@@ -303,6 +306,7 @@ function makeSession(
     getEntries: any;
     appendLabel: any;
     appendCustomEntry: any;
+    appendCustomMessageEntry: any;
     getLeafId: any;
   }>,
 ) {
@@ -314,6 +318,8 @@ function makeSession(
     getEntries: overrides?.getEntries ?? mockSessionGetEntries,
     appendLabel: overrides?.appendLabel ?? mockSessionAppendLabel,
     appendCustomEntry: overrides?.appendCustomEntry ?? mockSessionAppendCustomEntry,
+    appendCustomMessageEntry:
+      overrides?.appendCustomMessageEntry ?? mockSessionAppendCustomMessageEntry,
     getLeafId: overrides?.getLeafId ?? mockSessionGetLeafId,
   } as any;
 }
@@ -384,6 +390,7 @@ describe('AgentSession', () => {
     mockSessionMoveTo.mockResolvedValue(undefined);
     mockSessionGetEntries.mockResolvedValue([]);
     mockSessionAppendLabel.mockResolvedValue('label-entry-1');
+    mockSessionAppendCustomMessageEntry.mockResolvedValue('custom-message-entry-1');
     mockSessionGetLeafId.mockResolvedValue(null);
   });
 
@@ -803,6 +810,69 @@ describe('AgentSession — 运行时操作', () => {
     expect(mockHarnessSteer).toHaveBeenCalledWith('steer message');
     expect(mockHarnessFollowUp).toHaveBeenCalledWith('follow message');
     expect(mockHarnessNextTurn).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('sendMessage appends a real custom message entry to the session', async () => {
+    const listener = vi.fn();
+    const agentSession = await makeInitializedAgentSession();
+    agentSession.subscribe(listener);
+
+    await agentSession.sendMessage('extension note');
+
+    expect(mockSessionAppendCustomMessageEntry).toHaveBeenCalledWith(
+      'extension_message',
+      'extension note',
+      true,
+      undefined,
+    );
+
+    await agentSession.sendMessage({
+      customType: 'custom-test',
+      content: 'custom content',
+      display: false,
+      details: { source: 'test' },
+    });
+
+    expect(mockSessionAppendCustomMessageEntry).toHaveBeenCalledWith(
+      'custom-test',
+      'custom content',
+      false,
+      { source: 'test' },
+    );
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ type: 'state_change' }));
+    agentSession.dispose();
+  });
+
+  it('ReplacedSessionContext sendMessage and sendUserMessage target the replacement session', async () => {
+    const extensionRunner = {
+      createContext: vi.fn(() => ({
+        cwd: '/test/project',
+      })),
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+    const replacementCtx = agentSession.createReplacedSessionContext();
+
+    await replacementCtx.sendMessage('replacement message');
+    await replacementCtx.sendUserMessage('replacement prompt');
+
+    expect(mockSessionAppendCustomMessageEntry).toHaveBeenCalledWith(
+      'extension_message',
+      'replacement message',
+      true,
+      undefined,
+    );
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('replacement prompt');
     agentSession.dispose();
   });
 

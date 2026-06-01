@@ -33,12 +33,15 @@ interface SessionRepoLike {
 import {
   ScoutExtensionRunner,
   discoverAndLoadExtensions,
+  type SendMessageInput,
   type ScoutExtensionActions,
   type ScoutExtensionContextActions,
+  type SessionReplacementOptions,
 } from './extensions/index.ts';
 import { AgentSession, type ScoutSessionEvent } from './agent-session.ts';
 import {
   AgentSessionRuntime,
+  type AgentSessionReplacementResult,
   type AgentSessionRuntimeDiagnostic,
   type CreateAgentSessionRuntimeFactory,
 } from './agent-session-runtime.ts';
@@ -54,6 +57,11 @@ export interface SessionManagerOptions {
   outputChannel: vscode.OutputChannel;
   configManager: ConfigManager;
 }
+
+type SessionManagerReplacementResult = Pick<
+  AgentSessionReplacementResult,
+  'cancelled' | 'teardownError' | 'withSessionError'
+>;
 
 // ---------- SessionManager ----------
 
@@ -204,7 +212,10 @@ export class SessionManager implements vscode.Disposable {
   }
 
   /** 从 JSONL 文件恢复 session */
-  async restore(sessionMeta: JsonlSessionMetadata): Promise<void> {
+  async restore(
+    sessionMeta: JsonlSessionMetadata,
+    options?: SessionReplacementOptions,
+  ): Promise<SessionManagerReplacementResult> {
     if (!this.sessionRepo) {
       const env = new NodeExecutionEnv({
         cwd: this.cwd,
@@ -235,38 +246,69 @@ export class SessionManager implements vscode.Disposable {
       await runtime.session.emitSessionStart({ type: 'session_start', reason: 'resume' });
       this.emit({ type: 'state_change' });
       this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
-      return;
+      let withSessionError: unknown;
+      if (options?.withSession) {
+        try {
+          await options.withSession(runtime.session.createReplacedSessionContext());
+        } catch (error) {
+          withSessionError = error;
+        }
+      }
+      this.logReplacementWithSessionError(withSessionError);
+      return { cancelled: false, withSessionError };
     }
 
-    const result = await this.sessionRuntime.switchSession(this.sessionRepo, sessionMeta);
+    const result = await this.sessionRuntime.switchSession(this.sessionRepo, sessionMeta, options);
     if (result.cancelled) {
       this.outputChannel.appendLine(
         `[scout] Session restore cancelled by extension: ${sessionMeta.id}`,
       );
-      return;
+      return { cancelled: true };
     }
     this.emit({ type: 'state_change' });
     this.logReplacementTeardownError(result.teardownError);
+    this.logReplacementWithSessionError(result.withSessionError);
     this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
+    return result;
   }
 
-  async newSession(): Promise<void> {
+  async newSession(options?: SessionReplacementOptions): Promise<SessionManagerReplacementResult> {
     if (!this.sessionRepo) {
       await this.initialize();
-      return;
+      let withSessionError: unknown;
+      if (options?.withSession && this.agentSession) {
+        try {
+          await options.withSession(this.agentSession.createReplacedSessionContext());
+        } catch (error) {
+          withSessionError = error;
+        }
+      }
+      this.logReplacementWithSessionError(withSessionError);
+      return { cancelled: false, withSessionError };
     }
     if (!this.sessionRuntime) {
       await this.initialize();
-      return;
+      let withSessionError: unknown;
+      if (options?.withSession && this.agentSession) {
+        try {
+          await options.withSession(this.agentSession.createReplacedSessionContext());
+        } catch (error) {
+          withSessionError = error;
+        }
+      }
+      this.logReplacementWithSessionError(withSessionError);
+      return { cancelled: false, withSessionError };
     }
 
-    const result = await this.sessionRuntime.newSession(this.sessionRepo);
+    const result = await this.sessionRuntime.newSession(this.sessionRepo, options);
     if (result.cancelled) {
       this.outputChannel.appendLine('[scout] New session cancelled by extension');
-      return;
+      return { cancelled: true };
     }
     this.emit({ type: 'state_change' });
     this.logReplacementTeardownError(result.teardownError);
+    this.logReplacementWithSessionError(result.withSessionError);
+    return result;
   }
 
   async listSessions(): Promise<JsonlSessionMetadata[]> {
@@ -325,26 +367,33 @@ export class SessionManager implements vscode.Disposable {
     await this.agentSession?.abortRetry();
   }
 
-  async fork(entryId: string, position: 'before' | 'at'): Promise<void> {
+  async fork(
+    entryId: string,
+    position: 'before' | 'at',
+    options?: SessionReplacementOptions,
+  ): Promise<SessionManagerReplacementResult> {
     if (!this.sessionRepo || !this.agentSession || !this.sessionRuntime) {
       this.emit({ type: 'error', message: 'No active session to fork from' });
-      return;
+      return { cancelled: true };
     }
 
     try {
-      const result = await this.sessionRuntime?.fork(this.sessionRepo, entryId, position);
+      const result = await this.sessionRuntime?.fork(this.sessionRepo, entryId, position, options);
       if (result?.cancelled) {
         this.outputChannel.appendLine(
           `[scout] Fork cancelled by extension: ${entryId} (${position})`,
         );
-        return;
+        return { cancelled: true };
       }
       this.emit({ type: 'state_change' });
       this.logReplacementTeardownError(result?.teardownError);
+      this.logReplacementWithSessionError(result?.withSessionError);
+      return result ?? { cancelled: false };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.outputChannel.appendLine(`[scout] Fork failed: ${errorMessage}`);
       this.emit({ type: 'error', message: `Fork failed: ${errorMessage}` });
+      return { cancelled: true };
     }
   }
 
@@ -431,6 +480,15 @@ export class SessionManager implements vscode.Disposable {
         `[scout] Suppressed teardown error ${index + 1}: ${suppressedMessage}`,
       );
     });
+  }
+
+  private logReplacementWithSessionError(error: unknown): void {
+    if (!error) return;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    this.outputChannel.appendLine(
+      `[scout] Replacement withSession callback failed: ${errorMessage}`,
+    );
+    this.emit({ type: 'error', message: `withSession failed: ${errorMessage}` });
   }
 
   private async cleanupCreatedSessionAfterFailure(
@@ -557,8 +615,8 @@ export class SessionManager implements vscode.Disposable {
     agentSession: AgentSession,
   ): void {
     const extensionActions: ScoutExtensionActions = {
-      sendMessage: (message: string) => {
-        this.outputChannel.appendLine(`[scout] Extension message: ${message}`);
+      sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => {
+        void agentSession.sendMessage(message);
       },
       sendUserMessage: (content, options) => {
         void agentSession.sendUserMessage(content, options);
@@ -597,6 +655,9 @@ export class SessionManager implements vscode.Disposable {
         return agentSession.setThinkingLevel(validated);
       },
       getContextUsage: () => agentSession.getContextUsage(),
+      newSession: (options) => this.newSession(options),
+      fork: (entryId, options) => this.fork(entryId, options?.position ?? 'before', options),
+      switchSession: (sessionMeta, options) => this.restore(sessionMeta, options),
     };
 
     extensionRunner.bindCore(extensionActions, contextActions);
