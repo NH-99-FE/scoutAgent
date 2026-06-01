@@ -32,6 +32,7 @@ import type {
   SessionBeforeSwitchEvent,
   SessionBeforeSwitchResult,
   SessionShutdownEvent,
+  SessionStartEvent,
   RegisteredTool,
 } from './types.ts';
 import type { ConfigManager } from '../config-manager.ts';
@@ -605,6 +606,26 @@ export class ScoutExtensionRunner {
           await handler(event, ctx);
         } catch (err) {
           this.emitHandlerError(ext.path, 'session_shutdown', err);
+        }
+      }
+    }
+  }
+
+  /**
+   * session_start：通知所有扩展新 session runtime 已绑定
+   */
+  async emitSessionStart(event: SessionStartEvent): Promise<void> {
+    const ctx = this.createContext();
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('session_start');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          await handler(event, ctx);
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'session_start', err);
         }
       }
     }

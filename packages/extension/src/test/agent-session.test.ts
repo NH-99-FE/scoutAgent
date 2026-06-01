@@ -39,7 +39,6 @@ const {
   mockSessionGetEntries,
   mockSessionAppendLabel,
   mockSessionGetLeafId,
-  mockSessionRepoFork,
   mockWrapRegisteredTools,
   MockAgentHarness,
 } = vi.hoisted(() => {
@@ -84,7 +83,6 @@ const {
   const mockSessionGetEntries = vi.fn(async () => [] as any[]);
   const mockSessionAppendLabel = vi.fn(async () => 'label-entry-1');
   const mockSessionGetLeafId = vi.fn(async () => null as string | null);
-  const mockSessionRepoFork = vi.fn();
   const mockWrapRegisteredTools = vi.fn(() => []);
 
   const MockAgentHarness = vi.fn(function (this: any) {
@@ -148,7 +146,6 @@ const {
     mockSessionGetEntries,
     mockSessionAppendLabel,
     mockSessionGetLeafId,
-    mockSessionRepoFork,
     mockWrapRegisteredTools,
     MockAgentHarness,
   };
@@ -1054,100 +1051,9 @@ describe('AgentSession — Fork', () => {
     mockSessionGetLeafId.mockResolvedValue(null);
   });
 
-  function makeRepo() {
-    return { fork: mockSessionRepoFork } as any;
-  }
-
-  it('fork creates new AgentSession', async () => {
-    const forkedSession = {
-      buildContext: vi.fn(async () => ({ messages: [], thinkingLevel: 'off', model: null })),
-      getMetadata: vi.fn(async () => ({
-        id: 'forked-session',
-        createdAt: new Date().toISOString(),
-        parentSessionPath: '/sessions/test-session.jsonl',
-      })),
-      getBranch: vi.fn(async () => []),
-      getEntries: vi.fn(async () => []),
-      getLeafId: vi.fn(async () => null),
-      appendLabel: vi.fn(async () => 'lbl'),
-      moveTo: vi.fn(async () => undefined),
-    };
-    mockSessionRepoFork.mockResolvedValue(forkedSession);
-
+  it('does not own fork replacement', async () => {
     const agentSession = await makeInitializedAgentSession();
-    const forked = await agentSession.fork(makeRepo(), 'entry-1', 'at');
-
-    expect(mockSessionRepoFork).toHaveBeenCalled();
-    expect(forked).toBeInstanceOf(AgentSession);
-    expect(forked.sessionId).toBe('forked-session');
-    expect(forked.parentSessionPath).toBe('/sessions/test-session.jsonl');
-    agentSession.dispose();
-    forked.dispose();
-  });
-
-  it('fork with position=before passes correct args to repo', async () => {
-    const forkedSession = {
-      buildContext: vi.fn(async () => ({ messages: [], thinkingLevel: 'off', model: null })),
-      getMetadata: vi.fn(async () => ({
-        id: 'forked-before',
-        createdAt: new Date().toISOString(),
-      })),
-      getBranch: vi.fn(async () => []),
-      getEntries: vi.fn(async () => []),
-      getLeafId: vi.fn(async () => null),
-      appendLabel: vi.fn(async () => 'lbl'),
-      moveTo: vi.fn(async () => undefined),
-    };
-    mockSessionRepoFork.mockResolvedValue(forkedSession);
-
-    const agentSession = await makeInitializedAgentSession();
-    await agentSession.fork(makeRepo(), 'entry-abc', 'before');
-
-    expect(mockSessionRepoFork).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ entryId: 'entry-abc', position: 'before' }),
-    );
-    agentSession.dispose();
-  });
-
-  it('fork aborts streaming before forking when streaming is active', async () => {
-    const forkedSession = {
-      buildContext: vi.fn(async () => ({ messages: [], thinkingLevel: 'off', model: null })),
-      getMetadata: vi.fn(async () => ({
-        id: 'forked-session',
-        createdAt: new Date().toISOString(),
-      })),
-      getBranch: vi.fn(async () => []),
-      getEntries: vi.fn(async () => []),
-      getLeafId: vi.fn(async () => null),
-      appendLabel: vi.fn(async () => 'lbl'),
-      moveTo: vi.fn(async () => undefined),
-    };
-    mockSessionRepoFork.mockResolvedValue(forkedSession);
-
-    const agentSession = await makeInitializedAgentSession();
-
-    // 模拟流式进行中（通过 harness subscribe 回调触发 settled 之前的状态）
-    // 直接 prompt 并在 harness.prompt 挂起期间 fork
-    let resolvePrompt!: () => void;
-    mockHarnessPrompt.mockImplementationOnce(
-      () =>
-        new Promise<void>((r) => {
-          resolvePrompt = r;
-        }),
-    );
-
-    // 启动 prompt（不等待）
-    const promptPromise = agentSession.prompt('test');
-
-    // 此时 _isStreaming=true，fork 时应先 abort
-    await agentSession.fork(makeRepo(), 'entry-1', 'at');
-
-    expect(mockHarnessAbort).toHaveBeenCalled();
-
-    // 清理
-    resolvePrompt();
-    await promptPromise;
+    expect('fork' in agentSession).toBe(false);
     agentSession.dispose();
   });
 });

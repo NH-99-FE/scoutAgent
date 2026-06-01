@@ -11,6 +11,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const {
   mockFindDefaultModel,
+  mockFindModel,
   mockGetApiKey,
   mockGetShellPath,
   mockHarnessSubscribe,
@@ -94,6 +95,12 @@ const {
       input: ['text', 'image'],
     })),
     mockGetApiKey: vi.fn(() => 'test-api-key'),
+    mockFindModel: vi.fn((id: string) => ({
+      id,
+      api: 'anthropic',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    })),
     mockGetShellPath: vi.fn(() => undefined),
     mockHarnessSubscribe,
     mockHarnessPrompt,
@@ -203,12 +210,7 @@ vi.mock('@scout-agent/shared', () => ({}));
 vi.mock('../config-manager.ts', () => ({
   ConfigManager: vi.fn(function (this: any) {
     this.findDefaultModel = mockFindDefaultModel;
-    this.findModel = vi.fn((id: string) => ({
-      id,
-      api: 'anthropic',
-      provider: 'anthropic',
-      input: ['text', 'image'],
-    }));
+    this.findModel = mockFindModel;
     this.getApiKey = mockGetApiKey;
     this.getShellPath = mockGetShellPath;
     this.getDefaultThinkingLevel = vi.fn(() => 'off');
@@ -313,6 +315,8 @@ function makeMockExtensionRunner(overrides?: Record<string, unknown>) {
     hasHandlers: vi.fn(() => false),
     emitSessionBeforeSwitch: vi.fn(),
     emitSessionBeforeFork: vi.fn(),
+    emitSessionShutdown: vi.fn(),
+    emitSessionStart: vi.fn(),
     invalidate: vi.fn(),
     ...overrides,
   };
@@ -351,6 +355,12 @@ describe('SessionManager — 协调层', () => {
       provider: 'anthropic',
       input: ['text', 'image'],
     });
+    mockFindModel.mockImplementation((id: string) => ({
+      id,
+      api: 'anthropic',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    }));
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
@@ -431,6 +441,35 @@ describe('SessionManager — 协调层', () => {
     manager.dispose();
   });
 
+  it('records model fallback diagnostics when restored session model is unavailable', async () => {
+    mockSessionBuildContext.mockResolvedValue({
+      messages: [],
+      thinkingLevel: 'off',
+      model: { provider: 'anthropic', modelId: 'missing-model' },
+    } as any);
+    mockFindModel.mockImplementation(((id: string) =>
+      id === 'missing-model'
+        ? undefined
+        : {
+            id,
+            api: 'anthropic',
+            provider: 'anthropic',
+            input: ['text', 'image'],
+          }) as any);
+
+    const manager = makeSessionManager();
+    await manager.restore({ id: 'restored-abc', createdAt: new Date().toISOString() } as any);
+
+    expect(manager.modelFallbackMessage).toBe(
+      'Session model "missing-model" is unavailable. Falling back to "test-model".',
+    );
+    expect(manager.diagnostics).toContainEqual({
+      type: 'warning',
+      message: 'Session model "missing-model" is unavailable. Falling back to "test-model".',
+    });
+    manager.dispose();
+  });
+
   it('newSession disposes old session and re-initializes', async () => {
     const manager = await makeInitializedSessionManager();
 
@@ -459,6 +498,36 @@ describe('SessionManager — 协调层', () => {
       targetSessionFile: undefined,
     });
     expect(MockAgentHarness).toHaveBeenCalledTimes(harnessCount);
+    manager.dispose();
+  });
+
+  it('newSession emits shutdown before invalidating the old extension runner', async () => {
+    const order: string[] = [];
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) =>
+        ['session_before_switch', 'session_shutdown'].includes(eventType),
+      ),
+      emitSessionBeforeSwitch: vi.fn(async () => {
+        order.push('before_switch');
+        return undefined;
+      }),
+      emitSessionShutdown: vi.fn(async () => {
+        order.push('shutdown');
+      }),
+      invalidate: vi.fn(() => {
+        order.push('invalidate');
+      }),
+    });
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+
+    await manager.newSession();
+
+    expect(extensionRunner.emitSessionShutdown).toHaveBeenCalledWith({
+      type: 'session_shutdown',
+      reason: 'new',
+      targetSessionFile: undefined,
+    });
+    expect(order).toEqual(['before_switch', 'shutdown', 'invalidate']);
     manager.dispose();
   });
 
@@ -551,6 +620,12 @@ describe('SessionManager — 属性与委托', () => {
       provider: 'anthropic',
       input: ['text', 'image'],
     });
+    mockFindModel.mockImplementation((id: string) => ({
+      id,
+      api: 'anthropic',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    }));
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());

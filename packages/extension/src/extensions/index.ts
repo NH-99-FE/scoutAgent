@@ -27,6 +27,7 @@ export type {
   SessionBeforeForkResult,
   SessionBeforeSwitchEvent,
   SessionBeforeSwitchResult,
+  SessionStartEvent,
   ScoutExtensionContext,
   ScoutExtensionRuntime,
   ScoutExtension,

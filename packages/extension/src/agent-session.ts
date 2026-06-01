@@ -45,7 +45,13 @@ import {
 } from './tools/index.ts';
 import { ScoutExtensionRunner, wrapRegisteredTools } from './extensions/index.ts';
 import { mapAgentEventToScout, convertMessage } from './protocol/agent-event-mapper.ts';
-import type { ToolInfo, SendUserMessageOptions, SourceInfo } from './extensions/types.ts';
+import type {
+  ToolInfo,
+  SendUserMessageOptions,
+  SourceInfo,
+  SessionShutdownEvent,
+  SessionStartEvent,
+} from './extensions/types.ts';
 import { createSyntheticSourceInfo } from './source-info.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
 
@@ -351,6 +357,10 @@ export class AgentSession implements vscode.Disposable {
     return [...this.activeToolNames];
   }
 
+  async getSessionMetadata(): Promise<JsonlSessionMetadata> {
+    return (await this.session.getMetadata()) as JsonlSessionMetadata;
+  }
+
   getAllToolInfos(): ToolInfo[] {
     return [...this.toolRegistry.values()].map((entry) => ({
       name: entry.definition.name,
@@ -419,53 +429,17 @@ export class AgentSession implements vscode.Disposable {
     return result?.cancel === true;
   }
 
-  // ---------- Fork ----------
-
-  /**
-   * 从当前 session 的指定 entry 处分叉，返回新的 AgentSession。
-   * fork 后的 session 不携带 extensionRunner（由 SessionManager 重新绑定）。
-   */
-  async fork(
-    sessionRepo: {
-      fork: (
-        meta: JsonlSessionMetadata,
-        opts: { cwd: string; entryId: string; position: 'before' | 'at' },
-      ) => Promise<Session>;
-    },
-    entryId: string,
-    position: 'before' | 'at',
-  ): Promise<AgentSession> {
-    if (this._isStreaming) {
-      await this.abort();
-    }
-
-    const sourceMetadata = (await this.session.getMetadata()) as JsonlSessionMetadata;
-    const forkedSession = await sessionRepo.fork(sourceMetadata, {
-      cwd: this.cwd,
-      entryId,
-      position,
-    });
-
-    // extensionRunner 不传入，由 SessionManager.fork() 重新创建后调用 setExtensionRunner()
-    const forkedAgentSession = new AgentSession({
-      session: forkedSession as Session,
-      configManager: this.configManager,
-      cwd: this.cwd,
-      outputChannel: this.outputChannel,
-      skills: this.skills,
-      extensionRunner: undefined,
-      activeToolNames: [...this.activeToolNames],
-    });
-
-    await forkedAgentSession.initialize();
-    this.outputChannel.appendLine(`[scout] Forked session from entry ${entryId} (${position})`);
-    return forkedAgentSession;
+  async emitSessionShutdown(event: SessionShutdownEvent): Promise<void> {
+    if (!this.extensionRunner?.hasHandlers('session_shutdown')) return;
+    await this.extensionRunner.emitSessionShutdown(event);
   }
 
-  /**
-   * 设置扩展 runner 并重新桥接钩子。
-   * 由 SessionManager 在 fork() 后调用，为新 session 绑定独立 runner。
-   */
+  async emitSessionStart(event: SessionStartEvent): Promise<void> {
+    if (!this.extensionRunner?.hasHandlers('session_start')) return;
+    await this.extensionRunner.emitSessionStart(event);
+  }
+
+  /** 设置扩展 runner 并重新桥接钩子。 */
   setExtensionRunner(runner: ScoutExtensionRunner): void {
     this.extensionRunner = runner;
     void this.refreshTools();

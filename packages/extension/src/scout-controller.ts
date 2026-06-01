@@ -30,6 +30,7 @@ export class ScoutController implements vscode.Disposable {
 
   private webview?: vscode.Webview;
   private unsubscribeSession?: () => void;
+  private disposePromise?: Promise<void>;
 
   constructor(options: ScoutControllerOptions) {
     this.extensionUri = options.extensionUri;
@@ -113,11 +114,32 @@ export class ScoutController implements vscode.Disposable {
     }
   }
 
+  async disposeAsync(): Promise<void> {
+    if (this.disposePromise) {
+      return this.disposePromise;
+    }
+
+    this.disposePromise = (async () => {
+      this.unsubscribeSession?.();
+      this.unsubscribeSession = undefined;
+      const sessionManager = this.sessionManager as SessionManager & {
+        disposeAsync?: () => Promise<void>;
+      };
+      if (sessionManager.disposeAsync) {
+        await sessionManager.disposeAsync();
+      } else {
+        sessionManager.dispose();
+      }
+      for (const d of this.disposables) d.dispose();
+      this.disposables.length = 0;
+    })();
+
+    return this.disposePromise;
+  }
+
   dispose(): void {
     this.unsubscribeSession?.();
-    this.sessionManager.dispose();
-    for (const d of this.disposables) d.dispose();
-    this.disposables.length = 0;
+    void this.disposeAsync();
   }
 
   // ---------- SessionManager 事件转发 ----------

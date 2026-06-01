@@ -32,6 +32,11 @@ import {
   type ScoutExtensionContextActions,
 } from './extensions/index.ts';
 import { AgentSession, type ScoutSessionEvent } from './agent-session.ts';
+import {
+  AgentSessionRuntime,
+  type AgentSessionRuntimeDiagnostic,
+  type CreateAgentSessionRuntimeFactory,
+} from './agent-session-runtime.ts';
 import type { NavigateTreeResult } from '@scout-agent/agent';
 
 // ---------- 配置接口 ----------
@@ -56,7 +61,9 @@ export class SessionManager implements vscode.Disposable {
 
   protected sessionRepo?: SessionRepoLike;
   private agentSession?: AgentSession;
+  private sessionRuntime?: AgentSessionRuntime;
   private isInitializing = false;
+  private disposePromise?: Promise<void>;
 
   /** 事件监听器列表（透传 AgentSession 事件） */
   private listeners: ((event: ScoutSessionEvent) => void)[] = [];
@@ -95,10 +102,18 @@ export class SessionManager implements vscode.Disposable {
     return this.agentSession?.leafId ?? null;
   }
 
+  get diagnostics(): readonly AgentSessionRuntimeDiagnostic[] {
+    return this.sessionRuntime?.diagnostics ?? [];
+  }
+
+  get modelFallbackMessage(): string | undefined {
+    return this.sessionRuntime?.modelFallbackMessage;
+  }
+
   // ---------- 核心生命周期 ----------
 
   async initialize(): Promise<void> {
-    if (this.isInitializing) return;
+    if (this.isInitializing || this.sessionRuntime) return;
     this.isInitializing = true;
 
     try {
@@ -125,34 +140,20 @@ export class SessionManager implements vscode.Disposable {
       }
       const session = await this.sessionRepo.create({ cwd: this.cwd });
 
-      // 3. 加载 Skills
-      const { skills, diagnostics } = loadSkills({ cwd: this.cwd, agentDir: this.agentDir });
-      for (const diag of diagnostics) {
-        const prefix = diag.severity === 'error' ? 'ERROR' : 'WARN';
-        this.outputChannel.appendLine(`[scout] ${prefix}: ${diag.filePath}: ${diag.message}`);
-      }
-
-      // 4. 加载扩展
-      const extensionRunner = await this.loadExtensions();
-
-      // 5. 创建 AgentSession
-      const agentSession = new AgentSession({
-        session: session as Session,
-        configManager: this.configManager,
-        cwd: this.cwd,
-        outputChannel: this.outputChannel,
-        skills,
-        extensionRunner,
+      const runtimeResult = await this.createRuntime({
+        session,
+        sessionStartEvent: { type: 'session_start', reason: 'startup' },
       });
-
-      // 6. 绑定扩展 core actions（依赖 agentSession 引用）
-      if (extensionRunner) {
-        this.bindExtensionActions(extensionRunner, agentSession);
-      }
-
-      await agentSession.initialize();
-
-      this.setAgentSession(agentSession);
+      const runtime = new AgentSessionRuntime(runtimeResult.session, {
+        cwd: this.cwd,
+        createRuntime: this.createRuntime,
+        diagnostics: runtimeResult.diagnostics,
+        modelFallbackMessage: runtimeResult.modelFallbackMessage,
+      });
+      runtime.setRebindSession((nextSession) => this.setAgentSession(nextSession, false));
+      this.sessionRuntime = runtime;
+      this.setAgentSession(runtime.session, false);
+      await runtime.session.emitSessionStart({ type: 'session_start', reason: 'startup' });
       this.emit({ type: 'state_change' });
 
       this.outputChannel.appendLine(`[scout] Harness initialized with model: ${model.id}`);
@@ -167,13 +168,6 @@ export class SessionManager implements vscode.Disposable {
 
   /** 从 JSONL 文件恢复 session */
   async restore(sessionMeta: JsonlSessionMetadata): Promise<void> {
-    if (await this.agentSession?.emitSessionBeforeSwitch('resume', sessionMeta.path)) {
-      this.outputChannel.appendLine(
-        `[scout] Session restore cancelled by extension: ${sessionMeta.id}`,
-      );
-      return;
-    }
-
     if (!this.sessionRepo) {
       const env = new NodeExecutionEnv({
         cwd: this.cwd,
@@ -185,48 +179,54 @@ export class SessionManager implements vscode.Disposable {
       });
     }
 
-    const session = await this.sessionRepo.open(sessionMeta);
-
-    const { skills, diagnostics } = loadSkills({ cwd: this.cwd, agentDir: this.agentDir });
-    for (const diag of diagnostics) {
-      const prefix = diag.severity === 'error' ? 'ERROR' : 'WARN';
-      this.outputChannel.appendLine(`[scout] ${prefix}: ${diag.filePath}: ${diag.message}`);
+    if (!this.sessionRuntime) {
+      const session = await this.sessionRepo.open(sessionMeta);
+      const runtimeResult = await this.createRuntime({
+        session,
+        sessionStartEvent: { type: 'session_start', reason: 'resume' },
+      });
+      const runtime = new AgentSessionRuntime(runtimeResult.session, {
+        cwd: this.cwd,
+        createRuntime: this.createRuntime,
+        diagnostics: runtimeResult.diagnostics,
+        modelFallbackMessage: runtimeResult.modelFallbackMessage,
+      });
+      runtime.setRebindSession((nextSession) => this.setAgentSession(nextSession, false));
+      this.sessionRuntime = runtime;
+      this.setAgentSession(runtime.session, false);
+      await runtime.session.emitSessionStart({ type: 'session_start', reason: 'resume' });
+      this.emit({ type: 'state_change' });
+      this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
+      return;
     }
 
-    const extensionRunner = await this.loadExtensions();
-
-    const agentSession = new AgentSession({
-      session: session as Session,
-      configManager: this.configManager,
-      cwd: this.cwd,
-      outputChannel: this.outputChannel,
-      skills,
-      extensionRunner,
-    });
-
-    if (extensionRunner) {
-      this.bindExtensionActions(extensionRunner, agentSession);
+    const result = await this.sessionRuntime.switchSession(this.sessionRepo, sessionMeta);
+    if (result.cancelled) {
+      this.outputChannel.appendLine(
+        `[scout] Session restore cancelled by extension: ${sessionMeta.id}`,
+      );
+      return;
     }
-
-    await agentSession.initialize();
-
-    this.setAgentSession(agentSession);
     this.emit({ type: 'state_change' });
     this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
   }
 
   async newSession(): Promise<void> {
-    if (await this.agentSession?.emitSessionBeforeSwitch('new')) {
-      this.outputChannel.appendLine('[scout] New session cancelled by extension');
+    if (!this.sessionRepo) {
+      await this.initialize();
+      return;
+    }
+    if (!this.sessionRuntime) {
+      await this.initialize();
       return;
     }
 
-    // 销毁旧 AgentSession
-    this.unsubscribeAgentSession?.();
-    this.agentSession?.dispose();
-    this.agentSession = undefined;
-    // 创建新 session
-    await this.initialize();
+    const result = await this.sessionRuntime.newSession(this.sessionRepo);
+    if (result.cancelled) {
+      this.outputChannel.appendLine('[scout] New session cancelled by extension');
+      return;
+    }
+    this.emit({ type: 'state_change' });
   }
 
   async listSessions(): Promise<JsonlSessionMetadata[]> {
@@ -286,29 +286,19 @@ export class SessionManager implements vscode.Disposable {
   }
 
   async fork(entryId: string, position: 'before' | 'at'): Promise<void> {
-    if (!this.sessionRepo || !this.agentSession) {
+    if (!this.sessionRepo || !this.agentSession || !this.sessionRuntime) {
       this.emit({ type: 'error', message: 'No active session to fork from' });
       return;
     }
 
     try {
-      if (await this.agentSession.emitSessionBeforeFork(entryId, position)) {
+      const result = await this.sessionRuntime?.fork(this.sessionRepo, entryId, position);
+      if (result?.cancelled) {
         this.outputChannel.appendLine(
           `[scout] Fork cancelled by extension: ${entryId} (${position})`,
         );
         return;
       }
-
-      const forkedAgentSession = await this.agentSession.fork(this.sessionRepo, entryId, position);
-
-      // 为 forked session 创建独立的 extensionRunner（防止共享 runner 被 dispose 污染）
-      const extensionRunner = await this.loadExtensions();
-      if (extensionRunner) {
-        this.bindExtensionActions(extensionRunner, forkedAgentSession);
-        forkedAgentSession.setExtensionRunner(extensionRunner);
-      }
-
-      this.setAgentSession(forkedAgentSession);
       this.emit({ type: 'state_change' });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -368,10 +358,12 @@ export class SessionManager implements vscode.Disposable {
   // ---------- 内部：AgentSession 管理 ----------
 
   /** 替换当前 AgentSession，订阅其事件并透传 */
-  protected setAgentSession(agentSession: AgentSession): void {
+  protected setAgentSession(agentSession: AgentSession, disposePrevious = true): void {
     // 取消订阅旧的
     this.unsubscribeAgentSession?.();
-    this.agentSession?.dispose();
+    if (disposePrevious) {
+      this.agentSession?.dispose();
+    }
 
     this.agentSession = agentSession;
     // 透传所有事件给上层监听者
@@ -380,8 +372,64 @@ export class SessionManager implements vscode.Disposable {
 
   // ---------- 内部：扩展系统 ----------
 
+  private readonly createRuntime: CreateAgentSessionRuntimeFactory = async ({
+    session,
+    activeToolNames,
+  }) => {
+    const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
+    let modelFallbackMessage: string | undefined;
+
+    const context = await session.buildContext();
+    if (context.model && !this.configManager.findModel(context.model.modelId)) {
+      const fallbackModel = this.configManager.findDefaultModel();
+      if (fallbackModel) {
+        modelFallbackMessage = `Session model "${context.model.modelId}" is unavailable. Falling back to "${fallbackModel.id}".`;
+        diagnostics.push({ type: 'warning', message: modelFallbackMessage });
+        this.outputChannel.appendLine(`[scout] WARN: ${modelFallbackMessage}`);
+      }
+    }
+
+    const { skills, diagnostics: skillDiagnostics } = loadSkills({
+      cwd: this.cwd,
+      agentDir: this.agentDir,
+    });
+    for (const diag of skillDiagnostics) {
+      const type = diag.severity === 'error' ? 'error' : 'warning';
+      const message = `${diag.filePath}: ${diag.message}`;
+      diagnostics.push({ type, message });
+      const prefix = type === 'error' ? 'ERROR' : 'WARN';
+      this.outputChannel.appendLine(`[scout] ${prefix}: ${message}`);
+    }
+
+    const extensionRunner = await this.loadExtensions(diagnostics);
+
+    const agentSession = new AgentSession({
+      session: session as Session,
+      configManager: this.configManager,
+      cwd: this.cwd,
+      outputChannel: this.outputChannel,
+      skills,
+      extensionRunner,
+      activeToolNames,
+    });
+
+    if (extensionRunner) {
+      this.bindExtensionActions(extensionRunner, agentSession);
+    }
+
+    await agentSession.initialize();
+
+    return {
+      session: agentSession,
+      diagnostics,
+      modelFallbackMessage,
+    };
+  };
+
   /** 发现并加载扩展，返回 ScoutExtensionRunner 或 undefined */
-  private async loadExtensions(): Promise<ScoutExtensionRunner | undefined> {
+  private async loadExtensions(
+    diagnostics?: AgentSessionRuntimeDiagnostic[],
+  ): Promise<ScoutExtensionRunner | undefined> {
     const configuredPaths = this.configManager.getExtensionPaths();
     const { extensions, errors, runtime } = await discoverAndLoadExtensions(
       configuredPaths,
@@ -390,6 +438,10 @@ export class SessionManager implements vscode.Disposable {
     );
 
     for (const err of errors) {
+      diagnostics?.push({
+        type: 'error',
+        message: `Extension "${err.path}" error: ${err.error}`,
+      });
       this.outputChannel.appendLine(`[scout] Extension load error: ${err.path}: ${err.error}`);
     }
 
@@ -464,13 +516,36 @@ export class SessionManager implements vscode.Disposable {
 
   // ---------- 生命周期 ----------
 
+  async disposeAsync(): Promise<void> {
+    if (this.disposePromise) {
+      return this.disposePromise;
+    }
+
+    this.disposePromise = (async () => {
+      const runtime = this.sessionRuntime;
+      const agentSession = this.agentSession;
+
+      this.unsubscribeAgentSession?.();
+      this.unsubscribeAgentSession = undefined;
+      this.sessionRuntime = undefined;
+      this.agentSession = undefined;
+      this.listeners.length = 0;
+      for (const d of this.disposables) d.dispose();
+      this.disposables.length = 0;
+
+      if (runtime) {
+        await runtime.dispose();
+      } else {
+        agentSession?.dispose();
+      }
+    })();
+
+    return this.disposePromise;
+  }
+
   dispose(): void {
     this.unsubscribeAgentSession?.();
-    this.agentSession?.dispose();
-    this.agentSession = undefined;
-    this.listeners.length = 0;
-    for (const d of this.disposables) d.dispose();
-    this.disposables.length = 0;
+    void this.disposeAsync();
   }
 
   // ---------- 静态工厂 ----------

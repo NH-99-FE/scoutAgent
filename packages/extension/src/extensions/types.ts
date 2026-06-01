@@ -63,7 +63,8 @@ export type ScoutExtensionEventType =
   | 'session_before_tree'
   | 'session_before_fork'
   | 'session_before_switch'
-  | 'session_shutdown';
+  | 'session_shutdown'
+  | 'session_start';
 
 // ---------- 事件定义 ----------
 
@@ -137,6 +138,14 @@ export interface SessionBeforeSwitchEvent {
 
 export interface SessionShutdownEvent {
   type: 'session_shutdown';
+  reason?: 'new' | 'resume' | 'fork' | 'quit' | 'reload';
+  targetSessionFile?: string;
+}
+
+export interface SessionStartEvent {
+  type: 'session_start';
+  reason: 'startup' | 'new' | 'resume' | 'fork' | 'reload';
+  previousSessionFile?: string;
 }
 
 /** 所有扩展事件联合类型 */
@@ -151,7 +160,8 @@ export type ScoutExtensionEvent =
   | SessionBeforeTreeEvent
   | SessionBeforeForkEvent
   | SessionBeforeSwitchEvent
-  | SessionShutdownEvent;
+  | SessionShutdownEvent
+  | SessionStartEvent;
 
 // ---------- 事件结果 ----------
 
