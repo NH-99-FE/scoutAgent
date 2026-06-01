@@ -39,6 +39,12 @@ function makeExtension(
   return {
     path: '<test>',
     resolvedPath: '<test>',
+    sourceInfo: {
+      path: '<test>',
+      source: 'test',
+      scope: 'temporary',
+      origin: 'top-level',
+    },
     handlers: handlersMap,
     tools: new Map(),
   };
@@ -55,8 +61,27 @@ function makeExtensionWithTool(toolName: string): ScoutExtension {
   return {
     path: `<ext-with-${toolName}>`,
     resolvedPath: `<ext-with-${toolName}>`,
+    sourceInfo: {
+      path: `<ext-with-${toolName}>`,
+      source: 'test',
+      scope: 'temporary',
+      origin: 'top-level',
+    },
     handlers: new Map(),
-    tools: new Map([[toolName, { definition: tool, sourcePath: `<ext-with-${toolName}>` }]]),
+    tools: new Map([
+      [
+        toolName,
+        {
+          definition: tool,
+          sourceInfo: {
+            path: `<ext-with-${toolName}>`,
+            source: 'test',
+            scope: 'temporary',
+            origin: 'top-level',
+          },
+        },
+      ],
+    ]),
   };
 }
 
@@ -166,7 +191,7 @@ describe('ScoutExtensionRunner.getAllRegisteredTools', () => {
 
     const tools = runner.getAllRegisteredTools();
     expect(tools).toHaveLength(1);
-    expect(tools[0]!.sourcePath).toBe('<ext-with-shared-tool>');
+    expect(tools[0]!.sourceInfo.path).toBe('<ext-with-shared-tool>');
   });
 });
 

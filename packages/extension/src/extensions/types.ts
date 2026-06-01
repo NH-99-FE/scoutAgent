@@ -217,6 +217,7 @@ export type { SourceInfo } from '../source-info.ts';
 
 export interface ToolInfo {
   name: string;
+  label?: string;
   description: string;
   parameters: unknown;
   sourceInfo: SourceInfo;
@@ -278,6 +279,7 @@ export interface ScoutExtensionRuntime {
 export interface ScoutExtension {
   path: string;
   resolvedPath: string;
+  sourceInfo: SourceInfo;
   handlers: Map<string, ScoutHandlerFn[]>;
   tools: Map<string, RegisteredTool>;
 }
@@ -287,7 +289,7 @@ export interface ScoutExtension {
 /** 扩展注册的工具 + 来源信息 */
 export interface RegisteredTool {
   definition: ScoutToolDefinition;
-  sourcePath: string;
+  sourceInfo: SourceInfo;
 }
 
 // ---------- 扩展错误 ----------

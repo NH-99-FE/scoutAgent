@@ -330,6 +330,12 @@ async function makeInitializedSessionManagerWithExtensionRunner(
       {
         path: '<test-extension>',
         resolvedPath: '<test-extension>',
+        sourceInfo: {
+          path: '<test-extension>',
+          source: 'test',
+          scope: 'temporary',
+          origin: 'top-level',
+        },
         handlers: new Map(),
         tools: new Map(),
       },

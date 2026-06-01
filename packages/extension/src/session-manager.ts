@@ -9,7 +9,12 @@ import type { JsonlSessionMetadata } from '@scout-agent/agent';
 import { JsonlSessionRepo, InMemorySessionRepo } from '@scout-agent/agent';
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import type { JsonlSessionRepoFileSystem, Session } from '@scout-agent/agent';
-import type { ScoutMessage, ScoutSessionTreeNode, ThinkingLevel } from '@scout-agent/shared';
+import type {
+  ScoutMessage,
+  ScoutSessionTreeNode,
+  ThinkingLevel,
+  ToolInfo,
+} from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
 import { loadSkills } from './skill-loader.ts';
 
@@ -108,6 +113,33 @@ export class SessionManager implements vscode.Disposable {
 
   get modelFallbackMessage(): string | undefined {
     return this.sessionRuntime?.modelFallbackMessage;
+  }
+
+  getActiveToolNames(): string[] {
+    return this.agentSession?.getActiveToolNames() ?? [];
+  }
+
+  getAllToolInfos(): ToolInfo[] {
+    const active = new Set(this.getActiveToolNames());
+    return (this.agentSession?.getAllToolInfos() ?? []).map((tool) => ({
+      ...tool,
+      active: active.has(tool.name),
+    }));
+  }
+
+  async setActiveTools(toolNames: string[]): Promise<void> {
+    if (!this.agentSession) {
+      this.emit({ type: 'error', message: 'No active session' });
+      return;
+    }
+    try {
+      await this.agentSession.setActiveTools(toolNames);
+    } catch (error) {
+      this.emit({
+        type: 'error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   // ---------- 核心生命周期 ----------

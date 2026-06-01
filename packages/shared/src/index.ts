@@ -8,6 +8,28 @@
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high';
 
+// ---------- Source / Tool info ----------
+
+export type SourceScope = 'user' | 'project' | 'temporary';
+export type SourceOrigin = 'package' | 'top-level';
+
+export interface SourceInfo {
+  path: string;
+  source: string;
+  scope: SourceScope;
+  origin: SourceOrigin;
+  baseDir?: string;
+}
+
+export interface ToolInfo {
+  name: string;
+  label?: string;
+  description: string;
+  parameters: unknown;
+  active: boolean;
+  sourceInfo: SourceInfo;
+}
+
 // ---------- Session Tree ----------
 
 export interface ScoutSessionTreeNode {
@@ -29,6 +51,7 @@ export type WebviewMessage =
   | { type: 'abort_retry' }
   | { type: 'select_model'; modelId: string }
   | { type: 'select_thinking'; level: ThinkingLevel }
+  | { type: 'set_active_tools'; toolNames: string[] }
   | { type: 'clear_conversation' }
   | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
   | { type: 'request_tree' }
@@ -114,6 +137,8 @@ export interface ScoutWebviewState {
   isStreaming: boolean;
   modelId: string;
   thinkingLevel: ThinkingLevel;
+  tools: ToolInfo[];
+  activeToolNames: string[];
   errorMessage?: string;
   sessionId?: string;
   parentSessionPath?: string;

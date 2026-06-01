@@ -38,6 +38,7 @@ const {
   mockSessionMoveTo,
   mockSessionGetEntries,
   mockSessionAppendLabel,
+  mockSessionAppendCustomEntry,
   mockSessionGetLeafId,
   mockWrapRegisteredTools,
   MockAgentHarness,
@@ -82,6 +83,7 @@ const {
   const mockSessionMoveTo = vi.fn(async () => undefined);
   const mockSessionGetEntries = vi.fn(async () => [] as any[]);
   const mockSessionAppendLabel = vi.fn(async () => 'label-entry-1');
+  const mockSessionAppendCustomEntry = vi.fn(async () => 'custom-entry-1');
   const mockSessionGetLeafId = vi.fn(async () => null as string | null);
   const mockWrapRegisteredTools = vi.fn(() => []);
 
@@ -145,6 +147,7 @@ const {
     mockSessionMoveTo,
     mockSessionGetEntries,
     mockSessionAppendLabel,
+    mockSessionAppendCustomEntry,
     mockSessionGetLeafId,
     mockWrapRegisteredTools,
     MockAgentHarness,
@@ -299,6 +302,7 @@ function makeSession(
     moveTo: any;
     getEntries: any;
     appendLabel: any;
+    appendCustomEntry: any;
     getLeafId: any;
   }>,
 ) {
@@ -309,6 +313,7 @@ function makeSession(
     moveTo: overrides?.moveTo ?? mockSessionMoveTo,
     getEntries: overrides?.getEntries ?? mockSessionGetEntries,
     appendLabel: overrides?.appendLabel ?? mockSessionAppendLabel,
+    appendCustomEntry: overrides?.appendCustomEntry ?? mockSessionAppendCustomEntry,
     getLeafId: overrides?.getLeafId ?? mockSessionGetLeafId,
   } as any;
 }
@@ -645,6 +650,36 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
+  it('persists active tools to the current session branch', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    await agentSession.setActiveTools(['read', 'grep']);
+
+    expect(mockSessionAppendCustomEntry).toHaveBeenCalledWith('tools-config', {
+      enabledTools: ['read', 'grep'],
+    });
+    agentSession.dispose();
+  });
+
+  it('restores active tools from the latest tools-config branch entry', async () => {
+    const session = makeSession({
+      getBranch: vi.fn(async () => [
+        {
+          type: 'custom',
+          customType: 'tools-config',
+          data: { enabledTools: ['read', 'grep'] },
+        },
+      ]),
+    });
+
+    const agentSession = await makeInitializedAgentSession({ session });
+
+    expect(agentSession.getActiveToolNames()).toEqual(['read', 'grep']);
+    const harnessOptions = (MockAgentHarness.mock.calls as any[]).at(-1)?.[0] as any;
+    expect(harnessOptions.activeToolNames).toEqual(['read', 'grep']);
+    agentSession.dispose();
+  });
+
   it('extension tools override builtin tools and keep extension sourceInfo', async () => {
     const extensionRunner = {
       getAllRegisteredTools: vi.fn(() => [
@@ -656,7 +691,13 @@ describe('AgentSession — 运行时操作', () => {
             parameters: { type: 'object' },
             execute: vi.fn(),
           },
-          sourcePath: '/extensions/read-override.ts',
+          sourceInfo: {
+            path: '/extensions/read-override.ts',
+            source: 'local',
+            scope: 'project',
+            origin: 'top-level',
+            baseDir: '/extensions',
+          },
         },
       ]),
       invalidate: vi.fn(),
@@ -680,7 +721,9 @@ describe('AgentSession — 运行时操作', () => {
           description: 'extension read tool',
           sourceInfo: expect.objectContaining({
             path: '/extensions/read-override.ts',
-            source: 'extension',
+            source: 'local',
+            scope: 'project',
+            baseDir: '/extensions',
           }),
         }),
       ]),

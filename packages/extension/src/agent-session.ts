@@ -52,7 +52,6 @@ import type {
   SessionShutdownEvent,
   SessionStartEvent,
 } from './extensions/types.ts';
-import { createSyntheticSourceInfo } from './source-info.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
 
 // ---------- 类型守卫 ----------
@@ -108,7 +107,14 @@ type ToolRegistryEntry = {
   definition: ToolDefinition;
   tool: AgentTool;
   sourceInfo: SourceInfo;
+  sourceType: 'builtin' | 'extension';
 };
+
+const ACTIVE_TOOLS_CUSTOM_TYPE = 'tools-config';
+
+interface ActiveToolsState {
+  enabledTools: string[];
+}
 
 // ---------- AgentSession ----------
 
@@ -178,6 +184,7 @@ export class AgentSession implements vscode.Disposable {
     const metadata = (await this.session.getMetadata()) as JsonlSessionMetadata;
     this.cachedSessionId = metadata.id;
     this.cachedParentSessionPath = metadata.parentSessionPath;
+    await this.restoreActiveToolsFromBranch();
 
     await this.rebuildHarness();
     await this.rebuildCachedMessages();
@@ -364,6 +371,7 @@ export class AgentSession implements vscode.Disposable {
   getAllToolInfos(): ToolInfo[] {
     return [...this.toolRegistry.values()].map((entry) => ({
       name: entry.definition.name,
+      label: entry.definition.label,
       description: entry.definition.description,
       parameters: entry.definition.parameters,
       sourceInfo: entry.sourceInfo,
@@ -378,9 +386,11 @@ export class AgentSession implements vscode.Disposable {
 
     this.activeToolsCustomized = true;
     this.activeToolNames = [...toolNames];
+    await this.persistActiveTools();
     await this.applyToolsToHarness();
     this.lastSystemPrompt = this.buildCurrentSystemPrompt();
     this.emit({ type: 'state_change' });
+    this.emit({ type: 'tree_change' });
   }
 
   async refreshTools(): Promise<void> {
@@ -389,6 +399,33 @@ export class AgentSession implements vscode.Disposable {
     await this.applyToolsToHarness();
     this.lastSystemPrompt = this.buildCurrentSystemPrompt();
     this.emit({ type: 'state_change' });
+  }
+
+  private async restoreActiveToolsFromBranch(): Promise<void> {
+    if (this.activeToolsCustomized) return;
+
+    const branch = await this.session.getBranch();
+    let savedTools: string[] | undefined;
+    for (const entry of branch) {
+      if (entry.type !== 'custom' || entry.customType !== ACTIVE_TOOLS_CUSTOM_TYPE) {
+        continue;
+      }
+      const data = entry.data as ActiveToolsState | undefined;
+      if (Array.isArray(data?.enabledTools)) {
+        savedTools = data.enabledTools.filter((name): name is string => typeof name === 'string');
+      }
+    }
+
+    if (!savedTools) return;
+    this.activeToolsCustomized = true;
+    this.activeToolNames = savedTools;
+  }
+
+  private async persistActiveTools(): Promise<void> {
+    await this.session.appendCustomEntry(ACTIVE_TOOLS_CUSTOM_TYPE, {
+      enabledTools: [...this.activeToolNames],
+    } satisfies ActiveToolsState);
+    this.cachedLeafId = await this.session.getLeafId();
   }
 
   getSystemPrompt(): string {
@@ -646,6 +683,7 @@ export class AgentSession implements vscode.Disposable {
         definition: entry.definition,
         tool,
         sourceInfo: entry.sourceInfo,
+        sourceType: 'builtin',
       });
     }
 
@@ -658,7 +696,8 @@ export class AgentSession implements vscode.Disposable {
         registry.set(tool.name, {
           definition: registered.definition,
           tool,
-          sourceInfo: createSyntheticSourceInfo(registered.sourcePath, { source: 'extension' }),
+          sourceInfo: registered.sourceInfo,
+          sourceType: 'extension',
         });
       }
     }
@@ -670,7 +709,7 @@ export class AgentSession implements vscode.Disposable {
     if (!this.activeToolsCustomized) {
       const defaults = DEFAULT_ACTIVE_TOOL_NAMES.filter((name) => this.toolRegistry.has(name));
       const extensionTools = [...this.toolRegistry.values()]
-        .filter((entry) => entry.sourceInfo.source === 'extension')
+        .filter((entry) => entry.sourceType === 'extension')
         .map((entry) => entry.tool.name);
       this.activeToolNames = [...new Set([...defaults, ...extensionTools])];
       return;

@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
 import { createEventBus, type EventBus } from './event-bus.ts';
+import { createSyntheticSourceInfo, type SourceInfo, type SourceOrigin } from '../source-info.ts';
 import type {
   ScoutExtension,
   ScoutExtensionAPI,
@@ -142,7 +143,7 @@ function createExtensionAPI(
       runtime.assertActive();
       extension.tools.set(tool.name, {
         definition: tool,
-        sourcePath: extension.path,
+        sourceInfo: extension.sourceInfo,
       });
       runtime.refreshTools();
     },
@@ -194,11 +195,32 @@ async function loadExtensionModule(
   return typeof factory !== 'function' ? undefined : factory;
 }
 
+function createExtensionSourceInfo(
+  extensionPath: string,
+  resolvedPath: string,
+  sourceInfo?: SourceInfo,
+): SourceInfo {
+  if (sourceInfo) return sourceInfo;
+  if (extensionPath.startsWith('<') && extensionPath.endsWith('>')) {
+    const source = extensionPath.slice(1, -1).split(':')[0] || 'temporary';
+    return createSyntheticSourceInfo(extensionPath, { source });
+  }
+  return createSyntheticSourceInfo(extensionPath, {
+    source: 'local',
+    baseDir: path.dirname(resolvedPath),
+  });
+}
+
 /** 创建空扩展实例 */
-function createExtension(extensionPath: string, resolvedPath: string): ScoutExtension {
+function createExtension(
+  extensionPath: string,
+  resolvedPath: string,
+  sourceInfo?: SourceInfo,
+): ScoutExtension {
   return {
     path: extensionPath,
     resolvedPath,
+    sourceInfo: createExtensionSourceInfo(extensionPath, resolvedPath, sourceInfo),
     handlers: new Map(),
     tools: new Map(),
   };
@@ -209,6 +231,7 @@ async function loadExtension(
   extensionPath: string,
   runtime: ScoutExtensionRuntime,
   eventBus: EventBus,
+  sourceInfo?: SourceInfo,
 ): Promise<{ extension: ScoutExtension | null; error: string | null }> {
   const resolvedPath = path.resolve(extensionPath);
 
@@ -221,7 +244,7 @@ async function loadExtension(
       };
     }
 
-    const extension = createExtension(extensionPath, resolvedPath);
+    const extension = createExtension(extensionPath, resolvedPath, sourceInfo);
     const api = createExtensionAPI(extension, runtime, eventBus);
     await factory(api);
 
@@ -250,6 +273,7 @@ export async function loadExtensionFromFactory(
 export async function loadExtensions(
   paths: string[],
   eventBus?: EventBus,
+  sourceInfos?: Map<string, SourceInfo>,
 ): Promise<LoadExtensionsResult> {
   const extensions: ScoutExtension[] = [];
   const errors: Array<{ path: string; error: string }> = [];
@@ -257,7 +281,13 @@ export async function loadExtensions(
   const runtime = createExtensionRuntime();
 
   for (const extPath of paths) {
-    const { extension, error } = await loadExtension(extPath, runtime, resolvedEventBus);
+    const resolved = path.resolve(extPath);
+    const { extension, error } = await loadExtension(
+      extPath,
+      runtime,
+      resolvedEventBus,
+      sourceInfos?.get(resolved),
+    );
 
     if (error) {
       errors.push({ path: extPath, error });
@@ -283,6 +313,12 @@ interface ScoutManifest {
   extensions?: string[];
 }
 
+interface DiscoveredExtensionEntry {
+  path: string;
+  origin: SourceOrigin;
+  baseDir: string;
+}
+
 function isExtensionFile(name: string): boolean {
   return name.endsWith('.ts') || name.endsWith('.js');
 }
@@ -305,16 +341,20 @@ function readScoutManifest(packageJsonPath: string): ScoutManifest | null {
  * 1. package.json 中的 "scout.extensions" 字段
  * 2. index.ts 或 index.js
  */
-function resolveExtensionEntries(dir: string): string[] | null {
+function resolveExtensionEntries(dir: string): DiscoveredExtensionEntry[] | null {
   const packageJsonPath = path.join(dir, 'package.json');
   if (fs.existsSync(packageJsonPath)) {
     const manifest = readScoutManifest(packageJsonPath);
     if (manifest?.extensions?.length) {
-      const entries: string[] = [];
+      const entries: DiscoveredExtensionEntry[] = [];
       for (const extPath of manifest.extensions) {
         const resolvedExtPath = path.resolve(dir, extPath);
         if (fs.existsSync(resolvedExtPath)) {
-          entries.push(resolvedExtPath);
+          entries.push({
+            path: resolvedExtPath,
+            origin: 'package',
+            baseDir: dir,
+          });
         }
       }
       if (entries.length > 0) {
@@ -325,8 +365,12 @@ function resolveExtensionEntries(dir: string): string[] | null {
 
   const indexTs = path.join(dir, 'index.ts');
   const indexJs = path.join(dir, 'index.js');
-  if (fs.existsSync(indexTs)) return [indexTs];
-  if (fs.existsSync(indexJs)) return [indexJs];
+  if (fs.existsSync(indexTs)) {
+    return [{ path: indexTs, origin: 'top-level', baseDir: dir }];
+  }
+  if (fs.existsSync(indexJs)) {
+    return [{ path: indexJs, origin: 'top-level', baseDir: dir }];
+  }
 
   return null;
 }
@@ -341,10 +385,10 @@ function resolveExtensionEntries(dir: string): string[] | null {
  *
  * 不递归超过一层。
  */
-function discoverExtensionsInDir(dir: string): string[] {
+function discoverExtensionsInDir(dir: string): DiscoveredExtensionEntry[] {
   if (!fs.existsSync(dir)) return [];
 
-  const discovered: string[] = [];
+  const discovered: DiscoveredExtensionEntry[] = [];
 
   try {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -354,7 +398,11 @@ function discoverExtensionsInDir(dir: string): string[] {
 
       // 直接文件
       if ((entry.isFile() || entry.isSymbolicLink()) && isExtensionFile(entry.name)) {
-        discovered.push(entryPath);
+        discovered.push({
+          path: entryPath,
+          origin: 'top-level',
+          baseDir: dir,
+        });
         continue;
       }
 
@@ -389,24 +437,47 @@ export async function discoverAndLoadExtensions(
 ): Promise<LoadExtensionsResult> {
   const allPaths: string[] = [];
   const seen = new Set<string>();
+  const sourceInfos = new Map<string, SourceInfo>();
 
-  const addPaths = (paths: string[]) => {
-    for (const p of paths) {
-      const resolved = path.resolve(p);
-      if (!seen.has(resolved)) {
-        seen.add(resolved);
-        allPaths.push(p);
+  const addEntries = (
+    entries: DiscoveredExtensionEntry[],
+    sourceInfoForEntry?: (entry: DiscoveredExtensionEntry) => SourceInfo,
+  ) => {
+    for (const entry of entries) {
+      const resolved = path.resolve(entry.path);
+      if (seen.has(resolved)) {
+        continue;
+      }
+
+      seen.add(resolved);
+      allPaths.push(entry.path);
+      if (sourceInfoForEntry) {
+        sourceInfos.set(resolved, sourceInfoForEntry({ ...entry, path: resolved }));
       }
     }
   };
 
   // 1. 项目本地扩展
   const localExtDir = path.join(cwd, '.scout', 'extensions');
-  addPaths(discoverExtensionsInDir(localExtDir));
+  addEntries(discoverExtensionsInDir(localExtDir), (entry) =>
+    createSyntheticSourceInfo(entry.path, {
+      source: 'local',
+      scope: 'project',
+      origin: entry.origin,
+      baseDir: entry.baseDir,
+    }),
+  );
 
   // 2. 全局扩展
   const globalExtDir = path.join(agentDir, 'extensions');
-  addPaths(discoverExtensionsInDir(globalExtDir));
+  addEntries(discoverExtensionsInDir(globalExtDir), (entry) =>
+    createSyntheticSourceInfo(entry.path, {
+      source: 'local',
+      scope: 'user',
+      origin: entry.origin,
+      baseDir: entry.baseDir,
+    }),
+  );
 
   // 3. 显式配置路径
   for (const p of configuredPaths) {
@@ -414,15 +485,41 @@ export async function discoverAndLoadExtensions(
     if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
       const entries = resolveExtensionEntries(resolved);
       if (entries) {
-        addPaths(entries);
+        addEntries(entries, (entry) =>
+          createSyntheticSourceInfo(entry.path, {
+            source: 'local',
+            origin: entry.origin,
+            baseDir: entry.baseDir,
+          }),
+        );
         continue;
       }
-      addPaths(discoverExtensionsInDir(resolved));
+      addEntries(discoverExtensionsInDir(resolved), (entry) =>
+        createSyntheticSourceInfo(entry.path, {
+          source: 'local',
+          origin: entry.origin,
+          baseDir: entry.baseDir,
+        }),
+      );
       continue;
     }
 
-    addPaths([resolved]);
+    addEntries(
+      [
+        {
+          path: resolved,
+          origin: 'top-level',
+          baseDir: path.dirname(resolved),
+        },
+      ],
+      (entry) =>
+        createSyntheticSourceInfo(entry.path, {
+          source: 'local',
+          origin: entry.origin,
+          baseDir: entry.baseDir,
+        }),
+    );
   }
 
-  return loadExtensions(allPaths, eventBus);
+  return loadExtensions(allPaths, eventBus, sourceInfos);
 }

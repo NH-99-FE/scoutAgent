@@ -33,6 +33,9 @@ const {
   mockSessionManagerNavigateTree,
   mockSessionManagerSetLabel,
   mockSessionManagerLeafId,
+  mockSessionManagerGetActiveToolNames,
+  mockSessionManagerGetAllToolInfos,
+  mockSessionManagerSetActiveTools,
 } = vi.hoisted(() => {
   const mockUri = {
     parse: vi.fn(),
@@ -73,6 +76,23 @@ const {
     mockSessionManagerNavigateTree: vi.fn(async () => ({ cancelled: false })),
     mockSessionManagerSetLabel: vi.fn(async () => {}),
     mockSessionManagerLeafId: null,
+    mockSessionManagerGetActiveToolNames: vi.fn(() => ['read']),
+    mockSessionManagerGetAllToolInfos: vi.fn(() => [
+      {
+        name: 'read',
+        label: 'read',
+        description: 'read tool',
+        parameters: {},
+        active: true,
+        sourceInfo: {
+          path: '<builtin:read>',
+          source: 'builtin',
+          scope: 'temporary',
+          origin: 'top-level',
+        },
+      },
+    ]),
+    mockSessionManagerSetActiveTools: vi.fn(async () => {}),
   };
 });
 
@@ -175,6 +195,9 @@ vi.mock('../session-manager.ts', () => ({
     this.navigateTree = mockSessionManagerNavigateTree;
     this.setLabel = mockSessionManagerSetLabel;
     this.leafId = mockSessionManagerLeafId;
+    this.getActiveToolNames = mockSessionManagerGetActiveToolNames;
+    this.getAllToolInfos = mockSessionManagerGetAllToolInfos;
+    this.setActiveTools = mockSessionManagerSetActiveTools;
   }),
 }));
 
@@ -432,6 +455,15 @@ describe('ScoutController', () => {
     });
 
     expect(mockSessionManagerFork).toHaveBeenCalledWith('entry-1', 'before');
+    controller.dispose();
+  });
+
+  it('handles set_active_tools message by delegating to SessionManager', () => {
+    const controller = makeController();
+
+    controller.handleWebviewMessage({ type: 'set_active_tools', toolNames: ['read', 'grep'] });
+
+    expect(mockSessionManagerSetActiveTools).toHaveBeenCalledWith(['read', 'grep']);
     controller.dispose();
   });
 

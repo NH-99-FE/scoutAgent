@@ -178,6 +178,13 @@ export default function(api) {
 
     const result = await discoverAndLoadExtensions([], cwd, join(tempDir, 'agent'));
     expect(result.extensions).toHaveLength(1);
+    expect(result.extensions[0]!.sourceInfo).toEqual(
+      expect.objectContaining({
+        scope: 'project',
+        origin: 'top-level',
+        baseDir: extDir,
+      }),
+    );
   });
 
   it('discovers extensions from agentDir/extensions/', async () => {
@@ -234,6 +241,13 @@ export default function(api) {
 
     const result = await discoverAndLoadExtensions([], cwd, join(tempDir, 'agent'));
     expect(result.extensions).toHaveLength(1);
+    expect(result.extensions[0]!.sourceInfo).toEqual(
+      expect.objectContaining({
+        scope: 'project',
+        origin: 'top-level',
+        baseDir: pkgDir,
+      }),
+    );
   });
 
   it('discovers from subdirectory with package.json manifest', async () => {
@@ -257,6 +271,13 @@ export default function(api) {
 
     const result = await discoverAndLoadExtensions([], cwd, join(tempDir, 'agent'));
     expect(result.extensions).toHaveLength(1);
+    expect(result.extensions[0]!.sourceInfo).toEqual(
+      expect.objectContaining({
+        scope: 'project',
+        origin: 'package',
+        baseDir: pkgDir,
+      }),
+    );
   });
 
   it('returns empty when no extensions found', async () => {
