@@ -30,7 +30,6 @@ interface SessionRepoLike {
 
 export class AgentSessionRuntime {
   private rebindSession?: (session: AgentSession) => Promise<void> | void;
-  private beforeSessionInvalidate?: () => void;
   private _session: AgentSession;
   private readonly cwd: string;
   private readonly createRuntime: CreateAgentSessionRuntimeFactory;
@@ -69,10 +68,6 @@ export class AgentSessionRuntime {
     this.rebindSession = rebindSession;
   }
 
-  setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void {
-    this.beforeSessionInvalidate = beforeSessionInvalidate;
-  }
-
   private async emitBeforeSwitch(
     reason: 'new' | 'resume',
     targetSessionFile?: string,
@@ -98,7 +93,6 @@ export class AgentSessionRuntime {
     targetSessionFile?: string,
   ): Promise<void> {
     await this.session.emitSessionShutdown({ type: 'session_shutdown', reason, targetSessionFile });
-    this.beforeSessionInvalidate?.();
     this.session.dispose();
   }
 
