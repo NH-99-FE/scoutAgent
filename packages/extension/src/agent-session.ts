@@ -40,11 +40,13 @@ import {
   createTools,
   DEFAULT_ACTIVE_TOOL_NAMES,
   ALL_TOOL_NAMES,
-  type ToolName,
+  createBuiltinToolDefinitionEntries,
+  type ToolDefinition,
 } from './tools/index.ts';
 import { ScoutExtensionRunner, wrapRegisteredTools } from './extensions/index.ts';
 import { mapAgentEventToScout, convertMessage } from './protocol/agent-event-mapper.ts';
 import type { ToolInfo, SendUserMessageOptions, SourceInfo } from './extensions/types.ts';
+import { createSyntheticSourceInfo } from './source-info.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
 
 // ---------- 类型守卫 ----------
@@ -97,6 +99,7 @@ export interface AgentSessionOptions {
 }
 
 type ToolRegistryEntry = {
+  definition: ToolDefinition;
   tool: AgentTool;
   sourceInfo: SourceInfo;
 };
@@ -350,9 +353,9 @@ export class AgentSession implements vscode.Disposable {
 
   getAllToolInfos(): ToolInfo[] {
     return [...this.toolRegistry.values()].map((entry) => ({
-      name: entry.tool.name,
-      description: entry.tool.description,
-      parameters: entry.tool.parameters,
+      name: entry.definition.name,
+      description: entry.definition.description,
+      parameters: entry.definition.parameters,
       sourceInfo: entry.sourceInfo,
     }));
   }
@@ -628,13 +631,24 @@ export class AgentSession implements vscode.Disposable {
     const model =
       modelOverride ?? this.harness?.getModel() ?? this.configManager.findDefaultModel();
     const readOptions = { isVisionModel: () => model?.input.includes('image') ?? false };
+    const builtinEntries = createBuiltinToolDefinitionEntries(
+      this.cwd,
+      Array.from(ALL_TOOL_NAMES),
+      { read: readOptions },
+    );
     const builtinTools = createTools(this.cwd, Array.from(ALL_TOOL_NAMES), { read: readOptions });
+    const builtinToolsByName = new Map(builtinTools.map((tool) => [tool.name, tool]));
     const registry = new Map<string, ToolRegistryEntry>();
 
-    for (const tool of builtinTools) {
-      registry.set(tool.name, {
+    for (const entry of builtinEntries) {
+      const tool = builtinToolsByName.get(entry.definition.name);
+      if (!tool) {
+        continue;
+      }
+      registry.set(entry.definition.name, {
+        definition: entry.definition,
         tool,
-        sourceInfo: this.createSyntheticSourceInfo(`<builtin:${tool.name}>`, 'builtin'),
+        sourceInfo: entry.sourceInfo,
       });
     }
 
@@ -645,8 +659,9 @@ export class AgentSession implements vscode.Disposable {
         const tool = extensionTools[i]!;
         const registered = registeredTools[i]!;
         registry.set(tool.name, {
+          definition: registered.definition,
           tool,
-          sourceInfo: this.createSyntheticSourceInfo(registered.sourcePath, 'extension'),
+          sourceInfo: createSyntheticSourceInfo(registered.sourcePath, { source: 'extension' }),
         });
       }
     }
@@ -684,15 +699,6 @@ export class AgentSession implements vscode.Disposable {
 
   private buildCurrentSystemPrompt(): string {
     return this.buildDynamicSystemPrompt(this.getActiveTools());
-  }
-
-  private createSyntheticSourceInfo(path: string, source: string): SourceInfo {
-    return {
-      path,
-      source,
-      scope: 'temporary',
-      origin: 'top-level',
-    };
   }
 
   private normalizeUserMessageContent(content: string | (TextContent | ImageContent)[]): {

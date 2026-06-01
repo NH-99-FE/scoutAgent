@@ -56,9 +56,13 @@ export {
 export {
   createTools,
   createDefaultTools,
+  createBuiltinToolDefinitionEntries,
+  BUILTIN_TOOL_DEFINITION_ENTRIES,
   DEFAULT_ACTIVE_TOOL_NAMES,
   ALL_TOOL_NAMES,
   type ToolName,
+  type ToolDefinition,
+  type ToolDefinitionEntry,
   type ToolsOptions,
 } from './create-tools.ts';
 export { withFileMutationQueue } from './shared/file-mutation-queue.ts';

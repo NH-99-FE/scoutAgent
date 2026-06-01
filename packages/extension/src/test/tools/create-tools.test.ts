@@ -4,8 +4,10 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  BUILTIN_TOOL_DEFINITION_ENTRIES,
   createTools,
   createDefaultTools,
+  createBuiltinToolDefinitionEntries,
   DEFAULT_ACTIVE_TOOL_NAMES,
   ALL_TOOL_NAMES,
   type ToolName,
@@ -54,6 +56,31 @@ describe('createTools', () => {
     const tools = createTools('/test', ['write', 'read']);
     expect(tools[0].name).toBe('write');
     expect(tools[1].name).toBe('read');
+  });
+});
+
+describe('BUILTIN_TOOL_DEFINITION_ENTRIES', () => {
+  it('keeps sourceInfo outside tool definitions', () => {
+    const entries = createBuiltinToolDefinitionEntries('/test', ['read', 'bash']);
+
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      definition: { name: 'read', label: 'read' },
+      sourceInfo: { path: '<builtin:read>', source: 'builtin' },
+    });
+    expect(entries[1]).toMatchObject({
+      definition: { name: 'bash', label: 'bash' },
+      sourceInfo: { path: '<builtin:bash>', source: 'builtin' },
+    });
+    expect(entries[0].definition.parameters).toBeDefined();
+    expect(entries[0].definition).not.toHaveProperty('sourceInfo');
+  });
+
+  it('contains every builtin tool definition entry', () => {
+    expect(BUILTIN_TOOL_DEFINITION_ENTRIES.size).toBe(ALL_TOOL_NAMES.size);
+    for (const name of ALL_TOOL_NAMES) {
+      expect(BUILTIN_TOOL_DEFINITION_ENTRIES.get(name)?.definition.name).toBe(name);
+    }
   });
 });
 

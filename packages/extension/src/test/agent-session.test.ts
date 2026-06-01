@@ -40,6 +40,7 @@ const {
   mockSessionAppendLabel,
   mockSessionGetLeafId,
   mockSessionRepoFork,
+  mockWrapRegisteredTools,
   MockAgentHarness,
 } = vi.hoisted(() => {
   const mockHarnessSubscribe = vi.fn(() => vi.fn());
@@ -84,6 +85,7 @@ const {
   const mockSessionAppendLabel = vi.fn(async () => 'label-entry-1');
   const mockSessionGetLeafId = vi.fn(async () => null as string | null);
   const mockSessionRepoFork = vi.fn();
+  const mockWrapRegisteredTools = vi.fn(() => []);
 
   const MockAgentHarness = vi.fn(function (this: any) {
     this.subscribe = mockHarnessSubscribe;
@@ -147,6 +149,7 @@ const {
     mockSessionAppendLabel,
     mockSessionGetLeafId,
     mockSessionRepoFork,
+    mockWrapRegisteredTools,
     MockAgentHarness,
   };
 });
@@ -240,6 +243,22 @@ vi.mock('../system-prompt.ts', () => ({
 }));
 
 vi.mock('../tools/index.ts', () => ({
+  createBuiltinToolDefinitionEntries: vi.fn((_cwd: string, names: string[]) =>
+    names.map((name) => ({
+      definition: {
+        name,
+        label: name,
+        description: `${name} tool`,
+        parameters: {},
+      },
+      sourceInfo: {
+        path: `<builtin:${name}>`,
+        source: 'builtin',
+        scope: 'temporary',
+        origin: 'top-level',
+      },
+    })),
+  ),
   createTools: vi.fn((_cwd: string, names: string[]) =>
     names.map((name) => ({
       name,
@@ -255,7 +274,7 @@ vi.mock('../tools/index.ts', () => ({
 
 vi.mock('../extensions/index.ts', () => ({
   ScoutExtensionRunner: vi.fn(),
-  wrapRegisteredTools: vi.fn(() => []),
+  wrapRegisteredTools: mockWrapRegisteredTools,
   discoverAndLoadExtensions: vi.fn(async () => ({ extensions: [], errors: [], runtime: {} })),
 }));
 
@@ -297,7 +316,7 @@ function makeSession(
   } as any;
 }
 
-function makeAgentSession(overrides?: { session?: any }): AgentSession {
+function makeAgentSession(overrides?: { session?: any; extensionRunner?: any }): AgentSession {
   const configManager = new ConfigManager({
     cwd: '/test/project',
     agentDir: '/test/project/.scout',
@@ -308,10 +327,14 @@ function makeAgentSession(overrides?: { session?: any }): AgentSession {
     cwd: '/test/project',
     outputChannel: makeOutputChannel(),
     skills: [],
+    extensionRunner: overrides?.extensionRunner,
   });
 }
 
-async function makeInitializedAgentSession(overrides?: { session?: any }): Promise<AgentSession> {
+async function makeInitializedAgentSession(overrides?: {
+  session?: any;
+  extensionRunner?: any;
+}): Promise<AgentSession> {
   const agentSession = makeAgentSession(overrides);
   await agentSession.initialize();
   return agentSession;
@@ -621,6 +644,53 @@ describe('AgentSession — 运行时操作', () => {
         expect.objectContaining({ name: 'bash' }),
         expect.objectContaining({ name: 'grep' }),
       ]),
+    );
+    agentSession.dispose();
+  });
+
+  it('extension tools override builtin tools and keep extension sourceInfo', async () => {
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => [
+        {
+          definition: {
+            name: 'read',
+            label: 'extension read',
+            description: 'extension read tool',
+            parameters: { type: 'object' },
+            execute: vi.fn(),
+          },
+          sourcePath: '/extensions/read-override.ts',
+        },
+      ]),
+      invalidate: vi.fn(),
+    };
+    (mockWrapRegisteredTools as any).mockReturnValueOnce([
+      {
+        name: 'read',
+        label: 'extension read',
+        description: 'extension read tool',
+        parameters: { type: 'object' },
+        execute: vi.fn(),
+      },
+    ]);
+
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+
+    expect(agentSession.getAllToolInfos()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'read',
+          description: 'extension read tool',
+          sourceInfo: expect.objectContaining({
+            path: '/extensions/read-override.ts',
+            source: 'extension',
+          }),
+        }),
+      ]),
+    );
+    const harnessOptions = (MockAgentHarness.mock.calls as any[]).at(-1)?.[0] as any;
+    expect(harnessOptions.tools).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'read', label: 'extension read' })]),
     );
     agentSession.dispose();
   });

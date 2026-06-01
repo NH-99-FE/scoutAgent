@@ -20,6 +20,7 @@ import type { Static, TSchema } from '@sinclair/typebox';
 import type { EventBus } from './event-bus.ts';
 import type { ConfigManager } from '../config-manager.ts';
 import type { SessionManager } from '../session-manager.ts';
+import type { SourceInfo } from '../source-info.ts';
 
 // ---------- 扩展工具定义 ----------
 
@@ -154,16 +155,7 @@ export interface SessionBeforeCompactResult {
 
 // ---------- 工具信息 ----------
 
-export type SourceScope = 'user' | 'project' | 'temporary';
-export type SourceOrigin = 'package' | 'top-level';
-
-export interface SourceInfo {
-  path: string;
-  source: string;
-  scope: SourceScope;
-  origin: SourceOrigin;
-  baseDir?: string;
-}
+export type { SourceInfo } from '../source-info.ts';
 
 export interface ToolInfo {
   name: string;

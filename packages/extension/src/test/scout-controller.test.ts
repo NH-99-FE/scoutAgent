@@ -187,6 +187,22 @@ vi.mock('../system-prompt.ts', () => ({
 }));
 
 vi.mock('../tools/index.ts', () => ({
+  createBuiltinToolDefinitionEntries: vi.fn((_cwd: string, names: string[]) =>
+    names.map((name) => ({
+      definition: {
+        name,
+        label: name,
+        description: `${name} tool`,
+        parameters: {},
+      },
+      sourceInfo: {
+        path: `<builtin:${name}>`,
+        source: 'builtin',
+        scope: 'temporary',
+        origin: 'top-level',
+      },
+    })),
+  ),
   createTools: vi.fn((_cwd: string, names: string[]) =>
     names.map((name) => ({
       name,
