@@ -71,9 +71,6 @@ importers:
       '@scout-agent/ai':
         specifier: workspace:*
         version: link:../ai
-      '@scout-agent/shared':
-        specifier: workspace:*
-        version: link:../shared
       ignore:
         specifier: 7.0.5
         version: 7.0.5

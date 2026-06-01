@@ -162,12 +162,15 @@ vi.mock('vscode', () => ({
 vi.mock('@scout-agent/agent', () => ({
   AgentHarness: MockAgentHarness,
   NodeExecutionEnv: vi.fn(function (this: any) {}),
-  mapAgentEventToScout: vi.fn(() => ({ type: 'agent_start' })),
-  convertMessage: vi.fn(() => null),
   shouldCompact: vi.fn(() => false),
   calculateContextTokens: vi.fn(() => 0),
   estimateContextTokens: vi.fn(() => ({ tokens: 0, lastUsageIndex: null })),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
+}));
+
+vi.mock('../protocol/agent-event-mapper.ts', () => ({
+  mapAgentEventToScout: vi.fn(() => ({ type: 'agent_start' })),
+  convertMessage: vi.fn(() => null),
 }));
 
 // ---------- Mock @scout-agent/ai ----------
@@ -1205,7 +1208,7 @@ describe('AgentSession — 消息缓存', () => {
       model: null,
     });
 
-    const { convertMessage } = await import('@scout-agent/agent');
+    const { convertMessage } = await import('../protocol/agent-event-mapper.ts');
     (convertMessage as any).mockImplementation((msg: any) => {
       if (msg.role === 'user')
         return { role: 'user', content: msg.content, timestamp: msg.timestamp };

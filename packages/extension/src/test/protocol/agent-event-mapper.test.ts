@@ -3,8 +3,8 @@
 // ============================================================
 
 import { describe, expect, it } from 'vitest';
-import { mapAgentEventToScout } from '../src/event-mapper.ts';
-import type { AgentEvent } from '../src/types.ts';
+import { mapAgentEventToScout } from '../../protocol/agent-event-mapper.ts';
+import type { AgentEvent } from '@scout-agent/agent';
 import type { ScoutAssistantMessage } from '@scout-agent/shared';
 
 // ---------- 夹具：AgentMessage ----------
@@ -119,7 +119,9 @@ describe('mapAgentEventToScout', () => {
     expect(result?.type).toBe('message_start');
     if (result?.type === 'message_start') {
       expect(result.message.role).toBe('assistant');
-      expect((result.message as ScoutAssistantMessage).content).toEqual([{ type: 'text', text: 'some response' }]);
+      expect((result.message as ScoutAssistantMessage).content).toEqual([
+        { type: 'text', text: 'some response' },
+      ]);
     }
   });
 

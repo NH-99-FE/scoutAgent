@@ -26,8 +26,6 @@ import type {
   Skill,
 } from '@scout-agent/agent';
 import {
-  mapAgentEventToScout,
-  convertMessage,
   shouldCompact,
   calculateContextTokens,
   estimateContextTokens,
@@ -43,6 +41,7 @@ import { ConfigManager } from './config-manager.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { createTools, DEFAULT_ACTIVE_TOOL_NAMES, type ToolName } from './tools/index.ts';
 import { ScoutExtensionRunner, wrapRegisteredTools } from './extensions/index.ts';
+import { mapAgentEventToScout, convertMessage } from './protocol/agent-event-mapper.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
 
 // ---------- 类型守卫 ----------

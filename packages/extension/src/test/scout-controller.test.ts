@@ -106,8 +106,6 @@ vi.mock('@scout-agent/agent', () => ({
   AgentHarness: vi.fn(),
   JsonlSessionRepo: vi.fn(),
   NodeExecutionEnv: vi.fn(),
-  mapAgentEventToScout: vi.fn(),
-  convertMessage: vi.fn(),
   shouldCompact: vi.fn(),
   calculateContextTokens: vi.fn(() => 0),
   estimateContextTokens: vi.fn(() => ({ tokens: 0, lastUsageIndex: null })),

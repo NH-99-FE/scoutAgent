@@ -6,8 +6,6 @@
 export * from './agent.ts';
 // Loop functions
 export * from './agent-loop.ts';
-// Event mapper (Scout 独有)
-export { mapAgentEventToScout, convertMessage } from './event-mapper.ts';
 // Harness
 export * from './harness/agent-harness.ts';
 export {

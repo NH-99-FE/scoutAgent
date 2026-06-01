@@ -20,8 +20,7 @@ import type {
   ScoutToolResultMessage,
   ScoutUserMessage,
 } from '@scout-agent/shared';
-import type { BranchSummaryMessage } from './harness/messages.ts';
-import type { AgentMessage } from './types.ts';
+import type { AgentEvent, AgentMessage, BranchSummaryMessage } from '@scout-agent/agent';
 
 // ---------- 内容块转换 ----------
 
@@ -136,9 +135,7 @@ function toolResultToString(result: unknown): string {
  * 将内部 AgentEvent 映射为可序列化的 ScoutAgentEvent。
  * 对于携带无法序列化的自定义消息类型的事件，返回 null。
  */
-export function mapAgentEventToScout(
-  event: import('./types.ts').AgentEvent,
-): ScoutAgentEvent | null {
+export function mapAgentEventToScout(event: AgentEvent): ScoutAgentEvent | null {
   switch (event.type) {
     case 'agent_start':
       return { type: 'agent_start' };
@@ -195,4 +192,6 @@ export function mapAgentEventToScout(
         isError: event.isError,
       };
   }
+
+  return null;
 }

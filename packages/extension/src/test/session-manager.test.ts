@@ -163,12 +163,15 @@ vi.mock('@scout-agent/agent', () => ({
     this.fork = mockSessionRepoFork;
   }),
   NodeExecutionEnv: vi.fn(function (this: any) {}),
-  mapAgentEventToScout: vi.fn(() => ({ type: 'agent_start' })),
-  convertMessage: vi.fn(() => null),
   shouldCompact: vi.fn(() => false),
   calculateContextTokens: vi.fn(() => 0),
   estimateContextTokens: vi.fn(() => ({ tokens: 0, lastUsageIndex: null })),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
+}));
+
+vi.mock('../protocol/agent-event-mapper.ts', () => ({
+  mapAgentEventToScout: vi.fn(() => ({ type: 'agent_start' })),
+  convertMessage: vi.fn(() => null),
 }));
 
 // ---------- Mock @scout-agent/ai ----------
