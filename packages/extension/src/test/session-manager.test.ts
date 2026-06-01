@@ -29,6 +29,7 @@ const {
   mockSessionGetBranch,
   mockSessionGetEntries,
   mockSessionGetLeafId,
+  mockSessionRepoDelete,
   mockSessionRepoFork,
   MockAgentHarness,
 } = vi.hoisted(() => {
@@ -65,6 +66,7 @@ const {
   const mockSessionGetBranch = vi.fn(async () => []);
   const mockSessionGetEntries = vi.fn(async () => [] as any[]);
   const mockSessionGetLeafId = vi.fn(async () => null as string | null);
+  const mockSessionRepoDelete = vi.fn(async () => undefined);
   const mockSessionRepoFork = vi.fn();
 
   const MockAgentHarness = vi.fn(function (this: any) {
@@ -117,6 +119,7 @@ const {
     mockSessionGetBranch,
     mockSessionGetEntries,
     mockSessionGetLeafId,
+    mockSessionRepoDelete,
     mockSessionRepoFork,
     MockAgentHarness,
   };
@@ -176,6 +179,7 @@ vi.mock('@scout-agent/agent', () => ({
       getLeafId: mockSessionGetLeafId,
     }));
     this.list = vi.fn(async () => []);
+    this.delete = mockSessionRepoDelete;
     this.fork = mockSessionRepoFork;
   }),
   shouldCompact: vi.fn(() => false),
@@ -534,6 +538,104 @@ describe('SessionManager — 协调层', () => {
       targetSessionFile: undefined,
     });
     expect(order).toEqual(['before_switch', 'shutdown', 'invalidate']);
+    manager.dispose();
+  });
+
+  it('newSession still emits state_change when previous session teardown fails', async () => {
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) =>
+        ['session_before_switch', 'session_shutdown'].includes(eventType),
+      ),
+      emitSessionBeforeSwitch: vi.fn(async () => undefined),
+      emitSessionShutdown: vi.fn(async () => {
+        throw new Error('shutdown failed');
+      }),
+    });
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+    const events: string[] = [];
+    manager.subscribe((event) => {
+      events.push(event.type);
+    });
+
+    await manager.newSession();
+
+    expect(events).toContain('state_change');
+    manager.dispose();
+  });
+
+  it('logs suppressed teardown errors after a replacement teardown failure', async () => {
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) =>
+        ['session_before_switch', 'session_shutdown'].includes(eventType),
+      ),
+      emitSessionBeforeSwitch: vi.fn(async () => undefined),
+      emitSessionShutdown: vi.fn(async () => {
+        throw new Error('shutdown failed');
+      }),
+      invalidate: vi.fn(() => {
+        throw new Error('invalidate failed');
+      }),
+    });
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+
+    await manager.newSession();
+
+    const appendLine = (manager as any).outputChannel.appendLine;
+    expect(appendLine).toHaveBeenCalledWith(
+      '[scout] Previous session teardown failed: shutdown failed',
+    );
+    expect(appendLine).toHaveBeenCalledWith(
+      '[scout] Suppressed teardown error 1: invalidate failed',
+    );
+    manager.dispose();
+  });
+
+  it('initialize deletes a newly-created repo session when runtime creation fails early', async () => {
+    mockSessionBuildContext.mockRejectedValueOnce(new Error('context failed'));
+    const manager = makeSessionManager();
+
+    await manager.initialize();
+
+    expect(mockSessionRepoDelete).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'test-session' }),
+    );
+    manager.dispose();
+  });
+
+  it('initialize invalidates extension runner when AgentSession initialization fails', async () => {
+    const extensionRunner = makeMockExtensionRunner();
+    vi.mocked(discoverAndLoadExtensions).mockResolvedValueOnce({
+      extensions: [
+        {
+          path: '<test-extension>',
+          resolvedPath: '<test-extension>',
+          sourceInfo: {
+            path: '<test-extension>',
+            source: 'test',
+            scope: 'temporary',
+            origin: 'top-level',
+          },
+          handlers: new Map(),
+          tools: new Map(),
+        },
+      ],
+      errors: [],
+      runtime: {} as any,
+    });
+    vi.mocked(ScoutExtensionRunner).mockImplementationOnce(function (this: any) {
+      return extensionRunner as any;
+    });
+    MockAgentHarness.mockImplementationOnce(function () {
+      throw new Error('harness init failed');
+    });
+    const manager = makeSessionManager();
+
+    await manager.initialize();
+
+    expect(extensionRunner.invalidate).toHaveBeenCalled();
+    expect(mockSessionRepoDelete).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'test-session' }),
+    );
     manager.dispose();
   });
 

@@ -19,9 +19,15 @@ export type CreateAgentSessionRuntimeFactory = (options: {
   sessionStartEvent: SessionStartEvent;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
+export type AgentSessionReplacementResult = {
+  cancelled: boolean;
+  teardownError?: unknown;
+};
+
 interface SessionRepoLike {
   create(options?: { cwd?: string; id?: string }): Promise<Session>;
   open(metadata: JsonlSessionMetadata): Promise<Session>;
+  delete(metadata: JsonlSessionMetadata): Promise<void>;
   fork(
     sourceMetadata: JsonlSessionMetadata,
     options: { cwd: string; entryId: string; position: 'before' | 'at' },
@@ -30,6 +36,7 @@ interface SessionRepoLike {
 
 export class AgentSessionRuntime {
   private rebindSession?: (session: AgentSession) => Promise<void> | void;
+  private beforeSessionInvalidate?: () => void;
   private _session: AgentSession;
   private readonly cwd: string;
   private readonly createRuntime: CreateAgentSessionRuntimeFactory;
@@ -68,6 +75,10 @@ export class AgentSessionRuntime {
     this.rebindSession = rebindSession;
   }
 
+  setBeforeSessionInvalidate(beforeSessionInvalidate?: () => void): void {
+    this.beforeSessionInvalidate = beforeSessionInvalidate;
+  }
+
   private async emitBeforeSwitch(
     reason: 'new' | 'resume',
     targetSessionFile?: string,
@@ -92,8 +103,45 @@ export class AgentSessionRuntime {
     reason: NonNullable<SessionShutdownEvent['reason']>,
     targetSessionFile?: string,
   ): Promise<void> {
-    await this.session.emitSessionShutdown({ type: 'session_shutdown', reason, targetSessionFile });
-    this.session.dispose();
+    let shutdownError: unknown;
+    const teardownErrors: unknown[] = [];
+    try {
+      await this.session.emitSessionShutdown({
+        type: 'session_shutdown',
+        reason,
+        targetSessionFile,
+      });
+    } catch (error) {
+      shutdownError = error;
+    } finally {
+      try {
+        this.beforeSessionInvalidate?.();
+      } catch (error) {
+        teardownErrors.push(error);
+      }
+      try {
+        this.session.dispose();
+      } catch (error) {
+        teardownErrors.push(error);
+      }
+    }
+
+    if (shutdownError) {
+      if (
+        typeof shutdownError === 'object' &&
+        shutdownError !== null &&
+        teardownErrors.length > 0
+      ) {
+        (shutdownError as { suppressed?: unknown[] }).suppressed = teardownErrors;
+      }
+      throw shutdownError;
+    }
+    if (teardownErrors.length === 1) {
+      throw teardownErrors[0];
+    }
+    if (teardownErrors.length > 1) {
+      throw new AggregateError(teardownErrors, 'Session teardown failed');
+    }
   }
 
   private apply(result: CreateAgentSessionRuntimeResult): void {
@@ -107,54 +155,135 @@ export class AgentSessionRuntime {
     await this.session.emitSessionStart(sessionStartEvent);
   }
 
-  async newSession(repo: SessionRepoLike): Promise<{ cancelled: boolean }> {
+  private attachSuppressed(error: unknown, suppressed: unknown): void {
+    if (typeof error !== 'object' || error === null) return;
+    (error as { suppressed?: unknown[] }).suppressed = [
+      ...((error as { suppressed?: unknown[] }).suppressed ?? []),
+      suppressed,
+    ];
+  }
+
+  private async replaceCurrent(
+    reason: NonNullable<SessionShutdownEvent['reason']>,
+    targetSessionFile: string | undefined,
+    nextRuntime: CreateAgentSessionRuntimeResult,
+    sessionStartEvent: SessionStartEvent,
+  ): Promise<unknown | undefined> {
+    let teardownError: unknown;
+    try {
+      await this.teardownCurrent(reason, targetSessionFile);
+    } catch (error) {
+      teardownError = error;
+    }
+
+    this.apply(nextRuntime);
+    try {
+      await this.finishSessionReplacement(sessionStartEvent);
+    } catch (error) {
+      if (teardownError) {
+        this.attachSuppressed(error, teardownError);
+      }
+      throw error;
+    }
+
+    return teardownError;
+  }
+
+  private async cleanupCreatedSession(repo: SessionRepoLike, session: Session): Promise<void> {
+    const metadata = (await session.getMetadata()) as JsonlSessionMetadata;
+    await repo.delete(metadata);
+  }
+
+  private async cleanupCreatedSessionAfterFailure(
+    repo: SessionRepoLike,
+    session: Session,
+    failure: unknown,
+  ): Promise<void> {
+    try {
+      await this.cleanupCreatedSession(repo, session);
+    } catch (cleanupError) {
+      this.attachSuppressed(failure, cleanupError);
+    }
+  }
+
+  private disposeTargetSession(session: Session): void {
+    const maybeDisposable = session as Session & { dispose?: () => void };
+    try {
+      maybeDisposable.dispose?.();
+    } catch {
+      // Preserve the runtime creation failure for the caller.
+    }
+  }
+
+  async newSession(repo: SessionRepoLike): Promise<AgentSessionReplacementResult> {
     const beforeResult = await this.emitBeforeSwitch('new');
     if (beforeResult.cancelled) return beforeResult;
 
     const previousMetadata = await this.session.getSessionMetadata();
     const targetSession = await repo.create({ cwd: this.cwd });
-    const targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
     const sessionStartEvent: SessionStartEvent = {
       type: 'session_start',
       reason: 'new',
       previousSessionFile: previousMetadata.path,
     };
-    const nextRuntime = await this.createRuntime({ session: targetSession, sessionStartEvent });
+    let nextRuntime: CreateAgentSessionRuntimeResult;
+    let targetMetadata: JsonlSessionMetadata;
+    try {
+      targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
+      nextRuntime = await this.createRuntime({ session: targetSession, sessionStartEvent });
+    } catch (error) {
+      this.disposeTargetSession(targetSession);
+      await this.cleanupCreatedSessionAfterFailure(repo, targetSession, error);
+      throw error;
+    }
 
-    await this.teardownCurrent('new', targetMetadata.path);
-    this.apply(nextRuntime);
-    await this.finishSessionReplacement(sessionStartEvent);
-    return { cancelled: false };
+    const teardownError = await this.replaceCurrent(
+      'new',
+      targetMetadata.path,
+      nextRuntime,
+      sessionStartEvent,
+    );
+    return { cancelled: false, teardownError };
   }
 
   async switchSession(
     repo: SessionRepoLike,
     metadata: JsonlSessionMetadata,
-  ): Promise<{ cancelled: boolean }> {
+  ): Promise<AgentSessionReplacementResult> {
     const beforeResult = await this.emitBeforeSwitch('resume', metadata.path);
     if (beforeResult.cancelled) return beforeResult;
 
     const previousMetadata = await this.session.getSessionMetadata();
     const targetSession = await repo.open(metadata);
-    const targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
     const sessionStartEvent: SessionStartEvent = {
       type: 'session_start',
       reason: 'resume',
       previousSessionFile: previousMetadata.path,
     };
-    const nextRuntime = await this.createRuntime({ session: targetSession, sessionStartEvent });
+    let nextRuntime: CreateAgentSessionRuntimeResult;
+    let targetMetadata: JsonlSessionMetadata;
+    try {
+      targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
+      nextRuntime = await this.createRuntime({ session: targetSession, sessionStartEvent });
+    } catch (error) {
+      this.disposeTargetSession(targetSession);
+      throw error;
+    }
 
-    await this.teardownCurrent('resume', targetMetadata.path ?? metadata.path);
-    this.apply(nextRuntime);
-    await this.finishSessionReplacement(sessionStartEvent);
-    return { cancelled: false };
+    const teardownError = await this.replaceCurrent(
+      'resume',
+      targetMetadata.path ?? metadata.path,
+      nextRuntime,
+      sessionStartEvent,
+    );
+    return { cancelled: false, teardownError };
   }
 
   async fork(
     repo: SessionRepoLike,
     entryId: string,
     position: 'before' | 'at',
-  ): Promise<{ cancelled: boolean }> {
+  ): Promise<AgentSessionReplacementResult> {
     const beforeResult = await this.emitBeforeFork(entryId, position);
     if (beforeResult.cancelled) return beforeResult;
 
@@ -169,22 +298,33 @@ export class AgentSessionRuntime {
       entryId,
       position,
     });
-    const targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
     const sessionStartEvent: SessionStartEvent = {
       type: 'session_start',
       reason: 'fork',
       previousSessionFile: previousMetadata.path,
     };
-    const nextRuntime = await this.createRuntime({
-      session: targetSession,
-      activeToolNames,
-      sessionStartEvent,
-    });
+    let nextRuntime: CreateAgentSessionRuntimeResult;
+    let targetMetadata: JsonlSessionMetadata;
+    try {
+      targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
+      nextRuntime = await this.createRuntime({
+        session: targetSession,
+        activeToolNames,
+        sessionStartEvent,
+      });
+    } catch (error) {
+      this.disposeTargetSession(targetSession);
+      await this.cleanupCreatedSessionAfterFailure(repo, targetSession, error);
+      throw error;
+    }
 
-    await this.teardownCurrent('fork', targetMetadata.path);
-    this.apply(nextRuntime);
-    await this.finishSessionReplacement(sessionStartEvent);
-    return { cancelled: false };
+    const teardownError = await this.replaceCurrent(
+      'fork',
+      targetMetadata.path,
+      nextRuntime,
+      sessionStartEvent,
+    );
+    return { cancelled: false, teardownError };
   }
 
   async dispose(): Promise<void> {

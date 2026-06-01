@@ -20,12 +20,14 @@ function makeSession(overrides?: Partial<AgentSession>) {
 function makeRepo() {
   const targetSession = {
     getMetadata: vi.fn(async () => ({ id: 'target-session', path: '/sessions/target.jsonl' })),
+    dispose: vi.fn(),
   };
   return {
     targetSession,
     repo: {
       create: vi.fn(async () => targetSession),
       open: vi.fn(async () => targetSession),
+      delete: vi.fn(async () => undefined),
       fork: vi.fn(async () => targetSession),
     },
   };
@@ -104,5 +106,171 @@ describe('AgentSessionRuntime', () => {
     });
     expect(runtime.session).toBe(nextSession);
     expect(events).toEqual(['abort', 'create', 'shutdown', 'dispose', 'rebind', 'start']);
+  });
+
+  it('runs before-session-invalidate after shutdown and before old session dispose', async () => {
+    const events: string[] = [];
+    const oldSession = makeSession({
+      emitSessionShutdown: vi.fn(async () => {
+        events.push('shutdown');
+      }),
+      dispose: vi.fn(() => {
+        events.push('dispose');
+      }),
+    });
+    const nextSession = makeSession({
+      emitSessionStart: vi.fn(async () => {
+        events.push('start');
+      }),
+    });
+    const { repo } = makeRepo();
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(async () => ({ session: nextSession, diagnostics: [] })),
+    });
+    runtime.setBeforeSessionInvalidate(() => {
+      events.push('before-invalidate');
+    });
+    runtime.setRebindSession(() => {
+      events.push('rebind');
+    });
+
+    await runtime.newSession(repo as any);
+
+    expect(events).toEqual(['shutdown', 'before-invalidate', 'dispose', 'rebind', 'start']);
+  });
+
+  it('still invalidates and disposes when session_shutdown fails', async () => {
+    const events: string[] = [];
+    const oldSession = makeSession({
+      emitSessionShutdown: vi.fn(async () => {
+        events.push('shutdown');
+        throw new Error('shutdown failed');
+      }),
+      dispose: vi.fn(() => {
+        events.push('dispose');
+      }),
+    });
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(),
+    });
+    runtime.setBeforeSessionInvalidate(() => {
+      events.push('before-invalidate');
+    });
+
+    await expect(runtime.dispose()).rejects.toThrow('shutdown failed');
+
+    expect(events).toEqual(['shutdown', 'before-invalidate', 'dispose']);
+  });
+
+  it('disposes the target session when next runtime creation fails', async () => {
+    const oldSession = makeSession();
+    const { repo, targetSession } = makeRepo();
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(async () => {
+        throw new Error('init failed');
+      }),
+    });
+
+    await expect(runtime.newSession(repo as any)).rejects.toThrow('init failed');
+
+    expect(targetSession.dispose).toHaveBeenCalled();
+    expect(repo.delete).toHaveBeenCalledWith({
+      id: 'target-session',
+      path: '/sessions/target.jsonl',
+    });
+    expect(oldSession.emitSessionShutdown).not.toHaveBeenCalled();
+    expect(oldSession.dispose).not.toHaveBeenCalled();
+    expect(runtime.session).toBe(oldSession);
+  });
+
+  it('does not let invalidate or dispose errors hide a session_shutdown error', async () => {
+    const shutdownError = new Error('shutdown failed');
+    const oldSession = makeSession({
+      emitSessionShutdown: vi.fn(async () => {
+        throw shutdownError;
+      }),
+      dispose: vi.fn(() => {
+        throw new Error('dispose failed');
+      }),
+    });
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(),
+    });
+    runtime.setBeforeSessionInvalidate(() => {
+      throw new Error('invalidate failed');
+    });
+
+    await expect(runtime.dispose()).rejects.toBe(shutdownError);
+
+    expect((shutdownError as { suppressed?: unknown[] }).suppressed).toHaveLength(2);
+  });
+
+  it('completes replacement and returns a session_shutdown teardown error', async () => {
+    const events: string[] = [];
+    const shutdownError = new Error('shutdown failed');
+    const oldSession = makeSession({
+      emitSessionShutdown: vi.fn(async () => {
+        events.push('shutdown');
+        throw shutdownError;
+      }),
+      dispose: vi.fn(() => {
+        events.push('dispose');
+      }),
+    });
+    const nextSession = makeSession({
+      emitSessionStart: vi.fn(async () => {
+        events.push('start');
+      }),
+    });
+    const { repo } = makeRepo();
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(async () => {
+        events.push('create');
+        return { session: nextSession, diagnostics: [] };
+      }),
+    });
+    runtime.setBeforeSessionInvalidate(() => {
+      events.push('before-invalidate');
+    });
+    runtime.setRebindSession(() => {
+      events.push('rebind');
+    });
+
+    const result = await runtime.newSession(repo as any);
+
+    expect(result).toEqual({ cancelled: false, teardownError: shutdownError });
+    expect(runtime.session).toBe(nextSession);
+    expect(events).toEqual([
+      'create',
+      'shutdown',
+      'before-invalidate',
+      'dispose',
+      'rebind',
+      'start',
+    ]);
+  });
+
+  it('cleans up a newly-created session when target metadata lookup fails', async () => {
+    const metadataError = new Error('metadata failed');
+    const oldSession = makeSession();
+    const { repo, targetSession } = makeRepo();
+    targetSession.getMetadata.mockRejectedValue(metadataError);
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime: vi.fn(),
+    });
+
+    await expect(runtime.newSession(repo as any)).rejects.toBe(metadataError);
+
+    expect(targetSession.dispose).toHaveBeenCalled();
+    expect(repo.delete).not.toHaveBeenCalled();
+    expect((metadataError as { suppressed?: unknown[] }).suppressed).toHaveLength(1);
+    expect(oldSession.emitSessionShutdown).not.toHaveBeenCalled();
+    expect(runtime.session).toBe(oldSession);
   });
 });

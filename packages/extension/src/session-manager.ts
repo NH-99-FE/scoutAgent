@@ -147,6 +147,7 @@ export class SessionManager implements vscode.Disposable {
   async initialize(): Promise<void> {
     if (this.isInitializing || this.sessionRuntime) return;
     this.isInitializing = true;
+    let createdSession: Session | undefined;
 
     try {
       // 1. 查找默认模型（预检）
@@ -171,6 +172,7 @@ export class SessionManager implements vscode.Disposable {
         });
       }
       const session = await this.sessionRepo.create({ cwd: this.cwd });
+      createdSession = session;
 
       const runtimeResult = await this.createRuntime({
         session,
@@ -183,7 +185,9 @@ export class SessionManager implements vscode.Disposable {
         modelFallbackMessage: runtimeResult.modelFallbackMessage,
       });
       runtime.setRebindSession((nextSession) => this.setAgentSession(nextSession, false));
+      runtime.setBeforeSessionInvalidate(() => this.teardownAgentSessionBinding(runtime.session));
       this.sessionRuntime = runtime;
+      createdSession = undefined;
       this.setAgentSession(runtime.session, false);
       await runtime.session.emitSessionStart({ type: 'session_start', reason: 'startup' });
       this.emit({ type: 'state_change' });
@@ -191,6 +195,7 @@ export class SessionManager implements vscode.Disposable {
       this.outputChannel.appendLine(`[scout] Harness initialized with model: ${model.id}`);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      await this.cleanupCreatedSessionAfterFailure(createdSession, error);
       this.outputChannel.appendLine(`[scout] Harness initialization failed: ${errorMessage}`);
       this.emit({ type: 'error', message: `Initialization failed: ${errorMessage}` });
     } finally {
@@ -224,6 +229,7 @@ export class SessionManager implements vscode.Disposable {
         modelFallbackMessage: runtimeResult.modelFallbackMessage,
       });
       runtime.setRebindSession((nextSession) => this.setAgentSession(nextSession, false));
+      runtime.setBeforeSessionInvalidate(() => this.teardownAgentSessionBinding(runtime.session));
       this.sessionRuntime = runtime;
       this.setAgentSession(runtime.session, false);
       await runtime.session.emitSessionStart({ type: 'session_start', reason: 'resume' });
@@ -240,6 +246,7 @@ export class SessionManager implements vscode.Disposable {
       return;
     }
     this.emit({ type: 'state_change' });
+    this.logReplacementTeardownError(result.teardownError);
     this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
   }
 
@@ -259,6 +266,7 @@ export class SessionManager implements vscode.Disposable {
       return;
     }
     this.emit({ type: 'state_change' });
+    this.logReplacementTeardownError(result.teardownError);
   }
 
   async listSessions(): Promise<JsonlSessionMetadata[]> {
@@ -332,6 +340,7 @@ export class SessionManager implements vscode.Disposable {
         return;
       }
       this.emit({ type: 'state_change' });
+      this.logReplacementTeardownError(result?.teardownError);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.outputChannel.appendLine(`[scout] Fork failed: ${errorMessage}`);
@@ -402,6 +411,49 @@ export class SessionManager implements vscode.Disposable {
     this.unsubscribeAgentSession = agentSession.subscribe((event) => this.emit(event));
   }
 
+  private teardownAgentSessionBinding(agentSession: AgentSession): void {
+    if (this.agentSession !== agentSession) return;
+    this.unsubscribeAgentSession?.();
+    this.unsubscribeAgentSession = undefined;
+    this.agentSession = undefined;
+  }
+
+  private logReplacementTeardownError(error: unknown): void {
+    if (!error) return;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    this.outputChannel.appendLine(`[scout] Previous session teardown failed: ${errorMessage}`);
+    const suppressed = (error as { suppressed?: unknown[] } | undefined)?.suppressed;
+    if (!Array.isArray(suppressed) || suppressed.length === 0) return;
+    suppressed.forEach((suppressedError, index) => {
+      const suppressedMessage =
+        suppressedError instanceof Error ? suppressedError.message : String(suppressedError);
+      this.outputChannel.appendLine(
+        `[scout] Suppressed teardown error ${index + 1}: ${suppressedMessage}`,
+      );
+    });
+  }
+
+  private async cleanupCreatedSessionAfterFailure(
+    session: Session | undefined,
+    failure: unknown,
+  ): Promise<void> {
+    if (!session || !this.sessionRepo) return;
+    try {
+      const metadata = (await session.getMetadata()) as JsonlSessionMetadata;
+      await this.sessionRepo.delete(metadata);
+    } catch (cleanupError) {
+      if (typeof failure === 'object' && failure !== null) {
+        (failure as { suppressed?: unknown[] }).suppressed = [
+          ...((failure as { suppressed?: unknown[] }).suppressed ?? []),
+          cleanupError,
+        ];
+      }
+      const errorMessage =
+        cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      this.outputChannel.appendLine(`[scout] Failed to clean up created session: ${errorMessage}`);
+    }
+  }
+
   // ---------- 内部：扩展系统 ----------
 
   private readonly createRuntime: CreateAgentSessionRuntimeFactory = async ({
@@ -434,7 +486,6 @@ export class SessionManager implements vscode.Disposable {
     }
 
     const extensionRunner = await this.loadExtensions(diagnostics);
-
     const agentSession = new AgentSession({
       session: session as Session,
       configManager: this.configManager,
@@ -445,11 +496,16 @@ export class SessionManager implements vscode.Disposable {
       activeToolNames,
     });
 
-    if (extensionRunner) {
-      this.bindExtensionActions(extensionRunner, agentSession);
-    }
+    try {
+      if (extensionRunner) {
+        this.bindExtensionActions(extensionRunner, agentSession);
+      }
 
-    await agentSession.initialize();
+      await agentSession.initialize();
+    } catch (error) {
+      agentSession.dispose();
+      throw error;
+    }
 
     return {
       session: agentSession,
@@ -562,13 +618,25 @@ export class SessionManager implements vscode.Disposable {
       this.sessionRuntime = undefined;
       this.agentSession = undefined;
       this.listeners.length = 0;
-      for (const d of this.disposables) d.dispose();
+      for (const d of this.disposables) {
+        try {
+          d.dispose();
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          this.outputChannel.appendLine(`[scout] Dispose failed: ${errorMessage}`);
+        }
+      }
       this.disposables.length = 0;
 
-      if (runtime) {
-        await runtime.dispose();
-      } else {
-        agentSession?.dispose();
+      try {
+        if (runtime) {
+          await runtime.dispose();
+        } else {
+          agentSession?.dispose();
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.outputChannel.appendLine(`[scout] Runtime dispose failed: ${errorMessage}`);
       }
     })();
 
@@ -577,7 +645,10 @@ export class SessionManager implements vscode.Disposable {
 
   dispose(): void {
     this.unsubscribeAgentSession?.();
-    void this.disposeAsync();
+    void this.disposeAsync().catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.outputChannel.appendLine(`[scout] Dispose failed: ${errorMessage}`);
+    });
   }
 
   // ---------- 静态工厂 ----------
