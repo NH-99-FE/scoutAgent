@@ -18,6 +18,7 @@ import type {
   ScoutExtensionRuntime,
   LoadExtensionsResult,
   ScoutHandlerFn,
+  SendMessageInput,
 } from './types.ts';
 
 // ---------- Aliases ----------
@@ -107,7 +108,7 @@ export function createExtensionRuntime(): ScoutExtensionRuntime {
     getAllTools: notInitialized,
     setActiveTools: notInitialized,
     // registerTool() 在加载期间有效；refreshTools 仅需在 bind 后触发
-    refreshTools: () => {},
+    refreshTools: async () => {},
     assertActive,
     invalidate: (message) => {
       if (!state.staleMessage) {
@@ -138,28 +139,28 @@ function createExtensionAPI(
       extension.handlers.set(event, list);
     },
 
-    registerTool(tool): void {
+    registerTool(tool): Promise<void> {
       runtime.assertActive();
       extension.tools.set(tool.name, {
         definition: tool,
         sourceInfo: extension.sourceInfo,
       });
-      runtime.refreshTools();
+      return runtime.refreshTools();
     },
 
-    sendMessage(message: string): void {
+    sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void> {
       runtime.assertActive();
-      runtime.sendMessage(message);
+      return runtime.sendMessage(message);
     },
 
-    sendUserMessage(content, options): void {
+    sendUserMessage(content, options): Promise<void> {
       runtime.assertActive();
-      runtime.sendUserMessage(content, options);
+      return runtime.sendUserMessage(content, options);
     },
 
-    setActiveTools(toolNames: string[]): void {
+    setActiveTools(toolNames: string[]): Promise<void> {
       runtime.assertActive();
-      runtime.setActiveTools(toolNames);
+      return runtime.setActiveTools(toolNames);
     },
 
     getActiveTools(): string[] {

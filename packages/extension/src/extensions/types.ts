@@ -300,15 +300,15 @@ export interface ReplacedSessionContext extends ScoutExtensionContext {
  * 创建时所有动作方法为 throwing stub，bindCore() 替换为真实实现。
  */
 export interface ScoutExtensionRuntime {
-  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => void;
+  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => Promise<void>;
   sendUserMessage: (
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
-  ) => void;
+  ) => Promise<void>;
   getActiveTools: () => string[];
   getAllTools: () => ToolInfo[];
-  setActiveTools: (toolNames: string[]) => void;
-  refreshTools: () => void;
+  setActiveTools: (toolNames: string[]) => Promise<void>;
+  refreshTools: () => Promise<void>;
   assertActive: () => void;
   invalidate: (message?: string) => void;
 }
@@ -353,13 +353,13 @@ export type ScoutHandlerFn = (...args: unknown[]) => Promise<unknown>;
  */
 export interface ScoutExtensionAPI {
   on(event: string, handler: ScoutHandlerFn): void;
-  registerTool(tool: ScoutToolDefinition): void;
-  sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): void;
+  registerTool(tool: ScoutToolDefinition): Promise<void>;
+  sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void>;
   sendUserMessage(
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
-  ): void;
-  setActiveTools(toolNames: string[]): void;
+  ): Promise<void>;
+  setActiveTools(toolNames: string[]): Promise<void>;
   getActiveTools(): string[];
   getAllTools(): ToolInfo[];
   events: EventBus;
@@ -382,15 +382,15 @@ export interface LoadExtensionsResult {
 
 /** bindCore() 接收的动作方法集 */
 export interface ScoutExtensionActions {
-  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => void;
+  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => Promise<void>;
   sendUserMessage: (
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
-  ) => void;
+  ) => Promise<void>;
   getActiveTools: () => string[];
   getAllTools: () => ToolInfo[];
-  setActiveTools: (toolNames: string[]) => void;
-  refreshTools: () => void;
+  setActiveTools: (toolNames: string[]) => Promise<void>;
+  refreshTools: () => Promise<void>;
 }
 
 /** bindCore() 接收的上下文动作集 */

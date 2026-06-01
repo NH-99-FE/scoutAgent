@@ -497,7 +497,11 @@ export class AgentSession implements vscode.Disposable {
   /** 设置扩展 runner 并重新桥接钩子。 */
   setExtensionRunner(runner: ScoutExtensionRunner): void {
     this.extensionRunner = runner;
-    void this.refreshTools();
+    this.refreshTools().catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.outputChannel.appendLine(`[scout] Refresh tools failed: ${errorMessage}`);
+      this.emit({ type: 'error', message: `Refresh tools failed: ${errorMessage}` });
+    });
     // 重新桥接扩展钩子到当前 harness
     this.unsubscribeExtensionHooks?.();
     this.unsubscribeExtensionHooks = this.bridgeExtensionHooks();

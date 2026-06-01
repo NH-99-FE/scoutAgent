@@ -742,6 +742,34 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
+  it('reports refreshTools failures from setExtensionRunner', async () => {
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+    mockHarnessSetTools.mockRejectedValueOnce(new Error('set tools failed'));
+
+    agentSession.setExtensionRunner(extensionRunner as any);
+    await flushMicrotasks();
+
+    expect(events).toContainEqual({
+      type: 'error',
+      message: 'Refresh tools failed: set tools failed',
+    });
+    agentSession.dispose();
+  });
+
   it('bridges extension hooks to AgentHarness', async () => {
     const extensionRunner = {
       getAllRegisteredTools: vi.fn(() => []),

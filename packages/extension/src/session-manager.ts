@@ -615,20 +615,13 @@ export class SessionManager implements vscode.Disposable {
     agentSession: AgentSession,
   ): void {
     const extensionActions: ScoutExtensionActions = {
-      sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => {
-        void agentSession.sendMessage(message);
-      },
-      sendUserMessage: (content, options) => {
-        void agentSession.sendUserMessage(content, options);
-      },
+      sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) =>
+        agentSession.sendMessage(message),
+      sendUserMessage: (content, options) => agentSession.sendUserMessage(content, options),
       getActiveTools: () => agentSession.getActiveToolNames(),
       getAllTools: () => agentSession.getAllToolInfos(),
-      setActiveTools: (toolNames: string[]) => {
-        void agentSession.setActiveTools(toolNames);
-      },
-      refreshTools: () => {
-        void agentSession.refreshTools();
-      },
+      setActiveTools: (toolNames: string[]) => agentSession.setActiveTools(toolNames),
+      refreshTools: () => agentSession.refreshTools(),
     };
 
     const contextActions: ScoutExtensionContextActions = {

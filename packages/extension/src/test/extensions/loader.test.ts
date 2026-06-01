@@ -73,6 +73,42 @@ describe('createExtensionRuntime', () => {
     const runtime = createExtensionRuntime();
     expect(() => runtime.refreshTools()).not.toThrow();
   });
+
+  it('extension api action methods return runtime rejections to callers', async () => {
+    const runtime = createExtensionRuntime();
+    const error = new Error('streaming requires deliverAs');
+    let capturedApi: Parameters<ScoutExtensionFactory>[0] | undefined;
+
+    await loadExtensionFromFactory((api) => {
+      capturedApi = api;
+    }, runtime);
+
+    runtime.sendUserMessage = vi.fn().mockRejectedValue(error);
+
+    await expect(capturedApi?.sendUserMessage('continuation')).rejects.toBe(error);
+  });
+
+  it('registerTool returns refreshTools rejections to callers', async () => {
+    const runtime = createExtensionRuntime();
+    const error = new Error('refresh failed');
+    let capturedApi: Parameters<ScoutExtensionFactory>[0] | undefined;
+
+    await loadExtensionFromFactory((api) => {
+      capturedApi = api;
+    }, runtime);
+
+    runtime.refreshTools = vi.fn().mockRejectedValue(error);
+
+    await expect(
+      capturedApi?.registerTool({
+        name: 'dynamic-tool',
+        label: 'Dynamic Tool',
+        description: 'A dynamic tool',
+        parameters: Type.Object({}),
+        execute: async () => ({ content: [], details: undefined }),
+      }),
+    ).rejects.toBe(error);
+  });
 });
 
 // ---------- loadExtensionFromFactory ----------

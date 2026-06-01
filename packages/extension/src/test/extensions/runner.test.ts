@@ -88,12 +88,12 @@ function makeExtensionWithTool(toolName: string): ScoutExtension {
 
 function makeActions(): ScoutExtensionActions {
   return {
-    sendMessage: vi.fn(),
-    sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(async () => {}),
+    sendUserMessage: vi.fn(async () => {}),
     getActiveTools: vi.fn(() => []),
     getAllTools: vi.fn(() => []),
-    setActiveTools: vi.fn(),
-    refreshTools: vi.fn(),
+    setActiveTools: vi.fn(async () => {}),
+    refreshTools: vi.fn(async () => {}),
   };
 }
 
@@ -144,6 +144,25 @@ describe('ScoutExtensionRunner.bindCore', () => {
     // 不再 throw
     expect(() => runtime.sendMessage('hello')).not.toThrow();
     expect(actions.sendMessage).toHaveBeenCalledWith('hello');
+  });
+
+  it('returns action promises from bound runtime methods', async () => {
+    const runtime = createExtensionRuntime();
+    const runner = new ScoutExtensionRunner(
+      [],
+      runtime,
+      '/test',
+      makeMockSessionManager(),
+      makeMockConfigManager(),
+    );
+    const actions = makeActions();
+    const contextActions = makeContextActions();
+    const error = new Error('send failed');
+    vi.mocked(actions.sendMessage).mockRejectedValue(error);
+
+    runner.bindCore(actions, contextActions);
+
+    await expect(runtime.sendMessage('hello')).rejects.toBe(error);
   });
 });
 
