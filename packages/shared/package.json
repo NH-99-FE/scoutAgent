@@ -3,6 +3,19 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "main": "types.ts",
-  "types": "types.ts"
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check-types": "tsc -p tsconfig.build.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
+  }
 }

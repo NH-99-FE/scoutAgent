@@ -24,6 +24,25 @@ const _require = createRequire(import.meta.url);
 
 let _aliases: Record<string, string> | null = null;
 
+function findWorkspacePackagesRoot(startDir: string): string | null {
+  let current = startDir;
+
+  while (true) {
+    const packagesRoot = path.join(current, 'packages');
+    if (
+      fs.existsSync(path.join(packagesRoot, 'agent/package.json')) &&
+      fs.existsSync(path.join(packagesRoot, 'ai/package.json')) &&
+      fs.existsSync(path.join(packagesRoot, 'shared/package.json'))
+    ) {
+      return packagesRoot;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
+
 /**
  * 获取 jiti alias 映射，将 Scout 包名解析到实际文件路径。
  * 缓存以避免重复解析。
@@ -32,12 +51,13 @@ function getAliases(): Record<string, string> {
   if (_aliases) return _aliases;
 
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  // packages/extension/src/extensions → packages
-  const packagesRoot = path.resolve(__dirname, '../../../..');
+  const packagesRoot = findWorkspacePackagesRoot(__dirname);
 
   const resolveWorkspaceOrImport = (workspaceRelativePath: string, specifier: string): string => {
-    const workspacePath = path.join(packagesRoot, workspaceRelativePath);
-    if (fs.existsSync(workspacePath)) return workspacePath;
+    if (packagesRoot) {
+      const workspacePath = path.join(packagesRoot, workspaceRelativePath);
+      if (fs.existsSync(workspacePath)) return workspacePath;
+    }
     return fileURLToPath(new URL(import.meta.resolve(specifier)));
   };
 

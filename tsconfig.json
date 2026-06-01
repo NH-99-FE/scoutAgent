@@ -9,8 +9,8 @@
       "@scout-agent/ai/*": ["./packages/ai/src/*"],
       "@scout-agent/agent": ["./packages/agent/src/index.ts"],
       "@scout-agent/agent/*": ["./packages/agent/src/*"],
-      "@scout-agent/shared": ["./packages/shared/types.ts"],
-      "@scout-agent/shared/*": ["./packages/shared/*"]
+      "@scout-agent/shared": ["./packages/shared/src/index.ts"],
+      "@scout-agent/shared/*": ["./packages/shared/src/*"]
     }
   },
   "include": ["packages/*/src/**/*"],
