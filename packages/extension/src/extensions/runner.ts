@@ -21,9 +21,16 @@ import type {
   ToolResultEvent,
   ToolResultEventResult,
   BeforeProviderRequestEvent,
+  BeforeProviderRequestEventResult,
   BeforeProviderPayloadEvent,
   SessionBeforeCompactEvent,
   SessionBeforeCompactResult,
+  SessionBeforeTreeEvent,
+  SessionBeforeTreeResult,
+  SessionBeforeForkEvent,
+  SessionBeforeForkResult,
+  SessionBeforeSwitchEvent,
+  SessionBeforeSwitchResult,
   SessionShutdownEvent,
   RegisteredTool,
 } from './types.ts';
@@ -406,10 +413,13 @@ export class ScoutExtensionRunner {
   }
 
   /**
-   * before_provider_request：传递事件，扩展可观察
+   * before_provider_request：传递事件，扩展可修改 streamOptions
    */
-  async emitBeforeProviderRequest(event: BeforeProviderRequestEvent): Promise<void> {
+  async emitBeforeProviderRequest(
+    event: BeforeProviderRequestEvent,
+  ): Promise<BeforeProviderRequestEventResult | undefined> {
     const ctx = this.createContext();
+    let result: BeforeProviderRequestEventResult | undefined;
 
     for (const ext of this.extensions) {
       const handlers = ext.handlers.get('before_provider_request');
@@ -417,12 +427,17 @@ export class ScoutExtensionRunner {
 
       for (const handler of handlers) {
         try {
-          await handler(event, ctx);
+          const handlerResult = (await handler(event, ctx)) as
+            | BeforeProviderRequestEventResult
+            | undefined;
+          if (handlerResult) result = handlerResult;
         } catch (err) {
           this.emitHandlerError(ext.path, 'before_provider_request', err);
         }
       }
     }
+
+    return result;
   }
 
   /**
@@ -476,6 +491,98 @@ export class ScoutExtensionRunner {
           }
         } catch (err) {
           this.emitHandlerError(ext.path, 'session_before_compact', err);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * session_before_tree：第一个 cancel=true 短路
+   */
+  async emitSessionBeforeTree(
+    event: SessionBeforeTreeEvent,
+  ): Promise<SessionBeforeTreeResult | undefined> {
+    const ctx = this.createContext();
+    let result: SessionBeforeTreeResult | undefined;
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('session_before_tree');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const handlerResult = (await handler(event, ctx)) as SessionBeforeTreeResult | undefined;
+
+          if (handlerResult) {
+            result = handlerResult;
+            if (result.cancel) return result;
+          }
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'session_before_tree', err);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * session_before_fork：第一个 cancel=true 短路
+   */
+  async emitSessionBeforeFork(
+    event: SessionBeforeForkEvent,
+  ): Promise<SessionBeforeForkResult | undefined> {
+    const ctx = this.createContext();
+    let result: SessionBeforeForkResult | undefined;
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('session_before_fork');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const handlerResult = (await handler(event, ctx)) as SessionBeforeForkResult | undefined;
+
+          if (handlerResult) {
+            result = handlerResult;
+            if (result.cancel) return result;
+          }
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'session_before_fork', err);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * session_before_switch：第一个 cancel=true 短路
+   */
+  async emitSessionBeforeSwitch(
+    event: SessionBeforeSwitchEvent,
+  ): Promise<SessionBeforeSwitchResult | undefined> {
+    const ctx = this.createContext();
+    let result: SessionBeforeSwitchResult | undefined;
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('session_before_switch');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const handlerResult = (await handler(event, ctx)) as
+            | SessionBeforeSwitchResult
+            | undefined;
+
+          if (handlerResult) {
+            result = handlerResult;
+            if (result.cancel) return result;
+          }
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'session_before_switch', err);
         }
       }
     }

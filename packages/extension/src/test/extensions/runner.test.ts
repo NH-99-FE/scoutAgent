@@ -360,6 +360,59 @@ describe('ScoutExtensionRunner.emitSessionBeforeCompact', () => {
   });
 });
 
+describe('ScoutExtensionRunner session before hooks', () => {
+  it('short-circuits session_before_tree on cancel=true', async () => {
+    const ext1 = makeExtension({
+      session_before_tree: async () => ({ cancel: true }),
+    });
+    const ext2 = makeExtension({
+      session_before_tree: async () => ({ cancel: false }),
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitSessionBeforeTree({
+      type: 'session_before_tree',
+      preparation: {} as any,
+      signal: new AbortController().signal,
+    });
+
+    expect(result?.cancel).toBe(true);
+  });
+
+  it('short-circuits session_before_fork on cancel=true', async () => {
+    const ext = makeExtension({
+      session_before_fork: async () => ({ cancel: true }),
+    });
+    const runner = makeRunner([ext]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitSessionBeforeFork({
+      type: 'session_before_fork',
+      entryId: 'entry-1',
+      position: 'at',
+    });
+
+    expect(result?.cancel).toBe(true);
+  });
+
+  it('short-circuits session_before_switch on cancel=true', async () => {
+    const ext = makeExtension({
+      session_before_switch: async () => ({ cancel: true }),
+    });
+    const runner = makeRunner([ext]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitSessionBeforeSwitch({
+      type: 'session_before_switch',
+      reason: 'resume',
+      targetSessionFile: '/sessions/target.jsonl',
+    });
+
+    expect(result?.cancel).toBe(true);
+  });
+});
+
 // ---------- hasHandlers ----------
 
 describe('ScoutExtensionRunner.hasHandlers', () => {

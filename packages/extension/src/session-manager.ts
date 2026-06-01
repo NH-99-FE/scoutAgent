@@ -167,6 +167,13 @@ export class SessionManager implements vscode.Disposable {
 
   /** 从 JSONL 文件恢复 session */
   async restore(sessionMeta: JsonlSessionMetadata): Promise<void> {
+    if (await this.agentSession?.emitSessionBeforeSwitch('resume', sessionMeta.path)) {
+      this.outputChannel.appendLine(
+        `[scout] Session restore cancelled by extension: ${sessionMeta.id}`,
+      );
+      return;
+    }
+
     if (!this.sessionRepo) {
       const env = new NodeExecutionEnv({
         cwd: this.cwd,
@@ -209,6 +216,11 @@ export class SessionManager implements vscode.Disposable {
   }
 
   async newSession(): Promise<void> {
+    if (await this.agentSession?.emitSessionBeforeSwitch('new')) {
+      this.outputChannel.appendLine('[scout] New session cancelled by extension');
+      return;
+    }
+
     // 销毁旧 AgentSession
     this.unsubscribeAgentSession?.();
     this.agentSession?.dispose();
@@ -280,6 +292,13 @@ export class SessionManager implements vscode.Disposable {
     }
 
     try {
+      if (await this.agentSession.emitSessionBeforeFork(entryId, position)) {
+        this.outputChannel.appendLine(
+          `[scout] Fork cancelled by extension: ${entryId} (${position})`,
+        );
+        return;
+      }
+
       const forkedAgentSession = await this.agentSession.fork(this.sessionRepo, entryId, position);
 
       // 为 forked session 创建独立的 extensionRunner（防止共享 runner 被 dispose 污染）

@@ -396,6 +396,29 @@ export class AgentSession implements vscode.Disposable {
     return this.harness?.getSignal();
   }
 
+  async emitSessionBeforeFork(entryId: string, position: 'before' | 'at'): Promise<boolean> {
+    if (!this.extensionRunner?.hasHandlers('session_before_fork')) return false;
+    const result = await this.extensionRunner.emitSessionBeforeFork({
+      type: 'session_before_fork',
+      entryId,
+      position,
+    });
+    return result?.cancel === true;
+  }
+
+  async emitSessionBeforeSwitch(
+    reason: 'new' | 'resume',
+    targetSessionFile?: string,
+  ): Promise<boolean> {
+    if (!this.extensionRunner?.hasHandlers('session_before_switch')) return false;
+    const result = await this.extensionRunner.emitSessionBeforeSwitch({
+      type: 'session_before_switch',
+      reason,
+      targetSessionFile,
+    });
+    return result?.cancel === true;
+  }
+
   // ---------- Fork ----------
 
   /**
@@ -1095,11 +1118,20 @@ export class AgentSession implements vscode.Disposable {
         return { messages };
       }),
     );
+    unsubs.push(
+      this.harness.on('before_provider_request', (e) => runner.emitBeforeProviderRequest(e)),
+    );
+    unsubs.push(
+      this.harness.on('before_provider_payload', async (e) => ({
+        payload: await runner.emitBeforeProviderPayload(e),
+      })),
+    );
     unsubs.push(this.harness.on('tool_call', (e) => runner.emitToolCall(e)));
     unsubs.push(this.harness.on('tool_result', (e) => runner.emitToolResult(e)));
     unsubs.push(
       this.harness.on('session_before_compact', (e) => runner.emitSessionBeforeCompact(e)),
     );
+    unsubs.push(this.harness.on('session_before_tree', (e) => runner.emitSessionBeforeTree(e)));
 
     return () => {
       for (const unsub of unsubs) unsub();

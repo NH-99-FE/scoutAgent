@@ -6,6 +6,8 @@
 import type { Model, ImageContent, TextContent } from '@scout-agent/ai';
 import type {
   AgentMessage,
+  AgentHarnessStreamOptions,
+  AgentHarnessStreamOptionsPatch,
   AgentToolResult,
   AgentToolUpdateCallback,
   ToolExecutionMode,
@@ -13,6 +15,7 @@ import type {
 import type {
   CompactionPreparation,
   SessionTreeEntry,
+  TreePreparation,
   CompactResult,
   ContextUsageEstimate,
 } from '@scout-agent/agent';
@@ -57,6 +60,9 @@ export type ScoutExtensionEventType =
   | 'before_provider_request'
   | 'before_provider_payload'
   | 'session_before_compact'
+  | 'session_before_tree'
+  | 'session_before_fork'
+  | 'session_before_switch'
   | 'session_shutdown';
 
 // ---------- 事件定义 ----------
@@ -94,6 +100,7 @@ export interface BeforeProviderRequestEvent {
   type: 'before_provider_request';
   model: Model<any>;
   sessionId: string;
+  streamOptions: AgentHarnessStreamOptions;
 }
 
 export interface BeforeProviderPayloadEvent {
@@ -110,6 +117,24 @@ export interface SessionBeforeCompactEvent {
   signal: AbortSignal;
 }
 
+export interface SessionBeforeTreeEvent {
+  type: 'session_before_tree';
+  preparation: TreePreparation;
+  signal: AbortSignal;
+}
+
+export interface SessionBeforeForkEvent {
+  type: 'session_before_fork';
+  entryId: string;
+  position: 'before' | 'at';
+}
+
+export interface SessionBeforeSwitchEvent {
+  type: 'session_before_switch';
+  reason: 'new' | 'resume';
+  targetSessionFile?: string;
+}
+
 export interface SessionShutdownEvent {
   type: 'session_shutdown';
 }
@@ -123,6 +148,9 @@ export type ScoutExtensionEvent =
   | BeforeProviderRequestEvent
   | BeforeProviderPayloadEvent
   | SessionBeforeCompactEvent
+  | SessionBeforeTreeEvent
+  | SessionBeforeForkEvent
+  | SessionBeforeSwitchEvent
   | SessionShutdownEvent;
 
 // ---------- 事件结果 ----------
@@ -148,9 +176,29 @@ export interface ToolResultEventResult {
   terminate?: boolean;
 }
 
+export interface BeforeProviderRequestEventResult {
+  streamOptions?: AgentHarnessStreamOptionsPatch;
+}
+
 export interface SessionBeforeCompactResult {
   cancel?: boolean;
   compaction?: CompactResult;
+}
+
+export interface SessionBeforeTreeResult {
+  cancel?: boolean;
+  summary?: { summary: string; details?: unknown };
+  customInstructions?: string;
+  replaceInstructions?: boolean;
+  label?: string;
+}
+
+export interface SessionBeforeForkResult {
+  cancel?: boolean;
+}
+
+export interface SessionBeforeSwitchResult {
+  cancel?: boolean;
 }
 
 // ---------- 工具信息 ----------

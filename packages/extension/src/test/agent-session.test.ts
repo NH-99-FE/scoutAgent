@@ -695,6 +695,33 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
+  it('bridges extension hooks to AgentHarness', async () => {
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+
+    expect(mockHarnessOn).toHaveBeenCalledWith('before_agent_start', expect.any(Function));
+    expect(mockHarnessOn).toHaveBeenCalledWith('context', expect.any(Function));
+    expect(mockHarnessOn).toHaveBeenCalledWith('before_provider_request', expect.any(Function));
+    expect(mockHarnessOn).toHaveBeenCalledWith('before_provider_payload', expect.any(Function));
+    expect(mockHarnessOn).toHaveBeenCalledWith('tool_call', expect.any(Function));
+    expect(mockHarnessOn).toHaveBeenCalledWith('tool_result', expect.any(Function));
+    expect(mockHarnessOn).toHaveBeenCalledWith('session_before_compact', expect.any(Function));
+    expect(mockHarnessOn).toHaveBeenCalledWith('session_before_tree', expect.any(Function));
+    agentSession.dispose();
+  });
+
   it('sendUserMessage prompts when idle and requires deliverAs while streaming', async () => {
     const agentSession = await makeInitializedAgentSession();
 

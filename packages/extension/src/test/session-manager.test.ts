@@ -274,6 +274,7 @@ vi.mock('../extensions/index.ts', () => ({
 
 import { SessionManager } from '../session-manager.ts';
 import { ConfigManager } from '../config-manager.ts';
+import { ScoutExtensionRunner, discoverAndLoadExtensions } from '../extensions/index.ts';
 
 function makeOutputChannel() {
   return {
@@ -303,6 +304,40 @@ async function makeInitializedSessionManager(): Promise<SessionManager> {
   const manager = makeSessionManager();
   await manager.initialize();
   return manager;
+}
+
+function makeMockExtensionRunner(overrides?: Record<string, unknown>) {
+  return {
+    bindCore: vi.fn(),
+    getAllRegisteredTools: vi.fn(() => []),
+    hasHandlers: vi.fn(() => false),
+    emitSessionBeforeSwitch: vi.fn(),
+    emitSessionBeforeFork: vi.fn(),
+    invalidate: vi.fn(),
+    ...overrides,
+  };
+}
+
+async function makeInitializedSessionManagerWithExtensionRunner(
+  extensionRunner: ReturnType<typeof makeMockExtensionRunner>,
+): Promise<SessionManager> {
+  vi.mocked(discoverAndLoadExtensions).mockResolvedValueOnce({
+    extensions: [
+      {
+        path: '<test-extension>',
+        resolvedPath: '<test-extension>',
+        handlers: new Map(),
+        tools: new Map(),
+      },
+    ],
+    errors: [],
+    runtime: {} as any,
+  });
+  vi.mocked(ScoutExtensionRunner).mockImplementationOnce(function (this: any) {
+    return extensionRunner as any;
+  });
+
+  return makeInitializedSessionManager();
 }
 
 // ---------- initialize / restore / newSession / listSessions ----------
@@ -405,6 +440,49 @@ describe('SessionManager — 协调层', () => {
     await manager.newSession();
 
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ type: 'state_change' }));
+    manager.dispose();
+  });
+
+  it('newSession stops when session_before_switch cancels', async () => {
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) => eventType === 'session_before_switch'),
+      emitSessionBeforeSwitch: vi.fn(async () => ({ cancel: true })),
+    });
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+    const harnessCount = MockAgentHarness.mock.calls.length;
+
+    await manager.newSession();
+
+    expect(extensionRunner.emitSessionBeforeSwitch).toHaveBeenCalledWith({
+      type: 'session_before_switch',
+      reason: 'new',
+      targetSessionFile: undefined,
+    });
+    expect(MockAgentHarness).toHaveBeenCalledTimes(harnessCount);
+    manager.dispose();
+  });
+
+  it('restore stops when session_before_switch cancels', async () => {
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) => eventType === 'session_before_switch'),
+      emitSessionBeforeSwitch: vi.fn(async () => ({ cancel: true })),
+    });
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+    const harnessCount = MockAgentHarness.mock.calls.length;
+
+    await manager.restore({
+      id: 'cancelled-session',
+      cwd: '/test/project',
+      path: '/sessions/cancelled.jsonl',
+      createdAt: new Date().toISOString(),
+    });
+
+    expect(extensionRunner.emitSessionBeforeSwitch).toHaveBeenCalledWith({
+      type: 'session_before_switch',
+      reason: 'resume',
+      targetSessionFile: '/sessions/cancelled.jsonl',
+    });
+    expect(MockAgentHarness).toHaveBeenCalledTimes(harnessCount);
     manager.dispose();
   });
 
@@ -576,6 +654,26 @@ describe('SessionManager — 属性与委托', () => {
         message: expect.stringContaining('No active session'),
       }),
     );
+    manager.dispose();
+  });
+
+  it('fork stops when session_before_fork cancels', async () => {
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) => eventType === 'session_before_fork'),
+      emitSessionBeforeFork: vi.fn(async () => ({ cancel: true })),
+    });
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+    const harnessCount = MockAgentHarness.mock.calls.length;
+
+    await manager.fork('entry-1', 'at');
+
+    expect(extensionRunner.emitSessionBeforeFork).toHaveBeenCalledWith({
+      type: 'session_before_fork',
+      entryId: 'entry-1',
+      position: 'at',
+    });
+    expect(mockSessionRepoFork).not.toHaveBeenCalled();
+    expect(MockAgentHarness).toHaveBeenCalledTimes(harnessCount);
     manager.dispose();
   });
 
