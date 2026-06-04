@@ -116,9 +116,9 @@ describe('createExtensionRuntime', () => {
 describe('loadExtensionFromFactory', () => {
   it('loads extension from inline factory', async () => {
     const runtime = createExtensionRuntime();
-    const factory: ScoutExtensionFactory = (api) => {
+    const factory: ScoutExtensionFactory = async (api) => {
       api.on('tool_call', async () => undefined);
-      api.registerTool({
+      await api.registerTool({
         name: 'test-tool',
         label: 'Test Tool',
         description: 'A test tool',
@@ -191,9 +191,9 @@ describe('loadExtensions', () => {
     writeFileSync(
       extPath,
       `
-export default function(api) {
+export default async function(api) {
   api.on('tool_call', async () => undefined);
-  api.registerTool({
+  await api.registerTool({
     name: 'my-tool',
     label: 'My Tool',
     description: 'A tool from extension',
