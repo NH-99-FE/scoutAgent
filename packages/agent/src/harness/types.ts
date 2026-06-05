@@ -688,6 +688,10 @@ export interface BeforeProviderPayloadResult {
   payload: unknown;
 }
 
+export interface MessageEndResult {
+  message?: AgentMessage;
+}
+
 export interface ToolCallResult {
   block?: boolean;
   reason?: string;
@@ -714,6 +718,7 @@ export interface SessionBeforeTreeResult {
 }
 
 export type AgentHarnessEventResultMap = {
+  message_end: MessageEndResult | undefined;
   before_agent_start: BeforeAgentStartResult | undefined;
   context: ContextResult | undefined;
   before_provider_request: BeforeProviderRequestResult | undefined;

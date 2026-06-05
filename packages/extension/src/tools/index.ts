@@ -96,4 +96,15 @@ export {
   type AppliedEditsResult,
   type FuzzyMatchResult,
 } from './shared/edit-diff.ts';
-export { killProcessTree, waitForChildProcess } from './shared/process-utils.ts';
+export {
+  killProcessTree,
+  killTrackedDetachedChildren,
+  trackDetachedChildPid,
+  untrackDetachedChildPid,
+  waitForChildProcess,
+} from './shared/process-utils.ts';
+export { getShellConfig, getShellEnv, type ShellConfig } from './shared/shell-config.ts';
+export {
+  detectSupportedImageMimeType,
+  detectSupportedImageMimeTypeFromFile,
+} from './shared/mime.ts';

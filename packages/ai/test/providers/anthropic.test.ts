@@ -1267,6 +1267,151 @@ describe('streamAnthropic — unhandled stop reason', () => {
 // ---------- cache_control on tool results ----------
 
 describe('streamAnthropic — cache_control with tool results', () => {
+  it('adds cache_control to string user messages by default', async () => {
+    let capturedPayload: any = null;
+    const response = createSseResponse([
+      messageStartEvent(),
+      textStartEvent(0),
+      textDeltaEvent(0, 'Hi'),
+      blockStopEvent(0),
+      messageDeltaEvent('end_turn'),
+      messageStopEvent(),
+    ]);
+
+    const model = makeModel();
+    const client = createMockClient(response);
+    const s = streamAnthropic(model, basicContext(), {
+      client,
+      apiKey: 'test-key',
+      onPayload: (payload: unknown) => {
+        capturedPayload = payload;
+      },
+    } as AnthropicOptions);
+
+    await s.result();
+    expect(capturedPayload).not.toBeNull();
+    const lastMessage = capturedPayload.messages[capturedPayload.messages.length - 1];
+    expect(Array.isArray(lastMessage.content)).toBe(true);
+    const lastBlock = lastMessage.content[lastMessage.content.length - 1];
+    expect(lastBlock.cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('sets 1h cache TTL when cacheRetention is long', async () => {
+    let capturedPayload: any = null;
+    const response = createSseResponse([
+      messageStartEvent(),
+      textStartEvent(0),
+      textDeltaEvent(0, 'Hi'),
+      blockStopEvent(0),
+      messageDeltaEvent('end_turn'),
+      messageStopEvent(),
+    ]);
+
+    const model = makeModel();
+    const client = createMockClient(response);
+    const s = streamAnthropic(model, basicContext(), {
+      client,
+      apiKey: 'test-key',
+      cacheRetention: 'long',
+      onPayload: (payload: unknown) => {
+        capturedPayload = payload;
+      },
+    } as AnthropicOptions);
+
+    await s.result();
+    expect(capturedPayload).not.toBeNull();
+    expect(capturedPayload.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+  });
+
+  it('uses PI_CACHE_RETENTION=long as the default cache retention', async () => {
+    const original = process.env.PI_CACHE_RETENTION;
+    process.env.PI_CACHE_RETENTION = 'long';
+    try {
+      let capturedPayload: any = null;
+      const response = createSseResponse([
+        messageStartEvent(),
+        textStartEvent(0),
+        textDeltaEvent(0, 'Hi'),
+        blockStopEvent(0),
+        messageDeltaEvent('end_turn'),
+        messageStopEvent(),
+      ]);
+
+      const model = makeModel();
+      const client = createMockClient(response);
+      const s = streamAnthropic(model, basicContext(), {
+        client,
+        apiKey: 'test-key',
+        onPayload: (payload: unknown) => {
+          capturedPayload = payload;
+        },
+      } as AnthropicOptions);
+
+      await s.result();
+      expect(capturedPayload).not.toBeNull();
+      expect(capturedPayload.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    } finally {
+      if (original === undefined) delete process.env.PI_CACHE_RETENTION;
+      else process.env.PI_CACHE_RETENTION = original;
+    }
+  });
+
+  it('omits ttl when supportsLongCacheRetention is false', async () => {
+    let capturedPayload: any = null;
+    const response = createSseResponse([
+      messageStartEvent(),
+      textStartEvent(0),
+      textDeltaEvent(0, 'Hi'),
+      blockStopEvent(0),
+      messageDeltaEvent('end_turn'),
+      messageStopEvent(),
+    ]);
+
+    const model = makeModel({ compat: { supportsLongCacheRetention: false } });
+    const client = createMockClient(response);
+    const s = streamAnthropic(model, basicContext(), {
+      client,
+      apiKey: 'test-key',
+      cacheRetention: 'long',
+      onPayload: (payload: unknown) => {
+        capturedPayload = payload;
+      },
+    } as AnthropicOptions);
+
+    await s.result();
+    expect(capturedPayload).not.toBeNull();
+    expect(capturedPayload.system[0].cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('omits cache_control when cacheRetention is none', async () => {
+    let capturedPayload: any = null;
+    const response = createSseResponse([
+      messageStartEvent(),
+      textStartEvent(0),
+      textDeltaEvent(0, 'Hi'),
+      blockStopEvent(0),
+      messageDeltaEvent('end_turn'),
+      messageStopEvent(),
+    ]);
+
+    const model = makeModel();
+    const client = createMockClient(response);
+    const s = streamAnthropic(model, basicContext(), {
+      client,
+      apiKey: 'test-key',
+      cacheRetention: 'none',
+      onPayload: (payload: unknown) => {
+        capturedPayload = payload;
+      },
+    } as AnthropicOptions);
+
+    await s.result();
+    expect(capturedPayload).not.toBeNull();
+    expect(capturedPayload.system[0].cache_control).toBeUndefined();
+    const lastMessage = capturedPayload.messages[capturedPayload.messages.length - 1];
+    expect(lastMessage.content).toBe('Hello');
+  });
+
   it('applies cache_control to last tool result content block', async () => {
     let capturedPayload: any = null;
     const response = createSseResponse([

@@ -31,21 +31,15 @@ describe('createReadTool', () => {
     });
   });
 
-  it('detects image files by extension', async () => {
+  it('does not guess image MIME from extension when custom detector is absent', async () => {
     const ops = makeReadOps({
       readFile: vi.fn(async () => Buffer.from('fake-image-data')),
-      // 不提供 detectImageMimeType，使 fallback 到 detectImageMimeTypeByExtension
       detectImageMimeType: undefined,
     });
     const tool = createReadTool('/test', { operations: ops });
     const result = await tool.execute('tc1', { path: 'photo.png' });
-    expect(result.content).toHaveLength(2);
-    expect(result.content[0]).toEqual({ type: 'text', text: expect.stringContaining('image/png') });
-    expect(result.content[1]).toEqual({
-      type: 'image',
-      data: expect.any(String),
-      mimeType: 'image/png',
-    });
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]).toEqual({ type: 'text', text: 'fake-image-data' });
   });
 
   it('respects custom detectImageMimeType', async () => {

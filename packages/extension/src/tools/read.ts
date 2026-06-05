@@ -15,6 +15,7 @@ import {
   type TruncationResult,
   truncateHead,
 } from './shared/truncate.ts';
+import { detectSupportedImageMimeTypeFromFile } from './shared/mime.ts';
 
 // ---------- Schema ----------
 
@@ -52,8 +53,7 @@ export interface ReadOperations {
 const defaultReadOperations: ReadOperations = {
   readFile: (path) => fsReadFile(path),
   access: (path) => fsAccess(path, constants.R_OK),
-  // Scout 简化：暂不内置图片检测，由外部注入或留空
-  detectImageMimeType: undefined,
+  detectImageMimeType: detectSupportedImageMimeTypeFromFile,
 };
 
 // ---------- Options ----------
@@ -65,29 +65,6 @@ export interface ReadToolOptions {
   operations?: ReadOperations;
   /** 判断当前模型是否支持 vision。返回 false 时，图片内容替换为文本 note */
   isVisionModel?: () => boolean;
-}
-
-// ---------- 图片 MIME 检测辅助 ----------
-
-/**
- * 基于文件扩展名检测图片类型。
- * Scout 简化版：用扩展名替代 Pi 的文件头嗅探。
- */
-function detectImageMimeTypeByExtension(filePath: string): string | null {
-  const ext = filePath.toLowerCase().slice(filePath.lastIndexOf('.'));
-  switch (ext) {
-    case '.png':
-      return 'image/png';
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg';
-    case '.gif':
-      return 'image/gif';
-    case '.webp':
-      return 'image/webp';
-    default:
-      return null;
-  }
 }
 
 // ---------- 工厂函数 ----------
@@ -144,7 +121,7 @@ export function createReadTool(
             // 检测是否为图片
             const mimeType = ops.detectImageMimeType
               ? await ops.detectImageMimeType(absolutePath)
-              : detectImageMimeTypeByExtension(absolutePath);
+              : undefined;
 
             let content: Array<
               { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }

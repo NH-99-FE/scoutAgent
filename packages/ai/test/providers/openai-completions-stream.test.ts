@@ -151,13 +151,14 @@ function reasoningDetailsChunk(details: any[]) {
 
 let mockStreamChunks: ChatCompletionChunk[] = [];
 let mockOnCreate: ((params: any) => void) | null = null;
+let mockClientConfig: any = null;
 
 // Mock OpenAI 模块
 vi.mock('openai', () => {
   return {
     default: class MockOpenAI {
       constructor(config: any) {
-        // no-op
+        mockClientConfig = config;
       }
       chat = {
         completions: {
@@ -593,6 +594,48 @@ describe('streamOpenAICompletions — response metadata', () => {
     const result = await s.result();
     expect(result.responseModel).toBe('actual-deployed-model');
   });
+
+  it('leaves responseModel undefined when chunks echo the requested model id', async () => {
+    mockStreamChunks = [
+      makeChunk({
+        model: 'test-model',
+        choices: [{ index: 0, finish_reason: null, delta: { role: 'assistant', content: 'Hi' } }],
+      }),
+      textChunk('', 'stop'),
+    ];
+
+    const model = makeModel();
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+    } as OpenAICompletionsOptions);
+
+    const result = await s.result();
+    expect(result.model).toBe('test-model');
+    expect(result.responseModel).toBeUndefined();
+  });
+
+  it('ignores empty or missing chunk model values', async () => {
+    mockStreamChunks = [
+      makeChunk({
+        choices: [{ index: 0, finish_reason: null, delta: { role: 'assistant', content: 'Hi' } }],
+      }),
+      makeChunk({
+        model: '',
+        choices: [{ index: 0, finish_reason: null, delta: { role: 'assistant', content: '!' } }],
+      }),
+      textChunk('', 'stop'),
+    ];
+
+    const model = makeModel();
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+    } as OpenAICompletionsOptions);
+
+    const result = await s.result();
+    expect(result.responseModel).toBeUndefined();
+    const text = result.content.find((block) => block.type === 'text');
+    expect(text).toMatchObject({ text: 'Hi!' });
+  });
 });
 
 // ---------- buildParams 间接测试（通过 onPayload） ----------
@@ -777,6 +820,151 @@ describe('streamOpenAICompletions — buildParams', () => {
 
     await s.result();
     expect(capturedPayload.prompt_cache_key).toBeUndefined();
+  });
+
+  it('sets prompt_cache_retention when cacheRetention is long', async () => {
+    let capturedPayload: any = null;
+    mockStreamChunks = [textChunk('Hi'), textChunk('', 'stop')];
+
+    const model = makeModel({ baseUrl: 'https://custom.api/v1' });
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+      cacheRetention: 'long',
+      sessionId: 'session-long',
+      onPayload: (p) => {
+        capturedPayload = p;
+      },
+    } as OpenAICompletionsOptions);
+
+    await s.result();
+    expect(capturedPayload.prompt_cache_key).toBe('session-long');
+    expect(capturedPayload.prompt_cache_retention).toBe('24h');
+  });
+
+  it('uses PI_CACHE_RETENTION=long as the default cache retention', async () => {
+    const original = process.env.PI_CACHE_RETENTION;
+    process.env.PI_CACHE_RETENTION = 'long';
+    try {
+      let capturedPayload: any = null;
+      mockStreamChunks = [textChunk('Hi'), textChunk('', 'stop')];
+
+      const model = makeModel({ baseUrl: 'https://custom.api/v1' });
+      const s = streamOpenAICompletions(model, basicContext(), {
+        apiKey: 'test-key',
+        sessionId: 'session-env-long',
+        onPayload: (p) => {
+          capturedPayload = p;
+        },
+      } as OpenAICompletionsOptions);
+
+      await s.result();
+      expect(capturedPayload.prompt_cache_key).toBe('session-env-long');
+      expect(capturedPayload.prompt_cache_retention).toBe('24h');
+    } finally {
+      if (original === undefined) delete process.env.PI_CACHE_RETENTION;
+      else process.env.PI_CACHE_RETENTION = original;
+    }
+  });
+
+  it('omits prompt cache fields when cacheRetention is none', async () => {
+    let capturedPayload: any = null;
+    mockStreamChunks = [textChunk('Hi'), textChunk('', 'stop')];
+
+    const model = makeModel({ baseUrl: 'https://api.openai.com/v1' });
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+      cacheRetention: 'none',
+      sessionId: 'session-none',
+      onPayload: (p) => {
+        capturedPayload = p;
+      },
+    } as OpenAICompletionsOptions);
+
+    await s.result();
+    expect(capturedPayload.prompt_cache_key).toBeUndefined();
+    expect(capturedPayload.prompt_cache_retention).toBeUndefined();
+  });
+
+  it('omits prompt_cache_retention when supportsLongCacheRetention is false', async () => {
+    let capturedPayload: any = null;
+    mockStreamChunks = [textChunk('Hi'), textChunk('', 'stop')];
+
+    const model = makeModel({
+      baseUrl: 'https://custom.api/v1',
+      compat: { supportsLongCacheRetention: false },
+    });
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+      cacheRetention: 'long',
+      sessionId: 'session-compat-false',
+      onPayload: (p) => {
+        capturedPayload = p;
+      },
+    } as OpenAICompletionsOptions);
+
+    await s.result();
+    expect(capturedPayload.prompt_cache_key).toBeUndefined();
+    expect(capturedPayload.prompt_cache_retention).toBeUndefined();
+  });
+
+  it('sends known session-affinity headers when enabled', async () => {
+    mockStreamChunks = [textChunk('Hi'), textChunk('', 'stop')];
+
+    const model = makeModel({
+      baseUrl: 'https://custom.api/v1',
+      compat: { sendSessionAffinityHeaders: true },
+    });
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+      sessionId: 'session-affinity',
+    } as OpenAICompletionsOptions);
+
+    await s.result();
+    expect(mockClientConfig.defaultHeaders.session_id).toBe('session-affinity');
+    expect(mockClientConfig.defaultHeaders['x-client-request-id']).toBe('session-affinity');
+    expect(mockClientConfig.defaultHeaders['x-session-affinity']).toBe('session-affinity');
+  });
+
+  it('omits session-affinity headers when cacheRetention is none', async () => {
+    mockStreamChunks = [textChunk('Hi'), textChunk('', 'stop')];
+
+    const model = makeModel({
+      baseUrl: 'https://custom.api/v1',
+      compat: { sendSessionAffinityHeaders: true },
+    });
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+      cacheRetention: 'none',
+      sessionId: 'session-affinity',
+    } as OpenAICompletionsOptions);
+
+    await s.result();
+    expect(mockClientConfig.defaultHeaders.session_id).toBeUndefined();
+    expect(mockClientConfig.defaultHeaders['x-client-request-id']).toBeUndefined();
+    expect(mockClientConfig.defaultHeaders['x-session-affinity']).toBeUndefined();
+  });
+
+  it('lets explicit headers override generated session-affinity headers', async () => {
+    mockStreamChunks = [textChunk('Hi'), textChunk('', 'stop')];
+
+    const model = makeModel({
+      baseUrl: 'https://custom.api/v1',
+      compat: { sendSessionAffinityHeaders: true },
+    });
+    const s = streamOpenAICompletions(model, basicContext(), {
+      apiKey: 'test-key',
+      sessionId: 'session-affinity',
+      headers: {
+        session_id: 'override-session',
+        'x-client-request-id': 'override-request',
+        'x-session-affinity': 'override-affinity',
+      },
+    } as OpenAICompletionsOptions);
+
+    await s.result();
+    expect(mockClientConfig.defaultHeaders.session_id).toBe('override-session');
+    expect(mockClientConfig.defaultHeaders['x-client-request-id']).toBe('override-request');
+    expect(mockClientConfig.defaultHeaders['x-session-affinity']).toBe('override-affinity');
   });
 
   it('includes toolChoice when provided', async () => {

@@ -34,8 +34,8 @@ import type {
   AbortResult,
   AgentHarnessEvent,
   AgentHarnessEventResultMap,
-  AgentHarnessOptions,
   AgentHarnessOwnEvent,
+  AgentHarnessOptions,
   AgentHarnessPhase,
   AgentHarnessResources,
   AgentHarnessStreamOptions,
@@ -152,6 +152,11 @@ function applyStreamOptionsPatch(
 const SUBSCRIBER_EVENT_TYPE = '*';
 
 type AgentHarnessHandler = (event: any, signal?: AbortSignal) => Promise<any> | any;
+type MessageEndEvent = Extract<AgentEvent, { type: 'message_end' }>;
+type AgentHarnessHookEvent<
+  TSkill extends Skill = Skill,
+  TPromptTemplate extends PromptTemplate = PromptTemplate,
+> = AgentHarnessOwnEvent<TSkill, TPromptTemplate> | MessageEndEvent;
 
 function normalizeHarnessError(
   error: unknown,
@@ -262,7 +267,7 @@ export class AgentHarness<
   }
 
   private async emitHook<TType extends keyof AgentHarnessEventResultMap>(
-    event: Extract<AgentHarnessOwnEvent, { type: TType }>,
+    event: Extract<AgentHarnessHookEvent<TSkill, TPromptTemplate>, { type: TType }>,
   ): Promise<AgentHarnessEventResultMap[TType] | undefined> {
     const handlers = this.getHandlers(event.type as TType);
     if (!handlers || handlers.size === 0) return undefined;
@@ -278,6 +283,41 @@ export class AgentHarness<
       }
     }
     return lastResult;
+  }
+
+  private replaceMessageInPlace(target: AgentMessage, replacement: AgentMessage): void {
+    if (target === replacement) return;
+    const snapshot = structuredClone(replacement);
+    const mutableTarget = target as unknown as Record<string, unknown>;
+    for (const key of Object.keys(mutableTarget)) {
+      delete mutableTarget[key];
+    }
+    Object.assign(mutableTarget, snapshot);
+  }
+
+  private async finalizeMessageEnd(event: MessageEndEvent): Promise<MessageEndEvent> {
+    const handlers = this.getHandlers('message_end');
+    if (!handlers || handlers.size === 0) return event;
+
+    for (const handler of handlers) {
+      try {
+        const result = (await handler(event)) as
+          | AgentHarnessEventResultMap['message_end']
+          | undefined;
+        if (!result?.message) continue;
+        if (result.message.role !== event.message.role) {
+          throw new AgentHarnessError(
+            'hook',
+            `message_end replacement role mismatch: ${result.message.role}，期望 ${event.message.role}`,
+          );
+        }
+        this.replaceMessageInPlace(event.message, result.message);
+      } catch (error) {
+        throw normalizeHookError(error);
+      }
+    }
+
+    return event;
   }
 
   private async emitBeforeProviderRequest(
@@ -544,8 +584,9 @@ export class AgentHarness<
 
   private async handleAgentEvent(event: AgentEvent, signal?: AbortSignal): Promise<void> {
     if (event.type === 'message_end') {
-      await this.emitAny(event, signal);
-      await this.session.appendMessage(event.message);
+      const finalizedEvent = await this.finalizeMessageEnd(event);
+      await this.session.appendMessage(finalizedEvent.message);
+      await this.emitAny(finalizedEvent, signal);
       return;
     }
     if (event.type === 'turn_end') {
@@ -1239,7 +1280,7 @@ export class AgentHarness<
   on<TType extends keyof AgentHarnessEventResultMap>(
     type: TType,
     handler: (
-      event: Extract<AgentHarnessOwnEvent, { type: TType }>,
+      event: Extract<AgentHarnessHookEvent<TSkill, TPromptTemplate>, { type: TType }>,
     ) => Promise<AgentHarnessEventResultMap[TType]> | AgentHarnessEventResultMap[TType],
   ): () => void {
     let handlers = this.handlers.get(type);

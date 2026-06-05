@@ -6,6 +6,25 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 
+// ---------- detached 子进程跟踪 ----------
+
+const trackedDetachedChildPids = new Set<number>();
+
+export function trackDetachedChildPid(pid: number): void {
+  trackedDetachedChildPids.add(pid);
+}
+
+export function untrackDetachedChildPid(pid: number): void {
+  trackedDetachedChildPids.delete(pid);
+}
+
+export function killTrackedDetachedChildren(): void {
+  for (const pid of trackedDetachedChildPids) {
+    killProcessTree(pid);
+  }
+  trackedDetachedChildPids.clear();
+}
+
 // ---------- killProcessTree ----------
 
 /**

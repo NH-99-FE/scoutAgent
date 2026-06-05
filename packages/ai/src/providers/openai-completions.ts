@@ -97,6 +97,8 @@ function createClient(
   const headers: Record<string, string | null> = { ...model.headers };
 
   if (sessionId && compat.sendSessionAffinityHeaders) {
+    headers.session_id = sessionId;
+    headers['x-client-request-id'] = sessionId;
     headers['x-session-affinity'] = sessionId;
   }
 

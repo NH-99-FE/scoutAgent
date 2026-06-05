@@ -31,6 +31,9 @@ const {
   mockHarnessGetSignal,
   mockHarnessGetModel,
   mockHarnessGetThinkingLevel,
+  mockShouldCompact,
+  mockCalculateContextTokens,
+  mockEstimateContextTokens,
   mockHarnessNavigateTree,
   mockHarnessOn,
   mockSessionBuildContext,
@@ -70,6 +73,9 @@ const {
     trailingTokens: 200,
     lastUsageIndex: 1,
   }));
+  const mockShouldCompact = vi.fn(() => false);
+  const mockCalculateContextTokens = vi.fn(() => 0);
+  const mockEstimateContextTokens = vi.fn(() => ({ tokens: 0, lastUsageIndex: null }));
   const mockHarnessNavigateTree = vi.fn(async () => ({ cancelled: false }));
   const mockHarnessOn = vi.fn(() => vi.fn());
 
@@ -145,6 +151,9 @@ const {
     mockHarnessGetSignal,
     mockHarnessGetModel,
     mockHarnessGetThinkingLevel,
+    mockShouldCompact,
+    mockCalculateContextTokens,
+    mockEstimateContextTokens,
     mockHarnessNavigateTree,
     mockHarnessOn,
     mockSessionBuildContext,
@@ -195,9 +204,9 @@ vi.mock('vscode', () => ({
 
 vi.mock('@scout-agent/agent', () => ({
   AgentHarness: MockAgentHarness,
-  shouldCompact: vi.fn(() => false),
-  calculateContextTokens: vi.fn(() => 0),
-  estimateContextTokens: vi.fn(() => ({ tokens: 0, lastUsageIndex: null })),
+  shouldCompact: mockShouldCompact,
+  calculateContextTokens: mockCalculateContextTokens,
+  estimateContextTokens: mockEstimateContextTokens,
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
 }));
 
@@ -359,6 +368,14 @@ function getSubscribeCallback(): (event: any) => unknown {
   return calls[lastCallIdx]![0] as (event: any) => unknown;
 }
 
+/** 获取传递给 harness.on(type) 的最后一个 hook 回调 */
+function getOnCallback(type: string): (event: any) => unknown {
+  const calls = mockHarnessOn.mock.calls as Array<Array<unknown>>;
+  const call = [...calls].reverse().find(([eventType]) => eventType === type);
+  if (!call) throw new Error(`No harness.on(${type}) callback registered`);
+  return call[1] as (event: any) => unknown;
+}
+
 /** 等待微任务队列排空 */
 function flushMicrotasks(ms = 50): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -366,6 +383,14 @@ function flushMicrotasks(ms = 50): Promise<void> {
 
 async function runPostAgentLoop(agentSession: AgentSession): Promise<void> {
   await (agentSession as any).runPostAgentLoop();
+}
+
+async function runAutoCompaction(
+  agentSession: AgentSession,
+  reason: string,
+  willRetry = false,
+): Promise<boolean> {
+  return await (agentSession as any).runAutoCompaction(reason, willRetry);
 }
 
 // ---------- 基础功能测试 ----------
@@ -393,6 +418,9 @@ describe('AgentSession', () => {
       input: ['text', 'image'],
     });
     mockHarnessGetThinkingLevel.mockReturnValue('off');
+    mockShouldCompact.mockReturnValue(false);
+    mockCalculateContextTokens.mockReturnValue(0);
+    mockEstimateContextTokens.mockReturnValue({ tokens: 0, lastUsageIndex: null });
     mockGetRetrySettings.mockReturnValue({ enabled: true, maxRetries: 3, baseDelayMs: 2000 });
     mockSessionGetBranch.mockResolvedValue([]);
     mockSessionMoveTo.mockResolvedValue(undefined);
@@ -602,13 +630,13 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
-  it('manual continue delegates to an explicit continuation prompt', async () => {
+  it('manual continue delegates to harness continuation', async () => {
     const agentSession = await makeInitializedAgentSession();
 
     await agentSession.continue();
 
-    expect(mockHarnessPrompt).toHaveBeenCalledWith('Please continue.');
-    expect(mockHarnessContinue).not.toHaveBeenCalled();
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+    expect(mockHarnessPrompt).not.toHaveBeenCalledWith('Please continue.');
     agentSession.dispose();
   });
 
@@ -863,7 +891,13 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
-  it('applies message_end replacements in place for later handlers', async () => {
+  it('bridges message_end replacements through the finalized-message hook', async () => {
+    const replacement = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'replacement' }],
+      timestamp: 123,
+      stopReason: 'stop',
+    };
     const extensionRunner = {
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
@@ -874,18 +908,13 @@ describe('AgentSession — 运行时操作', () => {
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
       emitSessionBeforeTree: vi.fn(),
-      emitMessageEnd: vi.fn(async () => ({
-        role: 'assistant',
-        content: [{ type: 'text', text: 'replacement' }],
-        timestamp: 123,
-        stopReason: 'stop',
-      })),
+      emitMessageEnd: vi.fn(async () => replacement),
       emit: vi.fn(),
       invalidate: vi.fn(),
     };
 
     const agentSession = await makeInitializedAgentSession({ extensionRunner });
-    const callback = getSubscribeCallback();
+    const callback = getOnCallback('message_end');
     const message = {
       role: 'assistant',
       content: [{ type: 'text', text: 'original' }],
@@ -893,18 +922,17 @@ describe('AgentSession — 运行时操作', () => {
       stopReason: 'stop',
     };
 
-    await callback({ type: 'message_end', message });
+    const result = await callback({ type: 'message_end', message });
 
-    expect(message).toEqual({
-      role: 'assistant',
-      content: [{ type: 'text', text: 'replacement' }],
-      timestamp: 123,
-      stopReason: 'stop',
+    expect(extensionRunner.emitMessageEnd).toHaveBeenCalledWith({
+      type: 'message_end',
+      message,
     });
+    expect(result).toEqual({ message: replacement });
     agentSession.dispose();
   });
 
-  it('does not clear message_end replacements when the handler returns the same object', async () => {
+  it('preserves in-place message_end replacements from extension handlers', async () => {
     const extensionRunner = {
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
@@ -924,7 +952,7 @@ describe('AgentSession — 运行时操作', () => {
     };
 
     const agentSession = await makeInitializedAgentSession({ extensionRunner });
-    const callback = getSubscribeCallback();
+    const callback = getOnCallback('message_end');
     const message = {
       role: 'assistant',
       content: [{ type: 'text', text: 'original' }],
@@ -932,7 +960,7 @@ describe('AgentSession — 运行时操作', () => {
       stopReason: 'stop',
     };
 
-    await callback({ type: 'message_end', message });
+    const result = await callback({ type: 'message_end', message });
 
     expect(message).toEqual({
       role: 'assistant',
@@ -940,10 +968,11 @@ describe('AgentSession — 运行时操作', () => {
       timestamp: 1,
       stopReason: 'stop',
     });
+    expect(result).toEqual({ message });
     agentSession.dispose();
   });
 
-  it('returns the lifecycle promise to harness subscribers before message_end persistence', async () => {
+  it('returns the replacement promise to the finalized-message hook', async () => {
     let resolveReplacement!: () => void;
     const replacementReady = new Promise<void>((resolve) => {
       resolveReplacement = resolve;
@@ -972,7 +1001,7 @@ describe('AgentSession — 运行时操作', () => {
     };
 
     const agentSession = await makeInitializedAgentSession({ extensionRunner });
-    const callback = getSubscribeCallback();
+    const callback = getOnCallback('message_end');
     const message = {
       role: 'assistant',
       content: [{ type: 'text', text: 'original' }],
@@ -992,12 +1021,20 @@ describe('AgentSession — 运行时操作', () => {
     });
 
     resolveReplacement();
-    await lifecyclePromise;
+    const result = await lifecyclePromise;
 
+    expect(result).toEqual({
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'replacement' }],
+        timestamp: 123,
+        stopReason: 'stop',
+      },
+    });
     expect(message).toEqual({
       role: 'assistant',
-      content: [{ type: 'text', text: 'replacement' }],
-      timestamp: 123,
+      content: [{ type: 'text', text: 'original' }],
+      timestamp: 1,
       stopReason: 'stop',
     });
     agentSession.dispose();
@@ -1148,6 +1185,9 @@ describe('AgentSession — Auto Retry', () => {
       input: ['text', 'image'],
     });
     mockHarnessGetThinkingLevel.mockReturnValue('off');
+    mockShouldCompact.mockReturnValue(false);
+    mockCalculateContextTokens.mockReturnValue(0);
+    mockEstimateContextTokens.mockReturnValue({ tokens: 0, lastUsageIndex: null });
     mockGetRetrySettings.mockReturnValue({ enabled: true, maxRetries: 3, baseDelayMs: 10 });
     mockSessionGetBranch.mockResolvedValue([]);
     mockSessionMoveTo.mockResolvedValue(undefined);
@@ -1265,6 +1305,18 @@ describe('AgentSession — Auto Retry', () => {
     agentSession.dispose();
   });
 
+  it('returns continuation intent after threshold compaction when harness has pending messages', async () => {
+    mockHarnessHasPendingMessages.mockReturnValue(true);
+    const agentSession = await makeInitializedAgentSession();
+
+    await expect(runAutoCompaction(agentSession, 'threshold')).resolves.toBe(true);
+
+    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(mockHarnessHasPendingMessages).toHaveBeenCalledTimes(1);
+    expect(mockHarnessContinue).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
   it('does not retry when retry is disabled', async () => {
     mockGetRetrySettings.mockReturnValue({ enabled: false, maxRetries: 3, baseDelayMs: 10 });
 
@@ -1312,6 +1364,49 @@ describe('AgentSession — Auto Retry', () => {
     await runPostAgentLoop(agentSession);
 
     expect(events.some((e) => e.type === 'retry_end' && e.success === true)).toBe(true);
+    agentSession.dispose();
+  });
+
+  it('continues again when retry success triggers threshold compaction with pending work', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+    mockShouldCompact.mockReturnValue(true);
+    mockCalculateContextTokens.mockReturnValue(190000);
+    mockHarnessHasPendingMessages.mockReturnValue(true);
+
+    const callback = getSubscribeCallback();
+    await agentSession.prompt('test');
+
+    await callback({
+      type: 'message_end',
+      message: makeErrorAssistantMessage('Error 503: Service unavailable'),
+    });
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+
+    const successMessage = {
+      role: 'assistant',
+      stopReason: 'stop',
+      content: [{ type: 'text', text: 'Recovered' }],
+      timestamp: Date.now(),
+      usage: {
+        input: 190000,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 190000,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    };
+    await callback({ type: 'message_end', message: successMessage });
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
+
+    expect(events.some((e) => e.type === 'retry_end' && e.success === true)).toBe(true);
+    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(2);
     agentSession.dispose();
   });
 

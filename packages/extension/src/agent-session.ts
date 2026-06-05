@@ -260,7 +260,7 @@ export class AgentSession implements vscode.Disposable {
   }
 
   /**
-   * 用户手动续写：追加一个显式用户提示，避免从 assistant 尾消息直接续跑。
+   * 用户手动续写：沿用底层 harness continuation 语义。
    * 注意：不重置 lastUserMessageText，保留原用户消息供 Auto Retry 使用。
    */
   async continue(): Promise<void> {
@@ -271,7 +271,7 @@ export class AgentSession implements vscode.Disposable {
     try {
       this._isStreaming = true;
       this.emit({ type: 'state_change' });
-      await this.harness.prompt('Please continue.');
+      await this.harness.continue();
       await this.runPostAgentLoop();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -900,7 +900,7 @@ export class AgentSession implements vscode.Disposable {
     }
 
     // message_end：只记录最后一条 assistant message，实际 retry/compaction 等到 agent_end 后处理。
-    // 此时 harness 仍在 turn 内，且 message_end 可能尚未持久化，不能在这里重入 harness。
+    // 此时消息已经由 harness 持久化；这里只做观察和状态更新，避免重入 harness。
     if (type === 'message_end') {
       const message = (event as { message?: AgentMessage }).message;
       if (message?.role === 'assistant') {
@@ -961,13 +961,6 @@ export class AgentSession implements vscode.Disposable {
         message: messageUpdate.message,
         assistantMessageEvent: messageUpdate.assistantMessageEvent,
       });
-    } else if (type === 'message_end') {
-      const messageEvent = event as { message: AgentMessage };
-      const replacement = await runner.emitMessageEnd({
-        type: 'message_end',
-        message: messageEvent.message,
-      });
-      if (replacement) this.replaceMessageInPlace(messageEvent.message, replacement);
     } else if (type === 'tool_execution_start') {
       const toolEvent = event as { toolCallId: string; toolName: string; args: unknown };
       await runner.emit({
@@ -1041,16 +1034,6 @@ export class AgentSession implements vscode.Disposable {
         event as Parameters<typeof runner.emit>[0] & { type: 'thinking_level_select' },
       );
     }
-  }
-
-  private replaceMessageInPlace(target: AgentMessage, replacement: AgentMessage): void {
-    if (target === replacement) return;
-    const snapshot = structuredClone(replacement);
-    const mutableTarget = target as unknown as Record<string, unknown>;
-    for (const key of Object.keys(mutableTarget)) {
-      delete mutableTarget[key];
-    }
-    Object.assign(mutableTarget, snapshot);
   }
 
   // ---------- 内部：Compaction ----------
@@ -1331,6 +1314,15 @@ export class AgentSession implements vscode.Disposable {
     );
     unsubs.push(this.harness.on('tool_call', (e) => runner.emitToolCall(e)));
     unsubs.push(this.harness.on('tool_result', (e) => runner.emitToolResult(e)));
+    unsubs.push(
+      this.harness.on('message_end', async (e) => {
+        const message = await runner.emitMessageEnd({
+          type: 'message_end',
+          message: e.message,
+        });
+        return message ? { message } : undefined;
+      }),
+    );
     unsubs.push(
       this.harness.on('session_before_compact', (e) => runner.emitSessionBeforeCompact(e)),
     );

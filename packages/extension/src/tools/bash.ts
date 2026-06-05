@@ -15,7 +15,13 @@ import {
   formatSize,
   type TruncationResult,
 } from './shared/truncate.ts';
-import { killProcessTree, waitForChildProcess } from './shared/process-utils.ts';
+import {
+  killProcessTree,
+  trackDetachedChildPid,
+  untrackDetachedChildPid,
+  waitForChildProcess,
+} from './shared/process-utils.ts';
+import { getShellConfig, getShellEnv } from './shared/shell-config.ts';
 
 // ---------- Schema ----------
 
@@ -63,13 +69,12 @@ export interface BashOperations {
 
 /**
  * 创建基于本地 shell 的 BashOperations。
- * Scout 简化版：直接使用 spawn，不依赖 Pi 的 shell 工具链。
+ * 解析顺序与 Pi 保持一致，默认优先使用 bash 而非平台 shell。
  */
 export function createLocalBashOperations(options?: { shellPath?: string }): BashOperations {
   return {
     exec: async (command, cwd, { onData, signal, timeout, env }) => {
-      const shell = options?.shellPath ?? (process.platform === 'win32' ? 'cmd.exe' : '/bin/bash');
-      const shellArgs = process.platform === 'win32' ? ['/c', command] : ['-c', command];
+      const { shell, args } = getShellConfig(options?.shellPath);
 
       if (signal?.aborted) throw new Error('aborted');
 
@@ -80,25 +85,14 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
         throw new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`);
       }
 
-      // spawn 的 env 需要 Record<string, string>，过滤掉 undefined 值
-      const spawnEnv: Record<string, string> = {};
-      if (env) {
-        for (const [key, value] of Object.entries(env)) {
-          if (value !== undefined) spawnEnv[key] = value;
-        }
-      } else {
-        for (const [key, value] of Object.entries(process.env)) {
-          if (value !== undefined) spawnEnv[key] = value;
-        }
-      }
-
-      const child = spawn(shell, shellArgs, {
+      const child = spawn(shell, [...args, command], {
         cwd,
         detached: process.platform !== 'win32',
-        env: spawnEnv,
+        env: env ?? getShellEnv(),
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
+      if (child.pid) trackDetachedChildPid(child.pid);
 
       let timedOut = false;
       let timeoutHandle: NodeJS.Timeout | undefined;
@@ -133,6 +127,7 @@ export function createLocalBashOperations(options?: { shellPath?: string }): Bas
 
         return { exitCode };
       } finally {
+        if (child.pid) untrackDetachedChildPid(child.pid);
         if (timeoutHandle) clearTimeout(timeoutHandle);
         if (signal) signal.removeEventListener('abort', onAbort);
       }
@@ -155,12 +150,7 @@ function resolveSpawnContext(
   cwd: string,
   spawnHook?: BashSpawnHook,
 ): BashSpawnContext {
-  // spawn 的 env 需要 Record<string, string>，过滤掉 undefined 值
-  const filteredEnv: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) filteredEnv[key] = value;
-  }
-  const baseContext: BashSpawnContext = { command, cwd, env: filteredEnv };
+  const baseContext: BashSpawnContext = { command, cwd, env: getShellEnv() };
   return spawnHook ? spawnHook(baseContext) : baseContext;
 }
 

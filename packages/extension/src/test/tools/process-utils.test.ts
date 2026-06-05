@@ -2,8 +2,9 @@
 // process-utils 测试
 // ============================================================
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { killProcessTree, waitForChildProcess } from '../../tools/shared/process-utils.ts';
 
 describe('killProcessTree', () => {
@@ -42,5 +43,19 @@ describe('waitForChildProcess', () => {
 
     const exitCode = await waitForChildProcess(child);
     expect(exitCode).toBe(1);
+  });
+
+  it('resolves after exit even when inherited stdio handles never close', async () => {
+    const child = new EventEmitter() as any;
+    child.stdout = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+    child.stderr = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+
+    const promise = waitForChildProcess(child);
+    child.emit('exit', 0);
+
+    const exitCode = await promise;
+    expect(exitCode).toBe(0);
+    expect(child.stdout.destroy).toHaveBeenCalled();
+    expect(child.stderr.destroy).toHaveBeenCalled();
   });
 });
