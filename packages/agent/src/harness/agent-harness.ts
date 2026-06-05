@@ -5,7 +5,7 @@ import {
   streamSimple,
   type UserMessage,
 } from '@scout-agent/ai';
-import { runAgentLoop } from '../agent-loop.ts';
+import { runAgentLoop, runAgentLoopContinue } from '../agent-loop.ts';
 import type {
   AgentContext,
   AgentEvent,
@@ -212,8 +212,6 @@ export class AgentHarness<
   private followUpQueueMode: QueueMode;
   private nextTurnQueue: AgentMessage[] = [];
   private handlers = new Map<string, Set<AgentHarnessHandler>>();
-  /** 最近一次 turn 的消息快照，用于 getMessages()/getContextUsage() */
-  private lastTurnMessages: AgentMessage[] = [];
 
   constructor(options: AgentHarnessOptions<TSkill, TPromptTemplate, TTool>) {
     this.env = options.env;
@@ -447,8 +445,10 @@ export class AgentHarness<
   private createLoopConfig(
     getTurnState: () => AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
     setTurnState: (turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => void,
+    options: { skipInitialSteeringPoll?: boolean } = {},
   ): AgentLoopConfig {
     const turnState = getTurnState();
+    let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
     return {
       model: turnState.model,
       reasoning: turnState.thinkingLevel === 'off' ? undefined : turnState.thinkingLevel,
@@ -495,8 +495,13 @@ export class AgentHarness<
           thinkingLevel: nextTurnState.thinkingLevel,
         };
       },
-      getSteeringMessages: async () =>
-        this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode),
+      getSteeringMessages: async () => {
+        if (skipInitialSteeringPoll) {
+          skipInitialSteeringPoll = false;
+          return [];
+        }
+        return this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode);
+      },
       getFollowUpMessages: async () =>
         this.drainQueuedMessages(this.followUpQueue, this.followUpQueueMode),
     };
@@ -541,8 +546,6 @@ export class AgentHarness<
     if (event.type === 'message_end') {
       await this.emitAny(event, signal);
       await this.session.appendMessage(event.message);
-      // 更新消息快照
-      this.lastTurnMessages = [...this.lastTurnMessages, event.message];
       return;
     }
     if (event.type === 'turn_end') {
@@ -585,34 +588,16 @@ export class AgentHarness<
     return [failureMessage];
   }
 
-  private async executeTurn(
+  private async executePromptMessages(
     turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
-    text: string,
-    options?: { images?: ImageContent[] },
+    messages: AgentMessage[],
+    options: {
+      systemPrompt?: string;
+      skipInitialSteeringPoll?: boolean;
+      missingAssistantLabel: string;
+    },
   ): Promise<AssistantMessage> {
     let activeTurnState = turnState;
-    let messages: AgentMessage[] = [createUserMessage(text, options?.images)];
-    // 更新消息快照：包含新用户消息
-    this.lastTurnMessages = [...this.lastTurnMessages, messages[0]!];
-    if (this.nextTurnQueue.length > 0) {
-      const queuedMessages = this.nextTurnQueue.splice(0);
-      try {
-        await this.emitQueueUpdate();
-      } catch (error) {
-        this.nextTurnQueue.unshift(...queuedMessages);
-        throw normalizeHookError(error);
-      }
-      messages = [...queuedMessages, messages[0]!];
-    }
-    const beforeResult = await this.emitHook({
-      type: 'before_agent_start',
-      prompt: text,
-      images: options?.images,
-      systemPrompt: turnState.systemPrompt,
-      resources: turnState.resources,
-    });
-    if (beforeResult?.messages) messages = [...messages, ...beforeResult.messages];
-
     const abortController = new AbortController();
     const getTurnState = () => activeTurnState;
     const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => {
@@ -623,8 +608,10 @@ export class AgentHarness<
       try {
         return await runAgentLoop(
           messages,
-          this.createContext(turnState, beforeResult?.systemPrompt),
-          this.createLoopConfig(getTurnState, setTurnState),
+          this.createContext(turnState, options.systemPrompt),
+          this.createLoopConfig(getTurnState, setTurnState, {
+            skipInitialSteeringPoll: options.skipInitialSteeringPoll,
+          }),
           (event) => this.handleAgentEvent(event, abortController.signal),
           abortController.signal,
           this.createStreamFn(getTurnState),
@@ -654,9 +641,94 @@ export class AgentHarness<
           return message;
         }
       }
+      throw new AgentHarnessError('invalid_state', options.missingAssistantLabel);
+    } finally {
+      try {
+        await this.flushPendingSessionWrites();
+      } finally {
+        this.runAbortController = undefined;
+      }
+    }
+  }
+
+  private async executeTurn(
+    turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
+    text: string,
+    options?: { images?: ImageContent[] },
+  ): Promise<AssistantMessage> {
+    let messages: AgentMessage[] = [createUserMessage(text, options?.images)];
+    if (this.nextTurnQueue.length > 0) {
+      const queuedMessages = this.nextTurnQueue.splice(0);
+      try {
+        await this.emitQueueUpdate();
+      } catch (error) {
+        this.nextTurnQueue.unshift(...queuedMessages);
+        throw normalizeHookError(error);
+      }
+      messages = [...queuedMessages, messages[0]!];
+    }
+    const beforeResult = await this.emitHook({
+      type: 'before_agent_start',
+      prompt: text,
+      images: options?.images,
+      systemPrompt: turnState.systemPrompt,
+      resources: turnState.resources,
+    });
+    if (beforeResult?.messages) messages = [...messages, ...beforeResult.messages];
+
+    return await this.executePromptMessages(turnState, messages, {
+      systemPrompt: beforeResult?.systemPrompt,
+      missingAssistantLabel: 'AgentHarness prompt completed without an assistant message',
+    });
+  }
+
+  private async executeContinuation(
+    turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
+  ): Promise<AssistantMessage> {
+    let activeTurnState = turnState;
+    const abortController = new AbortController();
+    const getTurnState = () => activeTurnState;
+    const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => {
+      activeTurnState = nextTurnState;
+    };
+    this.runAbortController = abortController;
+    const runResultPromise = (async () => {
+      try {
+        return await runAgentLoopContinue(
+          this.createContext(turnState),
+          this.createLoopConfig(getTurnState, setTurnState),
+          (event) => this.handleAgentEvent(event, abortController.signal),
+          abortController.signal,
+          this.createStreamFn(getTurnState),
+        );
+      } catch (error) {
+        try {
+          return await this.emitRunFailure(
+            activeTurnState.model,
+            error,
+            abortController.signal.aborted,
+            abortController.signal,
+          );
+        } catch (failureError) {
+          const cause = new AggregateError(
+            [toError(error), toError(failureError)],
+            'Agent continuation failed and failure reporting failed',
+          );
+          throw new AgentHarnessError('unknown', cause.message, cause);
+        }
+      }
+    })();
+    try {
+      const newMessages = await runResultPromise;
+      for (let i = newMessages.length - 1; i >= 0; i--) {
+        const message = newMessages[i]!;
+        if (message.role === 'assistant') {
+          return message;
+        }
+      }
       throw new AgentHarnessError(
         'invalid_state',
-        'AgentHarness prompt completed without an assistant message',
+        'AgentHarness continue completed without an assistant message',
       );
     } finally {
       try {
@@ -674,6 +746,54 @@ export class AgentHarness<
     try {
       const turnState = await this.createTurnState();
       return await this.executeTurn(turnState, text, options);
+    } catch (error) {
+      this.phase = 'idle';
+      throw normalizeHarnessError(error, 'unknown');
+    } finally {
+      finishRunPromise();
+    }
+  }
+
+  async continue(): Promise<AssistantMessage> {
+    if (this.phase !== 'idle') throw new AgentHarnessError('busy', 'AgentHarness is busy');
+    this.phase = 'turn';
+    const finishRunPromise = this.startRunPromise();
+    try {
+      const turnState = await this.createTurnState();
+      const lastMessage = turnState.messages[turnState.messages.length - 1];
+      if (!lastMessage) {
+        throw new AgentHarnessError('invalid_state', 'No messages to continue from');
+      }
+      if (lastMessage.role === 'assistant') {
+        const queuedSteering = await this.drainQueuedMessages(
+          this.steerQueue,
+          this.steeringQueueMode,
+        );
+        if (queuedSteering.length > 0) {
+          return await this.executePromptMessages(turnState, queuedSteering, {
+            skipInitialSteeringPoll: true,
+            missingAssistantLabel:
+              'AgentHarness queued steering completed without an assistant message',
+          });
+        }
+
+        const queuedFollowUps = await this.drainQueuedMessages(
+          this.followUpQueue,
+          this.followUpQueueMode,
+        );
+        if (queuedFollowUps.length > 0) {
+          return await this.executePromptMessages(turnState, queuedFollowUps, {
+            missingAssistantLabel:
+              'AgentHarness queued follow-up completed without an assistant message',
+          });
+        }
+
+        throw new AgentHarnessError(
+          'invalid_state',
+          'Cannot continue from message role: assistant',
+        );
+      }
+      return await this.executeContinuation(turnState);
     } catch (error) {
       this.phase = 'idle';
       throw normalizeHarnessError(error, 'unknown');
@@ -801,8 +921,6 @@ export class AgentHarness<
         result.details,
         provided !== undefined,
       );
-      // 压缩后重置消息快照（下次 createTurnState 会重建）
-      this.lastTurnMessages = [];
       const entry = await this.session.getEntry(entryId);
       if (entry?.type === 'compaction') {
         await this.emitOwn({
@@ -946,15 +1064,14 @@ export class AgentHarness<
     return this.model;
   }
 
-  getMessages(): AgentMessage[] {
-    // 从 session 上下文构建获取消息
-    // 注意：此方法是同步的，返回最近一次 turnState 的消息快照
-    // 如需最新消息，应使用 session.buildContext()
-    return this.lastTurnMessages;
+  async getMessages(): Promise<AgentMessage[]> {
+    const context = await this.session.buildContext();
+    return context.messages;
   }
 
-  getContextUsage(): ContextUsageEstimate {
-    return estimateContextTokens(this.lastTurnMessages);
+  async getContextUsage(): Promise<ContextUsageEstimate> {
+    const context = await this.session.buildContext();
+    return estimateContextTokens(context.messages);
   }
 
   getThinkingLevel(): ThinkingLevel {
@@ -1097,9 +1214,7 @@ export class AgentHarness<
   }
 
   hasPendingMessages(): boolean {
-    return (
-      this.steerQueue.length > 0 || this.followUpQueue.length > 0 || this.nextTurnQueue.length > 0
-    );
+    return this.steerQueue.length > 0 || this.followUpQueue.length > 0;
   }
 
   getSignal(): AbortSignal | undefined {

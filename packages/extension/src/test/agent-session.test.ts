@@ -18,6 +18,7 @@ const {
   mockGetRetrySettings,
   mockHarnessSubscribe,
   mockHarnessPrompt,
+  mockHarnessContinue,
   mockHarnessAbort,
   mockHarnessSetModel,
   mockHarnessSetThinkingLevel,
@@ -46,6 +47,7 @@ const {
 } = vi.hoisted(() => {
   const mockHarnessSubscribe = vi.fn(() => vi.fn());
   const mockHarnessPrompt = vi.fn();
+  const mockHarnessContinue = vi.fn();
   const mockHarnessAbort = vi.fn();
   const mockHarnessSetModel = vi.fn();
   const mockHarnessSetThinkingLevel = vi.fn();
@@ -92,6 +94,7 @@ const {
   const MockAgentHarness = vi.fn(function (this: any) {
     this.subscribe = mockHarnessSubscribe;
     this.prompt = mockHarnessPrompt;
+    this.continue = mockHarnessContinue;
     this.abort = mockHarnessAbort;
     this.setModel = mockHarnessSetModel;
     this.setThinkingLevel = mockHarnessSetThinkingLevel;
@@ -129,6 +132,7 @@ const {
     mockGetRetrySettings: vi.fn(() => ({ enabled: true, maxRetries: 3, baseDelayMs: 2000 })),
     mockHarnessSubscribe,
     mockHarnessPrompt,
+    mockHarnessContinue,
     mockHarnessAbort,
     mockHarnessSetModel,
     mockHarnessSetThinkingLevel,
@@ -358,6 +362,10 @@ function getSubscribeCallback(): (event: any) => unknown {
 /** 等待微任务队列排空 */
 function flushMicrotasks(ms = 50): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runPostAgentLoop(agentSession: AgentSession): Promise<void> {
+  await (agentSession as any).runPostAgentLoop();
 }
 
 // ---------- 基础功能测试 ----------
@@ -591,6 +599,16 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession();
     await agentSession.abort();
     expect(mockHarnessAbort).toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('manual continue delegates to an explicit continuation prompt', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    await agentSession.continue();
+
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('Please continue.');
+    expect(mockHarnessContinue).not.toHaveBeenCalled();
     agentSession.dispose();
   });
 
@@ -1155,15 +1173,16 @@ describe('AgentSession — Auto Retry', () => {
     const callback = getSubscribeCallback();
     await agentSession.prompt('test');
 
-    // retry/compaction 决策在 agent_end 后执行（handlePostAgentEnd）
-    callback({
+    // retry/compaction 决策在 agent_end 后、harness.prompt 返回后执行
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('Error 429: Rate limit exceeded'),
     });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks();
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
     expect(events.some((e) => e.type === 'retry_start' && e.attempt === 1)).toBe(true);
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
     agentSession.dispose();
   });
 
@@ -1173,14 +1192,14 @@ describe('AgentSession — Auto Retry', () => {
     agentSession.subscribe((event) => events.push(event));
 
     const callback = getSubscribeCallback();
-    callback({
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage(
         'insufficient_quota: You have exceeded your billing limit',
       ),
     });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks();
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
     expect(events.some((e) => e.type === 'retry_start')).toBe(false);
     agentSession.dispose();
@@ -1192,8 +1211,8 @@ describe('AgentSession — Auto Retry', () => {
     agentSession.subscribe((event) => events.push(event));
 
     const callback = getSubscribeCallback();
-    // 溢出恢复在 message_end 时处理（不需要 agent_end）
-    callback({
+    // 溢出恢复不在 message_end 时处理
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('context_length_exceeded: too many tokens'),
     });
@@ -1217,6 +1236,7 @@ describe('AgentSession — Auto Retry', () => {
     expect(mockSessionMoveTo).not.toHaveBeenCalled();
     expect(mockHarnessCompact).not.toHaveBeenCalled();
     expect(mockHarnessPrompt).not.toHaveBeenCalledWith('Please continue.');
+    expect(mockHarnessContinue).not.toHaveBeenCalled();
 
     mockSessionGetBranch.mockResolvedValue([
       {
@@ -1236,10 +1256,12 @@ describe('AgentSession — Auto Retry', () => {
     ] as any);
 
     await callback({ type: 'agent_end', messages: [overflowMessage] });
+    await runPostAgentLoop(agentSession);
 
     expect(mockSessionMoveTo).toHaveBeenCalledWith('entry-user-1');
     expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
-    expect(mockHarnessPrompt).toHaveBeenCalledWith('Please continue.');
+    expect(mockHarnessPrompt).not.toHaveBeenCalledWith('Please continue.');
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
     agentSession.dispose();
   });
 
@@ -1251,12 +1273,12 @@ describe('AgentSession — Auto Retry', () => {
     agentSession.subscribe((event) => events.push(event));
 
     const callback = getSubscribeCallback();
-    callback({
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('Error 500: Internal server error'),
     });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks();
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
     expect(events.some((e) => e.type === 'retry_start')).toBe(false);
     agentSession.dispose();
@@ -1271,12 +1293,12 @@ describe('AgentSession — Auto Retry', () => {
     await agentSession.prompt('test');
 
     // 第一轮：error → agent_end 触发 retry
-    callback({
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('Error 503: Service unavailable'),
     });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks(50);
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
     // 第二轮：成功 → agent_end 触发 retry_end(success=true)
     const successMessage = {
@@ -1285,27 +1307,59 @@ describe('AgentSession — Auto Retry', () => {
       content: [{ type: 'text', text: 'Hello' }],
       timestamp: Date.now(),
     };
-    callback({ type: 'message_end', message: successMessage });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks();
+    await callback({ type: 'message_end', message: successMessage });
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
     expect(events.some((e) => e.type === 'retry_end' && e.success === true)).toBe(true);
     agentSession.dispose();
   });
 
-  it('re-prompts with last user message on retry', async () => {
+  it('continues from the previous user tail on retry', async () => {
     const agentSession = await makeInitializedAgentSession();
 
     const callback = getSubscribeCallback();
     await agentSession.prompt('my original question');
     mockHarnessPrompt.mockClear();
+    mockHarnessContinue.mockClear();
 
-    // retry 决策在 agent_end 后执行
-    callback({ type: 'message_end', message: makeErrorAssistantMessage('Error 502: Bad Gateway') });
-    callback({ type: 'agent_end' });
+    // retry 决策在 agent_end 后、harness.prompt 返回后执行
+    await callback({
+      type: 'message_end',
+      message: makeErrorAssistantMessage('Error 502: Bad Gateway'),
+    });
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
+
+    expect(mockHarnessPrompt).not.toHaveBeenCalledWith('my original question');
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+    agentSession.dispose();
+  });
+
+  it('keeps the session busy during retry delay', async () => {
+    mockGetRetrySettings.mockReturnValue({ enabled: true, maxRetries: 3, baseDelayMs: 5000 });
+
+    const agentSession = await makeInitializedAgentSession();
+    const callback = getSubscribeCallback();
+    await agentSession.prompt('test');
+    mockHarnessPrompt.mockClear();
+
+    await callback({
+      type: 'message_end',
+      message: makeErrorAssistantMessage('Error 500: Internal error'),
+    });
+    await callback({ type: 'agent_end' });
+    const postRunPromise = runPostAgentLoop(agentSession);
     await flushMicrotasks(50);
 
-    expect(mockHarnessPrompt).toHaveBeenCalledWith('my original question');
+    expect(agentSession.isStreaming).toBe(true);
+    await expect(agentSession.sendUserMessage('new prompt')).rejects.toThrow(
+      'deliverAs: "steer" or "followUp"',
+    );
+    expect(mockHarnessPrompt).not.toHaveBeenCalledWith('new prompt');
+
+    await agentSession.abortRetry();
+    await postRunPromise;
     agentSession.dispose();
   });
 
@@ -1320,14 +1374,16 @@ describe('AgentSession — Auto Retry', () => {
     await agentSession.prompt('test');
 
     // retry 决策在 agent_end 后触发
-    callback({
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('Error 500: Internal error'),
     });
-    callback({ type: 'agent_end' });
+    await callback({ type: 'agent_end' });
+    const postRunPromise = runPostAgentLoop(agentSession);
     await flushMicrotasks(50);
 
     await agentSession.abortRetry();
+    await postRunPromise;
     await flushMicrotasks(50);
 
     expect(
@@ -1360,26 +1416,26 @@ describe('AgentSession — Auto Retry', () => {
     await agentSession.prompt('test');
 
     // 每轮 message_end + agent_end 一起触发
-    callback({
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('Error 500: Server error'),
     });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks(50);
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
-    callback({
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('Error 500: Server error'),
     });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks(100);
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
-    callback({
+    await callback({
       type: 'message_end',
       message: makeErrorAssistantMessage('Error 500: Server error'),
     });
-    callback({ type: 'agent_end' });
-    await flushMicrotasks();
+    await callback({ type: 'agent_end' });
+    await runPostAgentLoop(agentSession);
 
     const retryEndEvents = events.filter((e) => e.type === 'retry_end');
     expect(retryEndEvents.length).toBeGreaterThan(0);

@@ -109,7 +109,7 @@ function makeContextActions(): ScoutExtensionContextActions {
     shutdown: vi.fn(),
     setModel: vi.fn(async () => {}),
     setThinkingLevel: vi.fn(async () => {}),
-    getContextUsage: vi.fn(() => undefined),
+    getContextUsage: vi.fn(async () => undefined),
     newSession: vi.fn(async () => ({ cancelled: false })),
     fork: vi.fn(async () => ({ cancelled: false })),
     switchSession: vi.fn(async () => ({ cancelled: false })),

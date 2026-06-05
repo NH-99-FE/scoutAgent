@@ -346,7 +346,7 @@ export class SessionManager implements vscode.Disposable {
     await this.agentSession?.abort();
   }
 
-  /** 无新用户消息续约对话，委托给 AgentSession.continue() */
+  /** 用户手动续写，委托给 AgentSession.continue() */
   async continue(): Promise<void> {
     await this.agentSession?.continue();
   }

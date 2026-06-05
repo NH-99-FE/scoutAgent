@@ -35,6 +35,7 @@ const {
 } = vi.hoisted(() => {
   const mockHarnessSubscribe = vi.fn(() => vi.fn());
   const mockHarnessPrompt = vi.fn();
+  const mockHarnessContinue = vi.fn();
   const mockHarnessAbort = vi.fn();
   const mockHarnessSetModel = vi.fn();
   const mockHarnessSetThinkingLevel = vi.fn();
@@ -72,6 +73,7 @@ const {
   const MockAgentHarness = vi.fn(function (this: any) {
     this.subscribe = mockHarnessSubscribe;
     this.prompt = mockHarnessPrompt;
+    this.continue = mockHarnessContinue;
     this.abort = mockHarnessAbort;
     this.setModel = mockHarnessSetModel;
     this.setThinkingLevel = mockHarnessSetThinkingLevel;

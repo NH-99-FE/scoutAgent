@@ -138,8 +138,9 @@ export class AgentSession implements vscode.Disposable {
   private unsubscribeHarness?: () => void;
   private unsubscribeExtensionHooks?: () => void;
 
-  /** 流式状态：只有 harness.prompt() 开始到 settled 事件之间为 true */
+  /** 流式/忙碌状态：覆盖 harness 运行和 agent_end 后的 retry/compaction 编排。 */
   private _isStreaming = false;
+  private isPostAgentProcessing = false;
 
   /** Retry 状态 */
   private retryAttempt = 0;
@@ -238,6 +239,7 @@ export class AgentSession implements vscode.Disposable {
       } else {
         await this.harness.prompt(text);
       }
+      await this.runPostAgentLoop();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.outputChannel.appendLine(`[scout] Prompt error: ${errorMessage}`);
@@ -258,8 +260,7 @@ export class AgentSession implements vscode.Disposable {
   }
 
   /**
-   * 无新用户消息续约对话（等价 Pi AgentSession.continue()）。
-   * Harness 层无独立 continue 接口，以固定续约提示触发。
+   * 用户手动续写：追加一个显式用户提示，避免从 assistant 尾消息直接续跑。
    * 注意：不重置 lastUserMessageText，保留原用户消息供 Auto Retry 使用。
    */
   async continue(): Promise<void> {
@@ -271,6 +272,7 @@ export class AgentSession implements vscode.Disposable {
       this._isStreaming = true;
       this.emit({ type: 'state_change' });
       await this.harness.prompt('Please continue.');
+      await this.runPostAgentLoop();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.outputChannel.appendLine(`[scout] Continue error: ${errorMessage}`);
@@ -279,9 +281,9 @@ export class AgentSession implements vscode.Disposable {
     }
   }
 
-  /** 获取当前上下文 token 用量估算（harness 空闲时基于最近一轮消息快照） */
-  getContextUsage(): ContextUsageEstimate | undefined {
-    return this.harness?.getContextUsage();
+  /** 获取当前上下文 token 用量估算（基于当前 session context） */
+  async getContextUsage(): Promise<ContextUsageEstimate | undefined> {
+    return await this.harness?.getContextUsage();
   }
 
   async setModel(modelId: string): Promise<void> {
@@ -879,9 +881,11 @@ export class AgentSession implements vscode.Disposable {
       }
     }
 
-    // settled：harness 空闲，重置流式状态
+    // settled：harness 空闲；若还有 agent_end 后处理，Session 仍保持 busy。
     if (type === 'settled') {
-      this._isStreaming = false;
+      if (!this.isPostAgentProcessing && !this.lastAssistantMessage) {
+        this._isStreaming = false;
+      }
       this.emit({ type: 'state_change' });
     }
 
@@ -908,8 +912,6 @@ export class AgentSession implements vscode.Disposable {
       // agent_end 后消息树稳定，统一重建缓存
       await this.rebuildCachedMessages();
       this.emit({ type: 'state_change' });
-      // 在消息树稳定后，集中处理 retry/compaction 决策（对齐 Pi _handlePostAgentRun 模式）
-      await this.handlePostAgentEnd();
     }
 
     // Compaction 事件
@@ -1053,14 +1055,14 @@ export class AgentSession implements vscode.Disposable {
 
   // ---------- 内部：Compaction ----------
 
-  private async checkCompaction(assistantMessage: AssistantMessage): Promise<void> {
-    if (!this.harness) return;
+  private async checkCompaction(assistantMessage: AssistantMessage): Promise<boolean> {
+    if (!this.harness) return false;
     const settings = this.configManager.getCompactionSettings();
-    if (!settings.enabled) return;
+    if (!settings.enabled) return false;
 
     const model = this.harness.getModel();
     const contextWindow = model.contextWindow;
-    if (!contextWindow) return;
+    if (!contextWindow) return false;
 
     // 问题 A：compaction 边界检查。
     // 若 assistant message 时间戳早于最近一次 compaction，跳过检查：
@@ -1071,7 +1073,7 @@ export class AgentSession implements vscode.Disposable {
     if (latestCompaction !== null) {
       const compactionTime = new Date(latestCompaction.timestamp).getTime();
       if (assistantMessage.timestamp <= compactionTime) {
-        return;
+        return false;
       }
     }
 
@@ -1082,12 +1084,12 @@ export class AgentSession implements vscode.Disposable {
       const context = await this.session.buildContext();
       const estimate = estimateContextTokens(context.messages);
       // 无任何 usage 数据时无法判断，跳过
-      if (estimate.lastUsageIndex === null) return;
+      if (estimate.lastUsageIndex === null) return false;
       // 验证 usage source 在最近 compaction 之后（防止 compaction 后误触发）
       if (latestCompaction !== null) {
         const usageMsg = context.messages[estimate.lastUsageIndex] as AssistantMessage | undefined;
         if (usageMsg && usageMsg.timestamp <= new Date(latestCompaction.timestamp).getTime()) {
-          return;
+          return false;
         }
       }
       contextTokens = estimate.tokens;
@@ -1096,8 +1098,9 @@ export class AgentSession implements vscode.Disposable {
     }
 
     if (shouldCompact(contextTokens, contextWindow, settings)) {
-      await this.runAutoCompaction('threshold');
+      return await this.runAutoCompaction('threshold');
     }
+    return false;
   }
 
   /**
@@ -1108,11 +1111,11 @@ export class AgentSession implements vscode.Disposable {
    *   3. 若 retry 成功 → 发出 retry_end(success=true)，再做 compaction 检查
    *   4. 无 retry → 直接做 compaction 检查
    */
-  private async handlePostAgentEnd(): Promise<void> {
+  private async handlePostAgentEnd(): Promise<boolean> {
     const assistant = this.lastAssistantMessage;
     this.lastAssistantMessage = undefined;
 
-    if (!assistant) return;
+    if (!assistant) return false;
 
     // Context overflow recovery must run after agent_end: the overflow message has been
     // persisted and the harness is idle, so removing it and compacting can succeed.
@@ -1122,30 +1125,18 @@ export class AgentSession implements vscode.Disposable {
         this.outputChannel.appendLine(
           '[scout] Overflow recovery failed after one attempt, stopping retry',
         );
-        return;
+        return false;
       }
       this.overflowRecoveryAttempted = true;
       // 移除 error message（不应留在 context 中）
       await this.removeLastAssistantMessage();
-      await this.runAutoCompaction('overflow', true);
-      return;
+      return await this.runAutoCompaction('overflow', true);
     }
 
     // Auto Retry
     if (this.isRetryableError(assistant)) {
       if (await this.prepareRetry(assistant)) {
-        // retry 已调度，等待下一轮 agent_end 后再判断 compaction
-        if (this.lastUserMessageText && this.harness) {
-          try {
-            this._isStreaming = true;
-            await this.harness.prompt(this.lastUserMessageText);
-          } catch (error) {
-            this.outputChannel.appendLine(
-              `[scout] Retry prompt error: ${error instanceof Error ? error.message : String(error)}`,
-            );
-          }
-        }
-        return; // 问题 E fix：retry 触发后跳过 compaction
+        return true; // 问题 E fix：retry 触发后跳过 compaction
       }
       // 超过最大重试次数
       this.emit({
@@ -1164,11 +1155,47 @@ export class AgentSession implements vscode.Disposable {
     }
 
     // 阈值压缩检查（非 retry 触发时执行）
-    await this.checkCompaction(assistant);
+    return await this.checkCompaction(assistant);
   }
 
-  private async runAutoCompaction(reason: string, willRetry = false): Promise<void> {
-    if (!this.harness) return;
+  private async runPostAgentLoop(): Promise<void> {
+    if (!this.lastAssistantMessage) {
+      this._isStreaming = false;
+      this.emit({ type: 'state_change' });
+      return;
+    }
+
+    this.isPostAgentProcessing = true;
+    this._isStreaming = true;
+    this.emit({ type: 'state_change' });
+
+    try {
+      while (await this.handlePostAgentEnd()) {
+        if (!this.harness) return;
+        try {
+          this._isStreaming = true;
+          this.emit({ type: 'state_change' });
+          await this.harness.continue();
+        } catch (error) {
+          this.outputChannel.appendLine(
+            `[scout] Continue error: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          this.emit({
+            type: 'error',
+            message: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
+      }
+    } finally {
+      this.isPostAgentProcessing = false;
+      this._isStreaming = false;
+      this.emit({ type: 'state_change' });
+    }
+  }
+
+  private async runAutoCompaction(reason: string, willRetry = false): Promise<boolean> {
+    if (!this.harness) return false;
     try {
       this.outputChannel.appendLine(`[scout] Running auto compaction: ${reason}`);
       await this.harness.compact();
@@ -1177,13 +1204,14 @@ export class AgentSession implements vscode.Disposable {
 
       if (willRetry) {
         this.outputChannel.appendLine('[scout] Retrying after overflow compaction');
-        this._isStreaming = true;
-        await this.harness.prompt('Please continue.');
+        return true;
       }
+      return this.harness.hasPendingMessages();
     } catch (error) {
       this.outputChannel.appendLine(
         `[scout] Compaction failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      return false;
     }
   }
 

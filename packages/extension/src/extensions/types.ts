@@ -440,7 +440,7 @@ export interface ScoutExtensionContext {
   /** 切换思考级别 */
   setThinkingLevel(level: string): Promise<void>;
   /** 获取当前上下文 token 用量估算 */
-  getContextUsage(): ContextUsageEstimate | undefined;
+  getContextUsage(): Promise<ContextUsageEstimate | undefined>;
   /** Start a new session. Post-replacement work must run inside withSession. */
   newSession(options?: SessionReplacementOptions): Promise<{ cancelled: boolean }>;
   /** Fork from a specific entry into a replacement session. */
@@ -578,7 +578,7 @@ export interface ScoutExtensionContextActions {
   shutdown: () => void;
   setModel: (modelId: string) => Promise<void>;
   setThinkingLevel: (level: string) => Promise<void>;
-  getContextUsage: () => ContextUsageEstimate | undefined;
+  getContextUsage: () => Promise<ContextUsageEstimate | undefined>;
   newSession: (options?: SessionReplacementOptions) => Promise<{ cancelled: boolean }>;
   fork: (
     entryId: string,

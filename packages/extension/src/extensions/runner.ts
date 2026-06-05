@@ -129,7 +129,8 @@ export class ScoutExtensionRunner {
   private shutdownFn: () => void = () => {};
   private setModelFn: (modelId: string) => Promise<void> = async () => {};
   private setThinkingLevelFn: (level: string) => Promise<void> = async () => {};
-  private getContextUsageFn: () => ContextUsageEstimate | undefined = () => undefined;
+  private getContextUsageFn: () => Promise<ContextUsageEstimate | undefined> = async () =>
+    undefined;
   private newSessionFn: ScoutExtensionContextActions['newSession'] = async () => ({
     cancelled: true,
   });
