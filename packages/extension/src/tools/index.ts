@@ -108,3 +108,4 @@ export {
   detectSupportedImageMimeType,
   detectSupportedImageMimeTypeFromFile,
 } from './shared/mime.ts';
+export { ensureTool, getToolPath } from './shared/tools-manager.ts';

@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { type Static, Type } from '@sinclair/typebox';
 import { pathExists, resolveToCwd } from './shared/path-utils.ts';
+import { ensureTool } from './shared/tools-manager.ts';
 import {
   DEFAULT_MAX_BYTES,
   formatSize,
@@ -113,7 +114,7 @@ export function createFindTool(
         };
         signal?.addEventListener('abort', onAbort, { once: true });
 
-        (() => {
+        (async () => {
           try {
             const searchPath = resolveToCwd(searchDir || '.', cwd);
             const effectiveLimit = limit ?? DEFAULT_LIMIT;
@@ -195,6 +196,16 @@ export function createFindTool(
 
             // ---------- 默认 fd 分支 ----------
 
+            const fdPath = await ensureTool('fd', true, { signal });
+            if (signal?.aborted) {
+              settle(() => reject(new Error('Operation aborted')));
+              return;
+            }
+            if (!fdPath) {
+              settle(() => reject(new Error('fd is not available and could not be downloaded')));
+              return;
+            }
+
             // 构建 fd 参数。--no-require-git 使 fd 在搜索路径不在 git 仓库内时
             // 也应用层级 .gitignore 语义，而不会像 --ignore-file（全局来源）那样
             // 泄漏兄弟目录规则。
@@ -218,7 +229,7 @@ export function createFindTool(
             }
             args.push('--', effectivePattern, searchPath);
 
-            const child = spawn('fd', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+            const child = spawn(fdPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
             const rl = createInterface({ input: child.stdout });
             let stderr = '';
             const lines: string[] = [];

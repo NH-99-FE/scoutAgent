@@ -61,4 +61,24 @@ describe('createGrepTool', () => {
       /not found/i,
     );
   });
+
+  it('does not continue after cancellation while ensuring rg', async () => {
+    vi.resetModules();
+    const controller = new AbortController();
+    const ensureTool = vi.fn(async () => {
+      controller.abort();
+      await Promise.resolve();
+      return 'rg';
+    });
+    vi.doMock('../../tools/shared/tools-manager.ts', () => ({ ensureTool }));
+    const { createGrepTool: createMockedGrepTool } = await import('../../tools/grep.ts');
+    const ops = makeGrepOps();
+    const tool = createMockedGrepTool('/test', { operations: ops });
+
+    await expect(tool.execute('tc1', { pattern: 'test' }, controller.signal)).rejects.toThrow(
+      /aborted/i,
+    );
+    expect(ensureTool).toHaveBeenCalledWith('rg', true, { signal: controller.signal });
+    expect(ops.isDirectory).not.toHaveBeenCalled();
+  });
 });

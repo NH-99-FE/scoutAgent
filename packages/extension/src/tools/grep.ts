@@ -10,6 +10,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { type Static, Type } from '@sinclair/typebox';
 import { resolveToCwd } from './shared/path-utils.ts';
+import { ensureTool } from './shared/tools-manager.ts';
 import {
   DEFAULT_MAX_BYTES,
   formatSize,
@@ -135,8 +136,17 @@ export function createGrepTool(
         // 立即执行异步逻辑，用 settle 防止重复 resolve/reject
         (async () => {
           try {
-            // Scout 直接使用 rg，假设已安装
-            const rgPath = 'rg';
+            const rgPath = await ensureTool('rg', true, { signal });
+            if (signal?.aborted) {
+              settle(() => reject(new Error('Operation aborted')));
+              return;
+            }
+            if (!rgPath) {
+              settle(() =>
+                reject(new Error('ripgrep (rg) is not available and could not be downloaded')),
+              );
+              return;
+            }
 
             const searchPath = resolveToCwd(searchDir || '.', cwd);
             const ops = customOps ?? defaultGrepOperations;
