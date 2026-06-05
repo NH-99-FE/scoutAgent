@@ -349,10 +349,10 @@ async function makeInitializedAgentSession(overrides?: {
 }
 
 /** 获取传递给 harness.subscribe() 的事件回调 */
-function getSubscribeCallback(): (event: any) => void {
+function getSubscribeCallback(): (event: any) => unknown {
   const lastCallIdx = mockHarnessSubscribe.mock.calls.length - 1;
   const calls = mockHarnessSubscribe.mock.calls as Array<Array<unknown>>;
-  return calls[lastCallIdx]![0] as (event: any) => void;
+  return calls[lastCallIdx]![0] as (event: any) => unknown;
 }
 
 /** 等待微任务队列排空 */
@@ -797,6 +797,194 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
+  it('forwards harness own lifecycle events from the subscriber path', async () => {
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderStreamOptions: vi.fn(),
+      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      emitAfterProviderResponse: vi.fn(),
+      emitMessageEnd: vi.fn(),
+      emit: vi.fn(),
+      invalidate: vi.fn(),
+    };
+
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+    const callback = getSubscribeCallback();
+
+    await callback({
+      type: 'after_provider_response',
+      status: 200,
+      headers: { 'x-test': 'yes' },
+    });
+    await callback({
+      type: 'model_select',
+      model: { id: 'next' },
+      previousModel: { id: 'prev' },
+      source: 'set',
+    });
+
+    expect(extensionRunner.emitAfterProviderResponse).toHaveBeenCalledWith({
+      type: 'after_provider_response',
+      status: 200,
+      headers: { 'x-test': 'yes' },
+    });
+    expect(extensionRunner.emit).toHaveBeenCalledWith({
+      type: 'model_select',
+      model: { id: 'next' },
+      previousModel: { id: 'prev' },
+      source: 'set',
+    });
+    expect(mockHarnessOn).not.toHaveBeenCalledWith('after_provider_response', expect.any(Function));
+    expect(mockHarnessOn).not.toHaveBeenCalledWith('model_select', expect.any(Function));
+    agentSession.dispose();
+  });
+
+  it('applies message_end replacements in place for later handlers', async () => {
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderStreamOptions: vi.fn(),
+      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      emitMessageEnd: vi.fn(async () => ({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'replacement' }],
+        timestamp: 123,
+        stopReason: 'stop',
+      })),
+      emit: vi.fn(),
+      invalidate: vi.fn(),
+    };
+
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+    const callback = getSubscribeCallback();
+    const message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'original' }],
+      timestamp: 1,
+      stopReason: 'stop',
+    };
+
+    await callback({ type: 'message_end', message });
+
+    expect(message).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'replacement' }],
+      timestamp: 123,
+      stopReason: 'stop',
+    });
+    agentSession.dispose();
+  });
+
+  it('does not clear message_end replacements when the handler returns the same object', async () => {
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderStreamOptions: vi.fn(),
+      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      emitMessageEnd: vi.fn(async (event) => {
+        event.message.content = [{ type: 'text', text: 'mutated in place' }];
+        return event.message;
+      }),
+      emit: vi.fn(),
+      invalidate: vi.fn(),
+    };
+
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+    const callback = getSubscribeCallback();
+    const message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'original' }],
+      timestamp: 1,
+      stopReason: 'stop',
+    };
+
+    await callback({ type: 'message_end', message });
+
+    expect(message).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'mutated in place' }],
+      timestamp: 1,
+      stopReason: 'stop',
+    });
+    agentSession.dispose();
+  });
+
+  it('returns the lifecycle promise to harness subscribers before message_end persistence', async () => {
+    let resolveReplacement!: () => void;
+    const replacementReady = new Promise<void>((resolve) => {
+      resolveReplacement = resolve;
+    });
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderStreamOptions: vi.fn(),
+      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      emitMessageEnd: vi.fn(async () => {
+        await replacementReady;
+        return {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'replacement' }],
+          timestamp: 123,
+          stopReason: 'stop',
+        };
+      }),
+      emit: vi.fn(),
+      invalidate: vi.fn(),
+    };
+
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+    const callback = getSubscribeCallback();
+    const message = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'original' }],
+      timestamp: 1,
+      stopReason: 'stop',
+    };
+
+    const lifecyclePromise = callback({ type: 'message_end', message });
+
+    expect(lifecyclePromise).toBeInstanceOf(Promise);
+    await Promise.resolve();
+    expect(message).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'original' }],
+      timestamp: 1,
+      stopReason: 'stop',
+    });
+
+    resolveReplacement();
+    await lifecyclePromise;
+
+    expect(message).toEqual({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'replacement' }],
+      timestamp: 123,
+      stopReason: 'stop',
+    });
+    agentSession.dispose();
+  });
+
   it('sendUserMessage prompts when idle and requires deliverAs while streaming', async () => {
     const agentSession = await makeInitializedAgentSession();
 
@@ -1012,6 +1200,46 @@ describe('AgentSession — Auto Retry', () => {
     await flushMicrotasks();
 
     expect(events.some((e) => e.type === 'retry_start')).toBe(false);
+    agentSession.dispose();
+  });
+
+  it('defers context overflow recovery until agent_end', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    const callback = getSubscribeCallback();
+    const userMessage = { role: 'user', content: 'hello', timestamp: Date.now() };
+    const overflowMessage = makeErrorAssistantMessage('context_length_exceeded: too many tokens');
+
+    await callback({
+      type: 'message_end',
+      message: overflowMessage,
+    });
+
+    expect(mockSessionMoveTo).not.toHaveBeenCalled();
+    expect(mockHarnessCompact).not.toHaveBeenCalled();
+    expect(mockHarnessPrompt).not.toHaveBeenCalledWith('Please continue.');
+
+    mockSessionGetBranch.mockResolvedValue([
+      {
+        type: 'message',
+        id: 'entry-user-1',
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        message: userMessage,
+      },
+      {
+        type: 'message',
+        id: 'entry-overflow-1',
+        parentId: 'entry-user-1',
+        timestamp: new Date().toISOString(),
+        message: overflowMessage,
+      },
+    ] as any);
+
+    await callback({ type: 'agent_end', messages: [overflowMessage] });
+
+    expect(mockSessionMoveTo).toHaveBeenCalledWith('entry-user-1');
+    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('Please continue.');
     agentSession.dispose();
   });
 

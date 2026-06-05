@@ -1,16 +1,20 @@
 // ============================================================
-// 扩展系统类型定义 — Scout 简化版
-// 扩展可：订阅 Agent 生命周期事件、注册 LLM 可调用工具
+// 扩展系统类型定义
+// Lifecycle 语义以 Pi extension API 为唯一来源。
 // ============================================================
 
-import type { Model, ImageContent, TextContent } from '@scout-agent/ai';
+import type { Model, ImageContent, TextContent, AssistantMessageEvent } from '@scout-agent/ai';
 import type {
   AgentMessage,
-  AgentHarnessStreamOptions,
-  AgentHarnessStreamOptionsPatch,
+  AgentHarnessResources,
   AgentToolResult,
   AgentToolUpdateCallback,
+  BranchSummaryEntry,
+  CompactionEntry,
   JsonlSessionMetadata,
+  Skill,
+  PromptTemplate,
+  ThinkingLevel,
   ToolExecutionMode,
 } from '@scout-agent/agent';
 import type {
@@ -52,28 +56,55 @@ export interface ScoutToolDefinition<TParams extends TSchema = TSchema, TDetails
 
 // ---------- 事件类型 ----------
 
-/** 扩展可监听的所有事件类型字符串 */
+export type InputSource = 'interactive' | 'rpc' | 'extension';
+export type ModelSelectSource = 'set' | 'cycle' | 'restore';
+
+/** 扩展可监听的所有事件类型字符串。 */
 export type ScoutExtensionEventType =
-  | 'before_agent_start'
-  | 'context'
-  | 'tool_call'
-  | 'tool_result'
-  | 'before_provider_request'
-  | 'before_provider_payload'
-  | 'session_before_compact'
-  | 'session_before_tree'
-  | 'session_before_fork'
+  | 'resources_discover'
+  | 'session_start'
   | 'session_before_switch'
+  | 'session_before_fork'
+  | 'session_before_compact'
+  | 'session_compact'
   | 'session_shutdown'
-  | 'session_start';
+  | 'session_before_tree'
+  | 'session_tree'
+  | 'context'
+  | 'before_provider_request'
+  | 'after_provider_response'
+  | 'before_agent_start'
+  | 'agent_start'
+  | 'agent_end'
+  | 'turn_start'
+  | 'turn_end'
+  | 'message_start'
+  | 'message_update'
+  | 'message_end'
+  | 'tool_execution_start'
+  | 'tool_execution_update'
+  | 'tool_execution_end'
+  | 'model_select'
+  | 'thinking_level_select'
+  | 'user_bash'
+  | 'input'
+  | 'tool_call'
+  | 'tool_result';
 
 // ---------- 事件定义 ----------
+
+export interface ResourcesDiscoverEvent {
+  type: 'resources_discover';
+  cwd: string;
+  reason: 'startup' | 'reload';
+}
 
 export interface BeforeAgentStartEvent {
   type: 'before_agent_start';
   prompt: string;
   images?: ImageContent[];
   systemPrompt: string;
+  resources?: AgentHarnessResources<Skill, PromptTemplate>;
 }
 
 export interface ContextEvent {
@@ -81,34 +112,15 @@ export interface ContextEvent {
   messages: AgentMessage[];
 }
 
-export interface ToolCallEvent {
-  type: 'tool_call';
-  toolCallId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-}
-
-export interface ToolResultEvent {
-  type: 'tool_result';
-  toolCallId: string;
-  toolName: string;
-  input: Record<string, unknown>;
-  content: Array<TextContent | ImageContent>;
-  details: unknown;
-  isError: boolean;
-}
-
 export interface BeforeProviderRequestEvent {
   type: 'before_provider_request';
-  model: Model<any>;
-  sessionId: string;
-  streamOptions: AgentHarnessStreamOptions;
+  payload: unknown;
 }
 
-export interface BeforeProviderPayloadEvent {
-  type: 'before_provider_payload';
-  model: Model<any>;
-  payload: unknown;
+export interface AfterProviderResponseEvent {
+  type: 'after_provider_response';
+  status: number;
+  headers: Record<string, string>;
 }
 
 export interface SessionBeforeCompactEvent {
@@ -123,6 +135,24 @@ export interface SessionBeforeTreeEvent {
   type: 'session_before_tree';
   preparation: TreePreparation;
   signal: AbortSignal;
+}
+
+export interface SessionCompactEvent {
+  type: 'session_compact';
+  compactionEntry: CompactionEntry;
+  fromExtension?: boolean;
+  /** Harness-native spelling. */
+  fromHook?: boolean;
+}
+
+export interface SessionTreeEvent {
+  type: 'session_tree';
+  newLeafId: string | null;
+  oldLeafId: string | null;
+  summaryEntry?: BranchSummaryEntry;
+  fromExtension?: boolean;
+  /** Harness-native spelling. */
+  fromHook?: boolean;
 }
 
 export interface SessionBeforeForkEvent {
@@ -149,22 +179,154 @@ export interface SessionStartEvent {
   previousSessionFile?: string;
 }
 
+export interface AgentStartEvent {
+  type: 'agent_start';
+}
+
+export interface AgentEndEvent {
+  type: 'agent_end';
+  messages: AgentMessage[];
+}
+
+export interface TurnStartEvent {
+  type: 'turn_start';
+  turnIndex?: number;
+  timestamp?: number;
+}
+
+export interface TurnEndEvent {
+  type: 'turn_end';
+  turnIndex?: number;
+  message: AgentMessage;
+  toolResults: AgentMessage[];
+}
+
+export interface MessageStartEvent {
+  type: 'message_start';
+  message: AgentMessage;
+}
+
+export interface MessageUpdateEvent {
+  type: 'message_update';
+  message: AgentMessage;
+  assistantMessageEvent: AssistantMessageEvent;
+}
+
+export interface MessageEndEvent {
+  type: 'message_end';
+  message: AgentMessage;
+}
+
+export interface ToolExecutionStartEvent {
+  type: 'tool_execution_start';
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+}
+
+export interface ToolExecutionUpdateEvent {
+  type: 'tool_execution_update';
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+  partialResult: unknown;
+}
+
+export interface ToolExecutionEndEvent {
+  type: 'tool_execution_end';
+  toolCallId: string;
+  toolName: string;
+  result: unknown;
+  isError: boolean;
+}
+
+export interface ModelSelectEvent {
+  type: 'model_select';
+  model: Model<any>;
+  previousModel: Model<any> | undefined;
+  source: ModelSelectSource;
+}
+
+export interface ThinkingLevelSelectEvent {
+  type: 'thinking_level_select';
+  level: ThinkingLevel;
+  previousLevel: ThinkingLevel;
+}
+
+export interface UserBashEvent {
+  type: 'user_bash';
+  command: string;
+  excludeFromContext: boolean;
+  cwd: string;
+}
+
+export interface InputEvent {
+  type: 'input';
+  text: string;
+  images?: ImageContent[];
+  source: InputSource;
+}
+
+/**
+ * Fired before a tool executes. `input` is mutable: mutate in place to patch
+ * arguments before execution. Later handlers observe earlier mutations.
+ */
+export interface ToolCallEvent {
+  type: 'tool_call';
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResultEvent {
+  type: 'tool_result';
+  toolCallId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  content: Array<TextContent | ImageContent>;
+  details: unknown;
+  isError: boolean;
+}
+
 /** 所有扩展事件联合类型 */
 export type ScoutExtensionEvent =
+  | ResourcesDiscoverEvent
   | BeforeAgentStartEvent
   | ContextEvent
-  | ToolCallEvent
-  | ToolResultEvent
   | BeforeProviderRequestEvent
-  | BeforeProviderPayloadEvent
+  | AfterProviderResponseEvent
   | SessionBeforeCompactEvent
+  | SessionCompactEvent
   | SessionBeforeTreeEvent
+  | SessionTreeEvent
   | SessionBeforeForkEvent
   | SessionBeforeSwitchEvent
   | SessionShutdownEvent
-  | SessionStartEvent;
+  | SessionStartEvent
+  | AgentStartEvent
+  | AgentEndEvent
+  | TurnStartEvent
+  | TurnEndEvent
+  | MessageStartEvent
+  | MessageUpdateEvent
+  | MessageEndEvent
+  | ToolExecutionStartEvent
+  | ToolExecutionUpdateEvent
+  | ToolExecutionEndEvent
+  | ModelSelectEvent
+  | ThinkingLevelSelectEvent
+  | UserBashEvent
+  | InputEvent
+  | ToolCallEvent
+  | ToolResultEvent;
 
 // ---------- 事件结果 ----------
+
+export interface ResourcesDiscoverResult {
+  skillPaths?: string[];
+  promptPaths?: string[];
+  themePaths?: string[];
+}
 
 export interface BeforeAgentStartEventResult {
   message?: AgentMessage;
@@ -184,12 +346,23 @@ export interface ToolResultEventResult {
   content?: Array<TextContent | ImageContent>;
   details?: unknown;
   isError?: boolean;
-  terminate?: boolean;
 }
 
-export interface BeforeProviderRequestEventResult {
-  streamOptions?: AgentHarnessStreamOptionsPatch;
+export type BeforeProviderRequestEventResult = unknown;
+
+export interface MessageEndEventResult {
+  message?: AgentMessage;
 }
+
+export interface UserBashEventResult {
+  operations?: unknown;
+  result?: unknown;
+}
+
+export type InputEventResult =
+  | { action: 'continue' }
+  | { action: 'transform'; text: string; images?: ImageContent[] }
+  | { action: 'handled' };
 
 export interface SessionBeforeCompactResult {
   cancel?: boolean;

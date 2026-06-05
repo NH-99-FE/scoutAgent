@@ -1,12 +1,17 @@
 // ============================================================
 // ScoutExtensionRunner — 事件分发、工具收集、bindCore
-// 从 Pi ExtensionRunner 简化：去除 UI/commands/flags/shortcuts/providers
+// Lifecycle reducer 语义以 Pi ExtensionRunner 为来源。
 // ============================================================
 
 import type { Model } from '@scout-agent/ai';
-import type { AgentMessage, ContextUsageEstimate } from '@scout-agent/agent';
+import type {
+  AgentMessage,
+  ContextUsageEstimate,
+  AgentHarnessStreamOptionsPatch,
+} from '@scout-agent/agent';
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from './types.ts';
 import type {
+  AfterProviderResponseEvent,
   ScoutExtension,
   ScoutExtensionActions,
   ScoutExtensionContext,
@@ -22,8 +27,13 @@ import type {
   ToolResultEvent,
   ToolResultEventResult,
   BeforeProviderRequestEvent,
-  BeforeProviderRequestEventResult,
-  BeforeProviderPayloadEvent,
+  MessageEndEvent,
+  MessageEndEventResult,
+  InputEvent,
+  InputEventResult,
+  InputSource,
+  ResourcesDiscoverEvent,
+  ResourcesDiscoverResult,
   SessionBeforeCompactEvent,
   SessionBeforeCompactResult,
   SessionBeforeTreeEvent,
@@ -34,6 +44,7 @@ import type {
   SessionBeforeSwitchResult,
   SessionShutdownEvent,
   SessionStartEvent,
+  ScoutExtensionEvent,
   RegisteredTool,
 } from './types.ts';
 import type { ConfigManager } from '../config-manager.ts';
@@ -48,6 +59,53 @@ export type ScoutExtensionErrorListener = (error: ScoutExtensionError) => void;
 interface BeforeAgentStartCombinedResult {
   messages?: NonNullable<BeforeAgentStartEventResult['message']>[];
   systemPrompt?: string;
+}
+
+type RunnerEmitEvent = Exclude<
+  ScoutExtensionEvent,
+  | ToolCallEvent
+  | ToolResultEvent
+  | ContextEvent
+  | BeforeProviderRequestEvent
+  | BeforeAgentStartEvent
+  | MessageEndEvent
+  | ResourcesDiscoverEvent
+  | InputEvent
+>;
+
+type SessionBeforeEvent = Extract<
+  RunnerEmitEvent,
+  {
+    type:
+      | 'session_before_switch'
+      | 'session_before_fork'
+      | 'session_before_compact'
+      | 'session_before_tree';
+  }
+>;
+
+type SessionBeforeEventResult =
+  | SessionBeforeSwitchResult
+  | SessionBeforeForkResult
+  | SessionBeforeCompactResult
+  | SessionBeforeTreeResult;
+
+type RunnerEmitResult<TEvent extends RunnerEmitEvent> = TEvent extends {
+  type: 'session_before_switch';
+}
+  ? SessionBeforeSwitchResult | undefined
+  : TEvent extends { type: 'session_before_fork' }
+    ? SessionBeforeForkResult | undefined
+    : TEvent extends { type: 'session_before_compact' }
+      ? SessionBeforeCompactResult | undefined
+      : TEvent extends { type: 'session_before_tree' }
+        ? SessionBeforeTreeResult | undefined
+        : undefined;
+
+interface ResourcesDiscoverCombinedResult {
+  skillPaths: Array<{ path: string; extensionPath: string }>;
+  promptPaths: Array<{ path: string; extensionPath: string }>;
+  themePaths: Array<{ path: string; extensionPath: string }>;
 }
 
 // ---------- ScoutExtensionRunner ----------
@@ -278,6 +336,42 @@ export class ScoutExtensionRunner {
 
   // ---------- 事件分发 ----------
 
+  private isSessionBeforeEvent(event: RunnerEmitEvent): event is SessionBeforeEvent {
+    return (
+      event.type === 'session_before_switch' ||
+      event.type === 'session_before_fork' ||
+      event.type === 'session_before_compact' ||
+      event.type === 'session_before_tree'
+    );
+  }
+
+  async emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>> {
+    const ctx = this.createContext();
+    let result: SessionBeforeEventResult | undefined;
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get(event.type);
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const handlerResult = await handler(event, ctx);
+
+          if (this.isSessionBeforeEvent(event) && handlerResult) {
+            result = handlerResult as SessionBeforeEventResult;
+            if (result.cancel) {
+              return result as RunnerEmitResult<TEvent>;
+            }
+          }
+        } catch (err) {
+          this.emitHandlerError(ext.path, event.type, err);
+        }
+      }
+    }
+
+    return result as RunnerEmitResult<TEvent>;
+  }
+
   /**
    * before_agent_start：收集所有 messages + 最后一个 systemPrompt
    */
@@ -333,6 +427,122 @@ export class ScoutExtensionRunner {
     return undefined;
   }
 
+  async emitResourcesDiscover(
+    cwd: string,
+    reason: ResourcesDiscoverEvent['reason'],
+  ): Promise<ResourcesDiscoverCombinedResult> {
+    const ctx = this.createContext();
+    const skillPaths: Array<{ path: string; extensionPath: string }> = [];
+    const promptPaths: Array<{ path: string; extensionPath: string }> = [];
+    const themePaths: Array<{ path: string; extensionPath: string }> = [];
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('resources_discover');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const event: ResourcesDiscoverEvent = { type: 'resources_discover', cwd, reason };
+          const result = (await handler(event, ctx)) as ResourcesDiscoverResult | undefined;
+
+          if (result?.skillPaths?.length) {
+            skillPaths.push(
+              ...result.skillPaths.map((path) => ({ path, extensionPath: ext.path })),
+            );
+          }
+          if (result?.promptPaths?.length) {
+            promptPaths.push(
+              ...result.promptPaths.map((path) => ({ path, extensionPath: ext.path })),
+            );
+          }
+          if (result?.themePaths?.length) {
+            themePaths.push(
+              ...result.themePaths.map((path) => ({ path, extensionPath: ext.path })),
+            );
+          }
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'resources_discover', err);
+        }
+      }
+    }
+
+    return { skillPaths, promptPaths, themePaths };
+  }
+
+  async emitInput(
+    text: string,
+    images: InputEvent['images'],
+    source: InputSource,
+  ): Promise<InputEventResult> {
+    const ctx = this.createContext();
+    let currentText = text;
+    let currentImages = images;
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('input');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const event: InputEvent = {
+            type: 'input',
+            text: currentText,
+            images: currentImages,
+            source,
+          };
+          const result = (await handler(event, ctx)) as InputEventResult | undefined;
+          if (result?.action === 'handled') return result;
+          if (result?.action === 'transform') {
+            currentText = result.text;
+            currentImages = result.images ?? currentImages;
+          }
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'input', err);
+        }
+      }
+    }
+
+    if (currentText !== text || currentImages !== images) {
+      return { action: 'transform', text: currentText, images: currentImages };
+    }
+    return { action: 'continue' };
+  }
+
+  async emitMessageEnd(event: MessageEndEvent): Promise<AgentMessage | undefined> {
+    const ctx = this.createContext();
+    let currentMessage = event.message;
+    let modified = false;
+
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('message_end');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const currentEvent: MessageEndEvent = { ...event, message: currentMessage };
+          const result = (await handler(currentEvent, ctx)) as MessageEndEventResult | undefined;
+          if (!result?.message) continue;
+
+          if (result.message.role !== currentMessage.role) {
+            this.emitError({
+              extensionPath: ext.path,
+              event: 'message_end',
+              error: 'message_end handlers must return a message with the same role',
+            });
+            continue;
+          }
+
+          currentMessage = result.message;
+          modified = true;
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'message_end', err);
+        }
+      }
+    }
+
+    return modified ? currentMessage : undefined;
+  }
+
   /**
    * context：最后返回的 messages 胜出
    */
@@ -366,25 +576,23 @@ export class ScoutExtensionRunner {
    */
   async emitToolCall(event: ToolCallEvent): Promise<ToolCallEventResult | undefined> {
     const ctx = this.createContext();
+    let result: ToolCallEventResult | undefined;
 
     for (const ext of this.extensions) {
       const handlers = ext.handlers.get('tool_call');
       if (!handlers || handlers.length === 0) continue;
 
       for (const handler of handlers) {
-        try {
-          const handlerResult = (await handler(event, ctx)) as ToolCallEventResult | undefined;
+        const handlerResult = (await handler(event, ctx)) as ToolCallEventResult | undefined;
 
-          if (handlerResult?.block) {
-            return handlerResult;
-          }
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'tool_call', err);
+        if (handlerResult) {
+          result = handlerResult;
+          if (result.block) return result;
         }
       }
     }
 
-    return undefined;
+    return result;
   }
 
   /**
@@ -430,18 +638,18 @@ export class ScoutExtensionRunner {
       content: currentEvent.content,
       details: currentEvent.details,
       isError: currentEvent.isError,
-      terminate: (event as ToolResultEvent & { terminate?: boolean }).terminate,
     };
   }
 
-  /**
-   * before_provider_request：传递事件，扩展可修改 streamOptions
-   */
-  async emitBeforeProviderRequest(
-    event: BeforeProviderRequestEvent,
-  ): Promise<BeforeProviderRequestEventResult | undefined> {
+  async emitBeforeProviderRequest(payloadOrEvent: unknown): Promise<unknown> {
     const ctx = this.createContext();
-    let result: BeforeProviderRequestEventResult | undefined;
+    let currentPayload =
+      payloadOrEvent &&
+      typeof payloadOrEvent === 'object' &&
+      (payloadOrEvent as { type?: unknown }).type === 'before_provider_request' &&
+      'payload' in payloadOrEvent
+        ? (payloadOrEvent as BeforeProviderRequestEvent).payload
+        : payloadOrEvent;
 
     for (const ext of this.extensions) {
       const handlers = ext.handlers.get('before_provider_request');
@@ -449,23 +657,60 @@ export class ScoutExtensionRunner {
 
       for (const handler of handlers) {
         try {
-          const handlerResult = (await handler(event, ctx)) as
-            | BeforeProviderRequestEventResult
-            | undefined;
-          if (handlerResult) result = handlerResult;
+          const event: BeforeProviderRequestEvent = {
+            type: 'before_provider_request',
+            payload: currentPayload,
+          };
+          const handlerResult = await handler(event, ctx);
+          if (handlerResult !== undefined) {
+            currentPayload = handlerResult;
+          }
         } catch (err) {
           this.emitHandlerError(ext.path, 'before_provider_request', err);
         }
       }
     }
 
-    return result;
+    return currentPayload;
+  }
+
+  async emitAfterProviderResponse(event: AfterProviderResponseEvent): Promise<void> {
+    await this.emit(event);
   }
 
   /**
-   * before_provider_payload：传递事件，扩展可修改 payload
+   * Scout harness still has a separate stream-options hook. It is intentionally
+   * not part of the Pi lifecycle surface.
    */
-  async emitBeforeProviderPayload(event: BeforeProviderPayloadEvent): Promise<unknown> {
+  async emitBeforeProviderStreamOptions(event: {
+    type: 'before_provider_stream_options';
+    streamOptions: unknown;
+  }): Promise<{ streamOptions?: AgentHarnessStreamOptionsPatch } | undefined> {
+    const ctx = this.createContext();
+    let streamOptions: AgentHarnessStreamOptionsPatch | undefined;
+    for (const ext of this.extensions) {
+      const handlers = ext.handlers.get('before_provider_stream_options');
+      if (!handlers || handlers.length === 0) continue;
+
+      for (const handler of handlers) {
+        try {
+          const result = (await handler(event, ctx)) as
+            | { streamOptions?: AgentHarnessStreamOptionsPatch }
+            | undefined;
+          if (result?.streamOptions) streamOptions = { ...streamOptions, ...result.streamOptions };
+        } catch (err) {
+          this.emitHandlerError(ext.path, 'before_provider_stream_options', err);
+        }
+      }
+    }
+
+    return streamOptions ? { streamOptions } : undefined;
+  }
+
+  /**
+   * Compatibility shim for Scout's old payload hook name.
+   */
+  async emitBeforeProviderPayload(event: { model?: unknown; payload: unknown }): Promise<unknown> {
     const ctx = this.createContext();
     let currentPayload = event.payload;
 
@@ -475,9 +720,12 @@ export class ScoutExtensionRunner {
 
       for (const handler of handlers) {
         try {
-          const handlerResult = await handler({ ...event, payload: currentPayload }, ctx);
-          if (handlerResult !== undefined) {
-            currentPayload = handlerResult;
+          const result = await handler(
+            { type: 'before_provider_payload', model: event.model, payload: currentPayload },
+            ctx,
+          );
+          if (result !== undefined) {
+            currentPayload = result;
           }
         } catch (err) {
           this.emitHandlerError(ext.path, 'before_provider_payload', err);
@@ -485,7 +733,7 @@ export class ScoutExtensionRunner {
       }
     }
 
-    return currentPayload;
+    return this.emitBeforeProviderRequest(currentPayload);
   }
 
   /**
@@ -494,30 +742,7 @@ export class ScoutExtensionRunner {
   async emitSessionBeforeCompact(
     event: SessionBeforeCompactEvent,
   ): Promise<SessionBeforeCompactResult | undefined> {
-    const ctx = this.createContext();
-    let result: SessionBeforeCompactResult | undefined;
-
-    for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('session_before_compact');
-      if (!handlers || handlers.length === 0) continue;
-
-      for (const handler of handlers) {
-        try {
-          const handlerResult = (await handler(event, ctx)) as
-            | SessionBeforeCompactResult
-            | undefined;
-
-          if (handlerResult) {
-            result = handlerResult;
-            if (result.cancel) return result;
-          }
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'session_before_compact', err);
-        }
-      }
-    }
-
-    return result;
+    return this.emit(event);
   }
 
   /**
@@ -526,28 +751,7 @@ export class ScoutExtensionRunner {
   async emitSessionBeforeTree(
     event: SessionBeforeTreeEvent,
   ): Promise<SessionBeforeTreeResult | undefined> {
-    const ctx = this.createContext();
-    let result: SessionBeforeTreeResult | undefined;
-
-    for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('session_before_tree');
-      if (!handlers || handlers.length === 0) continue;
-
-      for (const handler of handlers) {
-        try {
-          const handlerResult = (await handler(event, ctx)) as SessionBeforeTreeResult | undefined;
-
-          if (handlerResult) {
-            result = handlerResult;
-            if (result.cancel) return result;
-          }
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'session_before_tree', err);
-        }
-      }
-    }
-
-    return result;
+    return this.emit(event);
   }
 
   /**
@@ -556,28 +760,7 @@ export class ScoutExtensionRunner {
   async emitSessionBeforeFork(
     event: SessionBeforeForkEvent,
   ): Promise<SessionBeforeForkResult | undefined> {
-    const ctx = this.createContext();
-    let result: SessionBeforeForkResult | undefined;
-
-    for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('session_before_fork');
-      if (!handlers || handlers.length === 0) continue;
-
-      for (const handler of handlers) {
-        try {
-          const handlerResult = (await handler(event, ctx)) as SessionBeforeForkResult | undefined;
-
-          if (handlerResult) {
-            result = handlerResult;
-            if (result.cancel) return result;
-          }
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'session_before_fork', err);
-        }
-      }
-    }
-
-    return result;
+    return this.emit(event);
   }
 
   /**
@@ -586,70 +769,46 @@ export class ScoutExtensionRunner {
   async emitSessionBeforeSwitch(
     event: SessionBeforeSwitchEvent,
   ): Promise<SessionBeforeSwitchResult | undefined> {
-    const ctx = this.createContext();
-    let result: SessionBeforeSwitchResult | undefined;
-
-    for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('session_before_switch');
-      if (!handlers || handlers.length === 0) continue;
-
-      for (const handler of handlers) {
-        try {
-          const handlerResult = (await handler(event, ctx)) as
-            | SessionBeforeSwitchResult
-            | undefined;
-
-          if (handlerResult) {
-            result = handlerResult;
-            if (result.cancel) return result;
-          }
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'session_before_switch', err);
-        }
-      }
-    }
-
-    return result;
+    return this.emit(event);
   }
 
   /**
    * session_shutdown：通知所有扩展
    */
   async emitSessionShutdown(event: SessionShutdownEvent): Promise<void> {
-    const ctx = this.createContext();
-
-    for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('session_shutdown');
-      if (!handlers || handlers.length === 0) continue;
-
-      for (const handler of handlers) {
-        try {
-          await handler(event, ctx);
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'session_shutdown', err);
-        }
-      }
-    }
+    await this.emit(event);
   }
 
   /**
    * session_start：通知所有扩展新 session runtime 已绑定
    */
   async emitSessionStart(event: SessionStartEvent): Promise<void> {
+    await this.emit(event);
+  }
+
+  async emitUserBash(event: {
+    type: 'user_bash';
+    command: string;
+    excludeFromContext: boolean;
+    cwd: string;
+  }): Promise<unknown | undefined> {
     const ctx = this.createContext();
 
     for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('session_start');
+      const handlers = ext.handlers.get('user_bash');
       if (!handlers || handlers.length === 0) continue;
 
       for (const handler of handlers) {
         try {
-          await handler(event, ctx);
+          const result = await handler(event, ctx);
+          if (result) return result;
         } catch (err) {
-          this.emitHandlerError(ext.path, 'session_start', err);
+          this.emitHandlerError(ext.path, 'user_bash', err);
         }
       }
     }
+
+    return undefined;
   }
 
   // ---------- 内部辅助 ----------

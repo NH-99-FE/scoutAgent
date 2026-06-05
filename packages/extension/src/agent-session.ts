@@ -855,14 +855,12 @@ export class AgentSession implements vscode.Disposable {
 
   private subscribeToHarness(): () => void {
     if (!this.harness) return () => {};
-    return this.harness.subscribe((event: AgentHarnessEvent) => {
-      (() => {
-        this.handleHarnessEvent(event);
-      })();
-    });
+    return this.harness.subscribe((event: AgentHarnessEvent) => this.handleHarnessEvent(event));
   }
 
   private async handleHarnessEvent(event: AgentHarnessEvent): Promise<void> {
+    await this.emitExtensionLifecycleEvent(event);
+
     // 映射为 ScoutAgentEvent（仅 AgentEvent 子集可映射）
     if (isAgentEvent(event)) {
       const scoutEvent = mapAgentEventToScout(event);
@@ -897,34 +895,12 @@ export class AgentSession implements vscode.Disposable {
       this.emit({ type: 'state_change' });
     }
 
-    // message_end：记录最后一条 assistant message 供 agent_end 决策；处理溢出恢复（需立即重入 harness）
+    // message_end：只记录最后一条 assistant message，实际 retry/compaction 等到 agent_end 后处理。
+    // 此时 harness 仍在 turn 内，且 message_end 可能尚未持久化，不能在这里重入 harness。
     if (type === 'message_end') {
       const message = (event as { message?: AgentMessage }).message;
       if (message?.role === 'assistant') {
-        const assistant = message as AssistantMessage;
-
-        // 溢出恢复在 message_end 立即处理（需在下一条用户消息前 compact-and-retry）
-        if (assistant.errorMessage) {
-          const errMsg = assistant.errorMessage.toLowerCase();
-          if (errMsg.includes('context_length_exceeded') || errMsg.includes('context_window')) {
-            if (this.overflowRecoveryAttempted) {
-              // 已尝试过一次 compact-and-retry 仍然 overflow，停止重试防止无限循环
-              this.outputChannel.appendLine(
-                '[scout] Overflow recovery failed after one attempt, stopping retry',
-              );
-              return;
-            }
-            this.overflowRecoveryAttempted = true;
-            // 移除 error message（不应留在 context 中）
-            await this.removeLastAssistantMessage();
-            await this.runAutoCompaction('overflow', true);
-            return;
-          }
-        }
-
-        // 记录最后一条 assistant message，供 agent_end 后的 retry/compaction 决策
-        // 溢出情况已提前 return，此处只记录非溢出消息
-        this.lastAssistantMessage = assistant;
+        this.lastAssistantMessage = message as AssistantMessage;
       }
     }
 
@@ -948,6 +924,131 @@ export class AgentSession implements vscode.Disposable {
       this.emit({ type: 'state_change' });
       this.emit({ type: 'tree_change' });
     }
+  }
+
+  private async emitExtensionLifecycleEvent(event: AgentHarnessEvent): Promise<void> {
+    if (!this.extensionRunner) return;
+    const runner = this.extensionRunner;
+    const type = (event as { type: string }).type;
+
+    if (type === 'agent_start') {
+      await runner.emit({ type: 'agent_start' });
+    } else if (type === 'agent_end') {
+      await runner.emit({
+        type: 'agent_end',
+        messages: (event as { messages: AgentMessage[] }).messages,
+      });
+    } else if (type === 'turn_start') {
+      await runner.emit({ type: 'turn_start', timestamp: Date.now() });
+    } else if (type === 'turn_end') {
+      const turnEnd = event as { message: AgentMessage; toolResults: AgentMessage[] };
+      await runner.emit({
+        type: 'turn_end',
+        message: turnEnd.message,
+        toolResults: turnEnd.toolResults,
+      });
+    } else if (type === 'message_start') {
+      await runner.emit({
+        type: 'message_start',
+        message: (event as { message: AgentMessage }).message,
+      });
+    } else if (type === 'message_update') {
+      const messageUpdate = event as { message: AgentMessage; assistantMessageEvent: any };
+      await runner.emit({
+        type: 'message_update',
+        message: messageUpdate.message,
+        assistantMessageEvent: messageUpdate.assistantMessageEvent,
+      });
+    } else if (type === 'message_end') {
+      const messageEvent = event as { message: AgentMessage };
+      const replacement = await runner.emitMessageEnd({
+        type: 'message_end',
+        message: messageEvent.message,
+      });
+      if (replacement) this.replaceMessageInPlace(messageEvent.message, replacement);
+    } else if (type === 'tool_execution_start') {
+      const toolEvent = event as { toolCallId: string; toolName: string; args: unknown };
+      await runner.emit({
+        type: 'tool_execution_start',
+        toolCallId: toolEvent.toolCallId,
+        toolName: toolEvent.toolName,
+        args: toolEvent.args,
+      });
+    } else if (type === 'tool_execution_update') {
+      const toolEvent = event as {
+        toolCallId: string;
+        toolName: string;
+        args: unknown;
+        partialResult: unknown;
+      };
+      await runner.emit({
+        type: 'tool_execution_update',
+        toolCallId: toolEvent.toolCallId,
+        toolName: toolEvent.toolName,
+        args: toolEvent.args,
+        partialResult: toolEvent.partialResult,
+      });
+    } else if (type === 'tool_execution_end') {
+      const toolEvent = event as {
+        toolCallId: string;
+        toolName: string;
+        result: unknown;
+        isError: boolean;
+      };
+      await runner.emit({
+        type: 'tool_execution_end',
+        toolCallId: toolEvent.toolCallId,
+        toolName: toolEvent.toolName,
+        result: toolEvent.result,
+        isError: toolEvent.isError,
+      });
+    } else if (type === 'after_provider_response') {
+      const providerEvent = event as { status: number; headers: Record<string, string> };
+      await runner.emitAfterProviderResponse({
+        type: 'after_provider_response',
+        status: providerEvent.status,
+        headers: providerEvent.headers,
+      });
+    } else if (type === 'session_compact') {
+      const compactEvent = event as { compactionEntry: CompactionEntry; fromHook: boolean };
+      await runner.emit({
+        type: 'session_compact',
+        compactionEntry: compactEvent.compactionEntry,
+        fromHook: compactEvent.fromHook,
+        fromExtension: compactEvent.fromHook,
+      });
+    } else if (type === 'session_tree') {
+      const treeEvent = event as {
+        newLeafId: string | null;
+        oldLeafId: string | null;
+        summaryEntry?: BranchSummaryEntry;
+        fromHook?: boolean;
+      };
+      await runner.emit({
+        type: 'session_tree',
+        newLeafId: treeEvent.newLeafId,
+        oldLeafId: treeEvent.oldLeafId,
+        summaryEntry: treeEvent.summaryEntry,
+        fromHook: treeEvent.fromHook,
+        fromExtension: treeEvent.fromHook,
+      });
+    } else if (type === 'model_select') {
+      await runner.emit(event as Parameters<typeof runner.emit>[0] & { type: 'model_select' });
+    } else if (type === 'thinking_level_select') {
+      await runner.emit(
+        event as Parameters<typeof runner.emit>[0] & { type: 'thinking_level_select' },
+      );
+    }
+  }
+
+  private replaceMessageInPlace(target: AgentMessage, replacement: AgentMessage): void {
+    if (target === replacement) return;
+    const snapshot = structuredClone(replacement);
+    const mutableTarget = target as unknown as Record<string, unknown>;
+    for (const key of Object.keys(mutableTarget)) {
+      delete mutableTarget[key];
+    }
+    Object.assign(mutableTarget, snapshot);
   }
 
   // ---------- 内部：Compaction ----------
@@ -1013,6 +1114,23 @@ export class AgentSession implements vscode.Disposable {
 
     if (!assistant) return;
 
+    // Context overflow recovery must run after agent_end: the overflow message has been
+    // persisted and the harness is idle, so removing it and compacting can succeed.
+    if (this.isContextOverflowError(assistant)) {
+      if (this.overflowRecoveryAttempted) {
+        // 已尝试过一次 compact-and-retry 仍然 overflow，停止重试防止无限循环
+        this.outputChannel.appendLine(
+          '[scout] Overflow recovery failed after one attempt, stopping retry',
+        );
+        return;
+      }
+      this.overflowRecoveryAttempted = true;
+      // 移除 error message（不应留在 context 中）
+      await this.removeLastAssistantMessage();
+      await this.runAutoCompaction('overflow', true);
+      return;
+    }
+
     // Auto Retry
     if (this.isRetryableError(assistant)) {
       if (await this.prepareRetry(assistant)) {
@@ -1073,11 +1191,15 @@ export class AgentSession implements vscode.Disposable {
 
   private isRetryableError(message: AssistantMessage): boolean {
     if (message.stopReason !== 'error' || !message.errorMessage) return false;
-    const errMsg = message.errorMessage.toLowerCase();
-    if (errMsg.includes('context_length_exceeded') || errMsg.includes('context_window'))
-      return false;
+    if (this.isContextOverflowError(message)) return false;
     if (NON_RETRYABLE_LIMIT_PATTERN.test(message.errorMessage)) return false;
     return RETRYABLE_ERROR_PATTERN.test(message.errorMessage);
+  }
+
+  private isContextOverflowError(message: AssistantMessage): boolean {
+    if (message.stopReason !== 'error' || !message.errorMessage) return false;
+    const errMsg = message.errorMessage.toLowerCase();
+    return errMsg.includes('context_length_exceeded') || errMsg.includes('context_window');
   }
 
   private async prepareRetry(message: AssistantMessage): Promise<boolean> {
@@ -1167,7 +1289,12 @@ export class AgentSession implements vscode.Disposable {
       }),
     );
     unsubs.push(
-      this.harness.on('before_provider_request', (e) => runner.emitBeforeProviderRequest(e)),
+      this.harness.on('before_provider_request', (e) =>
+        runner.emitBeforeProviderStreamOptions({
+          type: 'before_provider_stream_options',
+          streamOptions: e.streamOptions,
+        }),
+      ),
     );
     unsubs.push(
       this.harness.on('before_provider_payload', async (e) => ({

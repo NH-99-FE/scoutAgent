@@ -539,10 +539,10 @@ export class AgentHarness<
 
   private async handleAgentEvent(event: AgentEvent, signal?: AbortSignal): Promise<void> {
     if (event.type === 'message_end') {
+      await this.emitAny(event, signal);
       await this.session.appendMessage(event.message);
       // 更新消息快照
       this.lastTurnMessages = [...this.lastTurnMessages, event.message];
-      await this.emitAny(event, signal);
       return;
     }
     if (event.type === 'turn_end') {

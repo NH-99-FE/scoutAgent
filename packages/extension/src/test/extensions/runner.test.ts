@@ -319,6 +319,33 @@ describe('ScoutExtensionRunner.emitBeforeAgentStart', () => {
     expect(result?.systemPrompt).toBe('still works');
     expect(errorListener).toHaveBeenCalled();
   });
+
+  it('chains ctx.getSystemPrompt through handler modifications', async () => {
+    const seen: string[] = [];
+    const ext1 = makeExtension({
+      before_agent_start: async (_event, ctx: any) => {
+        seen.push(ctx.getSystemPrompt());
+        return { systemPrompt: 'first' };
+      },
+    });
+    const ext2 = makeExtension({
+      before_agent_start: async (_event, ctx: any) => {
+        seen.push(ctx.getSystemPrompt());
+        return { systemPrompt: 'second' };
+      },
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitBeforeAgentStart({
+      type: 'before_agent_start',
+      prompt: 'test',
+      systemPrompt: 'original',
+    });
+
+    expect(seen).toEqual(['original', 'first']);
+    expect(result?.systemPrompt).toBe('second');
+  });
 });
 
 describe('ScoutExtensionRunner.emitContext', () => {
@@ -381,6 +408,47 @@ describe('ScoutExtensionRunner.emitToolCall', () => {
 
     expect(result).toBeUndefined();
   });
+
+  it('lets argument mutations remain visible to later handlers', async () => {
+    const ext1 = makeExtension({
+      tool_call: async (event: any) => {
+        event.input.command = 'echo patched';
+      },
+    });
+    const ext2 = makeExtension({
+      tool_call: async (event: any) => ({ block: event.input.command === 'echo patched' }),
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitToolCall({
+      type: 'tool_call',
+      toolCallId: 'tc-1',
+      toolName: 'bash',
+      input: { command: 'echo original' },
+    });
+
+    expect(result?.block).toBe(true);
+  });
+
+  it('propagates handler errors so tool execution is blocked by the caller', async () => {
+    const ext = makeExtension({
+      tool_call: async () => {
+        throw new Error('permission hook failed');
+      },
+    });
+    const runner = makeRunner([ext]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    await expect(
+      runner.emitToolCall({
+        type: 'tool_call',
+        toolCallId: 'tc-1',
+        toolName: 'bash',
+        input: {},
+      }),
+    ).rejects.toThrow('permission hook failed');
+  });
 });
 
 describe('ScoutExtensionRunner.emitToolResult', () => {
@@ -408,6 +476,34 @@ describe('ScoutExtensionRunner.emitToolResult', () => {
     expect(result?.details).toEqual({ extra: true });
   });
 
+  it('passes prior result patches to later handlers', async () => {
+    const ext1 = makeExtension({
+      tool_result: async () => ({ content: [{ type: 'text', text: 'patched' }], isError: true }),
+    });
+    const ext2 = makeExtension({
+      tool_result: async (event: any) => ({
+        details: {
+          sawContent: event.content[0].text,
+          sawIsError: event.isError,
+        },
+      }),
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitToolResult({
+      type: 'tool_result',
+      toolCallId: 'tc-1',
+      toolName: 'bash',
+      input: {},
+      content: [{ type: 'text', text: 'original' }],
+      details: undefined,
+      isError: false,
+    });
+
+    expect(result?.details).toEqual({ sawContent: 'patched', sawIsError: true });
+  });
+
   it('returns undefined when no handlers modify', async () => {
     const runner = makeRunner([makeExtension()]);
     runner.bindCore(makeActions(), makeContextActions());
@@ -423,6 +519,143 @@ describe('ScoutExtensionRunner.emitToolResult', () => {
     });
 
     expect(result).toBeUndefined();
+  });
+});
+
+describe('ScoutExtensionRunner.emitBeforeProviderRequest', () => {
+  it('chains payload transformations', async () => {
+    const ext1 = makeExtension({
+      before_provider_request: async (event: any) => ({ ...event.payload, first: true }),
+    });
+    const ext2 = makeExtension({
+      before_provider_request: async (event: any) => ({ ...event.payload, second: true }),
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitBeforeProviderRequest({ original: true });
+
+    expect(result).toEqual({ original: true, first: true, second: true });
+  });
+
+  it('keeps dispatching legacy before_provider_payload handlers before the pi payload hook', async () => {
+    const ext = makeExtension({
+      before_provider_payload: async (event: any) => ({ ...event.payload, legacy: true }),
+      before_provider_request: async (event: any) => ({ ...event.payload, pi: true }),
+    });
+    const runner = makeRunner([ext]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitBeforeProviderPayload({ payload: { original: true } });
+
+    expect(result).toEqual({ original: true, legacy: true, pi: true });
+  });
+});
+
+describe('ScoutExtensionRunner.emitInput', () => {
+  it('chains transform results', async () => {
+    const ext1 = makeExtension({
+      input: async (event: any) => ({ action: 'transform', text: `${event.text} one` }),
+    });
+    const ext2 = makeExtension({
+      input: async (event: any) => ({ action: 'transform', text: `${event.text} two` }),
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitInput('start', undefined, 'interactive');
+
+    expect(result).toEqual({ action: 'transform', text: 'start one two', images: undefined });
+  });
+
+  it('short-circuits on handled', async () => {
+    const second = vi.fn();
+    const ext1 = makeExtension({
+      input: async () => ({ action: 'handled' }),
+    });
+    const ext2 = makeExtension({
+      input: second,
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitInput('start', undefined, 'interactive');
+
+    expect(result).toEqual({ action: 'handled' });
+    expect(second).not.toHaveBeenCalled();
+  });
+});
+
+describe('ScoutExtensionRunner.emitMessageEnd', () => {
+  it('chains same-role message replacements', async () => {
+    const ext1 = makeExtension({
+      message_end: async (event: any) => ({
+        message: { ...event.message, content: 'first' },
+      }),
+    });
+    const ext2 = makeExtension({
+      message_end: async (event: any) => ({
+        message: { ...event.message, content: `${event.message.content} second` },
+      }),
+    });
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitMessageEnd({
+      type: 'message_end',
+      message: { role: 'assistant', content: 'original', timestamp: 0 } as any,
+    });
+
+    expect((result as any).content).toBe('first second');
+  });
+
+  it('rejects replacements with a different role and emits an error', async () => {
+    const errorListener = vi.fn();
+    const ext = makeExtension({
+      message_end: async () => ({
+        message: { role: 'user', content: 'wrong', timestamp: 0 },
+      }),
+    });
+    const runner = makeRunner([ext]);
+    runner.bindCore(makeActions(), makeContextActions());
+    runner.onError(errorListener);
+
+    const result = await runner.emitMessageEnd({
+      type: 'message_end',
+      message: { role: 'assistant', content: 'original', timestamp: 0 } as any,
+    });
+
+    expect(result).toBeUndefined();
+    expect(errorListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'message_end',
+        error: 'message_end handlers must return a message with the same role',
+      }),
+    );
+  });
+});
+
+describe('ScoutExtensionRunner.emitResourcesDiscover', () => {
+  it('aggregates paths with extension sources', async () => {
+    const ext1 = makeExtension({
+      resources_discover: async () => ({ skillPaths: ['skills-a'], promptPaths: ['prompts-a'] }),
+    });
+    ext1.path = '/ext/a.ts';
+    const ext2 = makeExtension({
+      resources_discover: async () => ({ skillPaths: ['skills-b'], themePaths: ['themes-b'] }),
+    });
+    ext2.path = '/ext/b.ts';
+    const runner = makeRunner([ext1, ext2]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const result = await runner.emitResourcesDiscover('/cwd', 'startup');
+
+    expect(result.skillPaths).toEqual([
+      { path: 'skills-a', extensionPath: '/ext/a.ts' },
+      { path: 'skills-b', extensionPath: '/ext/b.ts' },
+    ]);
+    expect(result.promptPaths).toEqual([{ path: 'prompts-a', extensionPath: '/ext/a.ts' }]);
+    expect(result.themePaths).toEqual([{ path: 'themes-b', extensionPath: '/ext/b.ts' }]);
   });
 });
 
