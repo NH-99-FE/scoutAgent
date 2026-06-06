@@ -249,6 +249,12 @@ vi.mock('../config-manager.ts', () => ({
     this.getSteeringMode = mockGetSteeringMode;
     this.getFollowUpMode = mockGetFollowUpMode;
     this.getRetrySettings = mockGetRetrySettings;
+    this.getStreamOptions = vi.fn(() => ({
+      transport: 'auto',
+      timeoutMs: 300000,
+      maxRetries: 2,
+      maxRetryDelayMs: 60000,
+    }));
     this.getScoutConfig = vi.fn(() => ({ models: [], defaultModelId: 'test-model' }));
     this.onDidChangeSettings = vi.fn(() => ({ dispose: vi.fn() }));
   }),
@@ -298,6 +304,7 @@ vi.mock('../extensions/index.ts', () => ({
 
 import { AgentSession } from '../agent-session.ts';
 import { ConfigManager } from '../config-manager.ts';
+import { mapAgentEventToScout } from '../protocol/agent-event-mapper.ts';
 
 function makeOutputChannel() {
   return {
@@ -407,6 +414,12 @@ describe('AgentSession', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessCompact.mockReset();
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 1000,
+    });
     mockSessionBuildContext.mockResolvedValue({ messages: [], thinkingLevel: 'off', model: null });
     mockSessionGetMetadata.mockResolvedValue({
       id: 'test-session',
@@ -434,6 +447,16 @@ describe('AgentSession', () => {
     const agentSession = await makeInitializedAgentSession();
     expect(agentSession.model).toBeDefined();
     expect(agentSession.model?.id).toBe('test-model');
+    expect(MockAgentHarness).toHaveBeenCalledWith(
+      expect.objectContaining({
+        streamOptions: expect.objectContaining({
+          transport: 'auto',
+          timeoutMs: 300000,
+          maxRetries: 2,
+          maxRetryDelayMs: 60000,
+        }),
+      }),
+    );
     agentSession.dispose();
   });
 
@@ -588,6 +611,12 @@ describe('AgentSession — 运行时操作', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessCompact.mockReset();
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 1000,
+    });
     mockSessionBuildContext.mockResolvedValue({ messages: [], thinkingLevel: 'off', model: null });
     mockSessionGetMetadata.mockResolvedValue({
       id: 'test-session',
@@ -654,10 +683,179 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
-  it('compact delegates to harness', async () => {
+  it('compact delegates to harness and emits compaction lifecycle events', async () => {
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'manual summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 1000,
+    });
     const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+
     await agentSession.compact();
+
     expect(mockHarnessCompact).toHaveBeenCalled();
+    expect(events).toContainEqual({ type: 'compaction_start', reason: 'manual' });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'compaction_end',
+        reason: 'manual',
+        aborted: false,
+        willRetry: false,
+      }),
+    );
+    agentSession.dispose();
+  });
+
+  it('getContextUsage exposes Pi-style context window and percent', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    await expect(agentSession.getContextUsage()).resolves.toEqual({
+      tokens: 1000,
+      contextWindow: 200000,
+      percent: 0.5,
+    });
+    agentSession.dispose();
+  });
+
+  it('getContextUsage returns unknown tokens after compaction until new usage exists', async () => {
+    const now = new Date().toISOString();
+    mockSessionGetBranch.mockResolvedValue([
+      {
+        type: 'compaction',
+        id: 'compact-1',
+        parentId: null,
+        timestamp: now,
+        summary: 'summary',
+        firstKeptEntryId: 'entry-1',
+        tokensBefore: 100000,
+      },
+    ] as any);
+    const agentSession = await makeInitializedAgentSession();
+
+    await expect(agentSession.getContextUsage()).resolves.toEqual({
+      tokens: null,
+      contextWindow: 200000,
+      percent: null,
+    });
+    agentSession.dispose();
+  });
+
+  it('getContextUsage uses later successful usage after post-compaction errors', async () => {
+    const now = new Date().toISOString();
+    mockCalculateContextTokens.mockReturnValue(1000);
+    mockSessionGetBranch.mockResolvedValue([
+      {
+        type: 'compaction',
+        id: 'compact-1',
+        parentId: null,
+        timestamp: now,
+        summary: 'summary',
+        firstKeptEntryId: 'entry-1',
+        tokensBefore: 100000,
+      },
+      {
+        type: 'message',
+        id: 'error-1',
+        parentId: 'compact-1',
+        timestamp: now,
+        message: {
+          role: 'assistant',
+          stopReason: 'error',
+          errorMessage: 'provider error',
+          content: [],
+          timestamp: Date.now(),
+        },
+      },
+      {
+        type: 'message',
+        id: 'assistant-1',
+        parentId: 'error-1',
+        timestamp: now,
+        message: {
+          role: 'assistant',
+          stopReason: 'stop',
+          content: [{ type: 'text', text: 'ok' }],
+          timestamp: Date.now(),
+          usage: {
+            input: 1000,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 1000,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        },
+      },
+    ] as any);
+    const agentSession = await makeInitializedAgentSession();
+
+    await expect(agentSession.getContextUsage()).resolves.toEqual({
+      tokens: 1000,
+      contextWindow: 200000,
+      percent: 0.5,
+    });
+    agentSession.dispose();
+  });
+
+  it('marks manual compaction as aborted when abort is called', async () => {
+    mockHarnessCompact.mockImplementation(
+      async (_customInstructions?: string, options?: { signal?: AbortSignal }) =>
+        await new Promise((resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        }),
+    );
+    const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+
+    const compactPromise = agentSession.compact();
+    await flushMicrotasks(50);
+    await agentSession.abort();
+    await compactPromise;
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'compaction_end',
+        reason: 'manual',
+        aborted: true,
+        willRetry: false,
+      }),
+    );
+    agentSession.dispose();
+  });
+
+  it('keeps the first manual compaction abortable when duplicate compact is requested', async () => {
+    mockHarnessCompact.mockImplementation(
+      async (_customInstructions?: string, options?: { signal?: AbortSignal }) =>
+        await new Promise((resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        }),
+    );
+    const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+
+    const firstCompact = agentSession.compact();
+    await flushMicrotasks(50);
+    await agentSession.compact();
+    await agentSession.abort();
+    await firstCompact;
+
+    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(events.filter((event) => event.type === 'compaction_start')).toHaveLength(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'compaction_end',
+        reason: 'manual',
+        aborted: true,
+      }),
+    );
     agentSession.dispose();
   });
 
@@ -1174,6 +1372,12 @@ describe('AgentSession — Auto Retry', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessCompact.mockReset();
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 1000,
+    });
     mockSessionBuildContext.mockResolvedValue({ messages: [], thinkingLevel: 'off', model: null });
     mockSessionGetMetadata.mockResolvedValue({
       id: 'test-session',
@@ -1222,7 +1426,25 @@ describe('AgentSession — Auto Retry', () => {
     await runPostAgentLoop(agentSession);
 
     expect(events.some((e) => e.type === 'retry_start' && e.attempt === 1)).toBe(true);
+    expect(events.some((e) => e.type === 'auto_retry_start' && e.attempt === 1)).toBe(true);
     expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+    agentSession.dispose();
+  });
+
+  it('marks agent_end with willRetry when the last assistant is retryable', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    const callback = getSubscribeCallback();
+    const errorMessage = makeErrorAssistantMessage('Error 503: Service unavailable');
+
+    await callback({ type: 'message_end', message: errorMessage });
+    await callback({ type: 'agent_end', messages: [errorMessage] });
+
+    expect(vi.mocked(mapAgentEventToScout)).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: 'agent_end',
+        willRetry: true,
+      }),
+    );
     agentSession.dispose();
   });
 
@@ -1307,13 +1529,58 @@ describe('AgentSession — Auto Retry', () => {
 
   it('returns continuation intent after threshold compaction when harness has pending messages', async () => {
     mockHarnessHasPendingMessages.mockReturnValue(true);
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 100000,
+    });
     const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
 
     await expect(runAutoCompaction(agentSession, 'threshold')).resolves.toBe(true);
 
     expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
     expect(mockHarnessHasPendingMessages).toHaveBeenCalledTimes(1);
     expect(mockHarnessContinue).not.toHaveBeenCalled();
+    expect(events).toContainEqual({ type: 'compaction_start', reason: 'threshold' });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'compaction_end',
+        reason: 'threshold',
+        aborted: false,
+        willRetry: false,
+      }),
+    );
+    agentSession.dispose();
+  });
+
+  it('marks auto compaction as aborted when abort is called', async () => {
+    mockHarnessCompact.mockImplementation(
+      async (_customInstructions?: string, options?: { signal?: AbortSignal }) =>
+        await new Promise((resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+            once: true,
+          });
+        }),
+    );
+    const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+
+    const compactPromise = runAutoCompaction(agentSession, 'threshold');
+    await flushMicrotasks(50);
+    await agentSession.abort();
+
+    await expect(compactPromise).resolves.toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'compaction_end',
+        reason: 'threshold',
+        aborted: true,
+        willRetry: false,
+      }),
+    );
     agentSession.dispose();
   });
 
@@ -1364,6 +1631,7 @@ describe('AgentSession — Auto Retry', () => {
     await runPostAgentLoop(agentSession);
 
     expect(events.some((e) => e.type === 'retry_end' && e.success === true)).toBe(true);
+    expect(events.some((e) => e.type === 'auto_retry_end' && e.success === true)).toBe(true);
     agentSession.dispose();
   });
 
@@ -1555,6 +1823,12 @@ describe('AgentSession — Fork', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessCompact.mockReset();
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 1000,
+    });
     mockSessionBuildContext.mockResolvedValue({ messages: [], thinkingLevel: 'off', model: null });
     mockSessionGetMetadata.mockResolvedValue({
       id: 'test-session',
@@ -1592,6 +1866,12 @@ describe('AgentSession — Tree / Navigation / Label', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessCompact.mockReset();
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 1000,
+    });
     mockSessionBuildContext.mockResolvedValue({ messages: [], thinkingLevel: 'off', model: null });
     mockSessionGetMetadata.mockResolvedValue({
       id: 'test-session',
@@ -1818,6 +2098,12 @@ describe('AgentSession — 消息缓存', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessCompact.mockReset();
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 1000,
+    });
     mockSessionGetMetadata.mockResolvedValue({
       id: 'test-session',
       createdAt: new Date().toISOString(),

@@ -141,7 +141,10 @@ export function mapAgentEventToScout(event: AgentEvent): ScoutAgentEvent | null 
       return { type: 'agent_start' };
 
     case 'agent_end':
-      return { type: 'agent_end' };
+      return {
+        type: 'agent_end',
+        willRetry: (event as { willRetry?: boolean }).willRetry ?? false,
+      };
 
     case 'turn_start':
       return { type: 'turn_start' };

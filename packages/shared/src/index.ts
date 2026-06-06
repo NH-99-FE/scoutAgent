@@ -150,6 +150,14 @@ export interface ScoutConfig {
   defaultModelId: string;
 }
 
+// ---------- Context Usage ----------
+
+export interface ScoutContextUsage {
+  tokens: number | null;
+  contextWindow: number;
+  percent: number | null;
+}
+
 /**
  * Agent 事件在 postMessage 通道上的序列化形式。
  * 结构与内部 AgentEvent 对齐，消息类型替换为可序列化的 ScoutMessage。
@@ -157,7 +165,7 @@ export interface ScoutConfig {
  */
 export type ScoutAgentEvent =
   | { type: 'agent_start' }
-  | { type: 'agent_end' }
+  | { type: 'agent_end'; willRetry: boolean }
   | { type: 'turn_start' }
   | { type: 'turn_end' }
   | { type: 'message_start'; message: ScoutMessage }
@@ -188,11 +196,51 @@ export interface ScoutRetryStartEvent {
   errorMessage: string;
 }
 
+export interface ScoutAutoRetryStartEvent {
+  type: 'auto_retry_start';
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  errorMessage: string;
+}
+
 export interface ScoutRetryEndEvent {
   type: 'retry_end';
   success: boolean;
   attempt: number;
   finalError?: string;
+}
+
+export interface ScoutAutoRetryEndEvent {
+  type: 'auto_retry_end';
+  success: boolean;
+  attempt: number;
+  finalError?: string;
+}
+
+// ---------- Compaction 事件 ----------
+
+export type ScoutCompactionReason = 'manual' | 'threshold' | 'overflow';
+
+export interface ScoutCompactionResult {
+  summary: string;
+  firstKeptEntryId: string;
+  tokensBefore: number;
+  details?: unknown;
+}
+
+export interface ScoutCompactionStartEvent {
+  type: 'compaction_start';
+  reason: ScoutCompactionReason;
+}
+
+export interface ScoutCompactionEndEvent {
+  type: 'compaction_end';
+  reason: ScoutCompactionReason;
+  result?: ScoutCompactionResult;
+  aborted: boolean;
+  willRetry: boolean;
+  errorMessage?: string;
 }
 
 export type ExtensionMessage =
@@ -206,7 +254,17 @@ export type ExtensionMessage =
       delayMs: number;
       errorMessage: string;
     }
+  | {
+      type: 'auto_retry_start';
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      errorMessage: string;
+    }
   | { type: 'retry_end'; success: boolean; attempt: number; finalError?: string }
+  | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
+  | ScoutCompactionStartEvent
+  | ScoutCompactionEndEvent
   | { type: 'fork_result'; success: boolean; error?: string }
   | { type: 'tree_data'; tree: ScoutSessionTreeNode[]; leafId: string | null }
   | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }

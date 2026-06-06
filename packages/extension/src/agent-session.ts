@@ -15,7 +15,6 @@ import type {
   AgentTool,
   BranchSummaryEntry,
   CompactionEntry,
-  ContextUsageEstimate,
   ExecutionEnv,
   JsonlSessionMetadata,
   LabelEntry,
@@ -30,7 +29,10 @@ import { shouldCompact, calculateContextTokens, estimateContextTokens } from '@s
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import type {
   ScoutAgentEvent,
+  ScoutContextUsage,
   ScoutMessage,
+  ScoutCompactionReason,
+  ScoutCompactionResult,
   ScoutSessionTreeNode,
   ThinkingLevel,
 } from '@scout-agent/shared';
@@ -92,7 +94,24 @@ export type ScoutSessionEvent =
   | { type: 'state_change' }
   | { type: 'error'; message: string }
   | { type: 'retry_start'; attempt: number; maxAttempts: number; delayMs: number; message: string }
+  | {
+      type: 'auto_retry_start';
+      attempt: number;
+      maxAttempts: number;
+      delayMs: number;
+      errorMessage: string;
+    }
   | { type: 'retry_end'; success: boolean; attempt: number; finalError?: string }
+  | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
+  | { type: 'compaction_start'; reason: ScoutCompactionReason }
+  | {
+      type: 'compaction_end';
+      reason: ScoutCompactionReason;
+      result?: ScoutCompactionResult;
+      aborted: boolean;
+      willRetry: boolean;
+      errorMessage?: string;
+    }
   | { type: 'tree_change' };
 
 // ---------- 构造选项 ----------
@@ -145,7 +164,8 @@ export class AgentSession implements vscode.Disposable {
   /** Retry 状态 */
   private retryAttempt = 0;
   private retryAbortController: AbortController | undefined;
-  private lastUserMessageText = '';
+  private manualCompactionAbortController: AbortController | undefined;
+  private autoCompactionAbortController: AbortController | undefined;
 
   /**
    * Overflow compaction 防重入标志。
@@ -228,7 +248,6 @@ export class AgentSession implements vscode.Disposable {
   async prompt(text: string, options?: { images?: ImageContent[] }): Promise<void> {
     if (!this.harness) return;
 
-    this.lastUserMessageText = text;
     this.retryAttempt = 0;
 
     try {
@@ -251,6 +270,9 @@ export class AgentSession implements vscode.Disposable {
   async abort(): Promise<void> {
     if (!this.harness) return;
     try {
+      this.retryAbortController?.abort();
+      this.manualCompactionAbortController?.abort();
+      this.autoCompactionAbortController?.abort();
       await this.harness.abort();
     } catch (error) {
       this.outputChannel.appendLine(
@@ -259,10 +281,7 @@ export class AgentSession implements vscode.Disposable {
     }
   }
 
-  /**
-   * 用户手动续写：沿用底层 harness continuation 语义。
-   * 注意：不重置 lastUserMessageText，保留原用户消息供 Auto Retry 使用。
-   */
+  /** 用户手动续写：沿用底层 harness continuation 语义。 */
   async continue(): Promise<void> {
     if (!this.harness) return;
 
@@ -282,8 +301,26 @@ export class AgentSession implements vscode.Disposable {
   }
 
   /** 获取当前上下文 token 用量估算（基于当前 session context） */
-  async getContextUsage(): Promise<ContextUsageEstimate | undefined> {
-    return await this.harness?.getContextUsage();
+  async getContextUsage(): Promise<ScoutContextUsage | undefined> {
+    if (!this.harness) return undefined;
+
+    const model = this.harness.getModel();
+    const contextWindow = model.contextWindow ?? 0;
+    if (contextWindow <= 0) return undefined;
+
+    const branch = await this.session.getBranch();
+    const latestCompaction = getLatestCompactionEntry(branch);
+    if (latestCompaction && !hasPostCompactionAssistantUsage(branch, latestCompaction)) {
+      return { tokens: null, contextWindow, percent: null };
+    }
+
+    const estimate = await this.harness.getContextUsage();
+    const percent = (estimate.tokens / contextWindow) * 100;
+    return {
+      tokens: estimate.tokens,
+      contextWindow,
+      percent,
+    };
   }
 
   async setModel(modelId: string): Promise<void> {
@@ -315,15 +352,42 @@ export class AgentSession implements vscode.Disposable {
 
   async compact(): Promise<void> {
     if (!this.harness) return;
+    if (this.manualCompactionAbortController) {
+      this.outputChannel.appendLine('[scout] Manual compaction already running, ignoring duplicate request');
+      return;
+    }
+    const abortController = new AbortController();
+    this.manualCompactionAbortController = abortController;
+    this.emit({ type: 'compaction_start', reason: 'manual' });
     try {
-      this.outputChannel.appendLine('[scout] Running auto compaction');
-      await this.harness.compact();
+      this.outputChannel.appendLine('[scout] Running manual compaction');
+      const result = await this.harness.compact(undefined, { signal: abortController.signal });
       await this.rebuildCachedMessages();
+      this.emit({
+        type: 'compaction_end',
+        reason: 'manual',
+        result,
+        aborted: false,
+        willRetry: false,
+      });
       this.emit({ type: 'state_change' });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const aborted = abortController.signal.aborted;
       this.outputChannel.appendLine(
-        `[scout] Compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[scout] Compaction failed: ${errorMessage}`,
       );
+      this.emit({
+        type: 'compaction_end',
+        reason: 'manual',
+        aborted,
+        willRetry: false,
+        errorMessage: aborted ? undefined : `Manual compaction failed: ${errorMessage}`,
+      });
+    } finally {
+      if (this.manualCompactionAbortController === abortController) {
+        this.manualCompactionAbortController = undefined;
+      }
     }
   }
 
@@ -838,7 +902,7 @@ export class AgentSession implements vscode.Disposable {
         return this.lastSystemPrompt;
       },
       getApiKeyAndHeaders: (m: Model<Api>) => this.getApiKeyAndHeaders(m),
-      streamOptions: { timeoutMs: 300000, maxRetries: 2 },
+      streamOptions: this.configManager.getStreamOptions(),
       steeringMode: this.configManager.getSteeringMode(),
       followUpMode: this.configManager.getFollowUpMode(),
     };
@@ -861,21 +925,23 @@ export class AgentSession implements vscode.Disposable {
   }
 
   private async handleHarnessEvent(event: AgentHarnessEvent): Promise<void> {
-    await this.emitExtensionLifecycleEvent(event);
+    const enrichedEvent = this.enrichAgentEndEvent(event);
+
+    await this.emitExtensionLifecycleEvent(enrichedEvent);
 
     // 映射为 ScoutAgentEvent（仅 AgentEvent 子集可映射）
-    if (isAgentEvent(event)) {
-      const scoutEvent = mapAgentEventToScout(event);
+    if (isAgentEvent(enrichedEvent)) {
+      const scoutEvent = mapAgentEventToScout(enrichedEvent);
       if (scoutEvent) {
         this.emit({ type: 'agent_event', event: scoutEvent });
       }
     }
 
-    const type = (event as { type: string }).type;
+    const type = (enrichedEvent as { type: string }).type;
 
     // message_start（用户消息到达）：重置 overflow 防重入标志
     if (type === 'message_start') {
-      const msg = (event as { message?: AgentMessage }).message;
+      const msg = (enrichedEvent as { message?: AgentMessage }).message;
       if (msg?.role === 'user') {
         this.overflowRecoveryAttempted = false;
       }
@@ -902,7 +968,7 @@ export class AgentSession implements vscode.Disposable {
     // message_end：只记录最后一条 assistant message，实际 retry/compaction 等到 agent_end 后处理。
     // 此时消息已经由 harness 持久化；这里只做观察和状态更新，避免重入 harness。
     if (type === 'message_end') {
-      const message = (event as { message?: AgentMessage }).message;
+      const message = (enrichedEvent as { message?: AgentMessage }).message;
       if (message?.role === 'assistant') {
         this.lastAssistantMessage = message as AssistantMessage;
       }
@@ -928,6 +994,28 @@ export class AgentSession implements vscode.Disposable {
     }
   }
 
+  private enrichAgentEndEvent(event: AgentHarnessEvent): AgentHarnessEvent {
+    if ((event as { type: string }).type !== 'agent_end') return event;
+    const agentEnd = event as Extract<AgentEvent, { type: 'agent_end' }>;
+    return {
+      ...agentEnd,
+      willRetry: this.willRetryAfterAgentEnd(agentEnd),
+    } as AgentHarnessEvent;
+  }
+
+  private willRetryAfterAgentEnd(event: Extract<AgentEvent, { type: 'agent_end' }>): boolean {
+    const settings = this.configManager.getRetrySettings();
+    if (!settings.enabled || this.retryAttempt >= settings.maxRetries) return false;
+
+    const messages = (event as { messages?: AgentMessage[] }).messages ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message?.role === 'assistant') return this.isRetryableError(message as AssistantMessage);
+    }
+
+    return this.lastAssistantMessage ? this.isRetryableError(this.lastAssistantMessage) : false;
+  }
+
   private async emitExtensionLifecycleEvent(event: AgentHarnessEvent): Promise<void> {
     if (!this.extensionRunner) return;
     const runner = this.extensionRunner;
@@ -939,6 +1027,7 @@ export class AgentSession implements vscode.Disposable {
       await runner.emit({
         type: 'agent_end',
         messages: (event as { messages: AgentMessage[] }).messages,
+        willRetry: (event as { willRetry?: boolean }).willRetry ?? false,
       });
     } else if (type === 'turn_start') {
       await runner.emit({ type: 'turn_start', timestamp: Date.now() });
@@ -1122,17 +1211,12 @@ export class AgentSession implements vscode.Disposable {
         return true; // 问题 E fix：retry 触发后跳过 compaction
       }
       // 超过最大重试次数
-      this.emit({
-        type: 'retry_end',
-        success: false,
-        attempt: this.retryAttempt,
-        finalError: assistant.errorMessage,
-      });
+      this.emitAutoRetryEnd(false, this.retryAttempt, assistant.errorMessage);
       this.retryAttempt = 0;
       // 超限后仍需做 compaction 检查（继续往下执行）
     } else if (assistant.stopReason !== 'error' && this.retryAttempt > 0) {
       // 问题 F fix：retry 成功时先发送 retry_end，再做 compaction 检查
-      this.emit({ type: 'retry_end', success: true, attempt: this.retryAttempt });
+      this.emitAutoRetryEnd(true, this.retryAttempt);
       this.retryAttempt = 0;
       // 成功后继续做 compaction 检查（继续往下执行）
     }
@@ -1177,12 +1261,25 @@ export class AgentSession implements vscode.Disposable {
     }
   }
 
-  private async runAutoCompaction(reason: string, willRetry = false): Promise<boolean> {
+  private async runAutoCompaction(
+    reason: ScoutCompactionReason,
+    willRetry = false,
+  ): Promise<boolean> {
     if (!this.harness) return false;
+    const abortController = new AbortController();
+    this.autoCompactionAbortController = abortController;
+    this.emit({ type: 'compaction_start', reason });
     try {
       this.outputChannel.appendLine(`[scout] Running auto compaction: ${reason}`);
-      await this.harness.compact();
+      const result = await this.harness.compact(undefined, { signal: abortController.signal });
       await this.rebuildCachedMessages();
+      this.emit({
+        type: 'compaction_end',
+        reason,
+        result,
+        aborted: false,
+        willRetry,
+      });
       this.emit({ type: 'state_change' });
 
       if (willRetry) {
@@ -1191,10 +1288,27 @@ export class AgentSession implements vscode.Disposable {
       }
       return this.harness.hasPendingMessages();
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const aborted = abortController.signal.aborted;
       this.outputChannel.appendLine(
-        `[scout] Compaction failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[scout] Compaction failed: ${errorMessage}`,
       );
+      this.emit({
+        type: 'compaction_end',
+        reason,
+        aborted,
+        willRetry: false,
+        errorMessage: aborted
+          ? undefined
+          : reason === 'overflow'
+            ? `Context overflow recovery failed: ${errorMessage}`
+            : `Auto-compaction failed: ${errorMessage}`,
+      });
       return false;
+    } finally {
+      if (this.autoCompactionAbortController === abortController) {
+        this.autoCompactionAbortController = undefined;
+      }
     }
   }
 
@@ -1225,13 +1339,12 @@ export class AgentSession implements vscode.Disposable {
 
     const delayMs = settings.baseDelayMs * 2 ** (this.retryAttempt - 1);
 
-    this.emit({
-      type: 'retry_start',
-      attempt: this.retryAttempt,
-      maxAttempts: settings.maxRetries,
+    this.emitAutoRetryStart(
+      this.retryAttempt,
+      settings.maxRetries,
       delayMs,
-      message: message.errorMessage ?? 'Unknown error',
-    });
+      message.errorMessage ?? 'Unknown error',
+    );
 
     await this.removeLastAssistantMessage();
 
@@ -1241,13 +1354,28 @@ export class AgentSession implements vscode.Disposable {
     } catch {
       const attempt = this.retryAttempt;
       this.retryAttempt = 0;
-      this.emit({ type: 'retry_end', success: false, attempt, finalError: 'Retry cancelled' });
+      this.emitAutoRetryEnd(false, attempt, 'Retry cancelled');
       return false;
     } finally {
       this.retryAbortController = undefined;
     }
 
     return true;
+  }
+
+  private emitAutoRetryStart(
+    attempt: number,
+    maxAttempts: number,
+    delayMs: number,
+    errorMessage: string,
+  ): void {
+    this.emit({ type: 'auto_retry_start', attempt, maxAttempts, delayMs, errorMessage });
+    this.emit({ type: 'retry_start', attempt, maxAttempts, delayMs, message: errorMessage });
+  }
+
+  private emitAutoRetryEnd(success: boolean, attempt: number, finalError?: string): void {
+    this.emit({ type: 'auto_retry_end', success, attempt, finalError });
+    this.emit({ type: 'retry_end', success, attempt, finalError });
   }
 
   /** 将 session leaf 回退到 error message 之前的 entry，等效移除 */
@@ -1392,6 +1520,28 @@ function getLatestCompactionEntry(entries: SessionTreeEntry[]): CompactionEntry 
     }
   }
   return null;
+}
+
+function hasPostCompactionAssistantUsage(
+  entries: SessionTreeEntry[],
+  compaction: CompactionEntry,
+): boolean {
+  const compactionIndex = entries.findIndex((entry) => entry.id === compaction.id);
+  if (compactionIndex < 0) return false;
+
+  for (let i = entries.length - 1; i > compactionIndex; i--) {
+    const entry = entries[i];
+    if (entry?.type !== 'message') continue;
+
+    const message = (entry as MessageEntry).message;
+    if (message.role !== 'assistant') continue;
+
+    const assistant = message as AssistantMessage;
+    if (assistant.stopReason === 'aborted' || assistant.stopReason === 'error') continue;
+    if (assistant.usage && calculateContextTokens(assistant.usage) > 0) return true;
+  }
+
+  return false;
 }
 
 /** 从 entry 中提取预览文本（首行，截断到 80 字符） */

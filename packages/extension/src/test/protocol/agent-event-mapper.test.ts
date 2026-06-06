@@ -79,9 +79,17 @@ describe('mapAgentEventToScout', () => {
     expect(mapAgentEventToScout(event)).toEqual({ type: 'agent_start' });
   });
 
-  it("maps agent_end to { type: 'agent_end' }", () => {
+  it('maps agent_end with willRetry=false by default', () => {
     const event: AgentEvent = { type: 'agent_end', messages: [] };
-    expect(mapAgentEventToScout(event)).toEqual({ type: 'agent_end' });
+    expect(mapAgentEventToScout(event)).toEqual({ type: 'agent_end', willRetry: false });
+  });
+
+  it('maps agent_end with willRetry=true when provided by AgentSession', () => {
+    const event = { type: 'agent_end' as const, messages: [], willRetry: true };
+    expect(mapAgentEventToScout(event as AgentEvent)).toEqual({
+      type: 'agent_end',
+      willRetry: true,
+    });
   });
 
   it("maps turn_start to { type: 'turn_start' }", () => {

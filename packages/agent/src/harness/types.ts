@@ -101,6 +101,8 @@ export interface AgentHarnessStreamOptions {
   metadata?: SimpleStreamOptions['metadata'];
   /** provider 缓存保留提示。 */
   cacheRetention?: SimpleStreamOptions['cacheRetention'];
+  /** 自定义各推理等级的 token 预算。 */
+  thinkingBudgets?: SimpleStreamOptions['thinkingBudgets'];
 }
 
 /** provider 钩子返回的每次请求流式选项补丁。 */

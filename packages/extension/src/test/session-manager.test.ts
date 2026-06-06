@@ -228,6 +228,12 @@ vi.mock('../config-manager.ts', () => ({
     this.getSteeringMode = vi.fn(() => 'one-at-a-time');
     this.getFollowUpMode = vi.fn(() => 'one-at-a-time');
     this.getRetrySettings = vi.fn(() => ({ enabled: true, maxRetries: 3, baseDelayMs: 2000 }));
+    this.getStreamOptions = vi.fn(() => ({
+      transport: 'auto',
+      timeoutMs: 300000,
+      maxRetries: 2,
+      maxRetryDelayMs: 60000,
+    }));
     this.getScoutConfig = vi.fn(() => ({ models: [], defaultModelId: 'test-model' }));
     this.onDidChangeSettings = vi.fn(() => ({ dispose: vi.fn() }));
     this.getExtensionPaths = vi.fn(() => []);

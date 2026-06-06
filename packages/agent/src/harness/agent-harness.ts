@@ -119,6 +119,7 @@ function applyStreamOptionsPatch(
   if (Object.hasOwn(patch, 'maxRetries')) result.maxRetries = patch.maxRetries;
   if (Object.hasOwn(patch, 'maxRetryDelayMs')) result.maxRetryDelayMs = patch.maxRetryDelayMs;
   if (Object.hasOwn(patch, 'cacheRetention')) result.cacheRetention = patch.cacheRetention;
+  if (Object.hasOwn(patch, 'thinkingBudgets')) result.thinkingBudgets = patch.thinkingBudgets;
 
   if (Object.hasOwn(patch, 'headers')) {
     if (patch.headers === undefined) {
@@ -460,6 +461,7 @@ export class AgentHarness<
         reasoning: streamOptions?.reasoning,
         signal: streamOptions?.signal,
         sessionId: turnState.sessionId,
+        thinkingBudgets: requestOptions.thinkingBudgets,
         timeoutMs: requestOptions.timeoutMs,
         transport: requestOptions.transport,
         apiKey: auth?.apiKey,
@@ -914,7 +916,10 @@ export class AgentHarness<
     }
   }
 
-  async compact(customInstructions?: string): Promise<{
+  async compact(
+    customInstructions?: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{
     summary: string;
     firstKeptEntryId: string;
     tokensBefore: number;
@@ -924,6 +929,7 @@ export class AgentHarness<
       throw new AgentHarnessError('busy', 'compact() requires idle harness');
     this.phase = 'compaction';
     try {
+      if (options?.signal?.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const model = this.model;
       if (!model) throw new AgentHarnessError('invalid_state', 'No model set for compaction');
       const auth = await this.getApiKeyAndHeaders?.(model);
@@ -938,9 +944,10 @@ export class AgentHarness<
         preparation,
         branchEntries,
         customInstructions,
-        signal: new AbortController().signal,
+        signal: options?.signal ?? new AbortController().signal,
       });
       if (hookResult?.cancel) throw new AgentHarnessError('compaction', 'Compaction cancelled');
+      if (options?.signal?.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const provided = hookResult?.compaction;
       const compactResult = provided
         ? { ok: true as const, value: provided }
@@ -950,10 +957,11 @@ export class AgentHarness<
             auth.apiKey,
             auth.headers,
             customInstructions,
-            undefined,
+            options?.signal,
             this.thinkingLevel,
           );
       if (!compactResult.ok) throw compactResult.error;
+      if (options?.signal?.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const result = compactResult.value;
       const entryId = await this.session.appendCompaction(
         result.summary,

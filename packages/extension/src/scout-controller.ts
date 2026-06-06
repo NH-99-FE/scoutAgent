@@ -162,12 +162,43 @@ export class ScoutController implements vscode.Disposable {
         errorMessage: event.message,
       });
     }
+    if (event.type === 'auto_retry_start') {
+      this.postMessage({
+        type: 'auto_retry_start',
+        attempt: event.attempt,
+        maxAttempts: event.maxAttempts,
+        delayMs: event.delayMs,
+        errorMessage: event.errorMessage,
+      });
+    }
     if (event.type === 'retry_end') {
       this.postMessage({
         type: 'retry_end',
         success: event.success,
         attempt: event.attempt,
         finalError: event.finalError,
+      });
+    }
+    if (event.type === 'auto_retry_end') {
+      this.postMessage({
+        type: 'auto_retry_end',
+        success: event.success,
+        attempt: event.attempt,
+        finalError: event.finalError,
+      });
+    }
+
+    if (event.type === 'compaction_start') {
+      this.postMessage({ type: 'compaction_start', reason: event.reason });
+    }
+    if (event.type === 'compaction_end') {
+      this.postMessage({
+        type: 'compaction_end',
+        reason: event.reason,
+        result: event.result,
+        aborted: event.aborted,
+        willRetry: event.willRetry,
+        errorMessage: event.errorMessage,
       });
     }
 

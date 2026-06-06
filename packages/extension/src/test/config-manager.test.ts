@@ -243,4 +243,44 @@ describe('ConfigManager', () => {
     expect(settings.maxRetries).toBe(10);
     expect(settings.baseDelayMs).toBe(2000);
   });
+
+  it('reads provider stream options from config', () => {
+    const cm = makeConfigManager({
+      transport: 'sse',
+      'retry.provider.timeoutMs': 120000,
+      'retry.provider.maxRetries': 4,
+      'retry.provider.maxRetryDelayMs': 30000,
+      thinkingBudgets: {
+        minimal: 512,
+        low: 1024,
+        medium: 4096,
+        high: 8192,
+      },
+    });
+
+    expect(cm.getStreamOptions()).toEqual({
+      transport: 'sse',
+      timeoutMs: 120000,
+      maxRetries: 4,
+      maxRetryDelayMs: 30000,
+      thinkingBudgets: {
+        minimal: 512,
+        low: 1024,
+        medium: 4096,
+        high: 8192,
+      },
+    });
+  });
+
+  it('defaults provider stream options to Pi-compatible values', () => {
+    const cm = makeConfigManager({});
+
+    expect(cm.getStreamOptions()).toEqual({
+      transport: 'auto',
+      timeoutMs: undefined,
+      maxRetries: undefined,
+      maxRetryDelayMs: 60000,
+      thinkingBudgets: undefined,
+    });
+  });
 });

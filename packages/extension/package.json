@@ -72,10 +72,54 @@
           "default": "off",
           "description": "Default thinking level for reasoning models"
         },
+        "scout-agent.transport": {
+          "type": "string",
+          "enum": [
+            "sse",
+            "websocket",
+            "websocket-cached",
+            "auto"
+          ],
+          "default": "auto",
+          "description": "Preferred provider transport when supported"
+        },
+        "scout-agent.thinkingBudgets": {
+          "type": "object",
+          "default": {},
+          "description": "Custom token budgets for thinking levels"
+        },
         "scout-agent.shellPath": {
           "type": "string",
           "default": "",
           "description": "Path to the shell executable (leave empty for system default)"
+        },
+        "scout-agent.retry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic session retry for transient assistant errors"
+        },
+        "scout-agent.retry.maxRetries": {
+          "type": "number",
+          "default": 3,
+          "description": "Maximum automatic session retry attempts"
+        },
+        "scout-agent.retry.baseDelayMs": {
+          "type": "number",
+          "default": 2000,
+          "description": "Base delay in milliseconds for automatic session retry"
+        },
+        "scout-agent.retry.provider.timeoutMs": {
+          "type": "number",
+          "description": "Provider request timeout in milliseconds"
+        },
+        "scout-agent.retry.provider.maxRetries": {
+          "type": "number",
+          "description": "Maximum provider request retry attempts"
+        },
+        "scout-agent.retry.provider.maxRetryDelayMs": {
+          "type": "number",
+          "default": 60000,
+          "description": "Maximum provider retry delay in milliseconds"
         },
         "scout-agent.compaction.enabled": {
           "type": "boolean",

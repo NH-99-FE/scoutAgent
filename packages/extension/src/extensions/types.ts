@@ -22,8 +22,8 @@ import type {
   SessionTreeEntry,
   TreePreparation,
   CompactResult,
-  ContextUsageEstimate,
 } from '@scout-agent/agent';
+import type { ScoutContextUsage } from '@scout-agent/shared';
 import type { Static, TSchema } from '@sinclair/typebox';
 import type { EventBus } from './event-bus.ts';
 import type { ConfigManager } from '../config-manager.ts';
@@ -186,6 +186,7 @@ export interface AgentStartEvent {
 export interface AgentEndEvent {
   type: 'agent_end';
   messages: AgentMessage[];
+  willRetry: boolean;
 }
 
 export interface TurnStartEvent {
@@ -440,7 +441,7 @@ export interface ScoutExtensionContext {
   /** 切换思考级别 */
   setThinkingLevel(level: string): Promise<void>;
   /** 获取当前上下文 token 用量估算 */
-  getContextUsage(): Promise<ContextUsageEstimate | undefined>;
+  getContextUsage(): Promise<ScoutContextUsage | undefined>;
   /** Start a new session. Post-replacement work must run inside withSession. */
   newSession(options?: SessionReplacementOptions): Promise<{ cancelled: boolean }>;
   /** Fork from a specific entry into a replacement session. */
@@ -578,7 +579,7 @@ export interface ScoutExtensionContextActions {
   shutdown: () => void;
   setModel: (modelId: string) => Promise<void>;
   setThinkingLevel: (level: string) => Promise<void>;
-  getContextUsage: () => Promise<ContextUsageEstimate | undefined>;
+  getContextUsage: () => Promise<ScoutContextUsage | undefined>;
   newSession: (options?: SessionReplacementOptions) => Promise<{ cancelled: boolean }>;
   fork: (
     entryId: string,

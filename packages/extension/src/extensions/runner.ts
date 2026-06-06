@@ -4,11 +4,8 @@
 // ============================================================
 
 import type { Model } from '@scout-agent/ai';
-import type {
-  AgentMessage,
-  ContextUsageEstimate,
-  AgentHarnessStreamOptionsPatch,
-} from '@scout-agent/agent';
+import type { AgentMessage, AgentHarnessStreamOptionsPatch } from '@scout-agent/agent';
+import type { ScoutContextUsage } from '@scout-agent/shared';
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from './types.ts';
 import type {
   AfterProviderResponseEvent,
@@ -129,8 +126,7 @@ export class ScoutExtensionRunner {
   private shutdownFn: () => void = () => {};
   private setModelFn: (modelId: string) => Promise<void> = async () => {};
   private setThinkingLevelFn: (level: string) => Promise<void> = async () => {};
-  private getContextUsageFn: () => Promise<ContextUsageEstimate | undefined> = async () =>
-    undefined;
+  private getContextUsageFn: () => Promise<ScoutContextUsage | undefined> = async () => undefined;
   private newSessionFn: ScoutExtensionContextActions['newSession'] = async () => ({
     cancelled: true,
   });

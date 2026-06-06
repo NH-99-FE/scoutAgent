@@ -880,4 +880,47 @@ describe('harness compaction', () => {
       details: { source: 'hook' },
     });
   });
+
+  it('passes compact abort signals to hooks and rejects pre-aborted compaction', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    await session.appendMessage(createUserMessage('hello'));
+    await session.appendMessage(createAssistantMessage('first', createMockUsage(50000, 0)));
+    await session.appendMessage(createUserMessage('again'));
+    await session.appendMessage(createAssistantMessage('second', createMockUsage(50000, 0)));
+
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: {
+        id: 'test-model',
+        name: 'Test Model',
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        baseUrl: 'https://example.com',
+        reasoning: false,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 4096,
+      },
+      getApiKeyAndHeaders: async () => ({ apiKey: 'test-key' }),
+    });
+
+    const abortController = new AbortController();
+    let hookSignal: AbortSignal | undefined;
+    harness.on('session_before_compact', (event) => {
+      hookSignal = event.signal;
+      return { cancel: true };
+    });
+
+    await expect(harness.compact(undefined, { signal: abortController.signal })).rejects.toThrow(
+      'Compaction cancelled',
+    );
+    expect(hookSignal).toBe(abortController.signal);
+
+    abortController.abort();
+    await expect(harness.compact(undefined, { signal: abortController.signal })).rejects.toThrow(
+      'Compaction aborted',
+    );
+  });
 });

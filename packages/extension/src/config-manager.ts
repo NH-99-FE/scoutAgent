@@ -6,9 +6,9 @@
 import * as vscode from 'vscode';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Model, Api } from '@scout-agent/ai';
+import type { Model, Api, ThinkingBudgets, Transport } from '@scout-agent/ai';
 import { getModel, getModels, getProviders, getDefaultModel } from '@scout-agent/ai';
-import type { CompactionSettings, QueueMode } from '@scout-agent/agent';
+import type { AgentHarnessStreamOptions, CompactionSettings, QueueMode } from '@scout-agent/agent';
 import type { ScoutConfig, ThinkingLevel } from '@scout-agent/shared';
 
 // ---------- Retry 配置 ----------
@@ -19,7 +19,14 @@ export interface RetrySettings {
   baseDelayMs: number;
 }
 
+export interface ProviderRetrySettings {
+  timeoutMs?: number;
+  maxRetries?: number;
+  maxRetryDelayMs: number;
+}
+
 const SECTION = 'scout-agent';
+const VALID_TRANSPORTS: Transport[] = ['sse', 'websocket', 'websocket-cached', 'auto'];
 
 export interface ConfigManagerOptions {
   cwd: string;
@@ -161,6 +168,45 @@ export class ConfigManager {
       enabled: this.getSetting<boolean>('retry.enabled', true) ?? true,
       maxRetries: this.getSetting<number>('retry.maxRetries', 3) ?? 3,
       baseDelayMs: this.getSetting<number>('retry.baseDelayMs', 2000) ?? 2000,
+    };
+  }
+
+  getProviderRetrySettings(): ProviderRetrySettings {
+    const projectRetry = this.projectSettings.retry as Record<string, unknown> | undefined;
+    const projectProvider = projectRetry?.provider as Record<string, unknown> | undefined;
+    return {
+      timeoutMs:
+        (projectProvider?.timeoutMs as number | undefined) ??
+        this.config().get<number>('retry.provider.timeoutMs'),
+      maxRetries:
+        (projectProvider?.maxRetries as number | undefined) ??
+        this.config().get<number>('retry.provider.maxRetries'),
+      maxRetryDelayMs:
+        (projectProvider?.maxRetryDelayMs as number | undefined) ??
+        this.config().get<number>('retry.provider.maxRetryDelayMs') ??
+        60000,
+    };
+  }
+
+  getTransport(): Transport {
+    const transport = this.getSetting<Transport>('transport', 'auto') ?? 'auto';
+    return VALID_TRANSPORTS.includes(transport) ? transport : 'auto';
+  }
+
+  getThinkingBudgets(): ThinkingBudgets | undefined {
+    const budgets = this.getSetting<ThinkingBudgets>('thinkingBudgets');
+    if (!budgets || typeof budgets !== 'object') return undefined;
+    return budgets;
+  }
+
+  getStreamOptions(): AgentHarnessStreamOptions {
+    const providerRetry = this.getProviderRetrySettings();
+    return {
+      transport: this.getTransport(),
+      timeoutMs: providerRetry.timeoutMs,
+      maxRetries: providerRetry.maxRetries,
+      maxRetryDelayMs: providerRetry.maxRetryDelayMs,
+      thinkingBudgets: this.getThinkingBudgets(),
     };
   }
 
