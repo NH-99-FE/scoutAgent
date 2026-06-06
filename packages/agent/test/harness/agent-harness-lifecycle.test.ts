@@ -484,6 +484,54 @@ describe('AgentHarness lifecycle', () => {
     expect(settledNextTurnCounts).toEqual([0]);
   });
 
+  it('drains upper adapter queues with global queue mode and persists custom messages', async () => {
+    const requestText: string[][] = [];
+    registerResponses([
+      (context) => {
+        requestText.push(textFromUserMessages(context.messages));
+        return makeProviderAssistantMessage('first');
+      },
+      (context) => {
+        requestText.push(textFromUserMessages(context.messages));
+        return makeProviderAssistantMessage('second');
+      },
+      (context) => {
+        requestText.push(textFromUserMessages(context.messages));
+        return makeProviderAssistantMessage('third');
+      },
+    ]);
+    const session = new Session(new InMemorySessionStorage());
+    const externalSteeringQueue: AgentMessage[] = [];
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: makeProviderModel(),
+      steeringMode: 'one-at-a-time',
+      drainSteeringMessages: (mode) =>
+        mode === 'all' ? externalSteeringQueue.splice(0) : externalSteeringQueue.splice(0, 1),
+      hasQueuedMessages: () => externalSteeringQueue.length > 0,
+    });
+    let queued = false;
+    harness.subscribe((event) => {
+      if (event.type === 'message_start' && event.message.role === 'assistant' && !queued) {
+        queued = true;
+        void harness.steer('own');
+        externalSteeringQueue.push({
+          role: 'custom',
+          customType: 'adapter',
+          content: 'custom',
+          display: true,
+          timestamp: Date.now(),
+        });
+      }
+    });
+
+    await harness.prompt('hello');
+
+    expect(requestText).toEqual([['hello'], ['hello', 'own'], ['hello', 'own', 'custom']]);
+    expect((await session.getBranch()).some((entry) => entry.type === 'custom_message')).toBe(true);
+  });
+
   it('abort clears steer and follow-up queues but preserves next-turn messages', async () => {
     let releaseFirstResponse: (() => void) | undefined;
     let abortedSignal: AbortSignal | undefined;
@@ -862,6 +910,48 @@ describe('AgentHarness lifecycle', () => {
       entry.type === 'message' ? [entry.message.role] : [],
     );
     expect(roles).toEqual(['assistant', 'custom']);
+  });
+
+  it('preserves pending message order before finalized custom messages', async () => {
+    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const harness = makeHarness(session);
+    const internals = harness as unknown as HarnessInternals;
+    const userMessage: AgentMessage = {
+      role: 'user',
+      content: [{ type: 'text', text: 'queued user' }],
+      timestamp: 1,
+    };
+    const customMessage: AgentMessage = {
+      role: 'custom',
+      customType: 'before-agent-start',
+      content: 'queued custom',
+      display: true,
+      timestamp: 2,
+    };
+
+    internals.phase = 'turn';
+    await harness.appendMessage(userMessage);
+    await internals.handleAgentEvent({ type: 'message_end', message: customMessage });
+    await internals.handleAgentEvent({
+      type: 'turn_end',
+      message: customMessage,
+      toolResults: [],
+    });
+
+    const entries = await session.getEntries();
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      type: 'message',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'queued user' }],
+      },
+    });
+    expect(entries[1]).toMatchObject({
+      type: 'custom_message',
+      customType: 'before-agent-start',
+      content: 'queued custom',
+    });
   });
 
   it('waitForIdle waits for awaited agent_end listeners and settled notifications', async () => {

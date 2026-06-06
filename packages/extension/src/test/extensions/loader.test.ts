@@ -132,6 +132,27 @@ describe('loadExtensionFromFactory', () => {
     expect(extension.tools.has('test-tool')).toBe(true);
   });
 
+  it('registers extension commands during loading', async () => {
+    const runtime = createExtensionRuntime();
+    const handler = vi.fn();
+    const factory: ScoutExtensionFactory = (api) => {
+      api.registerCommand('hello', {
+        description: 'Say hello',
+        handler,
+      });
+    };
+
+    const extension = await loadExtensionFromFactory(factory, runtime);
+
+    expect(extension.commands.get('hello')).toEqual(
+      expect.objectContaining({
+        name: 'hello',
+        description: 'Say hello',
+        handler,
+      }),
+    );
+  });
+
   it('supports async factory', async () => {
     const runtime = createExtensionRuntime();
     const factory: ScoutExtensionFactory = async (api) => {

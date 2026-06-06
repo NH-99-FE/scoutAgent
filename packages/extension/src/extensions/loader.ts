@@ -107,6 +107,11 @@ export function createExtensionRuntime(): ScoutExtensionRuntime {
     getActiveTools: notInitialized,
     getAllTools: notInitialized,
     setActiveTools: notInitialized,
+    appendEntry: notInitialized,
+    setSessionName: notInitialized,
+    getSessionName: notInitialized,
+    setLabel: notInitialized,
+    getCommands: notInitialized,
     // registerTool() 在加载期间有效；refreshTools 仅需在 bind 后触发
     refreshTools: async () => {},
     assertActive,
@@ -148,9 +153,21 @@ function createExtensionAPI(
       return runtime.refreshTools();
     },
 
-    sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void> {
+    registerCommand(name, options): void {
       runtime.assertActive();
-      return runtime.sendMessage(message);
+      extension.commands.set(name, {
+        name,
+        sourceInfo: extension.sourceInfo,
+        ...options,
+      });
+    },
+
+    sendMessage<TDetails = unknown>(
+      message: SendMessageInput<TDetails>,
+      options?: Parameters<ScoutExtensionRuntime['sendMessage']>[1],
+    ): Promise<void> {
+      runtime.assertActive();
+      return runtime.sendMessage(message, options);
     },
 
     sendUserMessage(content, options): Promise<void> {
@@ -171,6 +188,31 @@ function createExtensionAPI(
     getAllTools() {
       runtime.assertActive();
       return runtime.getAllTools();
+    },
+
+    appendEntry(customType, data): Promise<void> {
+      runtime.assertActive();
+      return runtime.appendEntry(customType, data);
+    },
+
+    setSessionName(name: string): Promise<void> {
+      runtime.assertActive();
+      return runtime.setSessionName(name);
+    },
+
+    getSessionName(): Promise<string | undefined> {
+      runtime.assertActive();
+      return runtime.getSessionName();
+    },
+
+    setLabel(entryId: string, label: string | undefined): Promise<void> {
+      runtime.assertActive();
+      return runtime.setLabel(entryId, label);
+    },
+
+    getCommands() {
+      runtime.assertActive();
+      return runtime.getCommands();
     },
 
     events: _eventBus,
@@ -223,6 +265,7 @@ function createExtension(
     sourceInfo: createExtensionSourceInfo(extensionPath, resolvedPath, sourceInfo),
     handlers: new Map(),
     tools: new Map(),
+    commands: new Map(),
   };
 }
 

@@ -28,7 +28,7 @@ import {
   type ContextUsageEstimate,
   prepareCompaction,
 } from './compaction/compaction.ts';
-import { convertToLlm } from './messages.ts';
+import { convertToLlm, type CustomMessage } from './messages.ts';
 import { formatPromptTemplateInvocation } from './prompt-templates.ts';
 import { formatSkillInvocation } from './skills.ts';
 import type {
@@ -220,6 +220,9 @@ export class AgentHarness<
   private steeringQueueMode: QueueMode;
   private followUpQueue: UserMessage[] = [];
   private followUpQueueMode: QueueMode;
+  private drainExternalSteeringMessages?: AgentHarnessOptions['drainSteeringMessages'];
+  private drainExternalFollowUpMessages?: AgentHarnessOptions['drainFollowUpMessages'];
+  private hasExternalQueuedMessages?: AgentHarnessOptions['hasQueuedMessages'];
   private nextTurnQueue: AgentMessage[] = [];
   private handlers = new Map<string, Set<AgentHarnessHandler>>();
 
@@ -239,6 +242,9 @@ export class AgentHarness<
       options.activeToolNames ?? (options.tools ?? []).map((tool) => tool.name);
     this.steeringQueueMode = options.steeringMode ?? 'one-at-a-time';
     this.followUpQueueMode = options.followUpMode ?? 'one-at-a-time';
+    this.drainExternalSteeringMessages = options.drainSteeringMessages;
+    this.drainExternalFollowUpMessages = options.drainFollowUpMessages;
+    this.hasExternalQueuedMessages = options.hasQueuedMessages;
   }
 
   private getHandlers(type: string): Set<AgentHarnessHandler> | undefined {
@@ -546,10 +552,9 @@ export class AgentHarness<
           skipInitialSteeringPoll = false;
           return [];
         }
-        return this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode);
+        return this.drainSteeringMessages();
       },
-      getFollowUpMessages: async () =>
-        this.drainQueuedMessages(this.followUpQueue, this.followUpQueueMode),
+      getFollowUpMessages: async () => this.drainFollowUpMessages(),
     };
   }
 
@@ -588,10 +593,34 @@ export class AgentHarness<
     }
   }
 
+  private async appendFinalizedMessage(message: AgentMessage): Promise<void> {
+    if (message.role === 'custom') {
+      const customMessage = message as CustomMessage;
+      if (this.phase !== 'idle') {
+        this.pendingSessionWrites.push({
+          type: 'custom_message',
+          customType: customMessage.customType,
+          content: customMessage.content,
+          display: customMessage.display,
+          details: customMessage.details,
+        });
+        return;
+      }
+      await this.session.appendCustomMessageEntry(
+        customMessage.customType,
+        customMessage.content,
+        customMessage.display,
+        customMessage.details,
+      );
+      return;
+    }
+    await this.session.appendMessage(message);
+  }
+
   private async handleAgentEvent(event: AgentEvent, signal?: AbortSignal): Promise<void> {
     if (event.type === 'message_end') {
       const finalizedEvent = await this.finalizeMessageEnd(event);
-      await this.session.appendMessage(finalizedEvent.message);
+      await this.appendFinalizedMessage(finalizedEvent.message);
       await this.emitAny(finalizedEvent, signal);
       return;
     }
@@ -698,6 +727,26 @@ export class AgentHarness<
     }
   }
 
+  private async drainSteeringMessages(): Promise<AgentMessage[]> {
+    const ownMessages = await this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode);
+    if (this.steeringQueueMode === 'one-at-a-time' && ownMessages.length > 0) {
+      return ownMessages;
+    }
+    const externalMessages =
+      (await this.drainExternalSteeringMessages?.(this.steeringQueueMode)) ?? [];
+    return [...ownMessages, ...externalMessages];
+  }
+
+  private async drainFollowUpMessages(): Promise<AgentMessage[]> {
+    const ownMessages = await this.drainQueuedMessages(this.followUpQueue, this.followUpQueueMode);
+    if (this.followUpQueueMode === 'one-at-a-time' && ownMessages.length > 0) {
+      return ownMessages;
+    }
+    const externalMessages =
+      (await this.drainExternalFollowUpMessages?.(this.followUpQueueMode)) ?? [];
+    return [...ownMessages, ...externalMessages];
+  }
+
   private async executeTurn(
     turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
     text: string,
@@ -801,6 +850,23 @@ export class AgentHarness<
     }
   }
 
+  async promptMessages(messages: AgentMessage[]): Promise<AssistantMessage> {
+    if (this.phase !== 'idle') throw new AgentHarnessError('busy', 'AgentHarness is busy');
+    this.phase = 'turn';
+    const finishRunPromise = this.startRunPromise();
+    try {
+      const turnState = await this.createTurnState();
+      return await this.executePromptMessages(turnState, messages, {
+        missingAssistantLabel: 'AgentHarness promptMessages completed without an assistant message',
+      });
+    } catch (error) {
+      this.phase = 'idle';
+      throw normalizeHarnessError(error, 'unknown');
+    } finally {
+      finishRunPromise();
+    }
+  }
+
   async continue(): Promise<AssistantMessage> {
     if (this.phase !== 'idle') throw new AgentHarnessError('busy', 'AgentHarness is busy');
     this.phase = 'turn';
@@ -812,10 +878,7 @@ export class AgentHarness<
         throw new AgentHarnessError('invalid_state', 'No messages to continue from');
       }
       if (lastMessage.role === 'assistant') {
-        const queuedSteering = await this.drainQueuedMessages(
-          this.steerQueue,
-          this.steeringQueueMode,
-        );
+        const queuedSteering = await this.drainSteeringMessages();
         if (queuedSteering.length > 0) {
           return await this.executePromptMessages(turnState, queuedSteering, {
             skipInitialSteeringPoll: true,
@@ -824,10 +887,7 @@ export class AgentHarness<
           });
         }
 
-        const queuedFollowUps = await this.drainQueuedMessages(
-          this.followUpQueue,
-          this.followUpQueueMode,
-        );
+        const queuedFollowUps = await this.drainFollowUpMessages();
         if (queuedFollowUps.length > 0) {
           return await this.executePromptMessages(turnState, queuedFollowUps, {
             missingAssistantLabel:
@@ -1268,7 +1328,11 @@ export class AgentHarness<
   }
 
   hasPendingMessages(): boolean {
-    return this.steerQueue.length > 0 || this.followUpQueue.length > 0;
+    return (
+      this.steerQueue.length > 0 ||
+      this.followUpQueue.length > 0 ||
+      (this.hasExternalQueuedMessages?.() ?? false)
+    );
   }
 
   getSignal(): AbortSignal | undefined {

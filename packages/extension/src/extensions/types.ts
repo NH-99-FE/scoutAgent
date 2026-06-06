@@ -398,8 +398,71 @@ export interface ToolInfo {
   sourceInfo: SourceInfo;
 }
 
+export type SlashCommandSource = 'extension' | 'prompt' | 'skill';
+
+export interface SlashCommandInfo {
+  name: string;
+  description?: string;
+  source: SlashCommandSource;
+  sourceInfo: SourceInfo;
+}
+
+export interface AutocompleteItem {
+  value: string;
+  label?: string;
+  description?: string;
+}
+
+export interface ResourceCollision {
+  resourceType: 'extension' | 'skill' | 'prompt' | 'theme';
+  name: string;
+  winnerPath: string;
+  loserPath: string;
+  winnerSource?: string;
+  loserSource?: string;
+}
+
+export interface ResourceDiagnostic {
+  type: 'warning' | 'error' | 'collision';
+  message: string;
+  path?: string;
+  collision?: ResourceCollision;
+}
+
+export interface ScoutExtensionCommandContext extends ScoutExtensionContext {
+  waitForIdle(): Promise<void>;
+  navigateTree(
+    targetId: string,
+    options?: {
+      summarize?: boolean;
+      customInstructions?: string;
+      replaceInstructions?: boolean;
+      label?: string;
+    },
+  ): Promise<{ cancelled: boolean }>;
+}
+
+export interface RegisteredCommand {
+  name: string;
+  sourceInfo: SourceInfo;
+  description?: string;
+  getArgumentCompletions?: (
+    argumentPrefix: string,
+  ) => AutocompleteItem[] | null | Promise<AutocompleteItem[] | null>;
+  handler: (args: string, ctx: ScoutExtensionCommandContext) => Promise<void> | void;
+}
+
+export interface ResolvedCommand extends RegisteredCommand {
+  invocationName: string;
+}
+
 export interface SendUserMessageOptions {
   deliverAs?: 'steer' | 'followUp';
+}
+
+export interface SendMessageOptions {
+  triggerTurn?: boolean;
+  deliverAs?: 'steer' | 'followUp' | 'nextTurn';
 }
 
 export interface SendMessagePayload<TDetails = unknown> {
@@ -457,10 +520,13 @@ export interface ScoutExtensionContext {
 }
 
 /**
- * Fresh context bound to the replacement session after newSession/fork/switchSession.
+ * Fresh command-capable context bound to the replacement session after newSession/fork/switchSession.
  */
-export interface ReplacedSessionContext extends ScoutExtensionContext {
-  sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void>;
+export interface ReplacedSessionContext extends ScoutExtensionCommandContext {
+  sendMessage<TDetails = unknown>(
+    message: SendMessageInput<TDetails>,
+    options?: SendMessageOptions,
+  ): Promise<void>;
   sendUserMessage(
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
@@ -474,7 +540,10 @@ export interface ReplacedSessionContext extends ScoutExtensionContext {
  * 创建时所有动作方法为 throwing stub，bindCore() 替换为真实实现。
  */
 export interface ScoutExtensionRuntime {
-  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => Promise<void>;
+  sendMessage: <TDetails = unknown>(
+    message: SendMessageInput<TDetails>,
+    options?: SendMessageOptions,
+  ) => Promise<void>;
   sendUserMessage: (
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
@@ -483,6 +552,11 @@ export interface ScoutExtensionRuntime {
   getAllTools: () => ToolInfo[];
   setActiveTools: (toolNames: string[]) => Promise<void>;
   refreshTools: () => Promise<void>;
+  appendEntry: <TData = unknown>(customType: string, data?: TData) => Promise<void>;
+  setSessionName: (name: string) => Promise<void>;
+  getSessionName: () => Promise<string | undefined>;
+  setLabel: (entryId: string, label: string | undefined) => Promise<void>;
+  getCommands: () => SlashCommandInfo[];
   assertActive: () => void;
   invalidate: (message?: string) => void;
 }
@@ -496,6 +570,7 @@ export interface ScoutExtension {
   sourceInfo: SourceInfo;
   handlers: Map<string, ScoutHandlerFn[]>;
   tools: Map<string, RegisteredTool>;
+  commands: Map<string, RegisteredCommand>;
 }
 
 // ---------- 注册产物 ----------
@@ -528,7 +603,11 @@ export type ScoutHandlerFn = (...args: unknown[]) => Promise<unknown>;
 export interface ScoutExtensionAPI {
   on(event: string, handler: ScoutHandlerFn): void;
   registerTool(tool: ScoutToolDefinition): Promise<void>;
-  sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void>;
+  registerCommand(name: string, options: Omit<RegisteredCommand, 'name' | 'sourceInfo'>): void;
+  sendMessage<TDetails = unknown>(
+    message: SendMessageInput<TDetails>,
+    options?: SendMessageOptions,
+  ): Promise<void>;
   sendUserMessage(
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
@@ -536,6 +615,11 @@ export interface ScoutExtensionAPI {
   setActiveTools(toolNames: string[]): Promise<void>;
   getActiveTools(): string[];
   getAllTools(): ToolInfo[];
+  appendEntry<TData = unknown>(customType: string, data?: TData): Promise<void>;
+  setSessionName(name: string): Promise<void>;
+  getSessionName(): Promise<string | undefined>;
+  setLabel(entryId: string, label: string | undefined): Promise<void>;
+  getCommands(): SlashCommandInfo[];
   events: EventBus;
 }
 
@@ -556,7 +640,10 @@ export interface LoadExtensionsResult {
 
 /** bindCore() 接收的动作方法集 */
 export interface ScoutExtensionActions {
-  sendMessage: <TDetails = unknown>(message: SendMessageInput<TDetails>) => Promise<void>;
+  sendMessage: <TDetails = unknown>(
+    message: SendMessageInput<TDetails>,
+    options?: SendMessageOptions,
+  ) => Promise<void>;
   sendUserMessage: (
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
@@ -565,6 +652,11 @@ export interface ScoutExtensionActions {
   getAllTools: () => ToolInfo[];
   setActiveTools: (toolNames: string[]) => Promise<void>;
   refreshTools: () => Promise<void>;
+  appendEntry: <TData = unknown>(customType: string, data?: TData) => Promise<void>;
+  setSessionName: (name: string) => Promise<void>;
+  getSessionName: () => Promise<string | undefined>;
+  setLabel: (entryId: string, label: string | undefined) => Promise<void>;
+  getCommands: () => SlashCommandInfo[];
 }
 
 /** bindCore() 接收的上下文动作集 */
@@ -588,5 +680,15 @@ export interface ScoutExtensionContextActions {
   switchSession: (
     sessionMeta: JsonlSessionMetadata,
     options?: SessionReplacementOptions,
+  ) => Promise<{ cancelled: boolean }>;
+  waitForIdle: () => Promise<void>;
+  navigateTree: (
+    targetId: string,
+    options?: {
+      summarize?: boolean;
+      customInstructions?: string;
+      replaceInstructions?: boolean;
+      label?: string;
+    },
   ) => Promise<{ cancelled: boolean }>;
 }

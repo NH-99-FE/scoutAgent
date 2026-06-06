@@ -16,17 +16,28 @@ import type {
   AgentTool,
   BranchSummaryEntry,
   CompactionEntry,
+  CustomMessage,
   ExecutionEnv,
   JsonlSessionMetadata,
   LabelEntry,
   MessageEntry,
   NavigateTreeResult,
+  PromptTemplate,
+  QueueMode,
   Session,
   SessionContext,
   SessionTreeEntry,
   Skill,
 } from '@scout-agent/agent';
-import { shouldCompact, calculateContextTokens, estimateContextTokens } from '@scout-agent/agent';
+import {
+  shouldCompact,
+  calculateContextTokens,
+  estimateContextTokens,
+  createCustomMessage,
+  formatPromptTemplateInvocation,
+  formatSkillInvocation,
+  parseCommandArgs,
+} from '@scout-agent/agent';
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import type {
   ScoutAgentEvent,
@@ -51,13 +62,18 @@ import { mapAgentEventToScout, convertMessage } from './protocol/agent-event-map
 import type {
   ToolInfo,
   SendMessageInput,
+  SendMessageOptions,
   SendUserMessageOptions,
   SourceInfo,
+  SlashCommandInfo,
+  RegisteredCommand,
+  ResolvedCommand,
   SessionShutdownEvent,
   SessionStartEvent,
   ReplacedSessionContext,
 } from './extensions/types.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
+import { createSyntheticSourceInfo } from './source-info.ts';
 
 // ---------- 类型守卫 ----------
 
@@ -122,6 +138,7 @@ export interface AgentSessionOptions {
   cwd: string;
   outputChannel: vscode.OutputChannel;
   skills: ScoutSkill[];
+  promptTemplates?: PromptTemplate[];
   extensionRunner?: ScoutExtensionRunner;
   activeToolNames?: string[];
 }
@@ -147,6 +164,7 @@ export class AgentSession implements vscode.Disposable {
   private readonly cwd: string;
   private readonly outputChannel: vscode.OutputChannel;
   private readonly skills: ScoutSkill[];
+  private readonly promptTemplates: PromptTemplate[];
   private extensionRunner?: ScoutExtensionRunner;
   private activeToolNames: string[];
   private activeToolsCustomized: boolean;
@@ -183,6 +201,13 @@ export class AgentSession implements vscode.Disposable {
   /** 从 session.buildContext() 缓存的 ScoutMessage[] — 单一来源 */
   private cachedMessages: ScoutMessage[] = [];
 
+  /** 扩展通过 sendMessage({ deliverAs: 'nextTurn' }) 排入下一次 prompt 的 custom 消息。 */
+  private pendingNextTurnMessages: AgentMessage[] = [];
+  /** 上层 Agent/Session 队列：承载 Pi 风格的 user/custom steering 消息。 */
+  private steeringMessageQueue: AgentMessage[] = [];
+  /** 上层 Agent/Session 队列：承载 Pi 风格的 user/custom follow-up 消息。 */
+  private followUpMessageQueue: AgentMessage[] = [];
+
   /** 缓存的 session 元数据 */
   private cachedSessionId?: string;
   private cachedParentSessionPath?: string;
@@ -197,6 +222,7 @@ export class AgentSession implements vscode.Disposable {
     this.cwd = options.cwd;
     this.outputChannel = options.outputChannel;
     this.skills = options.skills;
+    this.promptTemplates = options.promptTemplates ?? [];
     this.extensionRunner = options.extensionRunner;
     this.activeToolNames = options.activeToolNames ?? [...DEFAULT_ACTIVE_TOOL_NAMES];
     this.activeToolsCustomized = options.activeToolNames !== undefined;
@@ -246,17 +272,33 @@ export class AgentSession implements vscode.Disposable {
   // ---------- 运行时操作 ----------
 
   async prompt(text: string, options?: { images?: ImageContent[] }): Promise<void> {
+    await this.runPrompt(text, options?.images, 'interactive');
+  }
+
+  private async runPrompt(
+    text: string,
+    images: ImageContent[] | undefined,
+    source: 'interactive' | 'rpc' | 'extension',
+  ): Promise<void> {
     if (!this.harness) return;
 
     this.retryAttempt = 0;
 
     try {
+      if (await this.tryExecuteExtensionCommand(text)) return;
+      const preparedInput = await this.preparePromptInput(text, images, source);
+      if (!preparedInput) return;
+
+      if (!this._isStreaming) {
+        await this.runPrePromptCompaction();
+      }
+
       this._isStreaming = true;
       this.emit({ type: 'state_change' });
-      if (options) {
-        await this.harness.prompt(text, options);
+      if (preparedInput.images) {
+        await this.harness.prompt(preparedInput.text, { images: preparedInput.images });
       } else {
-        await this.harness.prompt(text);
+        await this.harness.prompt(preparedInput.text);
       }
       await this.runPostAgentLoop();
     } catch (error) {
@@ -273,6 +315,7 @@ export class AgentSession implements vscode.Disposable {
       this.retryAbortController?.abort();
       this.manualCompactionAbortController?.abort();
       this.autoCompactionAbortController?.abort();
+      this.clearQueuedAgentMessages();
       await this.harness.abort();
     } catch (error) {
       this.outputChannel.appendLine(
@@ -406,7 +449,7 @@ export class AgentSession implements vscode.Disposable {
 
     const { text, images } = this.normalizeUserMessageContent(content);
     if (!this._isStreaming) {
-      await this.prompt(text, images ? { images } : undefined);
+      await this.runPrompt(text, images, 'extension');
       return;
     }
 
@@ -415,36 +458,39 @@ export class AgentSession implements vscode.Disposable {
     }
 
     if (options?.deliverAs === 'steer') {
-      if (images) {
-        await this.harness.steer(text, { images });
-      } else {
-        await this.harness.steer(text);
-      }
+      this.queueAgentMessage(this.createUserMessage(text, images), 'steer');
       return;
     }
     if (options?.deliverAs === 'followUp') {
-      if (images) {
-        await this.harness.followUp(text, { images });
-      } else {
-        await this.harness.followUp(text);
-      }
+      this.queueAgentMessage(this.createUserMessage(text, images), 'followUp');
       return;
     }
     throw new Error('sendUserMessage while streaming requires deliverAs: "steer" or "followUp"');
   }
 
-  async sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void> {
-    const payload =
-      typeof message === 'string'
-        ? { customType: EXTENSION_MESSAGE_CUSTOM_TYPE, content: message, display: true }
-        : message;
-    await this.session.appendCustomMessageEntry(
-      payload.customType,
-      payload.content,
-      payload.display ?? true,
-      payload.details,
-    );
-    this.emit({ type: 'state_change' });
+  async sendMessage<TDetails = unknown>(
+    message: SendMessageInput<TDetails>,
+    options?: SendMessageOptions,
+  ): Promise<void> {
+    const { customMessage } = this.createCustomMessageFromInput(message);
+
+    if (options?.deliverAs === 'nextTurn') {
+      this.pendingNextTurnMessages.push(customMessage);
+      this.emit({ type: 'state_change' });
+      return;
+    }
+
+    if (this._isStreaming) {
+      this.queueAgentMessage(customMessage, options?.deliverAs ?? 'steer');
+      return;
+    }
+
+    if (options?.triggerTurn) {
+      await this.promptCustomMessage(customMessage);
+      return;
+    }
+
+    await this.appendCustomMessageWithLifecycle(customMessage);
   }
 
   getActiveToolNames(): string[] {
@@ -463,6 +509,55 @@ export class AgentSession implements vscode.Disposable {
       parameters: entry.definition.parameters,
       sourceInfo: entry.sourceInfo,
     }));
+  }
+
+  async appendEntry<TData = unknown>(customType: string, data?: TData): Promise<void> {
+    await this.session.appendCustomEntry(customType, data);
+    this.cachedLeafId = await this.session.getLeafId();
+    this.emit({ type: 'state_change' });
+    this.emit({ type: 'tree_change' });
+  }
+
+  async setSessionName(name: string): Promise<void> {
+    await this.session.appendSessionName(name);
+    this.emit({ type: 'state_change' });
+  }
+
+  async getSessionName(): Promise<string | undefined> {
+    return this.session.getSessionName();
+  }
+
+  getCommands(): SlashCommandInfo[] {
+    const getRegisteredCommands = (
+      this.extensionRunner as { getRegisteredCommands?: () => ResolvedCommand[] } | undefined
+    )?.getRegisteredCommands;
+    const extensionCommands: SlashCommandInfo[] =
+      getRegisteredCommands?.call(this.extensionRunner).map((command) => ({
+        name: command.invocationName,
+        description: command.description,
+        source: 'extension',
+        sourceInfo: command.sourceInfo,
+      })) ?? [];
+    const templates: SlashCommandInfo[] = this.getPromptTemplates().map((template) => ({
+      name: template.name,
+      description: template.description,
+      source: 'prompt',
+      sourceInfo:
+        (template as PromptTemplate & { sourceInfo?: SourceInfo }).sourceInfo ??
+        createSyntheticSourceInfo(`<prompt:${template.name}>`, {
+          source: 'prompt',
+        }),
+    }));
+    const skills: SlashCommandInfo[] = this.skills.map((skill) => ({
+      name: `skill:${skill.name}`,
+      description: skill.description,
+      source: 'skill',
+      sourceInfo: createSyntheticSourceInfo(skill.filePath, {
+        source: 'skill',
+        baseDir: skill.filePath.replace(/[\\/][^\\/]*$/, ''),
+      }),
+    }));
+    return [...extensionCommands, ...templates, ...skills];
   }
 
   async setActiveTools(toolNames: string[]): Promise<void> {
@@ -679,6 +774,10 @@ export class AgentSession implements vscode.Disposable {
     }
   }
 
+  async waitForIdle(): Promise<void> {
+    await this.harness?.waitForIdle();
+  }
+
   // ---------- 消息访问（单一来源） ----------
 
   getScoutMessages(): ScoutMessage[] {
@@ -691,9 +790,9 @@ export class AgentSession implements vscode.Disposable {
     }
     const context = Object.defineProperties(
       {},
-      Object.getOwnPropertyDescriptors(this.extensionRunner.createContext()),
+      Object.getOwnPropertyDescriptors(this.extensionRunner.createCommandContext()),
     ) as ReplacedSessionContext;
-    context.sendMessage = (message) => this.sendMessage(message);
+    context.sendMessage = (message, options) => this.sendMessage(message, options);
     context.sendUserMessage = (content, options) => this.sendUserMessage(content, options);
     return context;
   }
@@ -865,6 +964,217 @@ export class AgentSession implements vscode.Disposable {
     };
   }
 
+  private async preparePromptInput(
+    text: string,
+    images: ImageContent[] | undefined,
+    source: 'interactive' | 'rpc' | 'extension',
+  ): Promise<{ text: string; images?: ImageContent[] } | undefined> {
+    const runner = this.extensionRunner;
+    if (!runner?.hasHandlers?.('input')) {
+      return { text: this.expandPromptCommands(text), images };
+    }
+
+    const result = await runner.emitInput(text, images, source);
+    if (result.action === 'handled') {
+      return undefined;
+    }
+    if (result.action === 'transform') {
+      return { text: this.expandPromptCommands(result.text), images: result.images };
+    }
+    return { text: this.expandPromptCommands(text), images };
+  }
+
+  private async tryExecuteExtensionCommand(text: string): Promise<boolean> {
+    if (!text.startsWith('/') || !this.extensionRunner) return false;
+
+    const spaceIndex = text.search(/\s/);
+    const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
+    const args = spaceIndex === -1 ? '' : text.slice(spaceIndex + 1);
+    if (!commandName || commandName.startsWith('skill:')) return false;
+
+    const getCommand = (
+      this.extensionRunner as {
+        getCommand?: (name: string) => RegisteredCommand | undefined;
+      }
+    ).getCommand;
+    const command = getCommand?.call(this.extensionRunner, commandName);
+    if (!command) return false;
+
+    try {
+      await command.handler(args, this.extensionRunner.createCommandContext());
+    } catch (error) {
+      this.extensionRunner.emitError({
+        extensionPath: `command:${commandName}`,
+        event: 'command',
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+    }
+    return true;
+  }
+
+  private expandPromptCommands(text: string): string {
+    const skillExpanded = this.expandSkillCommand(text);
+    return this.expandPromptTemplateCommand(skillExpanded);
+  }
+
+  private expandSkillCommand(text: string): string {
+    if (!text.startsWith('/skill:')) return text;
+
+    const commandText = text.slice('/skill:'.length);
+    const spaceIndex = commandText.search(/\s/);
+    const skillName = spaceIndex === -1 ? commandText : commandText.slice(0, spaceIndex);
+    const additionalInstructions =
+      spaceIndex === -1 ? undefined : commandText.slice(spaceIndex + 1).trim();
+    const skill = this.skills.find((candidate) => candidate.name === skillName);
+    if (!skill) return text;
+
+    return formatSkillInvocation(skill as Skill, additionalInstructions || undefined);
+  }
+
+  private expandPromptTemplateCommand(text: string): string {
+    if (!text.startsWith('/')) return text;
+
+    const withoutSlash = text.slice(1);
+    const spaceIndex = withoutSlash.search(/\s/);
+    const templateName = spaceIndex === -1 ? withoutSlash : withoutSlash.slice(0, spaceIndex);
+    const argsString = spaceIndex === -1 ? '' : withoutSlash.slice(spaceIndex + 1);
+    if (!templateName || templateName.startsWith('skill:')) return text;
+
+    const template = this.getPromptTemplates().find((candidate) => candidate.name === templateName);
+    if (!template) return text;
+
+    return formatPromptTemplateInvocation(template, parseCommandArgs(argsString));
+  }
+
+  private getPromptTemplates(): PromptTemplate[] {
+    return [...this.promptTemplates];
+  }
+
+  private async findLastAssistantMessage(): Promise<AssistantMessage | undefined> {
+    const context = await this.session.buildContext();
+    for (let i = context.messages.length - 1; i >= 0; i--) {
+      const message = context.messages[i];
+      if (message?.role === 'assistant') return message as AssistantMessage;
+    }
+    return undefined;
+  }
+
+  private async runPrePromptCompaction(): Promise<void> {
+    if (!this.harness) return;
+    const lastAssistant = await this.findLastAssistantMessage();
+    if (!lastAssistant) return;
+    const shouldContinue = await this.checkCompaction(lastAssistant);
+    if (!shouldContinue) return;
+
+    this._isStreaming = true;
+    this.emit({ type: 'state_change' });
+    await this.harness.continue();
+    await this.runPostAgentLoop();
+  }
+
+  private createUserMessage(text: string, images?: ImageContent[]): AgentMessage {
+    const content: Array<TextContent | ImageContent> = [{ type: 'text', text }];
+    if (images) content.push(...images);
+    return { role: 'user', content, timestamp: Date.now() };
+  }
+
+  private createCustomMessageFromInput<TDetails = unknown>(
+    message: SendMessageInput<TDetails>,
+  ): { customMessage: CustomMessage<TDetails> } {
+    const payload =
+      typeof message === 'string'
+        ? { customType: EXTENSION_MESSAGE_CUSTOM_TYPE, content: message, display: true }
+        : message;
+    const display = payload.display ?? true;
+    return {
+      customMessage: createCustomMessage(
+        payload.customType,
+        payload.content,
+        display,
+        payload.details,
+        new Date().toISOString(),
+      ) as CustomMessage<TDetails>,
+    };
+  }
+
+  private queueAgentMessage(message: AgentMessage, deliverAs: 'steer' | 'followUp'): void {
+    if (deliverAs === 'followUp') {
+      this.followUpMessageQueue.push(message);
+    } else {
+      this.steeringMessageQueue.push(message);
+    }
+    this.emit({ type: 'state_change' });
+  }
+
+  private drainQueuedAgentMessages(
+    queueName: 'steer' | 'followUp',
+    mode: QueueMode,
+  ): AgentMessage[] {
+    const queue = queueName === 'steer' ? this.steeringMessageQueue : this.followUpMessageQueue;
+    if (queue.length === 0) return [];
+
+    if (mode === 'all') {
+      const drained = queue.slice();
+      if (queueName === 'steer') {
+        this.steeringMessageQueue = [];
+      } else {
+        this.followUpMessageQueue = [];
+      }
+      this.emit({ type: 'state_change' });
+      return drained;
+    }
+
+    const first = queue[0];
+    if (!first) return [];
+    if (queueName === 'steer') {
+      this.steeringMessageQueue = queue.slice(1);
+    } else {
+      this.followUpMessageQueue = queue.slice(1);
+    }
+    this.emit({ type: 'state_change' });
+    return [first];
+  }
+
+  private hasQueuedAgentMessages(): boolean {
+    return this.steeringMessageQueue.length > 0 || this.followUpMessageQueue.length > 0;
+  }
+
+  private clearQueuedAgentMessages(): void {
+    if (!this.hasQueuedAgentMessages()) return;
+    this.steeringMessageQueue = [];
+    this.followUpMessageQueue = [];
+    this.emit({ type: 'state_change' });
+  }
+
+  private async appendCustomMessageWithLifecycle(message: CustomMessage): Promise<void> {
+    await this.session.appendCustomMessageEntry(
+      message.customType,
+      message.content,
+      message.display,
+      message.details,
+    );
+    this.emit({ type: 'state_change' });
+  }
+
+  private async promptCustomMessage(message: CustomMessage): Promise<void> {
+    if (!this.harness) return;
+
+    this.retryAttempt = 0;
+
+    try {
+      this._isStreaming = true;
+      this.emit({ type: 'state_change' });
+      await this.harness.promptMessages([message]);
+      await this.runPostAgentLoop();
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.outputChannel.appendLine(`[scout] Custom prompt error: ${errorMessage}`);
+      this._isStreaming = false;
+      this.emit({ type: 'error', message: errorMessage });
+    }
+  }
+
   /** 重建 AgentHarness（initialize/fork 复用） */
   private async rebuildHarness(): Promise<void> {
     const context = await this.session.buildContext();
@@ -899,7 +1209,10 @@ export class AgentSession implements vscode.Disposable {
       activeToolNames: this.activeToolNames,
       model,
       thinkingLevel,
-      resources: { skills: this.skills as Skill[] },
+      resources: {
+        skills: this.skills as Skill[],
+        promptTemplates: this.promptTemplates,
+      },
       systemPrompt: (ctx) => {
         this.lastSystemPrompt = this.buildDynamicSystemPrompt(ctx.activeTools as typeof tools);
         return this.lastSystemPrompt;
@@ -908,6 +1221,9 @@ export class AgentSession implements vscode.Disposable {
       streamOptions: this.configManager.getStreamOptions(),
       steeringMode: this.configManager.getSteeringMode(),
       followUpMode: this.configManager.getFollowUpMode(),
+      drainSteeringMessages: (mode) => this.drainQueuedAgentMessages('steer', mode),
+      drainFollowUpMessages: (mode) => this.drainQueuedAgentMessages('followUp', mode),
+      hasQueuedMessages: () => this.hasQueuedAgentMessages(),
     };
 
     const { AgentHarness: AgentHarnessClass } = await import('@scout-agent/agent');
@@ -1438,20 +1754,27 @@ export class AgentSession implements vscode.Disposable {
     const runner = this.extensionRunner;
     const unsubs: Array<() => void> = [];
 
-    unsubs.push(this.harness.on('before_agent_start', (e) => runner.emitBeforeAgentStart(e)));
+    unsubs.push(
+      this.harness.on('before_agent_start', async (e) => {
+        const queuedNextTurnMessages = this.pendingNextTurnMessages.splice(0);
+        try {
+          const result = await runner.emitBeforeAgentStart(e);
+          if (queuedNextTurnMessages.length === 0) return result;
+          return {
+            ...result,
+            messages: [...queuedNextTurnMessages, ...(result?.messages ?? [])],
+          };
+        } catch (error) {
+          this.pendingNextTurnMessages.unshift(...queuedNextTurnMessages);
+          throw error;
+        }
+      }),
+    );
     unsubs.push(
       this.harness.on('context', async (e) => {
         const messages = await runner.emitContext(e.messages);
         return { messages };
       }),
-    );
-    unsubs.push(
-      this.harness.on('before_provider_request', (e) =>
-        runner.emitBeforeProviderStreamOptions({
-          type: 'before_provider_stream_options',
-          streamOptions: e.streamOptions,
-        }),
-      ),
     );
     unsubs.push(
       this.harness.on('before_provider_payload', async (e) => ({

@@ -31,6 +31,7 @@ const {
   mockSessionGetLeafId,
   mockSessionRepoDelete,
   mockSessionRepoFork,
+  mockLoadSourcedPromptTemplates,
   MockAgentHarness,
 } = vi.hoisted(() => {
   const mockHarnessSubscribe = vi.fn(() => vi.fn());
@@ -69,6 +70,10 @@ const {
   const mockSessionGetLeafId = vi.fn(async () => null as string | null);
   const mockSessionRepoDelete = vi.fn(async () => undefined);
   const mockSessionRepoFork = vi.fn();
+  const mockLoadSourcedPromptTemplates = vi.fn(async (..._args: any[]) => ({
+    promptTemplates: [] as any[],
+    diagnostics: [] as any[],
+  }));
 
   const MockAgentHarness = vi.fn(function (this: any) {
     this.subscribe = mockHarnessSubscribe;
@@ -122,6 +127,7 @@ const {
     mockSessionGetLeafId,
     mockSessionRepoDelete,
     mockSessionRepoFork,
+    mockLoadSourcedPromptTemplates,
     MockAgentHarness,
   };
 });
@@ -186,6 +192,7 @@ vi.mock('@scout-agent/agent', () => ({
   shouldCompact: vi.fn(() => false),
   calculateContextTokens: vi.fn(() => 0),
   estimateContextTokens: vi.fn(() => ({ tokens: 0, lastUsageIndex: null })),
+  loadSourcedPromptTemplates: mockLoadSourcedPromptTemplates,
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
 }));
 
@@ -289,6 +296,7 @@ vi.mock('../extensions/index.ts', () => ({
 import { SessionManager } from '../session-manager.ts';
 import { ConfigManager } from '../config-manager.ts';
 import { ScoutExtensionRunner, discoverAndLoadExtensions } from '../extensions/index.ts';
+import { loadSkills } from '../skill-loader.ts';
 
 function makeOutputChannel() {
   return {
@@ -329,7 +337,9 @@ function makeMockExtensionRunner(overrides?: Record<string, unknown>) {
     emitSessionBeforeFork: vi.fn(),
     emitSessionShutdown: vi.fn(),
     emitSessionStart: vi.fn(),
+    emitResourcesDiscover: vi.fn(async () => ({ skillPaths: [], promptPaths: [], themePaths: [] })),
     createContext: vi.fn(() => ({})),
+    createCommandContext: vi.fn(() => ({})),
     invalidate: vi.fn(),
     ...overrides,
   };
@@ -351,6 +361,7 @@ async function makeInitializedSessionManagerWithExtensionRunner(
         },
         handlers: new Map(),
         tools: new Map(),
+        commands: new Map(),
       },
     ],
     errors: [],
@@ -397,6 +408,7 @@ describe('SessionManager — 协调层', () => {
     mockSessionGetBranch.mockResolvedValue([]);
     mockSessionGetEntries.mockResolvedValue([]);
     mockSessionGetLeafId.mockResolvedValue(null);
+    mockLoadSourcedPromptTemplates.mockResolvedValue({ promptTemplates: [], diagnostics: [] });
   });
 
   it('initialize emits state_change', async () => {
@@ -407,6 +419,75 @@ describe('SessionManager — 协调层', () => {
     await manager.initialize();
 
     expect(listener).toHaveBeenCalledWith(expect.objectContaining({ type: 'state_change' }));
+    manager.dispose();
+  });
+
+  it('initialize loads prompt templates into harness resources', async () => {
+    mockLoadSourcedPromptTemplates.mockResolvedValueOnce({
+      promptTemplates: [
+        {
+          promptTemplate: {
+            name: 'summarize',
+            description: 'Summarize target',
+            content: 'Summarize $ARGUMENTS',
+          },
+          source: {
+            path: '/test/project/.scout/prompts',
+            source: 'project',
+            scope: 'project',
+            origin: 'top-level',
+          },
+        },
+      ],
+      diagnostics: [],
+    });
+    const manager = makeSessionManager();
+
+    await manager.initialize();
+
+    const harnessCalls = MockAgentHarness.mock.calls as any[][];
+    const lastHarnessCall = harnessCalls[harnessCalls.length - 1]!;
+    expect(lastHarnessCall[0]).toEqual(
+      expect.objectContaining({
+        resources: expect.objectContaining({
+          promptTemplates: [
+            expect.objectContaining({
+              name: 'summarize',
+              description: 'Summarize target',
+              content: 'Summarize $ARGUMENTS',
+            }),
+          ],
+        }),
+      }),
+    );
+    const promptInputs = mockLoadSourcedPromptTemplates.mock.calls[0]![1];
+    const promptInputPaths = promptInputs.map((entry: { path: string }) =>
+      entry.path.replace(/\\/g, '/'),
+    );
+    expect(promptInputPaths).toEqual(expect.arrayContaining(['/test/project/.scout/prompts']));
+    manager.dispose();
+  });
+
+  it('initialize consumes extension discovered prompt and skill paths', async () => {
+    const extensionRunner = makeMockExtensionRunner({
+      emitResourcesDiscover: vi.fn(async () => ({
+        skillPaths: [{ path: '/extension/skills', extensionPath: '/extension/index.ts' }],
+        promptPaths: [{ path: '/extension/prompts', extensionPath: '/extension/index.ts' }],
+        themePaths: [],
+      })),
+    });
+
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+
+    expect(extensionRunner.emitResourcesDiscover).toHaveBeenCalledWith('/test/project', 'startup');
+    expect(loadSkills).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customPaths: ['/extension/skills'],
+      }),
+    );
+    expect(mockLoadSourcedPromptTemplates.mock.calls[0]![1]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: '/extension/prompts' })]),
+    );
     manager.dispose();
   });
 
@@ -588,6 +669,7 @@ describe('SessionManager — 协调层', () => {
           },
           handlers: new Map(),
           tools: new Map(),
+          commands: new Map(),
         },
       ],
       errors: [],
@@ -672,6 +754,7 @@ describe('SessionManager — 协调层', () => {
           },
           handlers: new Map(),
           tools: new Map(),
+          commands: new Map(),
         },
       ],
       errors: [],

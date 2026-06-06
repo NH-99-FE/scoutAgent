@@ -4,7 +4,7 @@
 // ============================================================
 
 import type { Model } from '@scout-agent/ai';
-import type { AgentMessage, AgentHarnessStreamOptionsPatch } from '@scout-agent/agent';
+import type { AgentMessage } from '@scout-agent/agent';
 import type { ScoutContextUsage } from '@scout-agent/shared';
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from './types.ts';
 import type {
@@ -12,6 +12,7 @@ import type {
   ScoutExtension,
   ScoutExtensionActions,
   ScoutExtensionContext,
+  ScoutExtensionCommandContext,
   ScoutExtensionContextActions,
   ScoutExtensionError,
   ScoutExtensionRuntime,
@@ -43,6 +44,9 @@ import type {
   SessionStartEvent,
   ScoutExtensionEvent,
   RegisteredTool,
+  RegisteredCommand,
+  ResolvedCommand,
+  ResourceDiagnostic,
 } from './types.ts';
 import type { ConfigManager } from '../config-manager.ts';
 import type { SessionManager } from '../session-manager.ts';
@@ -114,6 +118,7 @@ export class ScoutExtensionRunner {
   private sessionManager: SessionManager;
   private configManager: ConfigManager;
   private errorListeners: Set<ScoutExtensionErrorListener> = new Set();
+  private commandDiagnostics: ResourceDiagnostic[] = [];
 
   // bindCore 注入的上下文动作
   private getModelFn: () => Model<any> | undefined = () => undefined;
@@ -132,6 +137,10 @@ export class ScoutExtensionRunner {
   });
   private forkFn: ScoutExtensionContextActions['fork'] = async () => ({ cancelled: true });
   private switchSessionFn: ScoutExtensionContextActions['switchSession'] = async () => ({
+    cancelled: true,
+  });
+  private waitForIdleFn: ScoutExtensionContextActions['waitForIdle'] = async () => {};
+  private navigateTreeFn: ScoutExtensionContextActions['navigateTree'] = async () => ({
     cancelled: true,
   });
 
@@ -166,6 +175,11 @@ export class ScoutExtensionRunner {
     this.runtime.getAllTools = actions.getAllTools;
     this.runtime.setActiveTools = actions.setActiveTools;
     this.runtime.refreshTools = actions.refreshTools;
+    this.runtime.appendEntry = actions.appendEntry;
+    this.runtime.setSessionName = actions.setSessionName;
+    this.runtime.getSessionName = actions.getSessionName;
+    this.runtime.setLabel = actions.setLabel;
+    this.runtime.getCommands = actions.getCommands;
 
     // 上下文动作
     this.getModelFn = contextActions.getModel;
@@ -182,6 +196,8 @@ export class ScoutExtensionRunner {
     this.newSessionFn = contextActions.newSession;
     this.forkFn = contextActions.fork;
     this.switchSessionFn = contextActions.switchSession;
+    this.waitForIdleFn = contextActions.waitForIdle;
+    this.navigateTreeFn = contextActions.navigateTree;
   }
 
   // ---------- 上下文创建 ----------
@@ -266,6 +282,22 @@ export class ScoutExtensionRunner {
     };
   }
 
+  createCommandContext(): ScoutExtensionCommandContext {
+    const context = Object.defineProperties(
+      {},
+      Object.getOwnPropertyDescriptors(this.createContext()),
+    ) as ScoutExtensionCommandContext;
+    context.waitForIdle = () => {
+      this.assertActive();
+      return this.waitForIdleFn();
+    };
+    context.navigateTree = (targetId, options) => {
+      this.assertActive();
+      return this.navigateTreeFn(targetId, options);
+    };
+    return context;
+  }
+
   // ---------- 工具收集 ----------
 
   /** 获取所有扩展注册的工具（同名工具第一个注册的胜出） */
@@ -279,6 +311,50 @@ export class ScoutExtensionRunner {
       }
     }
     return Array.from(toolsByName.values());
+  }
+
+  private resolveRegisteredCommands(): ResolvedCommand[] {
+    const commands: RegisteredCommand[] = [];
+    const counts = new Map<string, number>();
+    for (const ext of this.extensions) {
+      for (const command of ext.commands.values()) {
+        commands.push(command);
+        counts.set(command.name, (counts.get(command.name) ?? 0) + 1);
+      }
+    }
+
+    const seen = new Map<string, number>();
+    const takenInvocationNames = new Set<string>();
+    return commands.map((command) => {
+      const occurrence = (seen.get(command.name) ?? 0) + 1;
+      seen.set(command.name, occurrence);
+
+      let invocationName =
+        (counts.get(command.name) ?? 0) > 1 ? `${command.name}:${occurrence}` : command.name;
+      if (takenInvocationNames.has(invocationName)) {
+        let suffix = occurrence;
+        do {
+          suffix += 1;
+          invocationName = `${command.name}:${suffix}`;
+        } while (takenInvocationNames.has(invocationName));
+      }
+
+      takenInvocationNames.add(invocationName);
+      return { ...command, invocationName };
+    });
+  }
+
+  getRegisteredCommands(): ResolvedCommand[] {
+    this.commandDiagnostics = [];
+    return this.resolveRegisteredCommands();
+  }
+
+  getCommandDiagnostics(): ResourceDiagnostic[] {
+    return this.commandDiagnostics;
+  }
+
+  getCommand(name: string): ResolvedCommand | undefined {
+    return this.resolveRegisteredCommands().find((command) => command.invocationName === name);
   }
 
   /** 按名称查找工具定义 */
@@ -673,35 +749,6 @@ export class ScoutExtensionRunner {
 
   async emitAfterProviderResponse(event: AfterProviderResponseEvent): Promise<void> {
     await this.emit(event);
-  }
-
-  /**
-   * Scout harness still has a separate stream-options hook. It is intentionally
-   * not part of the Pi lifecycle surface.
-   */
-  async emitBeforeProviderStreamOptions(event: {
-    type: 'before_provider_stream_options';
-    streamOptions: unknown;
-  }): Promise<{ streamOptions?: AgentHarnessStreamOptionsPatch } | undefined> {
-    const ctx = this.createContext();
-    let streamOptions: AgentHarnessStreamOptionsPatch | undefined;
-    for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('before_provider_stream_options');
-      if (!handlers || handlers.length === 0) continue;
-
-      for (const handler of handlers) {
-        try {
-          const result = (await handler(event, ctx)) as
-            | { streamOptions?: AgentHarnessStreamOptionsPatch }
-            | undefined;
-          if (result?.streamOptions) streamOptions = { ...streamOptions, ...result.streamOptions };
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'before_provider_stream_options', err);
-        }
-      }
-    }
-
-    return streamOptions ? { streamOptions } : undefined;
   }
 
   /**

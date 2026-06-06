@@ -48,6 +48,7 @@ function makeExtension(
     },
     handlers: handlersMap,
     tools: new Map(),
+    commands: new Map(),
   };
 }
 
@@ -83,6 +84,7 @@ function makeExtensionWithTool(toolName: string): ScoutExtension {
         },
       ],
     ]),
+    commands: new Map(),
   };
 }
 
@@ -94,6 +96,11 @@ function makeActions(): ScoutExtensionActions {
     getAllTools: vi.fn(() => []),
     setActiveTools: vi.fn(async () => {}),
     refreshTools: vi.fn(async () => {}),
+    appendEntry: vi.fn(async () => {}),
+    setSessionName: vi.fn(async () => {}),
+    getSessionName: vi.fn(async () => undefined),
+    setLabel: vi.fn(async () => {}),
+    getCommands: vi.fn(() => []),
   };
 }
 
@@ -113,6 +120,8 @@ function makeContextActions(): ScoutExtensionContextActions {
     newSession: vi.fn(async () => ({ cancelled: false })),
     fork: vi.fn(async () => ({ cancelled: false })),
     switchSession: vi.fn(async () => ({ cancelled: false })),
+    waitForIdle: vi.fn(async () => {}),
+    navigateTree: vi.fn(async () => ({ cancelled: false })),
   };
 }
 
@@ -231,6 +240,17 @@ describe('ScoutExtensionRunner.createContext', () => {
     expect(() => ctx.cwd).toThrow('ctx.newSession()');
     expect(() => ctx.setModel('test-model')).toThrow('withSession');
   });
+
+  it('keeps command context getters lazy for stale checks', () => {
+    const runner = makeRunner([]);
+    runner.bindCore(makeActions(), makeContextActions());
+
+    const ctx = runner.createCommandContext();
+    runner.invalidate('gone');
+
+    expect(() => ctx.cwd).toThrow('gone');
+    expect(() => ctx.waitForIdle()).toThrow('gone');
+  });
 });
 
 // ---------- 工具收集 ----------
@@ -255,6 +275,80 @@ describe('ScoutExtensionRunner.getAllRegisteredTools', () => {
     const tools = runner.getAllRegisteredTools();
     expect(tools).toHaveLength(1);
     expect(tools[0]!.sourceInfo.path).toBe('<ext-with-shared-tool>');
+  });
+});
+
+// ---------- 命令收集 ----------
+
+describe('ScoutExtensionRunner commands', () => {
+  it('collects registered commands and assigns Pi-style invocation names', () => {
+    const ext1 = makeExtension();
+    const ext2 = makeExtension();
+    const handlerA = vi.fn();
+    const handlerB = vi.fn();
+    ext1.commands.set('hello', {
+      name: 'hello',
+      description: 'first',
+      sourceInfo: ext1.sourceInfo,
+      handler: handlerA,
+    });
+    ext2.commands.set('hello', {
+      name: 'hello',
+      description: 'second',
+      sourceInfo: ext2.sourceInfo,
+      handler: handlerB,
+    });
+    ext2.commands.set('other', {
+      name: 'other',
+      sourceInfo: ext2.sourceInfo,
+      handler: handlerB,
+    });
+    const runner = makeRunner([ext1, ext2]);
+
+    expect(runner.getRegisteredCommands().map((command) => command.invocationName)).toEqual([
+      'hello:1',
+      'hello:2',
+      'other',
+    ]);
+    expect(runner.getCommand('hello')).toBeUndefined();
+    expect(runner.getCommand('hello:1')?.description).toBe('first');
+    expect(runner.getCommand('hello:2')?.description).toBe('second');
+    expect(runner.getCommandDiagnostics()).toEqual([]);
+  });
+
+  it('preserves command argument completion handlers', async () => {
+    const ext = makeExtension();
+    const getArgumentCompletions = vi.fn(async (prefix: string) => [
+      { value: `${prefix}-one`, label: 'One' },
+    ]);
+    ext.commands.set('complete', {
+      name: 'complete',
+      description: 'Complete arguments',
+      sourceInfo: ext.sourceInfo,
+      getArgumentCompletions,
+      handler: vi.fn(),
+    });
+    const runner = makeRunner([ext]);
+
+    const command = runner.getCommand('complete');
+
+    await expect(command?.getArgumentCompletions?.('arg')).resolves.toEqual([
+      { value: 'arg-one', label: 'One' },
+    ]);
+    expect(getArgumentCompletions).toHaveBeenCalledWith('arg');
+  });
+
+  it('creates command context with wait and tree navigation helpers', async () => {
+    const runner = makeRunner([]);
+    const contextActions = makeContextActions();
+    runner.bindCore(makeActions(), contextActions);
+
+    const ctx = runner.createCommandContext();
+    await ctx.waitForIdle();
+    await expect(ctx.navigateTree('entry-1')).resolves.toEqual({ cancelled: false });
+
+    expect(contextActions.waitForIdle).toHaveBeenCalled();
+    expect(contextActions.navigateTree).toHaveBeenCalledWith('entry-1', undefined);
   });
 });
 

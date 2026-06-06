@@ -18,6 +18,7 @@ const {
   mockGetRetrySettings,
   mockHarnessSubscribe,
   mockHarnessPrompt,
+  mockHarnessPromptMessages,
   mockHarnessContinue,
   mockHarnessAbort,
   mockHarnessSetModel,
@@ -43,12 +44,16 @@ const {
   mockSessionAppendLabel,
   mockSessionAppendCustomEntry,
   mockSessionAppendCustomMessageEntry,
+  mockSessionAppendSessionName,
+  mockSessionGetSessionName,
   mockSessionGetLeafId,
   mockWrapRegisteredTools,
+  getLastHarnessOptions,
   MockAgentHarness,
 } = vi.hoisted(() => {
   const mockHarnessSubscribe = vi.fn(() => vi.fn());
   const mockHarnessPrompt = vi.fn();
+  const mockHarnessPromptMessages = vi.fn();
   const mockHarnessContinue = vi.fn();
   const mockHarnessAbort = vi.fn();
   const mockHarnessSetModel = vi.fn();
@@ -93,12 +98,17 @@ const {
   const mockSessionAppendLabel = vi.fn(async () => 'label-entry-1');
   const mockSessionAppendCustomEntry = vi.fn(async () => 'custom-entry-1');
   const mockSessionAppendCustomMessageEntry = vi.fn(async () => 'custom-message-entry-1');
+  const mockSessionAppendSessionName = vi.fn(async () => 'session-name-entry-1');
+  const mockSessionGetSessionName = vi.fn(async () => undefined as string | undefined);
   const mockSessionGetLeafId = vi.fn(async () => null as string | null);
   const mockWrapRegisteredTools = vi.fn(() => []);
+  let lastHarnessOptions: any;
 
-  const MockAgentHarness = vi.fn(function (this: any) {
+  const MockAgentHarness = vi.fn(function (this: any, options: any) {
+    lastHarnessOptions = options;
     this.subscribe = mockHarnessSubscribe;
     this.prompt = mockHarnessPrompt;
+    this.promptMessages = mockHarnessPromptMessages;
     this.continue = mockHarnessContinue;
     this.abort = mockHarnessAbort;
     this.setModel = mockHarnessSetModel;
@@ -107,7 +117,9 @@ const {
     this.steer = mockHarnessSteer;
     this.followUp = mockHarnessFollowUp;
     this.setTools = mockHarnessSetTools;
-    this.hasPendingMessages = mockHarnessHasPendingMessages;
+    this.hasPendingMessages = vi.fn(
+      () => mockHarnessHasPendingMessages() || (options.hasQueuedMessages?.() ?? false),
+    );
     this.getSignal = mockHarnessGetSignal;
     this.getModel = mockHarnessGetModel;
     this.getThinkingLevel = mockHarnessGetThinkingLevel;
@@ -136,6 +148,7 @@ const {
     mockGetRetrySettings: vi.fn(() => ({ enabled: true, maxRetries: 3, baseDelayMs: 2000 })),
     mockHarnessSubscribe,
     mockHarnessPrompt,
+    mockHarnessPromptMessages,
     mockHarnessContinue,
     mockHarnessAbort,
     mockHarnessSetModel,
@@ -161,8 +174,11 @@ const {
     mockSessionAppendLabel,
     mockSessionAppendCustomEntry,
     mockSessionAppendCustomMessageEntry,
+    mockSessionAppendSessionName,
+    mockSessionGetSessionName,
     mockSessionGetLeafId,
     mockWrapRegisteredTools,
+    getLastHarnessOptions: () => lastHarnessOptions,
     MockAgentHarness,
   };
 });
@@ -204,6 +220,32 @@ vi.mock('@scout-agent/agent', () => ({
   shouldCompact: mockShouldCompact,
   calculateContextTokens: mockCalculateContextTokens,
   estimateContextTokens: mockEstimateContextTokens,
+  createCustomMessage: (
+    customType: string,
+    content: unknown,
+    display: boolean,
+    details: unknown,
+    timestamp: string,
+  ) => ({
+    role: 'custom',
+    customType,
+    content,
+    display,
+    details,
+    timestamp: new Date(timestamp).getTime(),
+  }),
+  formatSkillInvocation: (skill: any, additionalInstructions?: string) =>
+    `<skill name="${skill.name}" location="${skill.filePath}">\n${skill.content}\n</skill>${
+      additionalInstructions ? `\n\n${additionalInstructions}` : ''
+    }`,
+  parseCommandArgs: (argsString: string) =>
+    argsString
+      .match(/"[^"]*"|'[^']*'|\S+/g)
+      ?.map((arg: string) => arg.replace(/^['"]|['"]$/g, '')) ?? [],
+  formatPromptTemplateInvocation: (template: any, args: string[]) =>
+    template.content
+      .replace(/\$(\d+)/g, (_: string, num: string) => args[Number(num) - 1] ?? '')
+      .replace(/\$ARGUMENTS|\$@/g, args.join(' ')),
   DEFAULT_ACTIVE_TOOL_NAMES: ['read', 'bash', 'edit', 'write'],
 }));
 
@@ -335,6 +377,8 @@ function makeSession(
     appendLabel: any;
     appendCustomEntry: any;
     appendCustomMessageEntry: any;
+    appendSessionName: any;
+    getSessionName: any;
     getLeafId: any;
   }>,
 ) {
@@ -348,11 +392,18 @@ function makeSession(
     appendCustomEntry: overrides?.appendCustomEntry ?? mockSessionAppendCustomEntry,
     appendCustomMessageEntry:
       overrides?.appendCustomMessageEntry ?? mockSessionAppendCustomMessageEntry,
+    appendSessionName: overrides?.appendSessionName ?? mockSessionAppendSessionName,
+    getSessionName: overrides?.getSessionName ?? mockSessionGetSessionName,
     getLeafId: overrides?.getLeafId ?? mockSessionGetLeafId,
   } as any;
 }
 
-function makeAgentSession(overrides?: { session?: any; extensionRunner?: any }): AgentSession {
+function makeAgentSession(overrides?: {
+  session?: any;
+  extensionRunner?: any;
+  skills?: any[];
+  promptTemplates?: any[];
+}): AgentSession {
   const configManager = new ConfigManager({
     cwd: '/test/project',
     agentDir: '/test/project/.scout',
@@ -362,7 +413,8 @@ function makeAgentSession(overrides?: { session?: any; extensionRunner?: any }):
     configManager,
     cwd: '/test/project',
     outputChannel: makeOutputChannel(),
-    skills: [],
+    skills: overrides?.skills ?? [],
+    promptTemplates: overrides?.promptTemplates,
     extensionRunner: overrides?.extensionRunner,
   });
 }
@@ -370,6 +422,8 @@ function makeAgentSession(overrides?: { session?: any; extensionRunner?: any }):
 async function makeInitializedAgentSession(overrides?: {
   session?: any;
   extensionRunner?: any;
+  skills?: any[];
+  promptTemplates?: any[];
 }): Promise<AgentSession> {
   const agentSession = makeAgentSession(overrides);
   await agentSession.initialize();
@@ -448,7 +502,10 @@ describe('AgentSession', () => {
     mockSessionMoveTo.mockResolvedValue(undefined);
     mockSessionGetEntries.mockResolvedValue([]);
     mockSessionAppendLabel.mockResolvedValue('label-entry-1');
+    mockSessionAppendCustomEntry.mockResolvedValue('custom-entry-1');
     mockSessionAppendCustomMessageEntry.mockResolvedValue('custom-message-entry-1');
+    mockSessionAppendSessionName.mockResolvedValue('session-name-entry-1');
+    mockSessionGetSessionName.mockResolvedValue(undefined);
     mockSessionGetLeafId.mockResolvedValue(null);
   });
 
@@ -642,6 +699,9 @@ describe('AgentSession — 运行时操作', () => {
     mockSessionGetBranch.mockResolvedValue([]);
     mockSessionMoveTo.mockResolvedValue(undefined);
     mockSessionGetEntries.mockResolvedValue([]);
+    mockSessionAppendCustomEntry.mockResolvedValue('custom-entry-1');
+    mockSessionAppendSessionName.mockResolvedValue('session-name-entry-1');
+    mockSessionGetSessionName.mockResolvedValue(undefined);
     mockSessionGetLeafId.mockResolvedValue(null);
   });
 
@@ -649,6 +709,275 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession();
     await agentSession.prompt('Hello');
     expect(mockHarnessPrompt).toHaveBeenCalledWith('Hello');
+    agentSession.dispose();
+  });
+
+  it('prompt lets input handlers transform text and images before harness prompt', async () => {
+    const image = { type: 'image' as const, image: 'data:image/png;base64,abc' };
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      hasHandlers: vi.fn((event: string) => event === 'input'),
+      emitInput: vi.fn(async () => ({
+        action: 'transform',
+        text: 'Transformed',
+        images: [image],
+      })),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+
+    await agentSession.prompt('Hello');
+
+    expect(extensionRunner.emitInput).toHaveBeenCalledWith('Hello', undefined, 'interactive');
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('Transformed', { images: [image] });
+    agentSession.dispose();
+  });
+
+  it('prompt stops before harness when input handler handles the input', async () => {
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      hasHandlers: vi.fn((event: string) => event === 'input'),
+      emitInput: vi.fn(async () => ({ action: 'handled' })),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+
+    await agentSession.prompt('Hello');
+
+    expect(mockHarnessPrompt).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('prompt expands explicit skill commands before harness prompt', async () => {
+    const agentSession = await makeInitializedAgentSession({
+      skills: [
+        {
+          name: 'review',
+          description: 'Review code',
+          content: 'Read the diff carefully.',
+          filePath: '/test/project/.scout/skills/review/SKILL.md',
+        },
+      ],
+    });
+
+    await agentSession.prompt('/skill:review focus on lifecycle');
+
+    expect(mockHarnessPrompt).toHaveBeenCalledWith(expect.stringContaining('<skill name="review"'));
+    expect(mockHarnessPrompt).toHaveBeenCalledWith(expect.stringContaining('focus on lifecycle'));
+    agentSession.dispose();
+  });
+
+  it('prompt expands prompt template commands before harness prompt', async () => {
+    const agentSession = await makeInitializedAgentSession({
+      promptTemplates: [
+        {
+          name: 'summarize',
+          description: 'Summarize target',
+          content: 'Summarize $1 with $ARGUMENTS',
+        },
+      ],
+    });
+
+    await agentSession.prompt('/summarize package "agent session"');
+
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('Summarize package with package agent session');
+    agentSession.dispose();
+  });
+
+  it('prompt executes registered extension commands instead of prompting harness', async () => {
+    const handler = vi.fn(async () => {});
+    const command = {
+      name: 'hello',
+      description: 'Say hello',
+      sourceInfo: {
+        path: '<extension>',
+        source: 'extension',
+        scope: 'temporary',
+        origin: 'top-level',
+      },
+      handler,
+    };
+    const commandContext = { cwd: '/test/project' };
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      getCommand: vi.fn((name: string) => (name === 'hello' ? command : undefined)),
+      createCommandContext: vi.fn(() => commandContext),
+      emitError: vi.fn(),
+      hasHandlers: vi.fn(() => false),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+
+    await agentSession.prompt('/hello world --fast');
+
+    expect(extensionRunner.getCommand).toHaveBeenCalledWith('hello');
+    expect(handler).toHaveBeenCalledWith('world --fast', commandContext);
+    expect(mockHarnessPrompt).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('reports extension command errors without prompting harness', async () => {
+    const error = new Error('command failed');
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      getCommand: vi.fn(() => ({
+        name: 'boom',
+        sourceInfo: {
+          path: '<extension>',
+          source: 'extension',
+          scope: 'temporary',
+          origin: 'top-level',
+        },
+        handler: vi.fn(async () => {
+          throw error;
+        }),
+      })),
+      createCommandContext: vi.fn(() => ({})),
+      emitError: vi.fn(),
+      hasHandlers: vi.fn(() => false),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+
+    await agentSession.prompt('/boom now');
+
+    expect(extensionRunner.emitError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        extensionPath: 'command:boom',
+        event: 'command',
+        error: 'command failed',
+      }),
+    );
+    expect(mockHarnessPrompt).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('getCommands returns extension commands, prompt templates, and skills', async () => {
+    const extensionSourceInfo = {
+      path: '<extension>',
+      source: 'extension',
+      scope: 'temporary',
+      origin: 'top-level',
+    };
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => []),
+      getRegisteredCommands: vi.fn(() => [
+        {
+          name: 'hello',
+          invocationName: 'hello',
+          description: 'Say hello',
+          sourceInfo: extensionSourceInfo,
+          handler: vi.fn(),
+        },
+      ]),
+      hasHandlers: vi.fn(() => false),
+      emitBeforeAgentStart: vi.fn(),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession({
+      extensionRunner,
+      promptTemplates: [
+        {
+          name: 'summarize',
+          description: 'Summarize target',
+          content: 'Summarize $ARGUMENTS',
+        },
+      ],
+      skills: [
+        {
+          name: 'review',
+          description: 'Review code',
+          content: 'Read the diff carefully.',
+          filePath: '/test/project/.scout/skills/review/SKILL.md',
+        },
+      ],
+    });
+
+    expect(agentSession.getCommands()).toEqual([
+      expect.objectContaining({
+        name: 'hello',
+        description: 'Say hello',
+        source: 'extension',
+        sourceInfo: extensionSourceInfo,
+      }),
+      expect.objectContaining({
+        name: 'summarize',
+        description: 'Summarize target',
+        source: 'prompt',
+      }),
+      expect.objectContaining({
+        name: 'skill:review',
+        description: 'Review code',
+        source: 'skill',
+      }),
+    ]);
+    agentSession.dispose();
+  });
+
+  it('prompt runs pre-prompt compaction and delivers queued messages before new prompt', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    mockSessionBuildContext.mockResolvedValue({
+      messages: [
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'previous' }],
+          timestamp: Date.now(),
+          stopReason: 'stop',
+          usage: { input: 190000, output: 1, cacheRead: 0, cacheWrite: 0 },
+        } as any,
+      ],
+      thinkingLevel: 'off',
+      model: null,
+    } as any);
+    mockShouldCompact.mockReturnValue(true);
+    mockCalculateContextTokens.mockReturnValue(190000);
+    mockHarnessHasPendingMessages.mockReturnValue(true);
+
+    await agentSession.prompt('after compact');
+
+    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+    expect(mockHarnessPrompt).toHaveBeenCalledWith('after compact');
+    expect(mockHarnessCompact.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockHarnessContinue.mock.invocationCallOrder[0]!,
+    );
+    expect(mockHarnessContinue.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockHarnessPrompt.mock.invocationCallOrder[0]!,
+    );
     agentSession.dispose();
   });
 
@@ -690,6 +1019,35 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession();
     await agentSession.setThinkingLevel('medium');
     expect(mockHarnessSetThinkingLevel).toHaveBeenCalledWith('medium');
+    agentSession.dispose();
+  });
+
+  it('appendEntry appends a custom entry and emits state and tree changes', async () => {
+    mockSessionGetLeafId.mockResolvedValue('custom-entry-1');
+    const agentSession = await makeInitializedAgentSession();
+    const listener = vi.fn();
+    agentSession.subscribe(listener);
+
+    await agentSession.appendEntry('extension_note', { ok: true });
+
+    expect(mockSessionAppendCustomEntry).toHaveBeenCalledWith('extension_note', { ok: true });
+    expect(agentSession.leafId).toBe('custom-entry-1');
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ type: 'state_change' }));
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ type: 'tree_change' }));
+    agentSession.dispose();
+  });
+
+  it('setSessionName and getSessionName delegate to session', async () => {
+    mockSessionGetSessionName.mockResolvedValue('Demo Session');
+    const agentSession = await makeInitializedAgentSession();
+    const listener = vi.fn();
+    agentSession.subscribe(listener);
+
+    await agentSession.setSessionName('Demo Session');
+    await expect(agentSession.getSessionName()).resolves.toBe('Demo Session');
+
+    expect(mockSessionAppendSessionName).toHaveBeenCalledWith('Demo Session');
+    expect(listener).toHaveBeenCalledWith(expect.objectContaining({ type: 'state_change' }));
     agentSession.dispose();
   });
 
@@ -1063,7 +1421,6 @@ describe('AgentSession — 运行时操作', () => {
 
     expect(mockHarnessOn).toHaveBeenCalledWith('before_agent_start', expect.any(Function));
     expect(mockHarnessOn).toHaveBeenCalledWith('context', expect.any(Function));
-    expect(mockHarnessOn).toHaveBeenCalledWith('before_provider_request', expect.any(Function));
     expect(mockHarnessOn).toHaveBeenCalledWith('before_provider_payload', expect.any(Function));
     expect(mockHarnessOn).toHaveBeenCalledWith('tool_call', expect.any(Function));
     expect(mockHarnessOn).toHaveBeenCalledWith('tool_result', expect.any(Function));
@@ -1083,7 +1440,6 @@ describe('AgentSession — 运行时操作', () => {
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
-      emitBeforeProviderStreamOptions: vi.fn(),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1136,7 +1492,6 @@ describe('AgentSession — 运行时操作', () => {
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
-      emitBeforeProviderStreamOptions: vi.fn(),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1170,7 +1525,6 @@ describe('AgentSession — 运行时操作', () => {
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
-      emitBeforeProviderStreamOptions: vi.fn(),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1213,7 +1567,6 @@ describe('AgentSession — 运行时操作', () => {
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
-      emitBeforeProviderStreamOptions: vi.fn(),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1279,6 +1632,7 @@ describe('AgentSession — 运行时操作', () => {
 
     mockHarnessPrompt.mockImplementationOnce(() => new Promise(() => {}));
     void agentSession.prompt('streaming message');
+    await flushMicrotasks();
 
     await expect(agentSession.sendUserMessage('queued message')).rejects.toThrow(
       'deliverAs: "steer" or "followUp"',
@@ -1305,12 +1659,30 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession();
     mockHarnessPrompt.mockImplementationOnce(() => new Promise(() => {}));
     void agentSession.prompt('streaming message');
+    await flushMicrotasks();
 
     await agentSession.sendUserMessage('steer message', { deliverAs: 'steer' });
     await agentSession.sendUserMessage('follow message', { deliverAs: 'followUp' });
 
-    expect(mockHarnessSteer).toHaveBeenCalledWith('steer message');
-    expect(mockHarnessFollowUp).toHaveBeenCalledWith('follow message');
+    const harnessOptions = getLastHarnessOptions();
+    await expect(
+      Promise.resolve(harnessOptions.drainSteeringMessages('one-at-a-time')),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: [{ type: 'text', text: 'steer message' }],
+      }),
+    ]);
+    await expect(
+      Promise.resolve(harnessOptions.drainFollowUpMessages('one-at-a-time')),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        role: 'user',
+        content: [{ type: 'text', text: 'follow message' }],
+      }),
+    ]);
+    expect(mockHarnessSteer).not.toHaveBeenCalled();
+    expect(mockHarnessFollowUp).not.toHaveBeenCalled();
     agentSession.dispose();
   });
 
@@ -1345,10 +1717,135 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
-  it('ReplacedSessionContext sendMessage and sendUserMessage target the replacement session', async () => {
+  it('sendMessage with triggerTurn prompts with a custom message', async () => {
+    const agentSession = await makeInitializedAgentSession();
+
+    await agentSession.sendMessage('trigger note', { triggerTurn: true });
+
+    expect(mockHarnessPromptMessages).toHaveBeenCalledWith([
+      expect.objectContaining({
+        role: 'custom',
+        customType: 'extension_message',
+        content: 'trigger note',
+        display: true,
+      }),
+    ]);
+    expect(mockHarnessContinue).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('sendMessage queues custom messages as steering while streaming by default', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    mockHarnessPrompt.mockImplementationOnce(() => new Promise(() => {}));
+    void agentSession.prompt('streaming message');
+    await flushMicrotasks();
+
+    await agentSession.sendMessage({
+      customType: 'custom-test',
+      content: 'custom steer',
+      display: false,
+      details: { source: 'test' },
+    });
+
+    const harnessOptions = getLastHarnessOptions();
+    await expect(
+      Promise.resolve(harnessOptions.drainSteeringMessages('one-at-a-time')),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        role: 'custom',
+        customType: 'custom-test',
+        content: 'custom steer',
+        display: false,
+        details: { source: 'test' },
+      }),
+    ]);
+    expect(mockHarnessSteer).not.toHaveBeenCalled();
+    expect(mockHarnessFollowUp).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('sendMessage queues custom messages as follow-up while streaming', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    mockHarnessPrompt.mockImplementationOnce(() => new Promise(() => {}));
+    void agentSession.prompt('streaming message');
+    await flushMicrotasks();
+
+    await agentSession.sendMessage('custom follow', { deliverAs: 'followUp' });
+
+    const harnessOptions = getLastHarnessOptions();
+    await expect(
+      Promise.resolve(harnessOptions.drainFollowUpMessages('one-at-a-time')),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        role: 'custom',
+        customType: 'extension_message',
+        content: 'custom follow',
+        display: true,
+      }),
+    ]);
+    expect(mockHarnessFollowUp).not.toHaveBeenCalled();
+    expect(mockHarnessSteer).not.toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('sendMessage injects nextTurn custom messages before extension before_agent_start messages', async () => {
     const extensionRunner = {
-      createContext: vi.fn(() => ({
+      getAllRegisteredTools: vi.fn(() => []),
+      emitBeforeAgentStart: vi.fn(async () => ({
+        messages: [
+          {
+            role: 'custom',
+            customType: 'from-hook',
+            content: 'hook',
+            display: true,
+            timestamp: 123,
+          },
+        ],
+      })),
+      emitContext: vi.fn(async (messages) => messages),
+      emitBeforeProviderRequest: vi.fn(),
+      emitToolCall: vi.fn(),
+      emitToolResult: vi.fn(),
+      emitSessionBeforeCompact: vi.fn(),
+      emitSessionBeforeTree: vi.fn(),
+      invalidate: vi.fn(),
+    };
+    const agentSession = await makeInitializedAgentSession({ extensionRunner });
+
+    await agentSession.sendMessage('next note', { deliverAs: 'nextTurn' });
+    const callback = getOnCallback('before_agent_start');
+    const result = await callback({
+      type: 'before_agent_start',
+      prompt: 'prompt',
+      systemPrompt: 'system',
+      resources: {},
+    });
+
+    expect(result).toEqual({
+      messages: [
+        expect.objectContaining({
+          role: 'custom',
+          customType: 'extension_message',
+          content: 'next note',
+        }),
+        expect.objectContaining({
+          role: 'custom',
+          customType: 'from-hook',
+          content: 'hook',
+        }),
+      ],
+    });
+    agentSession.dispose();
+  });
+
+  it('ReplacedSessionContext sendMessage and sendUserMessage target the replacement session', async () => {
+    const waitForIdle = vi.fn(async () => {});
+    const navigateTree = vi.fn(async () => ({ cancelled: false }));
+    const extensionRunner = {
+      createCommandContext: vi.fn(() => ({
         cwd: '/test/project',
+        waitForIdle,
+        navigateTree,
       })),
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
@@ -1363,15 +1860,23 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession({ extensionRunner });
     const replacementCtx = agentSession.createReplacedSessionContext();
 
-    await replacementCtx.sendMessage('replacement message');
+    await replacementCtx.waitForIdle();
+    await expect(replacementCtx.navigateTree('entry-target')).resolves.toEqual({
+      cancelled: false,
+    });
+    await replacementCtx.sendMessage('replacement message', { triggerTurn: true });
     await replacementCtx.sendUserMessage('replacement prompt');
 
-    expect(mockSessionAppendCustomMessageEntry).toHaveBeenCalledWith(
-      'extension_message',
-      'replacement message',
-      true,
-      undefined,
-    );
+    expect(waitForIdle).toHaveBeenCalled();
+    expect(navigateTree).toHaveBeenCalledWith('entry-target');
+    expect(mockHarnessPromptMessages).toHaveBeenCalledWith([
+      expect.objectContaining({
+        role: 'custom',
+        customType: 'extension_message',
+        content: 'replacement message',
+        display: true,
+      }),
+    ]);
     expect(mockHarnessPrompt).toHaveBeenCalledWith('replacement prompt');
     agentSession.dispose();
   });
@@ -1428,6 +1933,8 @@ describe('AgentSession — Auto Retry', () => {
     mockSessionGetBranch.mockResolvedValue([]);
     mockSessionMoveTo.mockResolvedValue(undefined);
     mockSessionGetEntries.mockResolvedValue([]);
+    mockSessionAppendSessionName.mockResolvedValue('session-name-entry-1');
+    mockSessionGetSessionName.mockResolvedValue(undefined);
     mockSessionGetLeafId.mockResolvedValue(null);
   });
 
@@ -2051,6 +2558,9 @@ describe('AgentSession — Tree / Navigation / Label', () => {
     mockSessionMoveTo.mockResolvedValue(undefined);
     mockSessionGetEntries.mockResolvedValue([]);
     mockSessionAppendLabel.mockResolvedValue('label-entry-1');
+    mockSessionAppendCustomEntry.mockResolvedValue('custom-entry-1');
+    mockSessionAppendSessionName.mockResolvedValue('session-name-entry-1');
+    mockSessionGetSessionName.mockResolvedValue(undefined);
     mockSessionGetLeafId.mockResolvedValue(null);
   });
 
