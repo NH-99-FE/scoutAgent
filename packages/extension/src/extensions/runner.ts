@@ -764,15 +764,9 @@ export class ScoutExtensionRunner {
     };
   }
 
-  async emitBeforeProviderRequest(payloadOrEvent: unknown): Promise<unknown> {
+  async emitBeforeProviderRequest(payload: unknown): Promise<unknown> {
     const ctx = this.createContext();
-    let currentPayload =
-      payloadOrEvent &&
-      typeof payloadOrEvent === 'object' &&
-      (payloadOrEvent as { type?: unknown }).type === 'before_provider_request' &&
-      'payload' in payloadOrEvent
-        ? (payloadOrEvent as BeforeProviderRequestEvent).payload
-        : payloadOrEvent;
+    let currentPayload = payload;
 
     for (const ext of this.extensions) {
       const handlers = ext.handlers.get('before_provider_request');
