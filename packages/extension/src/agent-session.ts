@@ -364,7 +364,10 @@ export class AgentSession implements vscode.Disposable {
     this.emit({ type: 'compaction_start', reason: 'manual' });
     try {
       this.outputChannel.appendLine('[scout] Running manual compaction');
-      const result = await this.harness.compact(undefined, { signal: abortController.signal });
+      const result = await this.harness.compact(undefined, {
+        signal: abortController.signal,
+        settings: this.configManager.getCompactionSettings(),
+      });
       await this.rebuildCachedMessages();
       this.emit({
         type: 'compaction_end',
@@ -1277,7 +1280,10 @@ export class AgentSession implements vscode.Disposable {
     this.emit({ type: 'compaction_start', reason });
     try {
       this.outputChannel.appendLine(`[scout] Running auto compaction: ${reason}`);
-      const result = await this.harness.compact(undefined, { signal: abortController.signal });
+      const result = await this.harness.compact(undefined, {
+        signal: abortController.signal,
+        settings: this.configManager.getCompactionSettings(),
+      });
       await this.rebuildCachedMessages();
       this.emit({
         type: 'compaction_end',

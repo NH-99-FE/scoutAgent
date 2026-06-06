@@ -708,7 +708,17 @@ describe('AgentSession — 运行时操作', () => {
 
     await agentSession.compact();
 
-    expect(mockHarnessCompact).toHaveBeenCalled();
+    expect(mockHarnessCompact).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        settings: {
+          enabled: true,
+          reserveTokens: 16384,
+          keepRecentTokens: 20000,
+        },
+      }),
+    );
     expect(events).toContainEqual({ type: 'compaction_start', reason: 'manual' });
     expect(events).toContainEqual(
       expect.objectContaining({
@@ -1553,7 +1563,17 @@ describe('AgentSession — Auto Retry', () => {
 
     await expect(runAutoCompaction(agentSession, 'threshold')).resolves.toBe(true);
 
-    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(mockHarnessCompact).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({
+        signal: expect.any(AbortSignal),
+        settings: {
+          enabled: true,
+          reserveTokens: 16384,
+          keepRecentTokens: 20000,
+        },
+      }),
+    );
     expect(mockHarnessHasPendingMessages).toHaveBeenCalledTimes(1);
     expect(mockHarnessContinue).not.toHaveBeenCalled();
     expect(events).toContainEqual({ type: 'compaction_start', reason: 'threshold' });
@@ -1698,15 +1718,31 @@ describe('AgentSession — Auto Retry', () => {
     await agentSession.prompt('my original question');
     mockHarnessPrompt.mockClear();
     mockHarnessContinue.mockClear();
+    const userMessage = { role: 'user', content: 'my original question', timestamp: Date.now() };
+    const errorMessage = makeErrorAssistantMessage('Error 502: Bad Gateway');
+    mockSessionGetBranch.mockResolvedValue([
+      {
+        type: 'message',
+        id: 'entry-user-1',
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        message: userMessage,
+      },
+      {
+        type: 'message',
+        id: 'entry-error-1',
+        parentId: 'entry-user-1',
+        timestamp: new Date().toISOString(),
+        message: errorMessage,
+      },
+    ] as any);
 
     // retry 决策在 agent_end 后、harness.prompt 返回后执行
-    await callback({
-      type: 'message_end',
-      message: makeErrorAssistantMessage('Error 502: Bad Gateway'),
-    });
+    await callback({ type: 'message_end', message: errorMessage });
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
+    expect(mockSessionMoveTo).toHaveBeenCalledWith('entry-user-1');
     expect(mockHarnessPrompt).not.toHaveBeenCalledWith('my original question');
     expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
     agentSession.dispose();

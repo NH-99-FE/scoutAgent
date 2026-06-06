@@ -881,6 +881,52 @@ describe('harness compaction', () => {
     });
   });
 
+  it('passes caller compaction settings into preparation', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    await session.appendMessage(createUserMessage('one'));
+    await session.appendMessage(createAssistantMessage('two', createMockUsage(5000, 1000)));
+    await session.appendMessage(createUserMessage('three'));
+    await session.appendMessage(createAssistantMessage('four', createMockUsage(8000, 2000)));
+
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: {
+        id: 'test-model',
+        name: 'Test Model',
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        baseUrl: 'https://example.com',
+        reasoning: false,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 4096,
+      },
+      getApiKeyAndHeaders: async () => ({ apiKey: 'test-key' }),
+    });
+    const settings = {
+      enabled: true,
+      reserveTokens: 4096,
+      keepRecentTokens: 1234,
+    };
+    let hookSettings: unknown;
+    harness.on('session_before_compact', (event) => {
+      hookSettings = event.preparation.settings;
+      return {
+        compaction: {
+          summary: 'summary from hook',
+          firstKeptEntryId: event.preparation.firstKeptEntryId,
+          tokensBefore: event.preparation.tokensBefore,
+        },
+      };
+    });
+
+    await harness.compact(undefined, { settings });
+
+    expect(hookSettings).toEqual(settings);
+  });
+
   it('passes compact abort signals to hooks and rejects pre-aborted compaction', async () => {
     const session = new Session(new InMemorySessionStorage());
     await session.appendMessage(createUserMessage('hello'));

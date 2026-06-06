@@ -763,6 +763,48 @@ describe('AgentHarness lifecycle', () => {
     });
   });
 
+  it('rejects message_end replacements with mismatched roles before persistence', async () => {
+    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const harness = makeHarness(session);
+    const message = makeAssistantMessage();
+
+    harness.on('message_end', () => ({
+      message: makeUserMessage('wrong role'),
+    }));
+
+    await expect(handleMessageEnd(harness, message)).rejects.toThrow(
+      'message_end replacement role mismatch',
+    );
+    expect(await session.getEntries()).toEqual([]);
+  });
+
+  it('supports message_end replacements with non-cloneable details', async () => {
+    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const harness = makeHarness(session);
+    const message = makeAssistantMessage();
+    const marker = () => 'details marker';
+    const replacement = {
+      ...makeAssistantMessage(),
+      content: [{ type: 'text', text: 'replacement with details' }],
+      details: { marker },
+    } as AgentMessage;
+
+    harness.on('message_end', () => ({ message: replacement }));
+
+    await handleMessageEnd(harness, message);
+
+    const entries = await session.getEntries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      type: 'message',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'replacement with details' }],
+      },
+    });
+    expect((entries[0] as any).message.details.marker).toBe(marker);
+  });
+
   it('orders pending listener session writes after finalized agent messages', async () => {
     const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
     const harness = makeHarness(session);
@@ -939,7 +981,28 @@ describe('AgentHarness lifecycle', () => {
     expect(internals.followUpQueue).toHaveLength(0);
   });
 
-  it('does not treat next-turn messages as pending continuation work', async () => {
+  it('continues queued next-turn messages from an assistant tail', async () => {
+    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    await session.appendMessage(makeAssistantMessage());
+    const harness = makeHarness(session);
+    const internals = harness as unknown as HarnessInternals;
+    let receivedMessages: AgentMessage[] | undefined;
+
+    await harness.nextTurn('next prompt context');
+    internals.executePromptMessages = async (_turnState, messages) => {
+      receivedMessages = messages;
+      return makeAssistantMessage();
+    };
+
+    await harness.continue();
+
+    expect(receivedMessages).toEqual([expect.objectContaining({ role: 'user' })]);
+    expect(textFromUserMessages(receivedMessages ?? [])).toEqual(['next prompt context']);
+    expect(internals.nextTurnQueue).toHaveLength(0);
+    expect(harness.hasPendingMessages()).toBe(false);
+  });
+
+  it('treats next-turn messages as pending continuation work', async () => {
     const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
     const harness = makeHarness(session);
     const internals = harness as unknown as HarnessInternals;
@@ -947,6 +1010,6 @@ describe('AgentHarness lifecycle', () => {
     await harness.nextTurn('next prompt context');
 
     expect(internals.nextTurnQueue).toHaveLength(1);
-    expect(harness.hasPendingMessages()).toBe(false);
+    expect(harness.hasPendingMessages()).toBe(true);
   });
 });

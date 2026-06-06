@@ -24,6 +24,7 @@ import {
   compact,
   DEFAULT_COMPACTION_SETTINGS,
   estimateContextTokens,
+  type CompactionSettings,
   type ContextUsageEstimate,
   prepareCompaction,
 } from './compaction/compaction.ts';
@@ -288,12 +289,11 @@ export class AgentHarness<
 
   private replaceMessageInPlace(target: AgentMessage, replacement: AgentMessage): void {
     if (target === replacement) return;
-    const snapshot = structuredClone(replacement);
     const mutableTarget = target as unknown as Record<string, unknown>;
     for (const key of Object.keys(mutableTarget)) {
       delete mutableTarget[key];
     }
-    Object.assign(mutableTarget, snapshot);
+    Object.assign(mutableTarget, replacement);
   }
 
   private async finalizeMessageEnd(event: MessageEndEvent): Promise<MessageEndEvent> {
@@ -831,6 +831,20 @@ export class AgentHarness<
           });
         }
 
+        if (this.nextTurnQueue.length > 0) {
+          const queuedNextTurn = this.nextTurnQueue.splice(0);
+          try {
+            await this.emitQueueUpdate();
+          } catch (error) {
+            this.nextTurnQueue.unshift(...queuedNextTurn);
+            throw normalizeHookError(error);
+          }
+          return await this.executePromptMessages(turnState, queuedNextTurn, {
+            missingAssistantLabel:
+              'AgentHarness queued next-turn completed without an assistant message',
+          });
+        }
+
         throw new AgentHarnessError(
           'invalid_state',
           'Cannot continue from message role: assistant',
@@ -918,7 +932,7 @@ export class AgentHarness<
 
   async compact(
     customInstructions?: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; settings?: CompactionSettings },
   ): Promise<{
     summary: string;
     firstKeptEntryId: string;
@@ -935,7 +949,8 @@ export class AgentHarness<
       const auth = await this.getApiKeyAndHeaders?.(model);
       if (!auth) throw new AgentHarnessError('auth', 'No auth available for compaction');
       const branchEntries = await this.session.getBranch();
-      const preparationResult = prepareCompaction(branchEntries, DEFAULT_COMPACTION_SETTINGS);
+      const settings = options?.settings ?? DEFAULT_COMPACTION_SETTINGS;
+      const preparationResult = prepareCompaction(branchEntries, settings);
       if (!preparationResult.ok) throw preparationResult.error;
       const preparation = preparationResult.value;
       if (!preparation) throw new AgentHarnessError('compaction', 'Nothing to compact');
@@ -1263,7 +1278,9 @@ export class AgentHarness<
   }
 
   hasPendingMessages(): boolean {
-    return this.steerQueue.length > 0 || this.followUpQueue.length > 0;
+    return (
+      this.steerQueue.length > 0 || this.followUpQueue.length > 0 || this.nextTurnQueue.length > 0
+    );
   }
 
   getSignal(): AbortSignal | undefined {
