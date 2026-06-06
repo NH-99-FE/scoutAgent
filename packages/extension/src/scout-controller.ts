@@ -202,6 +202,10 @@ export class ScoutController implements vscode.Disposable {
       });
     }
 
+    if (event.type === 'thinking_level_changed') {
+      this.postMessage({ type: 'thinking_level_changed', level: event.level });
+    }
+
     if (event.type === 'state_change' || event.type === 'error') {
       this.pushState();
     }

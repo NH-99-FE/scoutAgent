@@ -403,6 +403,25 @@ describe('ScoutController', () => {
     controller.dispose();
   });
 
+  it('forwards thinking_level_changed to webview', () => {
+    const controller = makeController();
+    const webview = makeWebview();
+    controller.bindWebview(webview);
+
+    const sessionListener = (mockSessionManagerSubscribe.mock.calls as any[])[0]?.[0] as
+      | ((event: import('../session-manager.ts').ScoutSessionEvent) => void)
+      | undefined;
+    expect(sessionListener).toBeDefined();
+
+    sessionListener!({ type: 'thinking_level_changed', level: 'high' });
+
+    expect(webview.postMessage).toHaveBeenCalledWith({
+      type: 'thinking_level_changed',
+      level: 'high',
+    });
+    controller.dispose();
+  });
+
   it('pushes state on error event', () => {
     const controller = makeController();
     const webview = makeWebview();

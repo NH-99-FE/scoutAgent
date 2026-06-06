@@ -112,6 +112,7 @@ export type ScoutSessionEvent =
       willRetry: boolean;
       errorMessage?: string;
     }
+  | { type: 'thinking_level_changed'; level: ThinkingLevel }
   | { type: 'tree_change' };
 
 // ---------- 构造选项 ----------
@@ -353,7 +354,9 @@ export class AgentSession implements vscode.Disposable {
   async compact(): Promise<void> {
     if (!this.harness) return;
     if (this.manualCompactionAbortController) {
-      this.outputChannel.appendLine('[scout] Manual compaction already running, ignoring duplicate request');
+      this.outputChannel.appendLine(
+        '[scout] Manual compaction already running, ignoring duplicate request',
+      );
       return;
     }
     const abortController = new AbortController();
@@ -374,9 +377,7 @@ export class AgentSession implements vscode.Disposable {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const aborted = abortController.signal.aborted;
-      this.outputChannel.appendLine(
-        `[scout] Compaction failed: ${errorMessage}`,
-      );
+      this.outputChannel.appendLine(`[scout] Compaction failed: ${errorMessage}`);
       this.emit({
         type: 'compaction_end',
         reason: 'manual',
@@ -960,6 +961,11 @@ export class AgentSession implements vscode.Disposable {
       this.emit({ type: 'state_change' });
     }
 
+    if (type === 'thinking_level_select') {
+      const level = (enrichedEvent as { level: ThinkingLevel }).level;
+      this.emit({ type: 'thinking_level_changed', level });
+    }
+
     if (type === 'message_end' || type === 'turn_end') {
       // 仅推送 state_change，供 UI 实时感知；消息缓存延迟到 agent_end 才重建
       this.emit({ type: 'state_change' });
@@ -1290,9 +1296,7 @@ export class AgentSession implements vscode.Disposable {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const aborted = abortController.signal.aborted;
-      this.outputChannel.appendLine(
-        `[scout] Compaction failed: ${errorMessage}`,
-      );
+      this.outputChannel.appendLine(`[scout] Compaction failed: ${errorMessage}`);
       this.emit({
         type: 'compaction_end',
         reason,

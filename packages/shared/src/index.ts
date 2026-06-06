@@ -243,6 +243,13 @@ export interface ScoutCompactionEndEvent {
   errorMessage?: string;
 }
 
+// ---------- Thinking Level 事件 ----------
+
+export interface ScoutThinkingLevelChangedEvent {
+  type: 'thinking_level_changed';
+  level: ThinkingLevel;
+}
+
 export type ExtensionMessage =
   | { type: 'state_update'; state: ScoutWebviewState }
   | { type: 'agent_event'; event: ScoutAgentEvent }
@@ -265,6 +272,7 @@ export type ExtensionMessage =
   | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
   | ScoutCompactionStartEvent
   | ScoutCompactionEndEvent
+  | ScoutThinkingLevelChangedEvent
   | { type: 'fork_result'; success: boolean; error?: string }
   | { type: 'tree_data'; tree: ScoutSessionTreeNode[]; leafId: string | null }
   | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }

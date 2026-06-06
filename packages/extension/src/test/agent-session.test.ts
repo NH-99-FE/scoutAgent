@@ -683,6 +683,19 @@ describe('AgentSession — 运行时操作', () => {
     agentSession.dispose();
   });
 
+  it('emits thinking_level_changed when harness selects thinking level', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+    const callback = getSubscribeCallback();
+
+    await callback({ type: 'thinking_level_select', level: 'high', previousLevel: 'medium' });
+
+    expect(events).toContainEqual({ type: 'thinking_level_changed', level: 'high' });
+    expect(events).toContainEqual(expect.objectContaining({ type: 'state_change' }));
+    agentSession.dispose();
+  });
+
   it('compact delegates to harness and emits compaction lifecycle events', async () => {
     mockHarnessCompact.mockResolvedValue({
       summary: 'manual summary',
