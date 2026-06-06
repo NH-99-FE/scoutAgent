@@ -382,9 +382,11 @@ export class AgentSession implements vscode.Disposable {
     };
   }
 
-  async setModel(modelId: string): Promise<void> {
+  async setModel(modelId: string, provider?: string): Promise<void> {
     if (!this.harness) return;
-    const model = this.configManager.findModel(modelId);
+    const model = provider
+      ? this.configManager.findModelByProvider(provider, modelId)
+      : this.configManager.findModel(modelId);
     if (model) {
       try {
         await this.harness.setModel(model);
@@ -1256,7 +1258,13 @@ export class AgentSession implements vscode.Disposable {
     const context = await this.session.buildContext();
     let model: Model<Api> | undefined;
     if (context.model) {
-      model = this.configManager.findModel(context.model.modelId);
+      const restoredModel = this.configManager.findModelByProvider(
+        context.model.provider,
+        context.model.modelId,
+      );
+      if (restoredModel && this.configManager.hasConfiguredModelAuth(restoredModel)) {
+        model = restoredModel;
+      }
     }
     if (!model) {
       model = this.configManager.findDefaultModel();

@@ -353,8 +353,8 @@ export class SessionManager implements vscode.Disposable {
     await this.agentSession?.continue();
   }
 
-  async setModel(modelId: string): Promise<void> {
-    await this.agentSession?.setModel(modelId);
+  async setModel(modelId: string, provider?: string): Promise<void> {
+    await this.agentSession?.setModel(modelId, provider);
   }
 
   async setThinkingLevel(level: ThinkingLevel): Promise<void> {
@@ -541,12 +541,21 @@ export class SessionManager implements vscode.Disposable {
     let modelFallbackMessage: string | undefined;
 
     const context = await session.buildContext();
-    if (context.model && !this.configManager.findModel(context.model.modelId)) {
-      const fallbackModel = this.configManager.findDefaultModel();
-      if (fallbackModel) {
-        modelFallbackMessage = `Session model "${context.model.modelId}" is unavailable. Falling back to "${fallbackModel.id}".`;
-        diagnostics.push({ type: 'warning', message: modelFallbackMessage });
-        this.outputChannel.appendLine(`[scout] WARN: ${modelFallbackMessage}`);
+    if (context.model) {
+      const savedModelRef = `${context.model.provider}/${context.model.modelId}`;
+      const restoredModel = this.configManager.findModelByProvider(
+        context.model.provider,
+        context.model.modelId,
+      );
+      const restoredModelAvailable =
+        restoredModel && this.configManager.hasConfiguredModelAuth(restoredModel);
+      if (!restoredModelAvailable) {
+        const fallbackModel = this.configManager.findDefaultModel();
+        if (fallbackModel) {
+          modelFallbackMessage = `Session model "${savedModelRef}" is unavailable. Falling back to "${fallbackModel.provider}/${fallbackModel.id}".`;
+          diagnostics.push({ type: 'warning', message: modelFallbackMessage });
+          this.outputChannel.appendLine(`[scout] WARN: ${modelFallbackMessage}`);
+        }
       }
     }
 

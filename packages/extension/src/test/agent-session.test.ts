@@ -9,6 +9,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const {
   mockFindDefaultModel,
+  mockFindModel,
+  mockFindModelByProvider,
+  mockHasConfiguredModelAuth,
   mockGetApiKey,
   mockGetShellPath,
   mockGetDefaultThinkingLevel,
@@ -138,6 +141,19 @@ const {
       provider: 'anthropic',
       input: ['text', 'image'],
     })),
+    mockFindModel: vi.fn((id: string) => ({
+      id,
+      api: 'anthropic',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    })),
+    mockFindModelByProvider: vi.fn((provider: string, modelId: string) => ({
+      id: modelId,
+      api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+      provider,
+      input: ['text', 'image'],
+    })),
+    mockHasConfiguredModelAuth: vi.fn(() => true),
     mockGetApiKey: vi.fn(() => 'test-api-key'),
     mockGetShellPath: vi.fn(() => undefined),
     mockGetDefaultThinkingLevel: vi.fn(() => 'off'),
@@ -290,12 +306,9 @@ vi.mock('@scout-agent/shared', () => ({}));
 vi.mock('../config-manager.ts', () => ({
   ConfigManager: vi.fn(function (this: any) {
     this.findDefaultModel = mockFindDefaultModel;
-    this.findModel = vi.fn((id: string) => ({
-      id,
-      api: 'anthropic',
-      provider: 'anthropic',
-      input: ['text', 'image'],
-    }));
+    this.findModel = mockFindModel;
+    this.findModelByProvider = mockFindModelByProvider;
+    this.hasConfiguredModelAuth = mockHasConfiguredModelAuth;
     this.getApiKey = mockGetApiKey;
     this.getShellPath = mockGetShellPath;
     this.getDefaultThinkingLevel = mockGetDefaultThinkingLevel;
@@ -309,7 +322,11 @@ vi.mock('../config-manager.ts', () => ({
       maxRetries: 2,
       maxRetryDelayMs: 60000,
     }));
-    this.getScoutConfig = vi.fn(() => ({ models: [], defaultModelId: 'test-model' }));
+    this.getScoutConfig = vi.fn(() => ({
+      models: [],
+      defaultModelProvider: 'anthropic',
+      defaultModelId: 'test-model',
+    }));
     this.onDidChangeSettings = vi.fn(() => ({ dispose: vi.fn() }));
   }),
 }));
@@ -480,6 +497,19 @@ describe('AgentSession', () => {
       provider: 'anthropic',
       input: ['text', 'image'],
     });
+    mockFindModel.mockImplementation((id: string) => ({
+      id,
+      api: 'anthropic',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    }));
+    mockFindModelByProvider.mockImplementation((provider: string, modelId: string) => ({
+      id: modelId,
+      api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+      provider,
+      input: ['text', 'image'],
+    }));
+    mockHasConfiguredModelAuth.mockReturnValue(true);
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
@@ -530,6 +560,37 @@ describe('AgentSession', () => {
           maxRetryDelayMs: 60000,
         }),
       }),
+    );
+    agentSession.dispose();
+  });
+
+  it('restores session model by saved provider and model id', async () => {
+    mockSessionBuildContext.mockResolvedValue({
+      messages: [],
+      thinkingLevel: 'off',
+      model: { provider: 'openai', modelId: 'foo' },
+    } as any);
+    mockFindModel.mockReturnValue({
+      id: 'foo',
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    });
+    mockFindModelByProvider.mockImplementation(((provider: string, modelId: string) =>
+      provider === 'openai' && modelId === 'foo'
+        ? {
+            id: 'foo',
+            api: 'openai-completions',
+            provider: 'openai',
+            input: ['text'],
+          }
+        : undefined) as any);
+
+    const agentSession = await makeInitializedAgentSession();
+
+    expect(mockFindModelByProvider).toHaveBeenCalledWith('openai', 'foo');
+    expect(getLastHarnessOptions().model).toEqual(
+      expect.objectContaining({ provider: 'openai', id: 'foo' }),
     );
     agentSession.dispose();
   });
@@ -1087,6 +1148,30 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession();
     await agentSession.setModel('gpt-4o');
     expect(mockHarnessSetModel).toHaveBeenCalled();
+    agentSession.dispose();
+  });
+
+  it('setModel resolves by provider when provided', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    mockFindModel.mockReturnValue({
+      id: 'foo',
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    });
+    mockFindModelByProvider.mockReturnValue({
+      id: 'foo',
+      api: 'openai-completions',
+      provider: 'openai',
+      input: ['text'],
+    });
+
+    await agentSession.setModel('foo', 'openai');
+
+    expect(mockFindModelByProvider).toHaveBeenCalledWith('openai', 'foo');
+    expect(mockHarnessSetModel).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: 'openai', id: 'foo' }),
+    );
     agentSession.dispose();
   });
 

@@ -6,7 +6,8 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type * as vscode from 'vscode';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { resetModels } from '@scout-agent/ai';
 
 // ---------- Mock vscode ----------
 
@@ -37,6 +38,10 @@ vi.mock('vscode', () => ({
 }));
 
 import { ConfigManager } from '../config-manager.ts';
+
+afterEach(() => {
+  resetModels();
+});
 
 function makeMockConfiguration(config: Record<string, unknown> = {}) {
   return {
@@ -159,6 +164,68 @@ describe('ConfigManager', () => {
     expect(model?.id).toBe('claude-sonnet-4-20250514');
   });
 
+  it('finds model by provider-scoped reference', () => {
+    const cm = makeConfigManager({ anthropicApiKey: 'test-key' });
+    const model = cm.findModel('anthropic/claude-sonnet-4-20250514');
+    expect(model).toBeDefined();
+    expect(model?.provider).toBe('anthropic');
+    expect(model?.id).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('finds duplicate custom model ids by explicit provider', () => {
+    const tempDir = join(tmpdir(), `scout-model-provider-test-${Date.now()}-${Math.random()}`);
+    const scoutDir = join(tempDir, '.scout');
+    try {
+      mkdirSync(scoutDir, { recursive: true });
+      writeFileSync(
+        join(scoutDir, 'models.json'),
+        JSON.stringify({
+          models: [
+            {
+              id: 'foo',
+              name: 'Anthropic Foo',
+              api: 'anthropic-messages',
+              provider: 'anthropic',
+              baseUrl: 'https://api.anthropic.com',
+              reasoning: false,
+              input: ['text'],
+              cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 32000,
+              maxTokens: 4096,
+            },
+            {
+              id: 'foo',
+              name: 'OpenAI Foo',
+              api: 'openai-completions',
+              provider: 'openai',
+              baseUrl: 'https://api.openai.com/v1',
+              reasoning: false,
+              input: ['text'],
+              cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 32000,
+              maxTokens: 4096,
+            },
+          ],
+        }),
+      );
+
+      const cm = new ConfigManager({
+        cwd: tempDir,
+        agentDir: scoutDir,
+        getConfiguration: () =>
+          makeMockConfiguration({
+            anthropicApiKey: 'anthropic-key',
+            openaiApiKey: 'openai-key',
+          }) as vscode.WorkspaceConfiguration,
+      });
+
+      expect(cm.findModelByProvider('openai', 'foo')?.name).toBe('OpenAI Foo');
+      expect(cm.findModelByProvider('anthropic', 'foo')?.name).toBe('Anthropic Foo');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('returns undefined for unknown model id', () => {
     const cm = makeConfigManager({ anthropicApiKey: 'test-key' });
     expect(cm.findModel('nonexistent-model')).toBeUndefined();
@@ -180,6 +247,19 @@ describe('ConfigManager', () => {
     expect(model).toBeDefined();
   });
 
+  it('returns fallback warning for unavailable configured default model', () => {
+    const cm = makeConfigManager({
+      openaiApiKey: 'test-key',
+      defaultModel: 'anthropic/claude-sonnet-4-20250514',
+    });
+
+    const result = cm.resolveDefaultModel();
+
+    expect(result.model?.provider).toBe('openai');
+    expect(result.warning).toContain('Configured default model');
+    expect(result.warning).toContain('provider "anthropic" has no configured API key');
+  });
+
   it('returns first available model when no default is configured and no key for default', () => {
     const cm = makeConfigManager({ openaiApiKey: 'test-key' });
     const model = cm.findDefaultModel();
@@ -199,6 +279,145 @@ describe('ConfigManager', () => {
     expect(models.every((m) => m.provider === 'anthropic')).toBe(true);
   });
 
+  it('loads project custom models from .scout/models.json', () => {
+    const tempDir = join(tmpdir(), `scout-models-test-${Date.now()}`);
+    const scoutDir = join(tempDir, '.scout');
+    try {
+      mkdirSync(scoutDir, { recursive: true });
+      writeFileSync(
+        join(scoutDir, 'models.json'),
+        JSON.stringify({
+          models: [
+            {
+              id: 'custom-gpt',
+              name: 'Custom GPT',
+              api: 'openai-completions',
+              provider: 'openai',
+              baseUrl: 'https://api.openai.com/v1',
+              reasoning: false,
+              input: ['text'],
+              cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 32000,
+              maxTokens: 4096,
+            },
+          ],
+        }),
+      );
+
+      const cm = new ConfigManager({
+        cwd: tempDir,
+        agentDir: scoutDir,
+        getConfiguration: () =>
+          makeMockConfiguration({ openaiApiKey: 'test-key' }) as vscode.WorkspaceConfiguration,
+      });
+
+      const model = cm.findModel('openai/custom-gpt');
+      expect(model?.name).toBe('Custom GPT');
+      expect(cm.getAvailableModels().some((m) => m.id === 'custom-gpt')).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps project custom models isolated to their ConfigManager', () => {
+    const tempDir = join(tmpdir(), `scout-model-isolation-test-${Date.now()}-${Math.random()}`);
+    const workspaceA = join(tempDir, 'workspace-a');
+    const workspaceB = join(tempDir, 'workspace-b');
+    const scoutDirA = join(workspaceA, '.scout');
+    const scoutDirB = join(workspaceB, '.scout');
+
+    try {
+      mkdirSync(scoutDirA, { recursive: true });
+      mkdirSync(scoutDirB, { recursive: true });
+      writeFileSync(
+        join(scoutDirA, 'models.json'),
+        JSON.stringify({
+          models: [
+            {
+              id: 'project-only-model',
+              name: 'Project Only Model',
+              api: 'openai-completions',
+              provider: 'openai',
+              baseUrl: 'https://api.openai.com/v1',
+              reasoning: false,
+              input: ['text'],
+              cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 32000,
+              maxTokens: 4096,
+            },
+          ],
+        }),
+      );
+
+      const cmA = new ConfigManager({
+        cwd: workspaceA,
+        agentDir: scoutDirA,
+        getConfiguration: () =>
+          makeMockConfiguration({ openaiApiKey: 'test-key' }) as vscode.WorkspaceConfiguration,
+      });
+      const cmB = new ConfigManager({
+        cwd: workspaceB,
+        agentDir: scoutDirB,
+        getConfiguration: () =>
+          makeMockConfiguration({ openaiApiKey: 'test-key' }) as vscode.WorkspaceConfiguration,
+      });
+
+      expect(cmA.findModel('openai/project-only-model')?.name).toBe('Project Only Model');
+      expect(cmB.findModel('openai/project-only-model')).toBeUndefined();
+      expect(cmB.getAvailableModels().some((model) => model.id === 'project-only-model')).toBe(
+        false,
+      );
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('restores the built-in default model after removing a project override', () => {
+    const tempDir = join(tmpdir(), `scout-model-override-test-${Date.now()}-${Math.random()}`);
+    const scoutDir = join(tempDir, '.scout');
+    const modelsPath = join(scoutDir, 'models.json');
+
+    try {
+      mkdirSync(scoutDir, { recursive: true });
+      writeFileSync(
+        modelsPath,
+        JSON.stringify({
+          models: [
+            {
+              id: 'claude-sonnet-4-20250514',
+              name: 'Custom Sonnet Override',
+              api: 'anthropic-messages',
+              provider: 'anthropic',
+              baseUrl: 'https://proxy.example.com',
+              reasoning: true,
+              input: ['text', 'image'],
+              cost: { input: 9, output: 9, cacheRead: 0, cacheWrite: 0 },
+              contextWindow: 200000,
+              maxTokens: 64000,
+            },
+          ],
+        }),
+      );
+
+      const cm = new ConfigManager({
+        cwd: tempDir,
+        agentDir: scoutDir,
+        getConfiguration: () =>
+          makeMockConfiguration({ anthropicApiKey: 'test-key' }) as vscode.WorkspaceConfiguration,
+      });
+
+      expect(cm.findDefaultModel()?.name).toBe('Custom Sonnet Override');
+
+      writeFileSync(modelsPath, JSON.stringify({ models: [] }));
+      cm.reload();
+
+      expect(cm.findDefaultModel()?.id).toBe('claude-sonnet-4-20250514');
+      expect(cm.findDefaultModel()?.name).not.toBe('Custom Sonnet Override');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('excludes models without API key', () => {
     const cm = makeConfigManager({ anthropicApiKey: 'test-key' });
     const models = cm.getAvailableModels();
@@ -212,6 +431,8 @@ describe('ConfigManager', () => {
     });
     const config = cm.getScoutConfig();
     expect(config.models.length).toBeGreaterThan(0);
+    expect(config.models.some((model) => model.provider === 'anthropic')).toBe(true);
+    expect(config.defaultModelProvider).toBe('anthropic');
     expect(config.defaultModelId).toBe('claude-sonnet-4-20250514');
   });
 

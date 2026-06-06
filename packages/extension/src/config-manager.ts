@@ -7,9 +7,10 @@ import * as vscode from 'vscode';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Model, Api, ThinkingBudgets, Transport } from '@scout-agent/ai';
-import { getModel, getModels, getProviders, getDefaultModel } from '@scout-agent/ai';
 import type { AgentHarnessStreamOptions, CompactionSettings, QueueMode } from '@scout-agent/agent';
 import type { ScoutConfig, ThinkingLevel } from '@scout-agent/shared';
+import { ScoutModelRegistry } from './model-registry.ts';
+import { ScoutModelResolver, type ModelResolution } from './model-resolver.ts';
 
 // ---------- Retry 配置 ----------
 
@@ -68,16 +69,115 @@ interface ProjectSettings {
   [key: string]: unknown;
 }
 
-function loadProjectSettings(cwd: string): ProjectSettings {
-  const settingsPath = join(cwd, '.scout', 'settings.json');
-  if (!existsSync(settingsPath)) return {};
-
+function loadJsonObject(path: string): Record<string, unknown> {
+  if (!existsSync(path)) return {};
   try {
-    const content = readFileSync(settingsPath, 'utf-8');
-    return JSON.parse(content);
+    const content = readFileSync(path, 'utf-8');
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
+}
+
+function loadProjectSettings(cwd: string): ProjectSettings {
+  return loadJsonObject(join(cwd, '.scout', 'settings.json'));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function readCost(value: unknown): Model<Api>['cost'] | undefined {
+  if (!isRecord(value)) return undefined;
+  const input = readNumber(value.input);
+  const output = readNumber(value.output);
+  const cacheRead = readNumber(value.cacheRead);
+  const cacheWrite = readNumber(value.cacheWrite);
+  if (
+    input === undefined ||
+    output === undefined ||
+    cacheRead === undefined ||
+    cacheWrite === undefined
+  ) {
+    return undefined;
+  }
+  return { input, output, cacheRead, cacheWrite };
+}
+
+function parseConfiguredModel(value: unknown): Model<Api> | undefined {
+  if (!isRecord(value)) return undefined;
+  const id = typeof value.id === 'string' ? value.id.trim() : '';
+  const name = typeof value.name === 'string' ? value.name.trim() : id;
+  const provider = typeof value.provider === 'string' ? value.provider.trim() : '';
+  if (!id || !name || (provider !== 'anthropic' && provider !== 'openai')) return undefined;
+
+  const api =
+    typeof value.api === 'string'
+      ? value.api
+      : provider === 'anthropic'
+        ? 'anthropic-messages'
+        : 'openai-completions';
+  if (provider === 'anthropic' && api !== 'anthropic-messages') return undefined;
+  if (provider === 'openai' && api !== 'openai-completions') return undefined;
+
+  const baseUrl =
+    typeof value.baseUrl === 'string' && value.baseUrl.trim()
+      ? value.baseUrl.trim()
+      : provider === 'anthropic'
+        ? 'https://api.anthropic.com'
+        : 'https://api.openai.com/v1';
+  const input: Array<'text' | 'image'> = isStringArray(value.input)
+    ? value.input.filter((item): item is 'text' | 'image' => item === 'text' || item === 'image')
+    : ['text'];
+  const cost = readCost(value.cost);
+  const contextWindow = readNumber(value.contextWindow);
+  const maxTokens = readNumber(value.maxTokens);
+  if (!cost || !contextWindow || !maxTokens || input.length === 0) return undefined;
+
+  const model: Model<Api> = {
+    id,
+    name,
+    api,
+    provider,
+    baseUrl,
+    reasoning: typeof value.reasoning === 'boolean' ? value.reasoning : false,
+    input,
+    cost,
+    contextWindow,
+    maxTokens,
+  };
+
+  if (isRecord(value.thinkingLevelMap)) {
+    model.thinkingLevelMap = value.thinkingLevelMap as Model<Api>['thinkingLevelMap'];
+  }
+  if (isRecord(value.headers)) {
+    model.headers = value.headers as Record<string, string>;
+  }
+  if (isRecord(value.compat)) {
+    model.compat = value.compat as Model<Api>['compat'];
+  }
+  return model;
+}
+
+function parseConfiguredModels(value: unknown): Model<Api>[] {
+  const rawModels = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.models)
+      ? value.models
+      : [];
+  return rawModels.flatMap((item) => {
+    const model = parseConfiguredModel(item);
+    return model ? [model] : [];
+  });
 }
 
 // ---------- ConfigManager ----------
@@ -86,6 +186,8 @@ export class ConfigManager {
   readonly cwd: string;
   readonly agentDir: string;
   private readonly _getConfiguration: (section: string) => vscode.WorkspaceConfiguration;
+  private readonly modelRegistry: ScoutModelRegistry;
+  private readonly modelResolver: ScoutModelResolver;
   private projectSettings: ProjectSettings;
 
   constructor(options: ConfigManagerOptions) {
@@ -93,10 +195,16 @@ export class ConfigManager {
     this.agentDir = options.agentDir;
     this._getConfiguration = options.getConfiguration ?? vscode.workspace.getConfiguration;
     this.projectSettings = loadProjectSettings(this.cwd);
+    this.modelRegistry = new ScoutModelRegistry({
+      hasApiKey: (provider) => !!this.getApiKey(provider),
+    });
+    this.modelResolver = new ScoutModelResolver(this.modelRegistry);
+    this.reloadCustomModels();
   }
 
   reload(): void {
     this.projectSettings = loadProjectSettings(this.cwd);
+    this.reloadCustomModels();
   }
 
   // ---------- 配置读取（VS Code settings + 项目级合并） ----------
@@ -223,48 +331,37 @@ export class ConfigManager {
     return this.getSetting<string[]>('extensionPaths') ?? [];
   }
 
+  private reloadCustomModels(): void {
+    const projectModels = parseConfiguredModels(this.projectSettings.models);
+    const modelsFile = loadJsonObject(join(this.cwd, '.scout', 'models.json'));
+    const fileModels = parseConfiguredModels(modelsFile);
+    this.modelRegistry.setCustomModels([...projectModels, ...fileModels]);
+  }
+
   // ---------- 模型解析 ----------
 
   /** 获取所有可用模型（已配置 API key 的） */
   getAvailableModels(): { id: string; name: string; provider: string; model: Model<Api> }[] {
-    const result: { id: string; name: string; provider: string; model: Model<Api> }[] = [];
-    for (const provider of getProviders()) {
-      const apiKey = this.getApiKey(provider);
-      if (!apiKey) continue;
-      for (const model of getModels(provider)) {
-        result.push({ id: model.id, name: model.name, provider: model.provider, model });
-      }
-    }
-    return result;
+    return this.modelResolver.getAvailableModels();
   }
 
   /** 查找默认模型 */
   findDefaultModel(): Model<Api> | undefined {
-    // 1. 用户指定的默认模型
-    const defaultModelId = this.getDefaultModel();
-    if (defaultModelId) {
-      const model = this.findModel(defaultModelId);
-      if (model) return model;
-    }
-
-    // 2. 内置默认模型（如果有 API key）
-    const builtIn = getDefaultModel();
-    if (builtIn && this.getApiKey(builtIn.provider)) {
-      return builtIn as Model<Api>;
-    }
-
-    // 3. 第一个有 API key 的模型
-    const available = this.getAvailableModels();
-    return available[0]?.model;
+    return this.resolveDefaultModel().model;
   }
 
-  /** 按 modelId 查找模型 */
+  resolveDefaultModel(): ModelResolution {
+    return this.modelResolver.resolveDefaultModel(this.getDefaultModel());
+  }
+
+  /** 按 modelId 或 provider/modelId 查找模型，用于用户输入等宽松场景。 */
   findModel(modelId: string): Model<Api> | undefined {
-    for (const provider of getProviders()) {
-      const model = getModel(provider, modelId);
-      if (model) return model as Model<Api>;
-    }
-    return undefined;
+    return this.modelResolver.findModel(modelId);
+  }
+
+  /** 按 provider + modelId 精确查找模型，用于 session 恢复等持久化场景。 */
+  findModelByProvider(provider: string, modelId: string): Model<Api> | undefined {
+    return this.modelRegistry.getModel(provider, modelId);
   }
 
   /** 获取 Webview 配置 */
@@ -272,9 +369,14 @@ export class ConfigManager {
     const available = this.getAvailableModels();
     const defaultModel = this.findDefaultModel();
     return {
-      models: available.map((m) => ({ id: m.id, name: m.name })),
+      models: available.map((m) => ({ provider: m.provider, id: m.id, name: m.name })),
+      defaultModelProvider: defaultModel?.provider ?? '',
       defaultModelId: defaultModel?.id ?? '',
     };
+  }
+
+  hasConfiguredModelAuth(model: Model<Api>): boolean {
+    return this.modelRegistry.hasConfiguredAuth(model);
   }
 
   // ---------- 配置变更监听 ----------

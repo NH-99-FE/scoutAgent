@@ -88,7 +88,7 @@ export class ScoutController implements vscode.Disposable {
         this.sessionManager.continue();
         break;
       case 'select_model':
-        this.sessionManager.setModel(message.modelId);
+        this.sessionManager.setModel(message.modelId, message.provider);
         break;
       case 'select_thinking':
         this.sessionManager.setThinkingLevel(message.level);
@@ -221,6 +221,7 @@ export class ScoutController implements vscode.Disposable {
     return {
       messages: this.sessionManager.getScoutMessages(),
       isStreaming: this.sessionManager.isStreaming,
+      modelProvider: this.sessionManager.model?.provider ?? '',
       modelId: this.sessionManager.model?.id ?? '',
       thinkingLevel: this.sessionManager.thinkingLevel,
       tools: this.sessionManager.getAllToolInfos(),

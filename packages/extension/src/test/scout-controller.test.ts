@@ -54,7 +54,11 @@ const {
       input: ['text', 'image'],
     })),
     mockGetApiKey: vi.fn(() => 'test-key'),
-    mockGetScoutConfig: vi.fn(() => ({ models: [], defaultModelId: 'test-model' })),
+    mockGetScoutConfig: vi.fn(() => ({
+      models: [],
+      defaultModelProvider: 'anthropic',
+      defaultModelId: 'test-model',
+    })),
     mockOnDidChangeSettings: vi.fn(() => ({ dispose: vi.fn() })),
     mockSessionManagerSubscribe: vi.fn(() => vi.fn()),
     mockSessionManagerInitialize: vi.fn(async () => {}),
@@ -342,9 +346,13 @@ describe('ScoutController', () => {
   it('handles select_model by delegating to SessionManager', () => {
     const controller = makeController();
 
-    controller.handleWebviewMessage({ type: 'select_model', modelId: 'gpt-4o' });
+    controller.handleWebviewMessage({
+      type: 'select_model',
+      provider: 'openai',
+      modelId: 'gpt-4o',
+    });
 
-    expect(mockSessionManagerSetModel).toHaveBeenCalledWith('gpt-4o');
+    expect(mockSessionManagerSetModel).toHaveBeenCalledWith('gpt-4o', 'openai');
     controller.dispose();
   });
 

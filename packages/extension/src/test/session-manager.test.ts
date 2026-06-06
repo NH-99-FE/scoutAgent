@@ -12,6 +12,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   mockFindDefaultModel,
   mockFindModel,
+  mockFindModelByProvider,
+  mockHasConfiguredModelAuth,
   mockConfigReload,
   mockGetApiKey,
   mockGetShellPath,
@@ -114,6 +116,13 @@ const {
       provider: 'anthropic',
       input: ['text', 'image'],
     })),
+    mockFindModelByProvider: vi.fn((provider: string, modelId: string) => ({
+      id: modelId,
+      api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+      provider,
+      input: ['text', 'image'],
+    })),
+    mockHasConfiguredModelAuth: vi.fn(() => true),
     mockGetShellPath: vi.fn(() => undefined),
     mockHarnessSubscribe,
     mockHarnessPrompt,
@@ -230,6 +239,8 @@ vi.mock('../config-manager.ts', () => ({
   ConfigManager: vi.fn(function (this: any) {
     this.findDefaultModel = mockFindDefaultModel;
     this.findModel = mockFindModel;
+    this.findModelByProvider = mockFindModelByProvider;
+    this.hasConfiguredModelAuth = mockHasConfiguredModelAuth;
     this.getApiKey = mockGetApiKey;
     this.getShellPath = mockGetShellPath;
     this.getDefaultThinkingLevel = vi.fn(() => 'off');
@@ -247,7 +258,11 @@ vi.mock('../config-manager.ts', () => ({
       maxRetries: 2,
       maxRetryDelayMs: 60000,
     }));
-    this.getScoutConfig = vi.fn(() => ({ models: [], defaultModelId: 'test-model' }));
+    this.getScoutConfig = vi.fn(() => ({
+      models: [],
+      defaultModelProvider: 'anthropic',
+      defaultModelId: 'test-model',
+    }));
     this.onDidChangeSettings = vi.fn(() => ({ dispose: vi.fn() }));
     this.getExtensionPaths = vi.fn(() => []);
     this.reload = mockConfigReload;
@@ -398,6 +413,13 @@ describe('SessionManager — 协调层', () => {
       provider: 'anthropic',
       input: ['text', 'image'],
     }));
+    mockFindModelByProvider.mockImplementation((provider: string, modelId: string) => ({
+      id: modelId,
+      api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+      provider,
+      input: ['text', 'image'],
+    }));
+    mockHasConfiguredModelAuth.mockReturnValue(true);
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
@@ -667,13 +689,13 @@ describe('SessionManager — 协调层', () => {
       thinkingLevel: 'off',
       model: { provider: 'anthropic', modelId: 'missing-model' },
     } as any);
-    mockFindModel.mockImplementation(((id: string) =>
-      id === 'missing-model'
+    mockFindModelByProvider.mockImplementation(((provider: string, modelId: string) =>
+      provider === 'anthropic' && modelId === 'missing-model'
         ? undefined
         : {
-            id,
-            api: 'anthropic',
-            provider: 'anthropic',
+            id: modelId,
+            api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+            provider,
             input: ['text', 'image'],
           }) as any);
 
@@ -681,12 +703,37 @@ describe('SessionManager — 协调层', () => {
     await manager.restore({ id: 'restored-abc', createdAt: new Date().toISOString() } as any);
 
     expect(manager.modelFallbackMessage).toBe(
-      'Session model "missing-model" is unavailable. Falling back to "test-model".',
+      'Session model "anthropic/missing-model" is unavailable. Falling back to "anthropic/test-model".',
     );
     expect(manager.diagnostics).toContainEqual({
       type: 'warning',
-      message: 'Session model "missing-model" is unavailable. Falling back to "test-model".',
+      message:
+        'Session model "anthropic/missing-model" is unavailable. Falling back to "anthropic/test-model".',
     });
+    manager.dispose();
+  });
+
+  it('uses the saved provider when diagnosing restored session model availability', async () => {
+    mockSessionBuildContext.mockResolvedValue({
+      messages: [],
+      thinkingLevel: 'off',
+      model: { provider: 'openai', modelId: 'foo' },
+    } as any);
+    mockFindModel.mockReturnValue({
+      id: 'foo',
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      input: ['text', 'image'],
+    } as any);
+    mockFindModelByProvider.mockReturnValue(undefined as any);
+
+    const manager = makeSessionManager();
+    await manager.restore({ id: 'restored-abc', createdAt: new Date().toISOString() } as any);
+
+    expect(mockFindModelByProvider).toHaveBeenCalledWith('openai', 'foo');
+    expect(manager.modelFallbackMessage).toBe(
+      'Session model "openai/foo" is unavailable. Falling back to "anthropic/test-model".',
+    );
     manager.dispose();
   });
 
@@ -1067,6 +1114,13 @@ describe('SessionManager — 属性与委托', () => {
       provider: 'anthropic',
       input: ['text', 'image'],
     }));
+    mockFindModelByProvider.mockImplementation((provider: string, modelId: string) => ({
+      id: modelId,
+      api: provider === 'anthropic' ? 'anthropic-messages' : 'openai-completions',
+      provider,
+      input: ['text', 'image'],
+    }));
+    mockHasConfiguredModelAuth.mockReturnValue(true);
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());

@@ -49,7 +49,7 @@ export type WebviewMessage =
   | { type: 'user_message'; text: string }
   | { type: 'abort' }
   | { type: 'abort_retry' }
-  | { type: 'select_model'; modelId: string }
+  | { type: 'select_model'; provider: string; modelId: string }
   | { type: 'select_thinking'; level: ThinkingLevel }
   | { type: 'set_active_tools'; toolNames: string[] }
   | { type: 'clear_conversation' }
@@ -135,6 +135,7 @@ export type ScoutMessage =
 export interface ScoutWebviewState {
   messages: ScoutMessage[];
   isStreaming: boolean;
+  modelProvider: string;
   modelId: string;
   thinkingLevel: ThinkingLevel;
   tools: ToolInfo[];
@@ -146,7 +147,8 @@ export interface ScoutWebviewState {
 }
 
 export interface ScoutConfig {
-  models: { id: string; name: string }[];
+  models: { provider: string; id: string; name: string }[];
+  defaultModelProvider: string;
   defaultModelId: string;
 }
 

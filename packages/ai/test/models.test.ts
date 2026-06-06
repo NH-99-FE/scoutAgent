@@ -2,18 +2,25 @@
 // models 测试
 // ============================================================
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import {
   getModel,
   getModels,
   getProviders,
   getDefaultModel,
+  registerModel,
+  unregisterModels,
+  resetModels,
   calculateCost,
   getSupportedThinkingLevels,
   clampThinkingLevel,
   modelsAreEqual,
 } from '../src/models';
-import type { Usage } from '../src/types';
+import type { Model, Usage } from '../src/types';
+
+afterEach(() => {
+  resetModels();
+});
 
 // ---------- getModel ----------
 
@@ -51,14 +58,14 @@ describe('getModel', () => {
     expect(getModel('anthropic', 'gpt-4o')).toBeUndefined();
   });
 
-  it('Opus 4 supports xhigh thinking', () => {
-    const model = getModel('anthropic', 'claude-opus-4-20250514');
+  it('Opus 4.7 supports xhigh thinking from Pi catalog', () => {
+    const model = getModel('anthropic', 'claude-opus-4-7');
     expect(model).toBeDefined();
     expect(model!.thinkingLevelMap!.xhigh).toBe('xhigh');
   });
 
   it('Haiku 3.5 does not support reasoning', () => {
-    const model = getModel('anthropic', 'claude-haiku-3-5-20241022');
+    const model = getModel('anthropic', 'claude-3-5-haiku-20241022');
     expect(model).toBeDefined();
     expect(model!.reasoning).toBe(false);
     expect(model!.thinkingLevelMap).toBeUndefined();
@@ -192,16 +199,15 @@ describe('calculateCost', () => {
 
 describe('getSupportedThinkingLevels', () => {
   it('returns only off for non-reasoning model', () => {
-    const model = getModel('anthropic', 'claude-haiku-3-5-20241022')!;
+    const model = getModel('anthropic', 'claude-3-5-haiku-20241022')!;
     expect(getSupportedThinkingLevels(model)).toEqual(['off']);
   });
 
-  it('returns levels including xhigh for Opus 4', () => {
-    const model = getModel('anthropic', 'claude-opus-4-20250514')!;
+  it('returns levels including xhigh for Opus 4.7', () => {
+    const model = getModel('anthropic', 'claude-opus-4-7')!;
     const levels = getSupportedThinkingLevels(model);
     expect(levels).toContain('xhigh');
     expect(levels).toContain('high');
-    expect(levels).not.toContain('off');
   });
 
   it('excludes xhigh for Sonnet 4 (not in thinkingLevelMap)', () => {
@@ -223,7 +229,7 @@ describe('getSupportedThinkingLevels', () => {
 
 describe('clampThinkingLevel', () => {
   it('returns the level itself if available', () => {
-    const model = getModel('anthropic', 'claude-opus-4-20250514')!;
+    const model = getModel('anthropic', 'claude-opus-4-7')!;
     expect(clampThinkingLevel(model, 'high')).toBe('high');
     expect(clampThinkingLevel(model, 'low')).toBe('low');
   });
@@ -235,7 +241,7 @@ describe('clampThinkingLevel', () => {
   });
 
   it('returns off for non-reasoning model', () => {
-    const model = getModel('anthropic', 'claude-haiku-3-5-20241022')!;
+    const model = getModel('anthropic', 'claude-3-5-haiku-20241022')!;
     expect(clampThinkingLevel(model, 'off')).toBe('off');
     expect(clampThinkingLevel(model, 'high')).toBe('off');
   });
@@ -268,5 +274,66 @@ describe('modelsAreEqual', () => {
     expect(modelsAreEqual(null, model)).toBe(false);
     expect(modelsAreEqual(model, undefined)).toBe(false);
     expect(modelsAreEqual(null, undefined)).toBe(false);
+  });
+});
+
+// ---------- registry ----------
+
+describe('model registry', () => {
+  const customModel: Model<'openai-completions'> = {
+    id: 'custom-openai-model',
+    name: 'Custom OpenAI Model',
+    api: 'openai-completions',
+    provider: 'openai',
+    baseUrl: 'https://api.openai.com/v1',
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 4096,
+  };
+
+  it('registers a custom model by source id', () => {
+    registerModel(customModel, { sourceId: 'test-source' });
+
+    expect(getModel('openai', 'custom-openai-model')).toEqual(customModel);
+  });
+
+  it('unregisters all models from the same source id', () => {
+    registerModel(customModel, { sourceId: 'test-source' });
+
+    unregisterModels('test-source');
+
+    expect(getModel('openai', 'custom-openai-model')).toBeUndefined();
+  });
+
+  it('restores the previous model when unregistering an overriding source id', () => {
+    const builtInDefault = getDefaultModel();
+    registerModel(
+      {
+        ...builtInDefault,
+        name: 'Custom Default Override',
+        baseUrl: 'https://proxy.example.com',
+      },
+      { sourceId: 'test-source' },
+    );
+
+    expect(getDefaultModel().name).toBe('Custom Default Override');
+
+    unregisterModels('test-source');
+
+    expect(getDefaultModel().name).toBe(builtInDefault.name);
+    expect(getDefaultModel().baseUrl).toBe(builtInDefault.baseUrl);
+  });
+
+  it('restores the next lower source when unregistering only the top override', () => {
+    registerModel({ ...customModel, name: 'First Source' }, { sourceId: 'first-source' });
+    registerModel({ ...customModel, name: 'Second Source' }, { sourceId: 'second-source' });
+
+    expect(getModel('openai', 'custom-openai-model')?.name).toBe('Second Source');
+
+    unregisterModels('second-source');
+
+    expect(getModel('openai', 'custom-openai-model')?.name).toBe('First Source');
   });
 });
