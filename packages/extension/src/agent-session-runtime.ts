@@ -161,12 +161,24 @@ export class AgentSessionRuntime {
     this._modelFallbackMessage = result.modelFallbackMessage;
   }
 
+  appendDiagnostics(diagnostics: AgentSessionRuntimeDiagnostic[]): void {
+    this._diagnostics = [...this._diagnostics, ...diagnostics];
+  }
+
   private async finishSessionReplacement(
     sessionStartEvent: SessionStartEvent,
     withSession?: (ctx: ReplacedSessionContext) => Promise<void>,
   ): Promise<unknown | undefined> {
     await this.rebindSession?.(this.session);
     await this.session.emitSessionStart(sessionStartEvent);
+    const discoverExtensionResources = this.session.discoverExtensionResources?.bind(this.session);
+    if (discoverExtensionResources) {
+      this.appendDiagnostics(
+        await discoverExtensionResources(
+          sessionStartEvent.reason === 'reload' ? 'reload' : 'startup',
+        ),
+      );
+    }
     if (!withSession) return undefined;
     try {
       await withSession(this.session.createReplacedSessionContext());
@@ -354,6 +366,32 @@ export class AgentSessionRuntime {
     const replacementResult = await this.replaceCurrent(
       'fork',
       targetMetadata.path,
+      nextRuntime,
+      sessionStartEvent,
+      options,
+    );
+    return { cancelled: false, ...replacementResult };
+  }
+
+  async reload(options?: AgentSessionReplacementOptions): Promise<AgentSessionReplacementResult> {
+    if (this.session.isStreaming) {
+      await this.session.abort();
+    }
+
+    const targetSession = this.session.getBackingSession();
+    const activeToolNames = this.session.isActiveToolsCustomized()
+      ? this.session.getActiveToolNames()
+      : undefined;
+    const sessionStartEvent: SessionStartEvent = { type: 'session_start', reason: 'reload' };
+    const nextRuntime = await this.createRuntime({
+      session: targetSession,
+      activeToolNames,
+      sessionStartEvent,
+    });
+
+    const replacementResult = await this.replaceCurrent(
+      'reload',
+      undefined,
       nextRuntime,
       sessionStartEvent,
       options,

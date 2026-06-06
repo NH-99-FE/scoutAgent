@@ -4,11 +4,14 @@ import type { AgentSession } from '../agent-session.ts';
 import type { ReplacedSessionContext } from '../extensions/types.ts';
 
 function makeSession(overrides?: Partial<AgentSession>) {
+  const backingSession = {} as ReturnType<AgentSession['getBackingSession']>;
   return {
     isStreaming: false,
     abort: vi.fn(async () => undefined),
     dispose: vi.fn(),
     getActiveToolNames: vi.fn(() => ['read', 'bash']),
+    isActiveToolsCustomized: vi.fn(() => false),
+    getBackingSession: vi.fn(() => backingSession),
     getSessionMetadata: vi.fn(async () => ({ id: 'old-session', path: '/sessions/old.jsonl' })),
     emitSessionBeforeSwitch: vi.fn(async () => false),
     emitSessionBeforeFork: vi.fn(async () => false),
@@ -108,6 +111,59 @@ describe('AgentSessionRuntime', () => {
     });
     expect(runtime.session).toBe(nextSession);
     expect(events).toEqual(['abort', 'create', 'shutdown', 'dispose', 'rebind', 'start']);
+  });
+
+  it('reload keeps default tool selection uncustomized so new extension tools can activate', async () => {
+    const backingSession = {} as ReturnType<AgentSession['getBackingSession']>;
+    const oldSession = makeSession({
+      getBackingSession: vi.fn(() => backingSession),
+      getActiveToolNames: vi.fn(() => ['read', 'old-extension-tool']),
+      isActiveToolsCustomized: vi.fn(() => false),
+    });
+    const nextSession = makeSession();
+    const createRuntime = vi.fn(async () => ({ session: nextSession, diagnostics: [] }));
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime,
+    });
+
+    await runtime.reload();
+
+    expect(createRuntime).toHaveBeenCalledWith({
+      session: backingSession,
+      activeToolNames: undefined,
+      sessionStartEvent: {
+        type: 'session_start',
+        reason: 'reload',
+      },
+    });
+    expect(oldSession.getActiveToolNames).not.toHaveBeenCalled();
+  });
+
+  it('reload preserves manually customized active tools', async () => {
+    const backingSession = {} as ReturnType<AgentSession['getBackingSession']>;
+    const oldSession = makeSession({
+      getBackingSession: vi.fn(() => backingSession),
+      getActiveToolNames: vi.fn(() => ['read']),
+      isActiveToolsCustomized: vi.fn(() => true),
+    });
+    const nextSession = makeSession();
+    const createRuntime = vi.fn(async () => ({ session: nextSession, diagnostics: [] }));
+    const runtime = new AgentSessionRuntime(oldSession, {
+      cwd: '/test/project',
+      createRuntime,
+    });
+
+    await runtime.reload();
+
+    expect(createRuntime).toHaveBeenCalledWith({
+      session: backingSession,
+      activeToolNames: ['read'],
+      sessionStartEvent: {
+        type: 'session_start',
+        reason: 'reload',
+      },
+    });
   });
 
   it('runs withSession after rebind and session_start using the replacement context', async () => {

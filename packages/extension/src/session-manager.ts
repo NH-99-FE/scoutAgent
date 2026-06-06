@@ -5,13 +5,8 @@
 // ============================================================
 
 import * as vscode from 'vscode';
-import { join } from 'node:path';
-import type { JsonlSessionMetadata, PromptTemplate } from '@scout-agent/agent';
-import {
-  JsonlSessionRepo,
-  InMemorySessionRepo,
-  loadSourcedPromptTemplates,
-} from '@scout-agent/agent';
+import type { JsonlSessionMetadata } from '@scout-agent/agent';
+import { JsonlSessionRepo, InMemorySessionRepo } from '@scout-agent/agent';
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import type { JsonlSessionRepoFileSystem, Session } from '@scout-agent/agent';
 import type {
@@ -21,8 +16,7 @@ import type {
   ToolInfo,
 } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
-import { loadSkills } from './skill-loader.ts';
-import { createSyntheticSourceInfo, type SourceInfo } from './source-info.ts';
+import { ScoutResourceLoader } from './resource-loader.ts';
 
 // ---------- 内部 Repo 接口（供 JsonlSessionRepo 和 InMemorySessionRepo 共用） ----------
 
@@ -52,8 +46,6 @@ import {
   type CreateAgentSessionRuntimeFactory,
 } from './agent-session-runtime.ts';
 import type { NavigateTreeResult } from '@scout-agent/agent';
-
-type SourcedPromptTemplate = PromptTemplate & { sourceInfo?: SourceInfo };
 
 // ---------- 配置接口 ----------
 
@@ -206,6 +198,7 @@ export class SessionManager implements vscode.Disposable {
       createdSession = undefined;
       this.setAgentSession(runtime.session, false);
       await runtime.session.emitSessionStart({ type: 'session_start', reason: 'startup' });
+      runtime.appendDiagnostics(await runtime.session.discoverExtensionResources('startup'));
       this.emit({ type: 'state_change' });
 
       this.outputChannel.appendLine(`[scout] Harness initialized with model: ${model.id}`);
@@ -252,6 +245,7 @@ export class SessionManager implements vscode.Disposable {
       this.sessionRuntime = runtime;
       this.setAgentSession(runtime.session, false);
       await runtime.session.emitSessionStart({ type: 'session_start', reason: 'resume' });
+      runtime.appendDiagnostics(await runtime.session.discoverExtensionResources('startup'));
       this.emit({ type: 'state_change' });
       this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
       let withSessionError: unknown;
@@ -369,6 +363,20 @@ export class SessionManager implements vscode.Disposable {
 
   async compact(): Promise<void> {
     await this.agentSession?.compact();
+  }
+
+  async reload(): Promise<SessionManagerReplacementResult> {
+    if (!this.sessionRuntime) {
+      await this.initialize();
+      return { cancelled: false };
+    }
+
+    const result = await this.sessionRuntime.reload();
+    this.emit({ type: 'state_change' });
+    this.logReplacementTeardownError(result.teardownError);
+    this.logReplacementWithSessionError(result.withSessionError);
+    this.outputChannel.appendLine('[scout] Extensions and resources reloaded');
+    return result;
   }
 
   async abortRetry(): Promise<void> {
@@ -540,76 +548,21 @@ export class SessionManager implements vscode.Disposable {
     }
 
     const extensionRunner = await this.loadExtensions(diagnostics);
-    const discoveredResources = extensionRunner
-      ? await extensionRunner.emitResourcesDiscover(this.cwd, 'startup')
-      : { skillPaths: [], promptPaths: [], themePaths: [] };
-
-    const { skills, diagnostics: skillDiagnostics } = loadSkills({
+    const resourceLoader = new ScoutResourceLoader({
       cwd: this.cwd,
       agentDir: this.agentDir,
-      customPaths: discoveredResources.skillPaths.map((entry) => entry.path),
     });
-    for (const diag of skillDiagnostics) {
-      const type = diag.severity === 'error' ? 'error' : 'warning';
-      const message = `${diag.filePath}: ${diag.message}`;
-      diagnostics.push({ type, message });
-      const prefix = type === 'error' ? 'ERROR' : 'WARN';
-      this.outputChannel.appendLine(`[scout] ${prefix}: ${message}`);
-    }
-
-    const promptTemplateInputs = [
-      {
-        path: join(this.agentDir, 'prompts'),
-        sourceInfo: createSyntheticSourceInfo(join(this.agentDir, 'prompts'), {
-          source: 'user',
-          scope: 'user',
-          baseDir: this.agentDir,
-        }),
-      },
-      {
-        path: join(this.cwd, '.scout', 'prompts'),
-        sourceInfo: createSyntheticSourceInfo(join(this.cwd, '.scout', 'prompts'), {
-          source: 'project',
-          scope: 'project',
-          baseDir: this.cwd,
-        }),
-      },
-      ...discoveredResources.promptPaths.map((entry) => ({
-        path: entry.path,
-        sourceInfo: createSyntheticSourceInfo(entry.path, {
-          source: 'extension',
-          scope: 'temporary',
-          baseDir: entry.extensionPath.replace(/[\\/][^\\/]*$/, ''),
-        }),
-      })),
-    ];
-    const promptResult = await loadSourcedPromptTemplates(
-      new NodeExecutionEnv({ cwd: this.cwd }),
-      promptTemplateInputs.map((entry) => ({ path: entry.path, source: entry.sourceInfo })),
-      (promptTemplate, sourceInfo): SourcedPromptTemplate => ({ ...promptTemplate, sourceInfo }),
-    );
-    const dedupedPromptResult = this.dedupePromptTemplates(
-      promptResult.promptTemplates.map((entry) => entry.promptTemplate),
-    );
-    const promptTemplates = dedupedPromptResult.promptTemplates;
-    for (const diag of promptResult.diagnostics) {
-      const message = `${diag.path}: ${diag.message}`;
-      diagnostics.push({ type: 'warning', message });
-      this.outputChannel.appendLine(`[scout] WARN: ${message}`);
-    }
-    for (const diag of dedupedPromptResult.diagnostics) {
-      diagnostics.push(diag);
-      this.outputChannel.appendLine(`[scout] WARN: ${diag.message}`);
-    }
+    const runtimeResources = await resourceLoader.load();
 
     const agentSession = new AgentSession({
       session: session as Session,
       configManager: this.configManager,
       cwd: this.cwd,
       outputChannel: this.outputChannel,
-      skills,
-      promptTemplates,
+      skills: runtimeResources.skills,
+      promptTemplates: runtimeResources.promptTemplates,
       extensionRunner,
+      loadExtensionResources: (resources) => resourceLoader.extendResources(resources),
       activeToolNames,
     });
 
@@ -624,6 +577,8 @@ export class SessionManager implements vscode.Disposable {
       throw error;
     }
 
+    this.recordResourceDiagnostics(runtimeResources.diagnostics, diagnostics);
+
     return {
       session: agentSession,
       diagnostics,
@@ -631,36 +586,18 @@ export class SessionManager implements vscode.Disposable {
     };
   };
 
-  private dedupePromptTemplates(promptTemplates: SourcedPromptTemplate[]): {
-    promptTemplates: SourcedPromptTemplate[];
-    diagnostics: AgentSessionRuntimeDiagnostic[];
-  } {
-    const seen = new Map<string, SourcedPromptTemplate>();
-    const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
-
-    for (const promptTemplate of promptTemplates) {
-      const existing = seen.get(promptTemplate.name);
-      if (!existing) {
-        seen.set(promptTemplate.name, promptTemplate);
-        continue;
+  private recordResourceDiagnostics(
+    resourceDiagnostics: AgentSessionRuntimeDiagnostic[],
+    targetDiagnostics: AgentSessionRuntimeDiagnostic[],
+  ): void {
+    for (const diag of resourceDiagnostics) {
+      targetDiagnostics.push(diag);
+      if (diag.type === 'error') {
+        this.outputChannel.appendLine(`[scout] ERROR: ${diag.message}`);
+      } else {
+        this.outputChannel.appendLine(`[scout] WARN: ${diag.message}`);
       }
-
-      const winnerPath = existing.sourceInfo?.path ?? `<prompt:${existing.name}>`;
-      const loserPath = promptTemplate.sourceInfo?.path ?? `<prompt:${promptTemplate.name}>`;
-      diagnostics.push({
-        type: 'collision',
-        message: `name "/${promptTemplate.name}" collision`,
-        path: loserPath,
-        collision: {
-          resourceType: 'prompt',
-          name: promptTemplate.name,
-          winnerPath,
-          loserPath,
-        },
-      });
     }
-
-    return { promptTemplates: [...seen.values()], diagnostics };
   }
 
   /** 发现并加载扩展，返回 ScoutExtensionRunner 或 undefined */
@@ -750,6 +687,7 @@ export class SessionManager implements vscode.Disposable {
       fork: (entryId, options) => this.fork(entryId, options?.position ?? 'before', options),
       switchSession: (sessionMeta, options) => this.restore(sessionMeta, options),
       waitForIdle: () => agentSession.waitForIdle(),
+      reload: () => this.reload().then(() => undefined),
       navigateTree: (targetId, options) => agentSession.navigateTree(targetId, options),
     };
 

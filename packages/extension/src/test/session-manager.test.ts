@@ -21,6 +21,7 @@ const {
   mockHarnessSetThinkingLevel,
   mockHarnessCompact,
   mockHarnessSetTools,
+  mockHarnessSetResources,
   mockHarnessGetModel,
   mockHarnessGetThinkingLevel,
   mockHarnessOn,
@@ -42,6 +43,7 @@ const {
   const mockHarnessSetThinkingLevel = vi.fn();
   const mockHarnessCompact = vi.fn();
   const mockHarnessSetTools = vi.fn();
+  const mockHarnessSetResources = vi.fn();
   const mockHarnessGetModel = vi.fn(() => ({
     id: 'test-model',
     contextWindow: 200000,
@@ -86,6 +88,7 @@ const {
     this.steer = vi.fn();
     this.followUp = vi.fn();
     this.setTools = mockHarnessSetTools;
+    this.setResources = mockHarnessSetResources;
     this.hasPendingMessages = vi.fn(() => false);
     this.getSignal = vi.fn(() => undefined);
     this.getModel = mockHarnessGetModel;
@@ -117,6 +120,7 @@ const {
     mockHarnessSetThinkingLevel,
     mockHarnessCompact,
     mockHarnessSetTools,
+    mockHarnessSetResources,
     mockHarnessGetModel,
     mockHarnessGetThinkingLevel,
     mockHarnessOn,
@@ -565,9 +569,42 @@ describe('SessionManager — 协调层', () => {
         customPaths: ['/extension/skills'],
       }),
     );
-    expect(mockLoadSourcedPromptTemplates.mock.calls[0]![1]).toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: '/extension/prompts' })]),
+    const promptTemplateInputCalls = mockLoadSourcedPromptTemplates.mock.calls.map(
+      (call) => call[1],
     );
+    expect(promptTemplateInputCalls).toEqual(
+      expect.arrayContaining([
+        expect.arrayContaining([expect.objectContaining({ path: '/extension/prompts' })]),
+      ]),
+    );
+    expect(mockHarnessSetResources).toHaveBeenCalled();
+    manager.dispose();
+  });
+
+  it('initialize emits resources_discover after binding extension context actions', async () => {
+    const order: string[] = [];
+    let boundContextActions: any;
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) => eventType === 'session_start'),
+      bindCore: vi.fn((_actions, contextActions) => {
+        order.push('bindCore');
+        boundContextActions = contextActions;
+      }),
+      emitSessionStart: vi.fn(async () => {
+        order.push('session_start');
+      }),
+      emitResourcesDiscover: vi.fn(async () => {
+        order.push('resources_discover');
+        expect(boundContextActions.getModel()?.id).toBe('test-model');
+        expect(boundContextActions.getSystemPrompt()).toBe('System prompt');
+        expect(boundContextActions.hasPendingMessages()).toBe(false);
+        return { skillPaths: [], promptPaths: [], themePaths: [] };
+      }),
+    });
+
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+
+    expect(order).toEqual(['bindCore', 'session_start', 'resources_discover']);
     manager.dispose();
   });
 
@@ -708,6 +745,72 @@ describe('SessionManager — 协调层', () => {
       targetSessionFile: undefined,
     });
     expect(order).toEqual(['before_switch', 'shutdown', 'invalidate']);
+    manager.dispose();
+  });
+
+  it('reload shuts down old runner and starts replacement runner with reload discovery', async () => {
+    const order: string[] = [];
+    const extensionRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) => eventType === 'session_shutdown'),
+      emitSessionShutdown: vi.fn(async () => {
+        order.push('old:shutdown');
+      }),
+      invalidate: vi.fn(() => {
+        order.push('old:invalidate');
+      }),
+    });
+    const manager = await makeInitializedSessionManagerWithExtensionRunner(extensionRunner);
+    const replacementRunner = makeMockExtensionRunner({
+      hasHandlers: vi.fn((eventType: string) => eventType === 'session_start'),
+      emitSessionStart: vi.fn(async (event) => {
+        order.push(`new:start:${event.reason}`);
+      }),
+      emitResourcesDiscover: vi.fn(async (_cwd, reason) => {
+        order.push(`new:discover:${reason}`);
+        return { skillPaths: [], promptPaths: [], themePaths: [] };
+      }),
+    });
+    vi.mocked(discoverAndLoadExtensions).mockResolvedValueOnce({
+      extensions: [
+        {
+          path: '<replacement-extension>',
+          resolvedPath: '<replacement-extension>',
+          sourceInfo: {
+            path: '<replacement-extension>',
+            source: 'test',
+            scope: 'temporary',
+            origin: 'top-level',
+          },
+          handlers: new Map(),
+          tools: new Map(),
+          commands: new Map(),
+        },
+      ],
+      errors: [],
+      runtime: {} as any,
+    });
+    vi.mocked(ScoutExtensionRunner).mockImplementationOnce(function (this: any) {
+      return replacementRunner as any;
+    });
+
+    await manager.reload();
+
+    expect(extensionRunner.emitSessionShutdown).toHaveBeenCalledWith({
+      type: 'session_shutdown',
+      reason: 'reload',
+      targetSessionFile: undefined,
+    });
+    expect(replacementRunner.emitSessionStart).toHaveBeenCalledWith({
+      type: 'session_start',
+      reason: 'reload',
+    });
+    expect(replacementRunner.emitResourcesDiscover).toHaveBeenCalledWith('/test/project', 'reload');
+    expect(order).toEqual([
+      'old:shutdown',
+      'old:invalidate',
+      'new:start:reload',
+      'new:discover:reload',
+    ]);
     manager.dispose();
   });
 

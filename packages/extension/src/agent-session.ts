@@ -74,6 +74,12 @@ import type {
 } from './extensions/types.ts';
 import type { Skill as ScoutSkill } from './skill-loader.ts';
 import { createSyntheticSourceInfo } from './source-info.ts';
+import {
+  ScoutResourceLoader,
+  type DiscoveredExtensionResources,
+  type LoadedScoutResources,
+} from './resource-loader.ts';
+import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
 
 // ---------- 类型守卫 ----------
 
@@ -140,6 +146,9 @@ export interface AgentSessionOptions {
   skills: ScoutSkill[];
   promptTemplates?: PromptTemplate[];
   extensionRunner?: ScoutExtensionRunner;
+  loadExtensionResources?: (
+    resources: DiscoveredExtensionResources,
+  ) => Promise<LoadedScoutResources>;
   activeToolNames?: string[];
 }
 
@@ -166,6 +175,9 @@ export class AgentSession implements vscode.Disposable {
   private skills: ScoutSkill[];
   private promptTemplates: PromptTemplate[];
   private extensionRunner?: ScoutExtensionRunner;
+  private loadExtensionResources?: (
+    resources: DiscoveredExtensionResources,
+  ) => Promise<LoadedScoutResources>;
   private activeToolNames: string[];
   private activeToolsCustomized: boolean;
   private toolRegistry = new Map<string, ToolRegistryEntry>();
@@ -224,6 +236,7 @@ export class AgentSession implements vscode.Disposable {
     this.skills = options.skills;
     this.promptTemplates = options.promptTemplates ?? [];
     this.extensionRunner = options.extensionRunner;
+    this.loadExtensionResources = options.loadExtensionResources;
     this.activeToolNames = options.activeToolNames ?? [...DEFAULT_ACTIVE_TOOL_NAMES];
     this.activeToolsCustomized = options.activeToolNames !== undefined;
   }
@@ -497,8 +510,16 @@ export class AgentSession implements vscode.Disposable {
     return [...this.activeToolNames];
   }
 
+  isActiveToolsCustomized(): boolean {
+    return this.activeToolsCustomized;
+  }
+
   async getSessionMetadata(): Promise<JsonlSessionMetadata> {
     return (await this.session.getMetadata()) as JsonlSessionMetadata;
+  }
+
+  getBackingSession(): Session {
+    return this.session;
   }
 
   getAllToolInfos(): ToolInfo[] {
@@ -552,10 +573,12 @@ export class AgentSession implements vscode.Disposable {
       name: `skill:${skill.name}`,
       description: skill.description,
       source: 'skill',
-      sourceInfo: createSyntheticSourceInfo(skill.filePath, {
-        source: 'skill',
-        baseDir: skill.filePath.replace(/[\\/][^\\/]*$/, ''),
-      }),
+      sourceInfo:
+        (skill as ScoutSkill & { sourceInfo?: SourceInfo }).sourceInfo ??
+        createSyntheticSourceInfo(skill.filePath, {
+          source: 'skill',
+          baseDir: skill.filePath.replace(/[\\/][^\\/]*$/, ''),
+        }),
     }));
     return [...extensionCommands, ...templates, ...skills];
   }
@@ -674,6 +697,25 @@ export class AgentSession implements vscode.Disposable {
   async emitSessionStart(event: SessionStartEvent): Promise<void> {
     if (!this.extensionRunner?.hasHandlers('session_start')) return;
     await this.extensionRunner.emitSessionStart(event);
+  }
+
+  async discoverExtensionResources(
+    reason: 'startup' | 'reload',
+  ): Promise<AgentSessionRuntimeDiagnostic[]> {
+    if (!this.extensionRunner || !this.loadExtensionResources) return [];
+    const discoveredResources = await this.extensionRunner.emitResourcesDiscover(this.cwd, reason);
+    if (!ScoutResourceLoader.hasDiscoveredResources(discoveredResources)) return [];
+
+    const loadedResources = await this.loadExtensionResources(discoveredResources);
+    await this.setResources({
+      skills: loadedResources.skills,
+      promptTemplates: loadedResources.promptTemplates,
+    });
+    for (const diag of loadedResources.diagnostics) {
+      const prefix = diag.type === 'error' ? 'ERROR' : 'WARN';
+      this.outputChannel.appendLine(`[scout] ${prefix}: ${diag.message}`);
+    }
+    return loadedResources.diagnostics;
   }
 
   /** 设置扩展 runner 并重新桥接钩子。 */

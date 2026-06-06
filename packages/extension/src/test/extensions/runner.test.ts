@@ -121,6 +121,7 @@ function makeContextActions(): ScoutExtensionContextActions {
     fork: vi.fn(async () => ({ cancelled: false })),
     switchSession: vi.fn(async () => ({ cancelled: false })),
     waitForIdle: vi.fn(async () => {}),
+    reload: vi.fn(async () => {}),
     navigateTree: vi.fn(async () => ({ cancelled: false })),
   };
 }
@@ -313,7 +314,19 @@ describe('ScoutExtensionRunner commands', () => {
     expect(runner.getCommand('hello')).toBeUndefined();
     expect(runner.getCommand('hello:1')?.description).toBe('first');
     expect(runner.getCommand('hello:2')?.description).toBe('second');
-    expect(runner.getCommandDiagnostics()).toEqual([]);
+    expect(runner.getCommandDiagnostics()).toContainEqual(
+      expect.objectContaining({
+        type: 'collision',
+        message: 'command "/hello" collision',
+        path: '<test>',
+        collision: expect.objectContaining({
+          resourceType: 'extension',
+          name: 'hello',
+          winnerPath: '<test>',
+          loserPath: '<test>',
+        }),
+      }),
+    );
   });
 
   it('preserves command argument completion handlers', async () => {
@@ -345,9 +358,11 @@ describe('ScoutExtensionRunner commands', () => {
 
     const ctx = runner.createCommandContext();
     await ctx.waitForIdle();
+    await ctx.reload();
     await expect(ctx.navigateTree('entry-1')).resolves.toEqual({ cancelled: false });
 
     expect(contextActions.waitForIdle).toHaveBeenCalled();
+    expect(contextActions.reload).toHaveBeenCalled();
     expect(contextActions.navigateTree).toHaveBeenCalledWith('entry-1', undefined);
   });
 });

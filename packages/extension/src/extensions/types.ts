@@ -431,6 +431,7 @@ export interface ResourceDiagnostic {
 
 export interface ScoutExtensionCommandContext extends ScoutExtensionContext {
   waitForIdle(): Promise<void>;
+  reload(): Promise<void>;
   navigateTree(
     targetId: string,
     options?: {
@@ -682,6 +683,7 @@ export interface ScoutExtensionContextActions {
     options?: SessionReplacementOptions,
   ) => Promise<{ cancelled: boolean }>;
   waitForIdle: () => Promise<void>;
+  reload: () => Promise<void>;
   navigateTree: (
     targetId: string,
     options?: {

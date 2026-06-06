@@ -140,6 +140,7 @@ export class ScoutExtensionRunner {
     cancelled: true,
   });
   private waitForIdleFn: ScoutExtensionContextActions['waitForIdle'] = async () => {};
+  private reloadFn: ScoutExtensionContextActions['reload'] = async () => {};
   private navigateTreeFn: ScoutExtensionContextActions['navigateTree'] = async () => ({
     cancelled: true,
   });
@@ -197,6 +198,7 @@ export class ScoutExtensionRunner {
     this.forkFn = contextActions.fork;
     this.switchSessionFn = contextActions.switchSession;
     this.waitForIdleFn = contextActions.waitForIdle;
+    this.reloadFn = contextActions.reload;
     this.navigateTreeFn = contextActions.navigateTree;
   }
 
@@ -291,6 +293,10 @@ export class ScoutExtensionRunner {
       this.assertActive();
       return this.waitForIdleFn();
     };
+    context.reload = () => {
+      this.assertActive();
+      return this.reloadFn();
+    };
     context.navigateTree = (targetId, options) => {
       this.assertActive();
       return this.navigateTreeFn(targetId, options);
@@ -313,7 +319,10 @@ export class ScoutExtensionRunner {
     return Array.from(toolsByName.values());
   }
 
-  private resolveRegisteredCommands(): ResolvedCommand[] {
+  private resolveRegisteredCommands(): {
+    commands: ResolvedCommand[];
+    diagnostics: ResourceDiagnostic[];
+  } {
     const commands: RegisteredCommand[] = [];
     const counts = new Map<string, number>();
     for (const ext of this.extensions) {
@@ -325,28 +334,67 @@ export class ScoutExtensionRunner {
 
     const seen = new Map<string, number>();
     const takenInvocationNames = new Set<string>();
-    return commands.map((command) => {
-      const occurrence = (seen.get(command.name) ?? 0) + 1;
-      seen.set(command.name, occurrence);
+    const diagnostics = this.buildCommandCollisionDiagnostics(commands, counts);
+    return {
+      commands: commands.map((command) => {
+        const occurrence = (seen.get(command.name) ?? 0) + 1;
+        seen.set(command.name, occurrence);
 
-      let invocationName =
-        (counts.get(command.name) ?? 0) > 1 ? `${command.name}:${occurrence}` : command.name;
-      if (takenInvocationNames.has(invocationName)) {
-        let suffix = occurrence;
-        do {
-          suffix += 1;
-          invocationName = `${command.name}:${suffix}`;
-        } while (takenInvocationNames.has(invocationName));
+        let invocationName =
+          (counts.get(command.name) ?? 0) > 1 ? `${command.name}:${occurrence}` : command.name;
+        if (takenInvocationNames.has(invocationName)) {
+          let suffix = occurrence;
+          do {
+            suffix += 1;
+            invocationName = `${command.name}:${suffix}`;
+          } while (takenInvocationNames.has(invocationName));
+        }
+
+        takenInvocationNames.add(invocationName);
+        return { ...command, invocationName };
+      }),
+      diagnostics,
+    };
+  }
+
+  private buildCommandCollisionDiagnostics(
+    commands: RegisteredCommand[],
+    counts: Map<string, number>,
+  ): ResourceDiagnostic[] {
+    const diagnostics: ResourceDiagnostic[] = [];
+    const winners = new Map<string, RegisteredCommand>();
+
+    for (const command of commands) {
+      if ((counts.get(command.name) ?? 0) <= 1) continue;
+
+      const winner = winners.get(command.name);
+      if (!winner) {
+        winners.set(command.name, command);
+        continue;
       }
 
-      takenInvocationNames.add(invocationName);
-      return { ...command, invocationName };
-    });
+      diagnostics.push({
+        type: 'collision',
+        message: `command "/${command.name}" collision`,
+        path: command.sourceInfo.path,
+        collision: {
+          resourceType: 'extension',
+          name: command.name,
+          winnerPath: winner.sourceInfo.path,
+          loserPath: command.sourceInfo.path,
+          winnerSource: winner.sourceInfo.source,
+          loserSource: command.sourceInfo.source,
+        },
+      });
+    }
+
+    return diagnostics;
   }
 
   getRegisteredCommands(): ResolvedCommand[] {
-    this.commandDiagnostics = [];
-    return this.resolveRegisteredCommands();
+    const result = this.resolveRegisteredCommands();
+    this.commandDiagnostics = result.diagnostics;
+    return result.commands;
   }
 
   getCommandDiagnostics(): ResourceDiagnostic[] {
@@ -354,7 +402,9 @@ export class ScoutExtensionRunner {
   }
 
   getCommand(name: string): ResolvedCommand | undefined {
-    return this.resolveRegisteredCommands().find((command) => command.invocationName === name);
+    const result = this.resolveRegisteredCommands();
+    this.commandDiagnostics = result.diagnostics;
+    return result.commands.find((command) => command.invocationName === name);
   }
 
   /** 按名称查找工具定义 */
