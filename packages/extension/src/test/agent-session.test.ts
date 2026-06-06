@@ -63,6 +63,7 @@ const {
   const mockHarnessGetSignal = vi.fn<() => AbortSignal | undefined>(() => undefined);
   const mockHarnessGetModel = vi.fn(() => ({
     id: 'test-model',
+    provider: 'anthropic',
     contextWindow: 200000,
     input: ['text', 'image'],
   }));
@@ -225,6 +226,17 @@ vi.mock('@scout-agent/ai', () => ({
   getProviders: vi.fn(() => []),
   getModels: vi.fn(() => []),
   getModel: vi.fn(),
+  isContextOverflow: vi.fn((message: any, contextWindow?: number) => {
+    if (message.stopReason === 'error' && typeof message.errorMessage === 'string') {
+      return /prompt is too long|request_too_large|exceeds the context window|context[_ ]length[_ ]exceeded|too many tokens/i.test(
+        message.errorMessage,
+      );
+    }
+    if (contextWindow && message.stopReason === 'stop') {
+      return (message.usage?.input ?? 0) + (message.usage?.cacheRead ?? 0) > contextWindow;
+    }
+    return false;
+  }),
 }));
 
 // ---------- Mock @scout-agent/shared ----------
@@ -427,6 +439,7 @@ describe('AgentSession', () => {
     });
     mockHarnessGetModel.mockReturnValue({
       id: 'test-model',
+      provider: 'anthropic',
       contextWindow: 200000,
       input: ['text', 'image'],
     });
@@ -624,6 +637,7 @@ describe('AgentSession — 运行时操作', () => {
     });
     mockHarnessGetModel.mockReturnValue({
       id: 'test-model',
+      provider: 'anthropic',
       contextWindow: 200000,
       input: ['text', 'image'],
     });
@@ -1408,6 +1422,7 @@ describe('AgentSession — Auto Retry', () => {
     });
     mockHarnessGetModel.mockReturnValue({
       id: 'test-model',
+      provider: 'anthropic',
       contextWindow: 200000,
       input: ['text', 'image'],
     });
@@ -1425,6 +1440,8 @@ describe('AgentSession — Auto Retry', () => {
   function makeErrorAssistantMessage(errorMessage: string): any {
     return {
       role: 'assistant',
+      provider: 'anthropic',
+      model: 'test-model',
       stopReason: 'error',
       errorMessage,
       content: [],
@@ -1547,6 +1564,105 @@ describe('AgentSession — Auto Retry', () => {
     expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
     expect(mockHarnessPrompt).not.toHaveBeenCalledWith('Please continue.');
     expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+    agentSession.dispose();
+  });
+
+  it('detects Anthropic overflow messages through the shared overflow helper', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    const callback = getSubscribeCallback();
+    const userMessage = { role: 'user', content: 'hello', timestamp: Date.now() };
+    const overflowMessage = makeErrorAssistantMessage('prompt is too long: 213462 tokens > 200000 maximum');
+
+    mockSessionGetBranch.mockResolvedValue([
+      {
+        type: 'message',
+        id: 'entry-user-1',
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        message: userMessage,
+      },
+      {
+        type: 'message',
+        id: 'entry-overflow-1',
+        parentId: 'entry-user-1',
+        timestamp: new Date().toISOString(),
+        message: overflowMessage,
+      },
+    ] as any);
+
+    await callback({ type: 'message_end', message: overflowMessage });
+    await callback({ type: 'agent_end', messages: [overflowMessage] });
+    await runPostAgentLoop(agentSession);
+
+    expect(mockSessionMoveTo).toHaveBeenCalledWith('entry-user-1');
+    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+    agentSession.dispose();
+  });
+
+  it('recovers explicit overflow errors from the request model after the user switches models', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    const callback = getSubscribeCallback();
+    const userMessage = { role: 'user', content: 'hello', timestamp: Date.now() };
+    const overflowMessage = makeErrorAssistantMessage('prompt is too long: 213462 tokens > 200000 maximum');
+    mockHarnessGetModel.mockReturnValue({
+      id: 'gpt-4o',
+      provider: 'openai',
+      contextWindow: 128000,
+      input: ['text', 'image'],
+    });
+
+    mockSessionGetBranch.mockResolvedValue([
+      {
+        type: 'message',
+        id: 'entry-user-1',
+        parentId: null,
+        timestamp: new Date().toISOString(),
+        message: userMessage,
+      },
+      {
+        type: 'message',
+        id: 'entry-overflow-1',
+        parentId: 'entry-user-1',
+        timestamp: new Date().toISOString(),
+        message: overflowMessage,
+      },
+    ] as any);
+
+    await callback({ type: 'message_end', message: overflowMessage });
+    await callback({ type: 'agent_end', messages: [overflowMessage] });
+    await runPostAgentLoop(agentSession);
+
+    expect(mockSessionMoveTo).toHaveBeenCalledWith('entry-user-1');
+    expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
+    expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
+    agentSession.dispose();
+  });
+
+  it('emits compaction_end when overflow recovery fails twice', async () => {
+    const agentSession = await makeInitializedAgentSession();
+    const callback = getSubscribeCallback();
+    const events: any[] = [];
+    agentSession.subscribe((event) => events.push(event));
+    const overflowMessage = makeErrorAssistantMessage('context_length_exceeded: too many tokens');
+
+    await callback({ type: 'message_end', message: overflowMessage });
+    await callback({ type: 'agent_end', messages: [overflowMessage] });
+    await runPostAgentLoop(agentSession);
+
+    await callback({ type: 'message_end', message: overflowMessage });
+    await callback({ type: 'agent_end', messages: [overflowMessage] });
+    await runPostAgentLoop(agentSession);
+
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'compaction_end',
+        reason: 'overflow',
+        aborted: false,
+        willRetry: false,
+        errorMessage: expect.stringContaining('failed after one compact-and-retry attempt'),
+      }),
+    );
     agentSession.dispose();
   });
 
@@ -1885,6 +2001,7 @@ describe('AgentSession — Fork', () => {
     });
     mockHarnessGetModel.mockReturnValue({
       id: 'test-model',
+      provider: 'anthropic',
       contextWindow: 200000,
       input: ['text', 'image'],
     });
@@ -1928,6 +2045,7 @@ describe('AgentSession — Tree / Navigation / Label', () => {
     });
     mockHarnessGetModel.mockReturnValue({
       id: 'test-model',
+      provider: 'anthropic',
       contextWindow: 200000,
       input: ['text', 'image'],
     });
@@ -2159,6 +2277,7 @@ describe('AgentSession — 消息缓存', () => {
     });
     mockHarnessGetModel.mockReturnValue({
       id: 'test-model',
+      provider: 'anthropic',
       contextWindow: 200000,
       input: ['text', 'image'],
     });

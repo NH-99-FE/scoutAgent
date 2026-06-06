@@ -6,6 +6,7 @@
 
 import * as vscode from 'vscode';
 import type { Model, Api, AssistantMessage, ImageContent, TextContent } from '@scout-agent/ai';
+import { isContextOverflow } from '@scout-agent/ai';
 import type {
   AgentEvent,
   AgentHarness,
@@ -1206,6 +1207,14 @@ export class AgentSession implements vscode.Disposable {
         this.outputChannel.appendLine(
           '[scout] Overflow recovery failed after one attempt, stopping retry',
         );
+        this.emit({
+          type: 'compaction_end',
+          reason: 'overflow',
+          aborted: false,
+          willRetry: false,
+          errorMessage:
+            'Context overflow recovery failed after one compact-and-retry attempt. Try reducing context or switching to a larger-context model.',
+        });
         return false;
       }
       this.overflowRecoveryAttempted = true;
@@ -1332,9 +1341,12 @@ export class AgentSession implements vscode.Disposable {
   }
 
   private isContextOverflowError(message: AssistantMessage): boolean {
-    if (message.stopReason !== 'error' || !message.errorMessage) return false;
-    const errMsg = message.errorMessage.toLowerCase();
-    return errMsg.includes('context_length_exceeded') || errMsg.includes('context_window');
+    if (isContextOverflow(message)) return true;
+
+    const model = this.harness?.getModel();
+    if (!model) return false;
+    const sameModel = message.provider === model.provider && message.model === model.id;
+    return sameModel && isContextOverflow(message, model.contextWindow);
   }
 
   private async prepareRetry(message: AssistantMessage): Promise<boolean> {

@@ -453,7 +453,7 @@ describe('AgentHarness lifecycle', () => {
     expect(followUpQueueLengths).toEqual([1, 2, 1, 0]);
   });
 
-  it('abort clears steer and follow-up queues but preserves next-turn messages', async () => {
+  it('abort clears all pending queues', async () => {
     let releaseFirstResponse: (() => void) | undefined;
     let abortedSignal: AbortSignal | undefined;
     const firstResponseReleased = new Promise<void>((resolve) => {
@@ -502,8 +502,9 @@ describe('AgentHarness lifecycle', () => {
 
     expect(abortResult.clearedSteer).toHaveLength(1);
     expect(abortResult.clearedFollowUp).toHaveLength(1);
-    expect(queueUpdates).toContainEqual({ steer: 0, followUp: 0, nextTurn: 1 });
-    expect(secondRequestText).toEqual(['first', 'next', 'second']);
+    expect(abortResult.clearedNextTurn).toHaveLength(1);
+    expect(queueUpdates).toContainEqual({ steer: 0, followUp: 0, nextTurn: 0 });
+    expect(secondRequestText).toEqual(['first', 'second']);
   });
 
   it('settles thrown hook failures with persisted assistant error messages', async () => {

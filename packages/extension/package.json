@@ -88,6 +88,10 @@
           "default": {},
           "description": "Custom token budgets for thinking levels"
         },
+        "scout-agent.websocketConnectTimeoutMs": {
+          "type": "number",
+          "description": "WebSocket connect/open handshake timeout in milliseconds; 0 disables it"
+        },
         "scout-agent.shellPath": {
           "type": "string",
           "default": "",

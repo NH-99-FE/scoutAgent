@@ -205,6 +205,7 @@ vi.mock('@scout-agent/ai', () => ({
   getProviders: vi.fn(() => []),
   getModels: vi.fn(() => []),
   getModel: vi.fn(),
+  isContextOverflow: vi.fn(() => false),
 }));
 
 // ---------- Mock @scout-agent/shared ----------

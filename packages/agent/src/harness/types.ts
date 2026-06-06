@@ -95,6 +95,8 @@ export interface AgentHarnessStreamOptions {
   maxRetries?: number;
   /** 可选的 provider 请求重试延迟上限。 */
   maxRetryDelayMs?: number;
+  /** WebSocket 连接握手超时时间（毫秒）。 */
+  websocketConnectTimeoutMs?: SimpleStreamOptions['websocketConnectTimeoutMs'];
   /** 与 auth 和生命周期头合并的额外请求头。 */
   headers?: Record<string, string>;
   /** 随请求转发的 provider 元数据。 */
@@ -536,6 +538,7 @@ export interface AbortEvent {
   type: 'abort';
   clearedSteer: AgentMessage[];
   clearedFollowUp: AgentMessage[];
+  clearedNextTurn: AgentMessage[];
 }
 
 export interface SettledEvent {
@@ -748,6 +751,7 @@ export interface AgentHarnessPromptOptions {
 export interface AbortResult {
   clearedSteer: AgentMessage[];
   clearedFollowUp: AgentMessage[];
+  clearedNextTurn: AgentMessage[];
 }
 
 export interface CompactResult {

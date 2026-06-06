@@ -199,6 +199,10 @@ export class ConfigManager {
     return budgets;
   }
 
+  getWebSocketConnectTimeoutMs(): number | undefined {
+    return this.getSetting<number>('websocketConnectTimeoutMs');
+  }
+
   getStreamOptions(): AgentHarnessStreamOptions {
     const providerRetry = this.getProviderRetrySettings();
     return {
@@ -206,6 +210,7 @@ export class ConfigManager {
       timeoutMs: providerRetry.timeoutMs,
       maxRetries: providerRetry.maxRetries,
       maxRetryDelayMs: providerRetry.maxRetryDelayMs,
+      websocketConnectTimeoutMs: this.getWebSocketConnectTimeoutMs(),
       thinkingBudgets: this.getThinkingBudgets(),
     };
   }

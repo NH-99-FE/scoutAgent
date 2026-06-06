@@ -119,6 +119,9 @@ function applyStreamOptionsPatch(
   if (Object.hasOwn(patch, 'timeoutMs')) result.timeoutMs = patch.timeoutMs;
   if (Object.hasOwn(patch, 'maxRetries')) result.maxRetries = patch.maxRetries;
   if (Object.hasOwn(patch, 'maxRetryDelayMs')) result.maxRetryDelayMs = patch.maxRetryDelayMs;
+  if (Object.hasOwn(patch, 'websocketConnectTimeoutMs')) {
+    result.websocketConnectTimeoutMs = patch.websocketConnectTimeoutMs;
+  }
   if (Object.hasOwn(patch, 'cacheRetention')) result.cacheRetention = patch.cacheRetention;
   if (Object.hasOwn(patch, 'thinkingBudgets')) result.thinkingBudgets = patch.thinkingBudgets;
 
@@ -464,6 +467,7 @@ export class AgentHarness<
         thinkingBudgets: requestOptions.thinkingBudgets,
         timeoutMs: requestOptions.timeoutMs,
         transport: requestOptions.transport,
+        websocketConnectTimeoutMs: requestOptions.websocketConnectTimeoutMs,
         apiKey: auth?.apiKey,
       });
     };
@@ -1244,8 +1248,10 @@ export class AgentHarness<
   async abort(): Promise<AbortResult> {
     const clearedSteer = [...this.steerQueue];
     const clearedFollowUp = [...this.followUpQueue];
+    const clearedNextTurn = [...this.nextTurnQueue];
     this.steerQueue = [];
     this.followUpQueue = [];
+    this.nextTurnQueue = [];
     this.runAbortController?.abort();
     const errors: Error[] = [];
     try {
@@ -1259,7 +1265,7 @@ export class AgentHarness<
       errors.push(toError(error));
     }
     try {
-      await this.emitOwn({ type: 'abort', clearedSteer, clearedFollowUp });
+      await this.emitOwn({ type: 'abort', clearedSteer, clearedFollowUp, clearedNextTurn });
     } catch (error) {
       errors.push(toError(error));
     }
@@ -1270,7 +1276,7 @@ export class AgentHarness<
           : new AggregateError(errors, 'Abort completed with errors');
       throw normalizeHarnessError(cause, 'hook');
     }
-    return { clearedSteer, clearedFollowUp };
+    return { clearedSteer, clearedFollowUp, clearedNextTurn };
   }
 
   async waitForIdle(): Promise<void> {

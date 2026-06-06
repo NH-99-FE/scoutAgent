@@ -250,6 +250,7 @@ describe('ConfigManager', () => {
       'retry.provider.timeoutMs': 120000,
       'retry.provider.maxRetries': 4,
       'retry.provider.maxRetryDelayMs': 30000,
+      websocketConnectTimeoutMs: 15000,
       thinkingBudgets: {
         minimal: 512,
         low: 1024,
@@ -263,6 +264,7 @@ describe('ConfigManager', () => {
       timeoutMs: 120000,
       maxRetries: 4,
       maxRetryDelayMs: 30000,
+      websocketConnectTimeoutMs: 15000,
       thinkingBudgets: {
         minimal: 512,
         low: 1024,
@@ -280,6 +282,7 @@ describe('ConfigManager', () => {
       timeoutMs: undefined,
       maxRetries: undefined,
       maxRetryDelayMs: 60000,
+      websocketConnectTimeoutMs: undefined,
       thinkingBudgets: undefined,
     });
   });
