@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   mockFindDefaultModel,
   mockFindModel,
+  mockConfigReload,
   mockGetApiKey,
   mockGetShellPath,
   mockHarnessSubscribe,
@@ -105,6 +106,7 @@ const {
       provider: 'anthropic',
       input: ['text', 'image'],
     })),
+    mockConfigReload: vi.fn(),
     mockGetApiKey: vi.fn(() => 'test-api-key'),
     mockFindModel: vi.fn((id: string) => ({
       id,
@@ -248,6 +250,7 @@ vi.mock('../config-manager.ts', () => ({
     this.getScoutConfig = vi.fn(() => ({ models: [], defaultModelId: 'test-model' }));
     this.onDidChangeSettings = vi.fn(() => ({ dispose: vi.fn() }));
     this.getExtensionPaths = vi.fn(() => []);
+    this.reload = mockConfigReload;
   }),
 }));
 
@@ -811,6 +814,15 @@ describe('SessionManager — 协调层', () => {
       'new:start:reload',
       'new:discover:reload',
     ]);
+    manager.dispose();
+  });
+
+  it('reload refreshes project settings before rebuilding runtime', async () => {
+    const manager = await makeInitializedSessionManager();
+
+    await manager.reload();
+
+    expect(mockConfigReload).toHaveBeenCalledTimes(1);
     manager.dispose();
   });
 

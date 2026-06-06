@@ -2,6 +2,10 @@
 // ConfigManager 测试
 // ============================================================
 
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type * as vscode from 'vscode';
 import { describe, it, expect, vi } from 'vitest';
 
 // ---------- Mock vscode ----------
@@ -88,6 +92,34 @@ describe('ConfigManager', () => {
   it('reads default model from settings', () => {
     const cm = makeConfigManager({ defaultModel: 'claude-sonnet-4-20250514' });
     expect(cm.getDefaultModel()).toBe('claude-sonnet-4-20250514');
+  });
+
+  it('reloads project settings from disk', () => {
+    const tempDir = join(tmpdir(), `scout-config-test-${Date.now()}`);
+    const scoutDir = join(tempDir, '.scout');
+    const settingsPath = join(scoutDir, 'settings.json');
+
+    try {
+      mkdirSync(scoutDir, { recursive: true });
+      writeFileSync(settingsPath, JSON.stringify({ defaultModel: 'first-model' }));
+      const cm = new ConfigManager({
+        cwd: tempDir,
+        agentDir: scoutDir,
+        getConfiguration: () =>
+          makeMockConfiguration({
+            defaultModel: 'fallback-model',
+          }) as vscode.WorkspaceConfiguration,
+      });
+
+      expect(cm.getDefaultModel()).toBe('first-model');
+
+      writeFileSync(settingsPath, JSON.stringify({ defaultModel: 'second-model' }));
+      cm.reload();
+
+      expect(cm.getDefaultModel()).toBe('second-model');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('reads default thinking level from settings', () => {

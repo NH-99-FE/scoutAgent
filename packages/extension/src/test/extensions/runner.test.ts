@@ -242,6 +242,22 @@ describe('ScoutExtensionRunner.createContext', () => {
     expect(() => ctx.setModel('test-model')).toThrow('withSession');
   });
 
+  it('invalidates captured command ctx after reload', async () => {
+    const runner = makeRunner([]);
+    const contextActions = makeContextActions();
+    contextActions.reload = vi.fn(async () => {
+      runner.invalidate();
+    });
+    runner.bindCore(makeActions(), contextActions);
+
+    const ctx = runner.createCommandContext();
+
+    await expect(ctx.reload()).resolves.toBeUndefined();
+
+    expect(() => ctx.cwd).toThrow('ctx.reload()');
+    expect(() => ctx.waitForIdle()).toThrow('await ctx.reload()');
+  });
+
   it('keeps command context getters lazy for stale checks', () => {
     const runner = makeRunner([]);
     runner.bindCore(makeActions(), makeContextActions());

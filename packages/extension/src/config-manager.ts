@@ -86,12 +86,16 @@ export class ConfigManager {
   readonly cwd: string;
   readonly agentDir: string;
   private readonly _getConfiguration: (section: string) => vscode.WorkspaceConfiguration;
-  private readonly projectSettings: ProjectSettings;
+  private projectSettings: ProjectSettings;
 
   constructor(options: ConfigManagerOptions) {
     this.cwd = options.cwd;
     this.agentDir = options.agentDir;
     this._getConfiguration = options.getConfiguration ?? vscode.workspace.getConfiguration;
+    this.projectSettings = loadProjectSettings(this.cwd);
+  }
+
+  reload(): void {
     this.projectSettings = loadProjectSettings(this.cwd);
   }
 

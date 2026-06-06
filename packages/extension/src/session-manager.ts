@@ -366,6 +366,8 @@ export class SessionManager implements vscode.Disposable {
   }
 
   async reload(): Promise<SessionManagerReplacementResult> {
+    this.configManager.reload();
+
     if (!this.sessionRuntime) {
       await this.initialize();
       return { cancelled: false };
