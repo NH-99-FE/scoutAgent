@@ -705,35 +705,6 @@ export class ScoutExtensionRunner {
   }
 
   /**
-   * Compatibility shim for Scout's old payload hook name.
-   */
-  async emitBeforeProviderPayload(event: { model?: unknown; payload: unknown }): Promise<unknown> {
-    const ctx = this.createContext();
-    let currentPayload = event.payload;
-
-    for (const ext of this.extensions) {
-      const handlers = ext.handlers.get('before_provider_payload');
-      if (!handlers || handlers.length === 0) continue;
-
-      for (const handler of handlers) {
-        try {
-          const result = await handler(
-            { type: 'before_provider_payload', model: event.model, payload: currentPayload },
-            ctx,
-          );
-          if (result !== undefined) {
-            currentPayload = result;
-          }
-        } catch (err) {
-          this.emitHandlerError(ext.path, 'before_provider_payload', err);
-        }
-      }
-    }
-
-    return this.emitBeforeProviderRequest(currentPayload);
-  }
-
-  /**
    * session_before_compact：第一个 cancel=true 短路
    */
   async emitSessionBeforeCompact(

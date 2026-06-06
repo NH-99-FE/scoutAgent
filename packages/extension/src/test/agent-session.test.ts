@@ -25,7 +25,6 @@ const {
   mockHarnessCompact,
   mockHarnessSteer,
   mockHarnessFollowUp,
-  mockHarnessNextTurn,
   mockHarnessSetTools,
   mockHarnessHasPendingMessages,
   mockHarnessGetSignal,
@@ -57,7 +56,6 @@ const {
   const mockHarnessCompact = vi.fn();
   const mockHarnessSteer = vi.fn();
   const mockHarnessFollowUp = vi.fn();
-  const mockHarnessNextTurn = vi.fn();
   const mockHarnessSetTools = vi.fn();
   const mockHarnessHasPendingMessages = vi.fn(() => false);
   const mockHarnessGetSignal = vi.fn<() => AbortSignal | undefined>(() => undefined);
@@ -108,7 +106,6 @@ const {
     this.compact = mockHarnessCompact;
     this.steer = mockHarnessSteer;
     this.followUp = mockHarnessFollowUp;
-    this.nextTurn = mockHarnessNextTurn;
     this.setTools = mockHarnessSetTools;
     this.hasPendingMessages = mockHarnessHasPendingMessages;
     this.getSignal = mockHarnessGetSignal;
@@ -146,7 +143,6 @@ const {
     mockHarnessCompact,
     mockHarnessSteer,
     mockHarnessFollowUp,
-    mockHarnessNextTurn,
     mockHarnessSetTools,
     mockHarnessHasPendingMessages,
     mockHarnessGetSignal,
@@ -1029,7 +1025,6 @@ describe('AgentSession — 运行时操作', () => {
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
       emitBeforeProviderRequest: vi.fn(),
-      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1056,8 +1051,7 @@ describe('AgentSession — 运行时操作', () => {
       getAllRegisteredTools: vi.fn(() => []),
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
-      emitBeforeProviderRequest: vi.fn(),
-      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
+      emitBeforeProviderRequest: vi.fn(async (payload) => ({ ...payload, pi: true })),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1075,6 +1069,12 @@ describe('AgentSession — 运行时操作', () => {
     expect(mockHarnessOn).toHaveBeenCalledWith('tool_result', expect.any(Function));
     expect(mockHarnessOn).toHaveBeenCalledWith('session_before_compact', expect.any(Function));
     expect(mockHarnessOn).toHaveBeenCalledWith('session_before_tree', expect.any(Function));
+
+    const callback = getOnCallback('before_provider_payload');
+    await expect(callback({ payload: { original: true } })).resolves.toEqual({
+      payload: { original: true, pi: true },
+    });
+    expect(extensionRunner.emitBeforeProviderRequest).toHaveBeenCalledWith({ original: true });
     agentSession.dispose();
   });
 
@@ -1084,7 +1084,6 @@ describe('AgentSession — 运行时操作', () => {
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
       emitBeforeProviderStreamOptions: vi.fn(),
-      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1138,7 +1137,6 @@ describe('AgentSession — 运行时操作', () => {
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
       emitBeforeProviderStreamOptions: vi.fn(),
-      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1173,7 +1171,6 @@ describe('AgentSession — 运行时操作', () => {
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
       emitBeforeProviderStreamOptions: vi.fn(),
-      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1217,7 +1214,6 @@ describe('AgentSession — 运行时操作', () => {
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
       emitBeforeProviderStreamOptions: vi.fn(),
-      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1315,7 +1311,6 @@ describe('AgentSession — 运行时操作', () => {
 
     expect(mockHarnessSteer).toHaveBeenCalledWith('steer message');
     expect(mockHarnessFollowUp).toHaveBeenCalledWith('follow message');
-    expect(mockHarnessNextTurn).not.toHaveBeenCalled();
     agentSession.dispose();
   });
 
@@ -1359,7 +1354,6 @@ describe('AgentSession — 运行时操作', () => {
       emitBeforeAgentStart: vi.fn(),
       emitContext: vi.fn(async (messages) => messages),
       emitBeforeProviderRequest: vi.fn(),
-      emitBeforeProviderPayload: vi.fn(async (event) => event.payload),
       emitToolCall: vi.fn(),
       emitToolResult: vi.fn(),
       emitSessionBeforeCompact: vi.fn(),
@@ -1465,7 +1459,6 @@ describe('AgentSession — Auto Retry', () => {
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
-    expect(events.some((e) => e.type === 'retry_start' && e.attempt === 1)).toBe(true);
     expect(events.some((e) => e.type === 'auto_retry_start' && e.attempt === 1)).toBe(true);
     expect(mockHarnessContinue).toHaveBeenCalledTimes(1);
     agentSession.dispose();
@@ -1503,7 +1496,7 @@ describe('AgentSession — Auto Retry', () => {
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
-    expect(events.some((e) => e.type === 'retry_start')).toBe(false);
+    expect(events.some((e) => e.type === 'auto_retry_start')).toBe(false);
     agentSession.dispose();
   });
 
@@ -1520,7 +1513,7 @@ describe('AgentSession — Auto Retry', () => {
     });
     await flushMicrotasks();
 
-    expect(events.some((e) => e.type === 'retry_start')).toBe(false);
+    expect(events.some((e) => e.type === 'auto_retry_start')).toBe(false);
     agentSession.dispose();
   });
 
@@ -1571,7 +1564,9 @@ describe('AgentSession — Auto Retry', () => {
     const agentSession = await makeInitializedAgentSession();
     const callback = getSubscribeCallback();
     const userMessage = { role: 'user', content: 'hello', timestamp: Date.now() };
-    const overflowMessage = makeErrorAssistantMessage('prompt is too long: 213462 tokens > 200000 maximum');
+    const overflowMessage = makeErrorAssistantMessage(
+      'prompt is too long: 213462 tokens > 200000 maximum',
+    );
 
     mockSessionGetBranch.mockResolvedValue([
       {
@@ -1604,7 +1599,9 @@ describe('AgentSession — Auto Retry', () => {
     const agentSession = await makeInitializedAgentSession();
     const callback = getSubscribeCallback();
     const userMessage = { role: 'user', content: 'hello', timestamp: Date.now() };
-    const overflowMessage = makeErrorAssistantMessage('prompt is too long: 213462 tokens > 200000 maximum');
+    const overflowMessage = makeErrorAssistantMessage(
+      'prompt is too long: 213462 tokens > 200000 maximum',
+    );
     mockHarnessGetModel.mockReturnValue({
       id: 'gpt-4o',
       provider: 'openai',
@@ -1748,11 +1745,11 @@ describe('AgentSession — Auto Retry', () => {
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
-    expect(events.some((e) => e.type === 'retry_start')).toBe(false);
+    expect(events.some((e) => e.type === 'auto_retry_start')).toBe(false);
     agentSession.dispose();
   });
 
-  it('emits retry_end with success=true when retry succeeds', async () => {
+  it('emits auto_retry_end with success=true when retry succeeds', async () => {
     const agentSession = await makeInitializedAgentSession();
     const events: any[] = [];
     agentSession.subscribe((event) => events.push(event));
@@ -1768,7 +1765,7 @@ describe('AgentSession — Auto Retry', () => {
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
-    // 第二轮：成功 → agent_end 触发 retry_end(success=true)
+    // 第二轮：成功 → agent_end 触发 auto_retry_end(success=true)
     const successMessage = {
       role: 'assistant',
       stopReason: 'end_turn',
@@ -1779,7 +1776,6 @@ describe('AgentSession — Auto Retry', () => {
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
-    expect(events.some((e) => e.type === 'retry_end' && e.success === true)).toBe(true);
     expect(events.some((e) => e.type === 'auto_retry_end' && e.success === true)).toBe(true);
     agentSession.dispose();
   });
@@ -1821,7 +1817,7 @@ describe('AgentSession — Auto Retry', () => {
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
-    expect(events.some((e) => e.type === 'retry_end' && e.success === true)).toBe(true);
+    expect(events.some((e) => e.type === 'auto_retry_end' && e.success === true)).toBe(true);
     expect(mockHarnessCompact).toHaveBeenCalledTimes(1);
     expect(mockHarnessContinue).toHaveBeenCalledTimes(2);
     agentSession.dispose();
@@ -1916,7 +1912,8 @@ describe('AgentSession — Auto Retry', () => {
 
     expect(
       events.some(
-        (e) => e.type === 'retry_end' && e.success === false && e.finalError === 'Retry cancelled',
+        (e) =>
+          e.type === 'auto_retry_end' && e.success === false && e.finalError === 'Retry cancelled',
       ),
     ).toBe(true);
     agentSession.dispose();
@@ -1933,7 +1930,7 @@ describe('AgentSession — Auto Retry', () => {
     agentSession.dispose();
   });
 
-  it('emits retry_end with success=false after max retries exceeded', async () => {
+  it('emits auto_retry_end with success=false after max retries exceeded', async () => {
     mockGetRetrySettings.mockReturnValue({ enabled: true, maxRetries: 2, baseDelayMs: 10 });
 
     const agentSession = await makeInitializedAgentSession();
@@ -1965,7 +1962,7 @@ describe('AgentSession — Auto Retry', () => {
     await callback({ type: 'agent_end' });
     await runPostAgentLoop(agentSession);
 
-    const retryEndEvents = events.filter((e) => e.type === 'retry_end');
+    const retryEndEvents = events.filter((e) => e.type === 'auto_retry_end');
     expect(retryEndEvents.length).toBeGreaterThan(0);
     const lastRetryEnd = retryEndEvents[retryEndEvents.length - 1]!;
     expect(lastRetryEnd.success).toBe(false);

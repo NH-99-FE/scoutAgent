@@ -538,17 +538,19 @@ describe('ScoutExtensionRunner.emitBeforeProviderRequest', () => {
     expect(result).toEqual({ original: true, first: true, second: true });
   });
 
-  it('keeps dispatching legacy before_provider_payload handlers before the pi payload hook', async () => {
+  it('dispatches only the pi payload hook', async () => {
+    const legacyHandler = vi.fn(async (event: any) => ({ ...event.payload, legacy: true }));
     const ext = makeExtension({
-      before_provider_payload: async (event: any) => ({ ...event.payload, legacy: true }),
+      before_provider_payload: legacyHandler,
       before_provider_request: async (event: any) => ({ ...event.payload, pi: true }),
     });
     const runner = makeRunner([ext]);
     runner.bindCore(makeActions(), makeContextActions());
 
-    const result = await runner.emitBeforeProviderPayload({ payload: { original: true } });
+    const result = await runner.emitBeforeProviderRequest({ original: true });
 
-    expect(result).toEqual({ original: true, legacy: true, pi: true });
+    expect(result).toEqual({ original: true, pi: true });
+    expect(legacyHandler).not.toHaveBeenCalled();
   });
 });
 

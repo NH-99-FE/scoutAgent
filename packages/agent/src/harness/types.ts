@@ -538,7 +538,6 @@ export interface AbortEvent {
   type: 'abort';
   clearedSteer: AgentMessage[];
   clearedFollowUp: AgentMessage[];
-  clearedNextTurn: AgentMessage[];
 }
 
 export interface SettledEvent {
@@ -751,7 +750,6 @@ export interface AgentHarnessPromptOptions {
 export interface AbortResult {
   clearedSteer: AgentMessage[];
   clearedFollowUp: AgentMessage[];
-  clearedNextTurn: AgentMessage[];
 }
 
 export interface CompactResult {

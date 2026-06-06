@@ -94,7 +94,6 @@ export type ScoutSessionEvent =
   | { type: 'agent_event'; event: ScoutAgentEvent }
   | { type: 'state_change' }
   | { type: 'error'; message: string }
-  | { type: 'retry_start'; attempt: number; maxAttempts: number; delayMs: number; message: string }
   | {
       type: 'auto_retry_start';
       attempt: number;
@@ -102,7 +101,6 @@ export type ScoutSessionEvent =
       delayMs: number;
       errorMessage: string;
     }
-  | { type: 'retry_end'; success: boolean; attempt: number; finalError?: string }
   | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
   | { type: 'compaction_start'; reason: ScoutCompactionReason }
   | {
@@ -432,7 +430,7 @@ export class AgentSession implements vscode.Disposable {
       }
       return;
     }
-    await this.prompt(text, images ? { images } : undefined);
+    throw new Error('sendUserMessage while streaming requires deliverAs: "steer" or "followUp"');
   }
 
   async sendMessage<TDetails = unknown>(message: SendMessageInput<TDetails>): Promise<void> {
@@ -1189,8 +1187,8 @@ export class AgentSession implements vscode.Disposable {
    * agent_end 后统一处理 retry / compaction 决策。
    * 对齐 Pi 的 _handlePostAgentRun() 模式：
    *   1. 若 retry 触发 → 直接 return（跳过 compaction，retry 成功后再判断）
-   *   2. 若 retry 超限 → 发出 retry_end(success=false)，再做 compaction 检查
-   *   3. 若 retry 成功 → 发出 retry_end(success=true)，再做 compaction 检查
+   *   2. 若 retry 超限 → 发出 auto_retry_end(success=false)，再做 compaction 检查
+   *   3. 若 retry 成功 → 发出 auto_retry_end(success=true)，再做 compaction 检查
    *   4. 无 retry → 直接做 compaction 检查
    */
   private async handlePostAgentEnd(): Promise<boolean> {
@@ -1233,7 +1231,7 @@ export class AgentSession implements vscode.Disposable {
       this.retryAttempt = 0;
       // 超限后仍需做 compaction 检查（继续往下执行）
     } else if (assistant.stopReason !== 'error' && this.retryAttempt > 0) {
-      // 问题 F fix：retry 成功时先发送 retry_end，再做 compaction 检查
+      // 问题 F fix：retry 成功时先发送 auto_retry_end，再做 compaction 检查
       this.emitAutoRetryEnd(true, this.retryAttempt);
       this.retryAttempt = 0;
       // 成功后继续做 compaction 检查（继续往下执行）
@@ -1392,12 +1390,10 @@ export class AgentSession implements vscode.Disposable {
     errorMessage: string,
   ): void {
     this.emit({ type: 'auto_retry_start', attempt, maxAttempts, delayMs, errorMessage });
-    this.emit({ type: 'retry_start', attempt, maxAttempts, delayMs, message: errorMessage });
   }
 
   private emitAutoRetryEnd(success: boolean, attempt: number, finalError?: string): void {
     this.emit({ type: 'auto_retry_end', success, attempt, finalError });
-    this.emit({ type: 'retry_end', success, attempt, finalError });
   }
 
   /** 将 session leaf 回退到 error message 之前的 entry，等效移除 */
@@ -1459,7 +1455,7 @@ export class AgentSession implements vscode.Disposable {
     );
     unsubs.push(
       this.harness.on('before_provider_payload', async (e) => ({
-        payload: await runner.emitBeforeProviderPayload(e),
+        payload: await runner.emitBeforeProviderRequest(e.payload),
       })),
     );
     unsubs.push(this.harness.on('tool_call', (e) => runner.emitToolCall(e)));

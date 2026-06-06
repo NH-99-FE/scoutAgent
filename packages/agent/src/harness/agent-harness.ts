@@ -835,20 +835,6 @@ export class AgentHarness<
           });
         }
 
-        if (this.nextTurnQueue.length > 0) {
-          const queuedNextTurn = this.nextTurnQueue.splice(0);
-          try {
-            await this.emitQueueUpdate();
-          } catch (error) {
-            this.nextTurnQueue.unshift(...queuedNextTurn);
-            throw normalizeHookError(error);
-          }
-          return await this.executePromptMessages(turnState, queuedNextTurn, {
-            missingAssistantLabel:
-              'AgentHarness queued next-turn completed without an assistant message',
-          });
-        }
-
         throw new AgentHarnessError(
           'invalid_state',
           'Cannot continue from message role: assistant',
@@ -1248,10 +1234,8 @@ export class AgentHarness<
   async abort(): Promise<AbortResult> {
     const clearedSteer = [...this.steerQueue];
     const clearedFollowUp = [...this.followUpQueue];
-    const clearedNextTurn = [...this.nextTurnQueue];
     this.steerQueue = [];
     this.followUpQueue = [];
-    this.nextTurnQueue = [];
     this.runAbortController?.abort();
     const errors: Error[] = [];
     try {
@@ -1265,7 +1249,7 @@ export class AgentHarness<
       errors.push(toError(error));
     }
     try {
-      await this.emitOwn({ type: 'abort', clearedSteer, clearedFollowUp, clearedNextTurn });
+      await this.emitOwn({ type: 'abort', clearedSteer, clearedFollowUp });
     } catch (error) {
       errors.push(toError(error));
     }
@@ -1276,7 +1260,7 @@ export class AgentHarness<
           : new AggregateError(errors, 'Abort completed with errors');
       throw normalizeHarnessError(cause, 'hook');
     }
-    return { clearedSteer, clearedFollowUp, clearedNextTurn };
+    return { clearedSteer, clearedFollowUp };
   }
 
   async waitForIdle(): Promise<void> {
@@ -1284,9 +1268,7 @@ export class AgentHarness<
   }
 
   hasPendingMessages(): boolean {
-    return (
-      this.steerQueue.length > 0 || this.followUpQueue.length > 0 || this.nextTurnQueue.length > 0
-    );
+    return this.steerQueue.length > 0 || this.followUpQueue.length > 0;
   }
 
   getSignal(): AbortSignal | undefined {

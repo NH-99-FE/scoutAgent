@@ -80,7 +80,6 @@ const {
     this.compact = mockHarnessCompact;
     this.steer = vi.fn();
     this.followUp = vi.fn();
-    this.nextTurn = vi.fn();
     this.setTools = mockHarnessSetTools;
     this.hasPendingMessages = vi.fn(() => false);
     this.getSignal = vi.fn(() => undefined);

@@ -153,15 +153,6 @@ export class ScoutController implements vscode.Disposable {
     }
 
     // 转发 retry 事件
-    if (event.type === 'retry_start') {
-      this.postMessage({
-        type: 'retry_start',
-        attempt: event.attempt,
-        maxAttempts: event.maxAttempts,
-        delayMs: event.delayMs,
-        errorMessage: event.message,
-      });
-    }
     if (event.type === 'auto_retry_start') {
       this.postMessage({
         type: 'auto_retry_start',
@@ -169,14 +160,6 @@ export class ScoutController implements vscode.Disposable {
         maxAttempts: event.maxAttempts,
         delayMs: event.delayMs,
         errorMessage: event.errorMessage,
-      });
-    }
-    if (event.type === 'retry_end') {
-      this.postMessage({
-        type: 'retry_end',
-        success: event.success,
-        attempt: event.attempt,
-        finalError: event.finalError,
       });
     }
     if (event.type === 'auto_retry_end') {

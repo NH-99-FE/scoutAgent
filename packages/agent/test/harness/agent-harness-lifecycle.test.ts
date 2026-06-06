@@ -453,7 +453,38 @@ describe('AgentHarness lifecycle', () => {
     expect(followUpQueueLengths).toEqual([1, 2, 1, 0]);
   });
 
-  it('abort clears all pending queues', async () => {
+  it('injects queued next-turn messages into the next prompt', async () => {
+    const requestText: string[][] = [];
+    const settledNextTurnCounts: number[] = [];
+    registerResponses([
+      (context) => {
+        requestText.push(textFromUserMessages(context.messages));
+        return makeProviderAssistantMessage('done');
+      },
+    ]);
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session: new Session(new InMemorySessionStorage()),
+      model: makeProviderModel(),
+    });
+    harness.subscribe((event) => {
+      if (event.type === 'settled') {
+        settledNextTurnCounts.push(event.nextTurnCount);
+      }
+    });
+
+    await harness.nextTurn('next');
+
+    expect(harness.hasPendingMessages()).toBe(false);
+
+    await harness.prompt('prompt');
+
+    expect(requestText).toEqual([['next', 'prompt']]);
+    expect(harness.hasPendingMessages()).toBe(false);
+    expect(settledNextTurnCounts).toEqual([0]);
+  });
+
+  it('abort clears steer and follow-up queues but preserves next-turn messages', async () => {
     let releaseFirstResponse: (() => void) | undefined;
     let abortedSignal: AbortSignal | undefined;
     const firstResponseReleased = new Promise<void>((resolve) => {
@@ -502,9 +533,8 @@ describe('AgentHarness lifecycle', () => {
 
     expect(abortResult.clearedSteer).toHaveLength(1);
     expect(abortResult.clearedFollowUp).toHaveLength(1);
-    expect(abortResult.clearedNextTurn).toHaveLength(1);
-    expect(queueUpdates).toContainEqual({ steer: 0, followUp: 0, nextTurn: 0 });
-    expect(secondRequestText).toEqual(['first', 'second']);
+    expect(queueUpdates).toContainEqual({ steer: 0, followUp: 0, nextTurn: 1 });
+    expect(secondRequestText).toEqual(['first', 'next', 'second']);
   });
 
   it('settles thrown hook failures with persisted assistant error messages', async () => {
@@ -980,37 +1010,5 @@ describe('AgentHarness lifecycle', () => {
 
     expect(receivedMessages).toEqual([queuedMessage]);
     expect(internals.followUpQueue).toHaveLength(0);
-  });
-
-  it('continues queued next-turn messages from an assistant tail', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
-    await session.appendMessage(makeAssistantMessage());
-    const harness = makeHarness(session);
-    const internals = harness as unknown as HarnessInternals;
-    let receivedMessages: AgentMessage[] | undefined;
-
-    await harness.nextTurn('next prompt context');
-    internals.executePromptMessages = async (_turnState, messages) => {
-      receivedMessages = messages;
-      return makeAssistantMessage();
-    };
-
-    await harness.continue();
-
-    expect(receivedMessages).toEqual([expect.objectContaining({ role: 'user' })]);
-    expect(textFromUserMessages(receivedMessages ?? [])).toEqual(['next prompt context']);
-    expect(internals.nextTurnQueue).toHaveLength(0);
-    expect(harness.hasPendingMessages()).toBe(false);
-  });
-
-  it('treats next-turn messages as pending continuation work', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
-    const harness = makeHarness(session);
-    const internals = harness as unknown as HarnessInternals;
-
-    await harness.nextTurn('next prompt context');
-
-    expect(internals.nextTurnQueue).toHaveLength(1);
-    expect(harness.hasPendingMessages()).toBe(true);
   });
 });

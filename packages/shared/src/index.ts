@@ -188,27 +188,12 @@ export type ScoutAgentEvent =
 
 // ---------- Retry 事件 ----------
 
-export interface ScoutRetryStartEvent {
-  type: 'retry_start';
-  attempt: number;
-  maxAttempts: number;
-  delayMs: number;
-  errorMessage: string;
-}
-
 export interface ScoutAutoRetryStartEvent {
   type: 'auto_retry_start';
   attempt: number;
   maxAttempts: number;
   delayMs: number;
   errorMessage: string;
-}
-
-export interface ScoutRetryEndEvent {
-  type: 'retry_end';
-  success: boolean;
-  attempt: number;
-  finalError?: string;
 }
 
 export interface ScoutAutoRetryEndEvent {
@@ -255,20 +240,12 @@ export type ExtensionMessage =
   | { type: 'agent_event'; event: ScoutAgentEvent }
   | { type: 'config_update'; config: ScoutConfig }
   | {
-      type: 'retry_start';
-      attempt: number;
-      maxAttempts: number;
-      delayMs: number;
-      errorMessage: string;
-    }
-  | {
       type: 'auto_retry_start';
       attempt: number;
       maxAttempts: number;
       delayMs: number;
       errorMessage: string;
     }
-  | { type: 'retry_end'; success: boolean; attempt: number; finalError?: string }
   | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
   | ScoutCompactionStartEvent
   | ScoutCompactionEndEvent
