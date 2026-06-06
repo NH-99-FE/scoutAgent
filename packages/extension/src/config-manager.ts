@@ -26,6 +26,11 @@ export interface ProviderRetrySettings {
   maxRetryDelayMs: number;
 }
 
+export interface BranchSummarySettings {
+  reserveTokens: number;
+  skipPrompt: boolean;
+}
+
 const SECTION = 'scout-agent';
 const VALID_TRANSPORTS: Transport[] = ['sse', 'websocket', 'websocket-cached', 'auto'];
 
@@ -267,6 +272,22 @@ export class ConfigManager {
     return vscodeSettings;
   }
 
+  getBranchSummarySettings(): BranchSummarySettings {
+    const projectBranchSummary = this.projectSettings.branchSummary as
+      | Record<string, unknown>
+      | undefined;
+    const vscodeSettings: BranchSummarySettings = {
+      reserveTokens: this.config().get<number>('branchSummary.reserveTokens') ?? 16384,
+      skipPrompt: this.config().get<boolean>('branchSummary.skipPrompt') ?? false,
+    };
+
+    if (projectBranchSummary) {
+      return deepMerge(vscodeSettings, projectBranchSummary as Partial<BranchSummarySettings>);
+    }
+
+    return vscodeSettings;
+  }
+
   getSteeringMode(): QueueMode {
     return this.getSetting<QueueMode>('steeringMode') ?? 'one-at-a-time';
   }
@@ -372,6 +393,7 @@ export class ConfigManager {
       models: available.map((m) => ({ provider: m.provider, id: m.id, name: m.name })),
       defaultModelProvider: defaultModel?.provider ?? '',
       defaultModelId: defaultModel?.id ?? '',
+      branchSummary: this.getBranchSummarySettings(),
     };
   }
 

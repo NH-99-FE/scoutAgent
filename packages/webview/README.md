@@ -31,6 +31,7 @@ Webview 当前只保留临时占位入口。会话恢复、导入、消息渲染
 ## 模型与工具 UI
 
 - 根据 `config_update` 和 `state_update` 展示当前模型。
+- `config_update` 还包含 `branchSummary` 设置，Tree UI 必须按该配置决定默认交互。
 - 支持 `select_model`、`select_thinking`。
 - 根据 `tools` 和 `activeToolNames` 渲染工具列表，发送 `set_active_tools` 更新启用项。
 
@@ -38,8 +39,16 @@ Webview 当前只保留临时占位入口。会话恢复、导入、消息渲染
 
 - 发送 `request_tree` 获取会话树，消费 `tree_data`。
 - 支持 `navigate_tree` 跳转历史节点。
+- `navigate_tree` 必须携带 `summarize`；当用户填写自定义总结说明时传 `customInstructions`。
+- 当用户选择完全替换默认分支总结提示词时传 `replaceInstructions: true`；默认应省略或传 `false`，表示追加说明。
+- `config_update.branchSummary.reserveTokens` 是分支总结保留 token 预算，Webview 只展示或用于说明，实际执行由 extension/harness 侧使用。
+- `config_update.branchSummary.skipPrompt` 为 true 时，Tree 跳转交互应默认不弹出“是否总结被放弃分支”的确认，直接以 `summarize: false` 跳转；用户仍可从高级操作中显式选择总结。
+- 分支总结可能触发模型请求；发送 `navigate_tree` 后应进入 pending 状态，禁用重复跳转、fork、delete 等会改变 session tree 的操作。
+- pending 期间停止按钮应发送 `abort`，用于取消正在进行的分支总结或其它运行中任务。
+- `navigate_tree_result.editorText` 存在时，应把文本回填到输入框而不是立即发送；这是跳回 user/custom message 草稿节点的恢复语义。
 - 支持 `fork_session` 从指定 entry 派生新 session。
 - 支持 `set_label` 给 entry 写标签，消费 `label_result`。
+- `branchSummary` 消息需要在对话流中作为系统生成的分支检查点展示，至少显示 summary 正文和来源于 tree navigation 的语义。
 
 ## 体验要求
 

@@ -68,6 +68,7 @@ export type WebviewMessage =
       targetId: string;
       summarize: boolean;
       customInstructions?: string;
+      replaceInstructions?: boolean;
       label?: string;
     }
   | { type: 'set_label'; entryId: string; label?: string }
@@ -162,6 +163,10 @@ export interface ScoutConfig {
   models: { provider: string; id: string; name: string }[];
   defaultModelProvider: string;
   defaultModelId: string;
+  branchSummary: {
+    reserveTokens: number;
+    skipPrompt: boolean;
+  };
 }
 
 // ---------- Context Usage ----------

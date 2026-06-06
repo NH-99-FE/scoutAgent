@@ -157,6 +157,23 @@ describe('ConfigManager', () => {
     expect(settings.keepRecentTokens).toBe(10000);
   });
 
+  it('reads branch summary settings with defaults', () => {
+    const cm = makeConfigManager({});
+    const settings = cm.getBranchSummarySettings();
+    expect(settings.reserveTokens).toBe(16384);
+    expect(settings.skipPrompt).toBe(false);
+  });
+
+  it('reads branch summary settings from config', () => {
+    const cm = makeConfigManager({
+      'branchSummary.reserveTokens': 4096,
+      'branchSummary.skipPrompt': true,
+    });
+    const settings = cm.getBranchSummarySettings();
+    expect(settings.reserveTokens).toBe(4096);
+    expect(settings.skipPrompt).toBe(true);
+  });
+
   it('finds model by id', () => {
     const cm = makeConfigManager({ anthropicApiKey: 'test-key' });
     const model = cm.findModel('claude-sonnet-4-20250514');
@@ -434,6 +451,7 @@ describe('ConfigManager', () => {
     expect(config.models.some((model) => model.provider === 'anthropic')).toBe(true);
     expect(config.defaultModelProvider).toBe('anthropic');
     expect(config.defaultModelId).toBe('claude-sonnet-4-20250514');
+    expect(config.branchSummary).toEqual({ reserveTokens: 16384, skipPrompt: false });
   });
 
   it('exposes cwd and agentDir', () => {

@@ -140,6 +140,16 @@
           "default": 20000,
           "description": "Number of recent tokens to keep during compaction"
         },
+        "scout-agent.branchSummary.reserveTokens": {
+          "type": "number",
+          "default": 16384,
+          "description": "Token budget reserved when summarizing an abandoned session tree branch"
+        },
+        "scout-agent.branchSummary.skipPrompt": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, future Webview tree navigation should default to navigating without asking to summarize the abandoned branch"
+        },
         "scout-agent.steeringMode": {
           "type": "string",
           "enum": [

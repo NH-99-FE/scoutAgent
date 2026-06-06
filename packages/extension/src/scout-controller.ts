@@ -268,12 +268,14 @@ export class ScoutController implements vscode.Disposable {
     targetId: string;
     summarize: boolean;
     customInstructions?: string;
+    replaceInstructions?: boolean;
     label?: string;
   }): Promise<void> {
     try {
       const result = await this.sessionManager.navigateTree(message.targetId, {
         summarize: message.summarize,
         customInstructions: message.customInstructions,
+        replaceInstructions: message.replaceInstructions,
         label: message.label,
       });
       this.postMessage({

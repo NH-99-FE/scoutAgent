@@ -16,6 +16,7 @@ const {
   mockGetShellPath,
   mockGetDefaultThinkingLevel,
   mockGetCompactionSettings,
+  mockGetBranchSummarySettings,
   mockGetSteeringMode,
   mockGetFollowUpMode,
   mockGetRetrySettings,
@@ -161,6 +162,10 @@ const {
       enabled: true,
       reserveTokens: 16384,
       keepRecentTokens: 20000,
+    })),
+    mockGetBranchSummarySettings: vi.fn(() => ({
+      reserveTokens: 16384,
+      skipPrompt: false,
     })),
     mockGetSteeringMode: vi.fn(() => 'one-at-a-time'),
     mockGetFollowUpMode: vi.fn(() => 'one-at-a-time'),
@@ -313,6 +318,7 @@ vi.mock('../config-manager.ts', () => ({
     this.getShellPath = mockGetShellPath;
     this.getDefaultThinkingLevel = mockGetDefaultThinkingLevel;
     this.getCompactionSettings = mockGetCompactionSettings;
+    this.getBranchSummarySettings = mockGetBranchSummarySettings;
     this.getSteeringMode = mockGetSteeringMode;
     this.getFollowUpMode = mockGetFollowUpMode;
     this.getRetrySettings = mockGetRetrySettings;
@@ -326,6 +332,7 @@ vi.mock('../config-manager.ts', () => ({
       models: [],
       defaultModelProvider: 'anthropic',
       defaultModelId: 'test-model',
+      branchSummary: { reserveTokens: 16384, skipPrompt: false },
     }));
     this.onDidChangeSettings = vi.fn(() => ({ dispose: vi.fn() }));
   }),
@@ -2979,12 +2986,77 @@ describe('AgentSession — Tree / Navigation / Label', () => {
 
   it('navigateTree delegates to harness', async () => {
     mockHarnessNavigateTree.mockResolvedValue({ cancelled: false, editorText: 'test' } as any);
+    mockGetBranchSummarySettings.mockReturnValue({ reserveTokens: 8192, skipPrompt: false });
 
     const agentSession = await makeInitializedAgentSession();
-    const result = await agentSession.navigateTree('entry-target', { summarize: true });
+    const result = await agentSession.navigateTree('entry-target', {
+      summarize: true,
+      customInstructions: 'focus',
+      replaceInstructions: true,
+      label: 'checkpoint',
+    });
 
-    expect(mockHarnessNavigateTree).toHaveBeenCalledWith('entry-target', { summarize: true });
+    expect(mockHarnessNavigateTree).toHaveBeenCalledWith(
+      'entry-target',
+      expect.objectContaining({
+        summarize: true,
+        customInstructions: 'focus',
+        replaceInstructions: true,
+        label: 'checkpoint',
+        reserveTokens: 8192,
+        signal: expect.any(AbortSignal),
+      }),
+    );
     expect(result.cancelled).toBe(false);
+    agentSession.dispose();
+  });
+
+  it('abort cancels an in-flight branch summary navigation', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let resolveNavigation: ((value: { cancelled: boolean }) => void) | undefined;
+    mockHarnessNavigateTree.mockImplementation((async (_targetId: string, options: any) => {
+      capturedSignal = options.signal;
+      return new Promise((resolve) => {
+        resolveNavigation = resolve;
+      });
+    }) as any);
+
+    const agentSession = await makeInitializedAgentSession();
+    const navigation = agentSession.navigateTree('entry-target', { summarize: true });
+    await Promise.resolve();
+
+    await agentSession.abort();
+    expect(capturedSignal?.aborted).toBe(true);
+
+    resolveNavigation?.({ cancelled: true });
+    await expect(navigation).resolves.toEqual({ cancelled: true });
+    agentSession.dispose();
+  });
+
+  it('rejects duplicate tree navigation without replacing the active abort controller', async () => {
+    let firstSignal: AbortSignal | undefined;
+    let resolveNavigation: ((value: { cancelled: boolean }) => void) | undefined;
+    mockHarnessNavigateTree.mockImplementation((async (_targetId: string, options: any) => {
+      firstSignal = options.signal;
+      return new Promise((resolve) => {
+        resolveNavigation = resolve;
+      });
+    }) as any);
+
+    const agentSession = await makeInitializedAgentSession();
+    const firstNavigation = agentSession.navigateTree('entry-target', { summarize: true });
+    await Promise.resolve();
+
+    await expect(agentSession.navigateTree('entry-other', { summarize: true })).resolves.toEqual({
+      cancelled: true,
+    });
+    expect(mockHarnessNavigateTree).toHaveBeenCalledTimes(1);
+
+    await agentSession.abort();
+    expect(firstSignal?.aborted).toBe(true);
+
+    resolveNavigation?.({ cancelled: true });
+    await expect(firstNavigation).resolves.toEqual({ cancelled: true });
     agentSession.dispose();
   });
 

@@ -265,6 +265,7 @@ vi.mock('../config-manager.ts', () => ({
       models: [],
       defaultModelProvider: 'anthropic',
       defaultModelId: 'test-model',
+      branchSummary: { reserveTokens: 16384, skipPrompt: false },
     }));
     this.onDidChangeSettings = vi.fn(() => ({ dispose: vi.fn() }));
     this.getExtensionPaths = vi.fn(() => []);

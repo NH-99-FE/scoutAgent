@@ -1058,6 +1058,8 @@ export class AgentHarness<
       customInstructions?: string;
       replaceInstructions?: boolean;
       label?: string;
+      signal?: AbortSignal;
+      reserveTokens?: number;
     },
   ): Promise<NavigateTreeResult> {
     if (this.phase !== 'idle')
@@ -1084,9 +1086,11 @@ export class AgentHarness<
         replaceInstructions: options?.replaceInstructions,
         label: options?.label,
       };
-      const signal = new AbortController().signal;
+      const signal = options?.signal ?? new AbortController().signal;
+      if (signal.aborted) return { cancelled: true };
       const hookResult = await this.emitHook({ type: 'session_before_tree', preparation, signal });
       if (hookResult?.cancel) return { cancelled: true };
+      if (signal.aborted) return { cancelled: true };
       let summaryEntry: NavigateTreeResult['summaryEntry'];
       let summaryText: string | undefined = hookResult?.summary?.summary;
       let summaryDetails: unknown = hookResult?.summary?.details;
@@ -1099,9 +1103,10 @@ export class AgentHarness<
           model,
           apiKey: auth.apiKey,
           headers: auth.headers,
-          signal: new AbortController().signal,
+          signal,
           customInstructions: hookResult?.customInstructions ?? options?.customInstructions,
           replaceInstructions: hookResult?.replaceInstructions ?? options?.replaceInstructions,
+          reserveTokens: options?.reserveTokens,
         });
         if (!branchSummary.ok) {
           if (branchSummary.error.code === 'aborted') return { cancelled: true };
@@ -1116,6 +1121,7 @@ export class AgentHarness<
           readFiles: branchSummary.value.readFiles,
           modifiedFiles: branchSummary.value.modifiedFiles,
         };
+        if (signal.aborted) return { cancelled: true };
       }
       let editorText: string | undefined;
       let newLeafId: string | null;
@@ -1145,6 +1151,7 @@ export class AgentHarness<
       } else {
         newLeafId = targetId;
       }
+      if (signal.aborted) return { cancelled: true };
       const summaryId = await this.session.moveTo(
         newLeafId,
         summaryText

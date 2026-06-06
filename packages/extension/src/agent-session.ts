@@ -198,6 +198,7 @@ export class AgentSession implements vscode.Disposable {
   private retryAbortController: AbortController | undefined;
   private manualCompactionAbortController: AbortController | undefined;
   private autoCompactionAbortController: AbortController | undefined;
+  private branchSummaryAbortController: AbortController | undefined;
 
   /**
    * Overflow compaction 防重入标志。
@@ -331,6 +332,7 @@ export class AgentSession implements vscode.Disposable {
       this.retryAbortController?.abort();
       this.manualCompactionAbortController?.abort();
       this.autoCompactionAbortController?.abort();
+      this.branchSummaryAbortController?.abort();
       this.clearQueuedAgentMessages();
       await this.harness.abort();
     } catch (error) {
@@ -805,15 +807,31 @@ export class AgentSession implements vscode.Disposable {
   /** 导航到指定 entry */
   async navigateTree(
     targetId: string,
-    options?: { summarize?: boolean; customInstructions?: string; label?: string },
+    options?: {
+      summarize?: boolean;
+      customInstructions?: string;
+      replaceInstructions?: boolean;
+      label?: string;
+    },
   ): Promise<NavigateTreeResult> {
     if (!this.harness) {
       this.emit({ type: 'error', message: 'No active harness for tree navigation' });
       return { cancelled: true };
     }
+    if (this.branchSummaryAbortController) {
+      this.outputChannel.appendLine('[scout] Tree navigation already running, ignoring duplicate');
+      return { cancelled: true };
+    }
 
+    const abortController = new AbortController();
+    this.branchSummaryAbortController = abortController;
     try {
-      const result = await this.harness.navigateTree(targetId, options);
+      const branchSummarySettings = this.configManager.getBranchSummarySettings();
+      const result = await this.harness.navigateTree(targetId, {
+        ...options,
+        signal: abortController.signal,
+        reserveTokens: branchSummarySettings.reserveTokens,
+      });
       if (!result.cancelled) {
         await this.rebuildCachedMessages();
         this.emit({ type: 'state_change' });
@@ -825,6 +843,10 @@ export class AgentSession implements vscode.Disposable {
       this.outputChannel.appendLine(`[scout] Navigate tree failed: ${errorMessage}`);
       this.emit({ type: 'error', message: `Navigate tree failed: ${errorMessage}` });
       return { cancelled: true };
+    } finally {
+      if (this.branchSummaryAbortController === abortController) {
+        this.branchSummaryAbortController = undefined;
+      }
     }
   }
 

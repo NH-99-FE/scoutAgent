@@ -64,6 +64,7 @@ const {
       models: [],
       defaultModelProvider: 'anthropic',
       defaultModelId: 'test-model',
+      branchSummary: { reserveTokens: 16384, skipPrompt: false },
     })),
     mockOnDidChangeSettings: vi.fn(() => ({ dispose: vi.fn() })),
     mockSessionManagerSubscribe: vi.fn(() => vi.fn()),
@@ -686,11 +687,19 @@ describe('ScoutController', () => {
       type: 'navigate_tree',
       targetId: 'entry-1',
       summarize: true,
+      customInstructions: 'focus on changed files',
+      replaceInstructions: true,
+      label: 'checkpoint',
     });
 
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(mockSessionManagerNavigateTree).toHaveBeenCalledWith('entry-1', { summarize: true });
+    expect(mockSessionManagerNavigateTree).toHaveBeenCalledWith('entry-1', {
+      summarize: true,
+      customInstructions: 'focus on changed files',
+      replaceInstructions: true,
+      label: 'checkpoint',
+    });
     expect(webview.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'navigate_tree_result', success: true }),
     );

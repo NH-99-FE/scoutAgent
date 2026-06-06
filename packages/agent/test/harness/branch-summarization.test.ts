@@ -348,6 +348,73 @@ describe('branch summarization', () => {
     expect(result.summaryEntry?.details).toEqual({ readFiles: [], modifiedFiles: [] });
   });
 
+  it('does not move the leaf when aborted after branch summary generation', async () => {
+    const abortController = new AbortController();
+    registerResponses([
+      () => {
+        queueMicrotask(() => abortController.abort());
+        return createSummaryMessage('## Goal\nGenerated branch');
+      },
+    ]);
+    const session = new Session(new InMemorySessionStorage());
+    const rootAssistant = await session.appendMessage(createAssistantMessage('root answer'));
+    await session.appendMessage(createUserMessage('abandoned'));
+    const oldLeaf = await session.appendMessage(createAssistantMessage('abandoned answer'));
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: createModel(),
+      getApiKeyAndHeaders: async () => ({ apiKey: 'test-key' }),
+    });
+    const events: string[] = [];
+    harness.subscribe((event) => {
+      if (event.type === 'session_tree') events.push(event.type);
+    });
+
+    const result = await harness.navigateTree(rootAssistant, {
+      summarize: true,
+      signal: abortController.signal,
+    });
+
+    expect(result).toEqual({ cancelled: true });
+    expect(await session.getLeafId()).toBe(oldLeaf);
+    expect(events).toEqual([]);
+    expect((await session.getEntries()).some((entry) => entry.type === 'branch_summary')).toBe(
+      false,
+    );
+  });
+
+  it('treats navigation as committed once moveTo succeeds', async () => {
+    const abortController = new AbortController();
+    const session = new Session(new InMemorySessionStorage());
+    const rootAssistant = await session.appendMessage(createAssistantMessage('root answer'));
+    await session.appendMessage(createUserMessage('abandoned'));
+    await session.appendMessage(createAssistantMessage('abandoned answer'));
+    const originalMoveTo = session.moveTo.bind(session);
+    session.moveTo = (async (...args: Parameters<typeof session.moveTo>) => {
+      const result = await originalMoveTo(...args);
+      abortController.abort();
+      return result;
+    }) as typeof session.moveTo;
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: createModel(),
+    });
+    const events: string[] = [];
+    harness.subscribe((event) => {
+      if (event.type === 'session_tree') events.push(event.type);
+    });
+
+    const result = await harness.navigateTree(rootAssistant, {
+      signal: abortController.signal,
+    });
+
+    expect(result).toEqual({ cancelled: false, editorText: undefined, summaryEntry: undefined });
+    expect(await session.getLeafId()).toBe(rootAssistant);
+    expect(events).toEqual(['session_tree']);
+  });
+
   it('cancels navigation from session_before_tree without moving the leaf', async () => {
     const session = new Session(new InMemorySessionStorage());
     const rootAssistant = await session.appendMessage(createAssistantMessage('root answer'));

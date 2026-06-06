@@ -467,7 +467,12 @@ export class SessionManager implements vscode.Disposable {
 
   async navigateTree(
     targetId: string,
-    options?: { summarize?: boolean; customInstructions?: string; label?: string },
+    options?: {
+      summarize?: boolean;
+      customInstructions?: string;
+      replaceInstructions?: boolean;
+      label?: string;
+    },
   ): Promise<NavigateTreeResult> {
     if (!this.agentSession) {
       this.emit({ type: 'error', message: 'No active session for tree navigation' });
