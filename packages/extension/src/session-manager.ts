@@ -535,6 +535,7 @@ export class SessionManager implements vscode.Disposable {
   private readonly createRuntime: CreateAgentSessionRuntimeFactory = async ({
     session,
     activeToolNames,
+    includeAllExtensionTools,
   }) => {
     const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
     let modelFallbackMessage: string | undefined;
@@ -566,6 +567,7 @@ export class SessionManager implements vscode.Disposable {
       extensionRunner,
       loadExtensionResources: (resources) => resourceLoader.extendResources(resources),
       activeToolNames,
+      includeAllExtensionTools,
     });
 
     try {

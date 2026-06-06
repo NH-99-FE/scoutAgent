@@ -132,6 +132,7 @@ describe('AgentSessionRuntime', () => {
     expect(createRuntime).toHaveBeenCalledWith({
       session: backingSession,
       activeToolNames: undefined,
+      includeAllExtensionTools: true,
       sessionStartEvent: {
         type: 'session_start',
         reason: 'reload',
@@ -159,6 +160,7 @@ describe('AgentSessionRuntime', () => {
     expect(createRuntime).toHaveBeenCalledWith({
       session: backingSession,
       activeToolNames: ['read'],
+      includeAllExtensionTools: true,
       sessionStartEvent: {
         type: 'session_start',
         reason: 'reload',

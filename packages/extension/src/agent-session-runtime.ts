@@ -24,6 +24,7 @@ export interface CreateAgentSessionRuntimeResult {
 export type CreateAgentSessionRuntimeFactory = (options: {
   session: Session;
   activeToolNames?: string[];
+  includeAllExtensionTools?: boolean;
   sessionStartEvent: SessionStartEvent;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
@@ -386,6 +387,7 @@ export class AgentSessionRuntime {
     const nextRuntime = await this.createRuntime({
       session: targetSession,
       activeToolNames,
+      includeAllExtensionTools: true,
       sessionStartEvent,
     });
 

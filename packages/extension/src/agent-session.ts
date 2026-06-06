@@ -150,6 +150,7 @@ export interface AgentSessionOptions {
     resources: DiscoveredExtensionResources,
   ) => Promise<LoadedScoutResources>;
   activeToolNames?: string[];
+  includeAllExtensionTools?: boolean;
 }
 
 type ToolRegistryEntry = {
@@ -180,6 +181,7 @@ export class AgentSession implements vscode.Disposable {
   ) => Promise<LoadedScoutResources>;
   private activeToolNames: string[];
   private activeToolsCustomized: boolean;
+  private includeAllExtensionToolsOnInitialize: boolean;
   private toolRegistry = new Map<string, ToolRegistryEntry>();
   private lastSystemPrompt = '';
 
@@ -239,6 +241,7 @@ export class AgentSession implements vscode.Disposable {
     this.loadExtensionResources = options.loadExtensionResources;
     this.activeToolNames = options.activeToolNames ?? [...DEFAULT_ACTIVE_TOOL_NAMES];
     this.activeToolsCustomized = options.activeToolNames !== undefined;
+    this.includeAllExtensionToolsOnInitialize = options.includeAllExtensionTools ?? false;
   }
 
   // ---------- 初始化 ----------
@@ -613,8 +616,9 @@ export class AgentSession implements vscode.Disposable {
   }
 
   async refreshTools(): Promise<void> {
+    const previousRegistryNames = new Set(this.toolRegistry.keys());
     this.rebuildToolRegistry();
-    this.normalizeActiveToolNames();
+    this.normalizeActiveToolNames({ previousRegistryNames });
     await this.applyToolsToHarness();
     this.lastSystemPrompt = this.buildCurrentSystemPrompt();
     this.emit({ type: 'state_change' });
@@ -968,17 +972,29 @@ export class AgentSession implements vscode.Disposable {
     this.toolRegistry = registry;
   }
 
-  private normalizeActiveToolNames(): void {
+  private normalizeActiveToolNames(options?: {
+    previousRegistryNames?: Set<string>;
+    includeAllExtensionTools?: boolean;
+  }): void {
+    const extensionTools = [...this.toolRegistry.values()]
+      .filter((entry) => entry.sourceType === 'extension')
+      .map((entry) => entry.tool.name);
+
     if (!this.activeToolsCustomized) {
       const defaults = DEFAULT_ACTIVE_TOOL_NAMES.filter((name) => this.toolRegistry.has(name));
-      const extensionTools = [...this.toolRegistry.values()]
-        .filter((entry) => entry.sourceType === 'extension')
-        .map((entry) => entry.tool.name);
       this.activeToolNames = [...new Set([...defaults, ...extensionTools])];
       return;
     }
 
-    this.activeToolNames = this.activeToolNames.filter((name) => this.toolRegistry.has(name));
+    const nextActiveToolNames = this.activeToolNames.filter((name) => this.toolRegistry.has(name));
+    if (options?.includeAllExtensionTools) {
+      nextActiveToolNames.push(...extensionTools);
+    } else if (options?.previousRegistryNames) {
+      nextActiveToolNames.push(
+        ...extensionTools.filter((name) => !options.previousRegistryNames?.has(name)),
+      );
+    }
+    this.activeToolNames = [...new Set(nextActiveToolNames)];
   }
 
   private getActiveTools(): AgentTool[] {
@@ -1259,7 +1275,10 @@ export class AgentSession implements vscode.Disposable {
       shellPath: this.configManager.getShellPath(),
     });
     this.rebuildToolRegistry(model);
-    this.normalizeActiveToolNames();
+    this.normalizeActiveToolNames({
+      includeAllExtensionTools: this.includeAllExtensionToolsOnInitialize,
+    });
+    this.includeAllExtensionToolsOnInitialize = false;
     const tools = this.getAllTools();
 
     const harnessOptions: AgentHarnessOptions = {

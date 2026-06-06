@@ -407,6 +407,7 @@ function makeAgentSession(overrides?: {
   extensionRunner?: any;
   skills?: any[];
   promptTemplates?: any[];
+  includeAllExtensionTools?: boolean;
 }): AgentSession {
   const configManager = new ConfigManager({
     cwd: '/test/project',
@@ -420,6 +421,7 @@ function makeAgentSession(overrides?: {
     skills: overrides?.skills ?? [],
     promptTemplates: overrides?.promptTemplates,
     extensionRunner: overrides?.extensionRunner,
+    includeAllExtensionTools: overrides?.includeAllExtensionTools,
   });
 }
 
@@ -428,6 +430,7 @@ async function makeInitializedAgentSession(overrides?: {
   extensionRunner?: any;
   skills?: any[];
   promptTemplates?: any[];
+  includeAllExtensionTools?: boolean;
 }): Promise<AgentSession> {
   const agentSession = makeAgentSession(overrides);
   await agentSession.initialize();
@@ -1391,6 +1394,113 @@ describe('AgentSession — 运行时操作', () => {
     expect(agentSession.getActiveToolNames()).toEqual(['read', 'grep']);
     const harnessOptions = (MockAgentHarness.mock.calls as any[]).at(-1)?.[0] as any;
     expect(harnessOptions.activeToolNames).toEqual(['read', 'grep']);
+    agentSession.dispose();
+  });
+
+  it('includes all extension tools during reload-style initialization', async () => {
+    const session = makeSession({
+      getBranch: vi.fn(async () => [
+        {
+          type: 'custom',
+          customType: 'tools-config',
+          data: { enabledTools: ['read'] },
+        },
+      ]),
+    });
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => [
+        {
+          definition: {
+            name: 'extension-search',
+            label: 'Extension Search',
+            description: 'Search from an extension',
+            parameters: {},
+            execute: vi.fn(),
+          },
+          sourceInfo: {
+            path: '/extensions/search.ts',
+            source: 'local',
+            scope: 'project',
+            origin: 'top-level',
+          },
+        },
+      ]),
+      invalidate: vi.fn(),
+    };
+    (mockWrapRegisteredTools as any).mockReturnValueOnce([
+      {
+        name: 'extension-search',
+        label: 'Extension Search',
+        description: 'Search from an extension',
+        parameters: {},
+        execute: vi.fn(),
+      },
+    ]);
+
+    const agentSession = await makeInitializedAgentSession({
+      session,
+      extensionRunner,
+      includeAllExtensionTools: true,
+    });
+
+    expect(agentSession.getActiveToolNames()).toEqual(['read', 'extension-search']);
+    const harnessOptions = (MockAgentHarness.mock.calls as any[]).at(-1)?.[0] as any;
+    expect(harnessOptions.activeToolNames).toEqual(['read', 'extension-search']);
+    agentSession.dispose();
+  });
+
+  it('activates newly registered extension tools on refreshTools', async () => {
+    const session = makeSession({
+      getBranch: vi.fn(async () => [
+        {
+          type: 'custom',
+          customType: 'tools-config',
+          data: { enabledTools: ['read'] },
+        },
+      ]),
+    });
+    let registeredTools: any[] = [];
+    const extensionRunner = {
+      getAllRegisteredTools: vi.fn(() => registeredTools),
+      invalidate: vi.fn(),
+    };
+    (mockWrapRegisteredTools as any).mockImplementation((tools: any[]) =>
+      tools.map((entry) => ({
+        name: entry.definition.name,
+        label: entry.definition.label,
+        description: entry.definition.description,
+        parameters: entry.definition.parameters,
+        execute: vi.fn(),
+      })),
+    );
+    const agentSession = await makeInitializedAgentSession({ session, extensionRunner });
+    expect(agentSession.getActiveToolNames()).toEqual(['read']);
+
+    registeredTools = [
+      {
+        definition: {
+          name: 'extension-search',
+          label: 'Extension Search',
+          description: 'Search from an extension',
+          parameters: {},
+          execute: vi.fn(),
+        },
+        sourceInfo: {
+          path: '/extensions/search.ts',
+          source: 'local',
+          scope: 'project',
+          origin: 'top-level',
+        },
+      },
+    ];
+
+    await agentSession.refreshTools();
+
+    expect(agentSession.getActiveToolNames()).toEqual(['read', 'extension-search']);
+    expect(mockHarnessSetTools).toHaveBeenLastCalledWith(expect.any(Array), [
+      'read',
+      'extension-search',
+    ]);
     agentSession.dispose();
   });
 
