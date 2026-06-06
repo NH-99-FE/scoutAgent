@@ -163,8 +163,8 @@ export class AgentSession implements vscode.Disposable {
   private readonly configManager: ConfigManager;
   private readonly cwd: string;
   private readonly outputChannel: vscode.OutputChannel;
-  private readonly skills: ScoutSkill[];
-  private readonly promptTemplates: PromptTemplate[];
+  private skills: ScoutSkill[];
+  private promptTemplates: PromptTemplate[];
   private extensionRunner?: ScoutExtensionRunner;
   private activeToolNames: string[];
   private activeToolsCustomized: boolean;
@@ -560,6 +560,20 @@ export class AgentSession implements vscode.Disposable {
     return [...extensionCommands, ...templates, ...skills];
   }
 
+  async setResources(resources: {
+    skills?: ScoutSkill[];
+    promptTemplates?: PromptTemplate[];
+  }): Promise<void> {
+    this.skills = resources.skills ?? [];
+    this.promptTemplates = resources.promptTemplates ?? [];
+    await this.harness?.setResources({
+      skills: this.skills as Skill[],
+      promptTemplates: this.promptTemplates,
+    });
+    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
+    this.emit({ type: 'state_change' });
+  }
+
   async setActiveTools(toolNames: string[]): Promise<void> {
     const missing = toolNames.filter((name) => !this.toolRegistry.has(name));
     if (missing.length > 0) {
@@ -618,6 +632,10 @@ export class AgentSession implements vscode.Disposable {
   }
 
   hasPendingMessages(): boolean {
+    return this.pendingNextTurnMessages.length > 0 || (this.harness?.hasPendingMessages() ?? false);
+  }
+
+  private hasContinuationPendingMessages(): boolean {
     return this.harness?.hasPendingMessages() ?? false;
   }
 
@@ -1621,7 +1639,7 @@ export class AgentSession implements vscode.Disposable {
         this.outputChannel.appendLine('[scout] Retrying after overflow compaction');
         return true;
       }
-      return this.harness.hasPendingMessages();
+      return this.hasContinuationPendingMessages();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const aborted = abortController.signal.aborted;
@@ -1757,6 +1775,9 @@ export class AgentSession implements vscode.Disposable {
     unsubs.push(
       this.harness.on('before_agent_start', async (e) => {
         const queuedNextTurnMessages = this.pendingNextTurnMessages.splice(0);
+        if (queuedNextTurnMessages.length > 0) {
+          this.emit({ type: 'state_change' });
+        }
         try {
           const result = await runner.emitBeforeAgentStart(e);
           if (queuedNextTurnMessages.length === 0) return result;
@@ -1766,6 +1787,9 @@ export class AgentSession implements vscode.Disposable {
           };
         } catch (error) {
           this.pendingNextTurnMessages.unshift(...queuedNextTurnMessages);
+          if (queuedNextTurnMessages.length > 0) {
+            this.emit({ type: 'state_change' });
+          }
           throw error;
         }
       }),

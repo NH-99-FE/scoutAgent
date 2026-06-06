@@ -588,11 +588,18 @@ export class SessionManager implements vscode.Disposable {
       promptTemplateInputs.map((entry) => ({ path: entry.path, source: entry.sourceInfo })),
       (promptTemplate, sourceInfo): SourcedPromptTemplate => ({ ...promptTemplate, sourceInfo }),
     );
-    const promptTemplates = promptResult.promptTemplates.map((entry) => entry.promptTemplate);
+    const dedupedPromptResult = this.dedupePromptTemplates(
+      promptResult.promptTemplates.map((entry) => entry.promptTemplate),
+    );
+    const promptTemplates = dedupedPromptResult.promptTemplates;
     for (const diag of promptResult.diagnostics) {
       const message = `${diag.path}: ${diag.message}`;
       diagnostics.push({ type: 'warning', message });
       this.outputChannel.appendLine(`[scout] WARN: ${message}`);
+    }
+    for (const diag of dedupedPromptResult.diagnostics) {
+      diagnostics.push(diag);
+      this.outputChannel.appendLine(`[scout] WARN: ${diag.message}`);
     }
 
     const agentSession = new AgentSession({
@@ -623,6 +630,38 @@ export class SessionManager implements vscode.Disposable {
       modelFallbackMessage,
     };
   };
+
+  private dedupePromptTemplates(promptTemplates: SourcedPromptTemplate[]): {
+    promptTemplates: SourcedPromptTemplate[];
+    diagnostics: AgentSessionRuntimeDiagnostic[];
+  } {
+    const seen = new Map<string, SourcedPromptTemplate>();
+    const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
+
+    for (const promptTemplate of promptTemplates) {
+      const existing = seen.get(promptTemplate.name);
+      if (!existing) {
+        seen.set(promptTemplate.name, promptTemplate);
+        continue;
+      }
+
+      const winnerPath = existing.sourceInfo?.path ?? `<prompt:${existing.name}>`;
+      const loserPath = promptTemplate.sourceInfo?.path ?? `<prompt:${promptTemplate.name}>`;
+      diagnostics.push({
+        type: 'collision',
+        message: `name "/${promptTemplate.name}" collision`,
+        path: loserPath,
+        collision: {
+          resourceType: 'prompt',
+          name: promptTemplate.name,
+          winnerPath,
+          loserPath,
+        },
+      });
+    }
+
+    return { promptTemplates: [...seen.values()], diagnostics };
+  }
 
   /** 发现并加载扩展，返回 ScoutExtensionRunner 或 undefined */
   private async loadExtensions(

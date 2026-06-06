@@ -2,14 +2,17 @@ import type { JsonlSessionMetadata, Session } from '@scout-agent/agent';
 import type { AgentSession } from './agent-session.ts';
 import type {
   ReplacedSessionContext,
+  ResourceCollision,
   SessionReplacementOptions,
   SessionShutdownEvent,
   SessionStartEvent,
 } from './extensions/types.ts';
 
 export interface AgentSessionRuntimeDiagnostic {
-  type: 'info' | 'warning' | 'error';
+  type: 'info' | 'warning' | 'error' | 'collision';
   message: string;
+  path?: string;
+  collision?: ResourceCollision;
 }
 
 export interface CreateAgentSessionRuntimeResult {

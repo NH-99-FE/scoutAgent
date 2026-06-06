@@ -27,6 +27,7 @@ const {
   mockHarnessSteer,
   mockHarnessFollowUp,
   mockHarnessSetTools,
+  mockHarnessSetResources,
   mockHarnessHasPendingMessages,
   mockHarnessGetSignal,
   mockHarnessGetModel,
@@ -62,6 +63,7 @@ const {
   const mockHarnessSteer = vi.fn();
   const mockHarnessFollowUp = vi.fn();
   const mockHarnessSetTools = vi.fn();
+  const mockHarnessSetResources = vi.fn();
   const mockHarnessHasPendingMessages = vi.fn(() => false);
   const mockHarnessGetSignal = vi.fn<() => AbortSignal | undefined>(() => undefined);
   const mockHarnessGetModel = vi.fn(() => ({
@@ -117,6 +119,7 @@ const {
     this.steer = mockHarnessSteer;
     this.followUp = mockHarnessFollowUp;
     this.setTools = mockHarnessSetTools;
+    this.setResources = mockHarnessSetResources;
     this.hasPendingMessages = vi.fn(
       () => mockHarnessHasPendingMessages() || (options.hasQueuedMessages?.() ?? false),
     );
@@ -157,6 +160,7 @@ const {
     mockHarnessSteer,
     mockHarnessFollowUp,
     mockHarnessSetTools,
+    mockHarnessSetResources,
     mockHarnessHasPendingMessages,
     mockHarnessGetSignal,
     mockHarnessGetModel,
@@ -476,6 +480,7 @@ describe('AgentSession', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessHasPendingMessages.mockReturnValue(false);
     mockHarnessCompact.mockReset();
     mockHarnessCompact.mockResolvedValue({
       summary: 'compact summary',
@@ -677,6 +682,7 @@ describe('AgentSession — 运行时操作', () => {
     mockGetApiKey.mockReturnValue('test-api-key');
     mockHarnessSubscribe.mockReturnValue(vi.fn());
     mockHarnessOn.mockReturnValue(vi.fn());
+    mockHarnessHasPendingMessages.mockReturnValue(false);
     mockHarnessCompact.mockReset();
     mockHarnessCompact.mockResolvedValue({
       summary: 'compact summary',
@@ -770,6 +776,8 @@ describe('AgentSession — 运行时操作', () => {
           description: 'Review code',
           content: 'Read the diff carefully.',
           filePath: '/test/project/.scout/skills/review/SKILL.md',
+          baseDir: '/test/project/.scout/skills/review',
+          disableModelInvocation: false,
         },
       ],
     });
@@ -923,6 +931,8 @@ describe('AgentSession — 运行时操作', () => {
           description: 'Review code',
           content: 'Read the diff carefully.',
           filePath: '/test/project/.scout/skills/review/SKILL.md',
+          baseDir: '/test/project/.scout/skills/review',
+          disableModelInvocation: false,
         },
       ],
     });
@@ -937,6 +947,68 @@ describe('AgentSession — 运行时操作', () => {
       expect.objectContaining({
         name: 'summarize',
         description: 'Summarize target',
+        source: 'prompt',
+      }),
+      expect.objectContaining({
+        name: 'skill:review',
+        description: 'Review code',
+        source: 'skill',
+      }),
+    ]);
+    agentSession.dispose();
+  });
+
+  it('setResources updates harness resources and command resources', async () => {
+    const agentSession = await makeInitializedAgentSession({
+      promptTemplates: [
+        {
+          name: 'old',
+          description: 'Old prompt',
+          content: 'old',
+        },
+      ],
+      skills: [],
+    });
+
+    await agentSession.setResources({
+      promptTemplates: [
+        {
+          name: 'new',
+          description: 'New prompt',
+          content: 'new',
+        },
+      ],
+      skills: [
+        {
+          name: 'review',
+          description: 'Review code',
+          content: 'Read the diff carefully.',
+          filePath: '/test/project/.scout/skills/review/SKILL.md',
+          baseDir: '/test/project/.scout/skills/review',
+          disableModelInvocation: false,
+        },
+      ],
+    });
+
+    expect(mockHarnessSetResources).toHaveBeenCalledWith({
+      promptTemplates: [
+        expect.objectContaining({
+          name: 'new',
+          description: 'New prompt',
+          content: 'new',
+        }),
+      ],
+      skills: [
+        expect.objectContaining({
+          name: 'review',
+          description: 'Review code',
+        }),
+      ],
+    });
+    expect(agentSession.getCommands()).toEqual([
+      expect.objectContaining({
+        name: 'new',
+        description: 'New prompt',
         source: 'prompt',
       }),
       expect.objectContaining({
@@ -1813,6 +1885,7 @@ describe('AgentSession — 运行时操作', () => {
     const agentSession = await makeInitializedAgentSession({ extensionRunner });
 
     await agentSession.sendMessage('next note', { deliverAs: 'nextTurn' });
+    expect(agentSession.hasPendingMessages()).toBe(true);
     const callback = getOnCallback('before_agent_start');
     const result = await callback({
       type: 'before_agent_start',
@@ -1835,6 +1908,7 @@ describe('AgentSession — 运行时操作', () => {
         }),
       ],
     });
+    expect(agentSession.hasPendingMessages()).toBe(false);
     agentSession.dispose();
   });
 
@@ -2205,6 +2279,25 @@ describe('AgentSession — Auto Retry', () => {
         willRetry: false,
       }),
     );
+    agentSession.dispose();
+  });
+
+  it('does not request continuation after threshold compaction for nextTurn-only messages', async () => {
+    mockHarnessHasPendingMessages.mockReturnValue(false);
+    mockHarnessCompact.mockResolvedValue({
+      summary: 'compact summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 100000,
+    });
+    const agentSession = await makeInitializedAgentSession();
+
+    await agentSession.sendMessage('next note', { deliverAs: 'nextTurn' });
+
+    expect(agentSession.hasPendingMessages()).toBe(true);
+    await expect(runAutoCompaction(agentSession, 'threshold')).resolves.toBe(false);
+    expect(mockHarnessHasPendingMessages).toHaveBeenCalledTimes(1);
+    expect(agentSession.hasPendingMessages()).toBe(true);
+    expect(mockHarnessContinue).not.toHaveBeenCalled();
     agentSession.dispose();
   });
 

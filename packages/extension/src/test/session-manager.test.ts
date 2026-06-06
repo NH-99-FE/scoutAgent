@@ -468,6 +468,86 @@ describe('SessionManager — 协调层', () => {
     manager.dispose();
   });
 
+  it('initialize keeps first prompt template on name collision and records diagnostics', async () => {
+    mockLoadSourcedPromptTemplates.mockResolvedValueOnce({
+      promptTemplates: [
+        {
+          promptTemplate: {
+            name: 'dup',
+            description: 'First prompt',
+            content: 'first',
+            sourceInfo: {
+              path: '/test/project/.scout/prompts/dup.md',
+              source: 'project',
+              scope: 'project',
+              origin: 'top-level',
+            },
+          },
+          source: {
+            path: '/test/project/.scout/prompts/dup.md',
+            source: 'project',
+            scope: 'project',
+            origin: 'top-level',
+          },
+        },
+        {
+          promptTemplate: {
+            name: 'dup',
+            description: 'Second prompt',
+            content: 'second',
+            sourceInfo: {
+              path: '/extension/prompts/dup.md',
+              source: 'extension',
+              scope: 'temporary',
+              origin: 'top-level',
+            },
+          },
+          source: {
+            path: '/extension/prompts/dup.md',
+            source: 'extension',
+            scope: 'temporary',
+            origin: 'top-level',
+          },
+        },
+      ],
+      diagnostics: [],
+    });
+    const manager = makeSessionManager();
+
+    await manager.initialize();
+
+    const harnessCalls = MockAgentHarness.mock.calls as any[][];
+    const lastHarnessCall = harnessCalls[harnessCalls.length - 1]!;
+    expect(lastHarnessCall[0]).toEqual(
+      expect.objectContaining({
+        resources: expect.objectContaining({
+          promptTemplates: [
+            expect.objectContaining({
+              name: 'dup',
+              description: 'First prompt',
+              content: 'first',
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(lastHarnessCall[0].resources.promptTemplates).toHaveLength(1);
+    expect(manager.diagnostics).toContainEqual(
+      expect.objectContaining({
+        type: 'collision',
+        message: 'name "/dup" collision',
+        path: '/extension/prompts/dup.md',
+        collision: expect.objectContaining({
+          resourceType: 'prompt',
+          name: 'dup',
+          winnerPath: '/test/project/.scout/prompts/dup.md',
+          loserPath: '/extension/prompts/dup.md',
+        }),
+      }),
+    );
+    manager.dispose();
+  });
+
   it('initialize consumes extension discovered prompt and skill paths', async () => {
     const extensionRunner = makeMockExtensionRunner({
       emitResourcesDiscover: vi.fn(async () => ({
