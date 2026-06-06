@@ -1,9 +1,14 @@
+// ============================================================
+// Scout Webview — 临时占位入口
+// 后续功能规划见 packages/webview/README.md
+// ============================================================
+
 function App() {
   return (
-    <>
-      <h1 className="bg-red-400 text-3xl font-bold">Hello, WebView!</h1>
-      <h2 className="bg-green-400 text-2xl font-bold">HMR test!</h2>
-    </>
+    <main className="app-shell">
+      <h1>Scout Agent</h1>
+      <p>Webview UI is pending implementation.</p>
+    </main>
   );
 }
 

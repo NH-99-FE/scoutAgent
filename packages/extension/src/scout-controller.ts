@@ -5,9 +5,16 @@
 // ============================================================
 
 import * as vscode from 'vscode';
-import type { ExtensionMessage, ScoutWebviewState, WebviewMessage } from '@scout-agent/shared';
+import type {
+  ExtensionMessage,
+  ScoutSessionListItem,
+  ScoutWebviewState,
+  WebviewMessage,
+} from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
 import { SessionManager, type ScoutSessionEvent } from './session-manager.ts';
+import { readSessionFileInfo } from './session-file.ts';
+import { isPathInsideOrEqual, resolveSessionCwdPolicy } from './session-cwd-policy.ts';
 
 // ---------- 接口 ----------
 
@@ -86,6 +93,18 @@ export class ScoutController implements vscode.Disposable {
         break;
       case 'continue_session':
         this.sessionManager.continue();
+        break;
+      case 'request_sessions':
+        void this.handleRequestSessions();
+        break;
+      case 'restore_session':
+        void this.handleRestoreSession(message);
+        break;
+      case 'pick_import_session':
+        void this.handlePickImportSession();
+        break;
+      case 'import_session':
+        void this.handleImportSession(message);
         break;
       case 'select_model':
         this.sessionManager.setModel(message.modelId, message.provider);
@@ -205,6 +224,7 @@ export class ScoutController implements vscode.Disposable {
     await this.sessionManager.initialize();
     this.pushConfig();
     this.pushState();
+    await this.handleRequestSessions();
   }
 
   // ---------- 状态同步 ----------
@@ -288,11 +308,8 @@ export class ScoutController implements vscode.Disposable {
     sessionPath: string;
   }): Promise<void> {
     try {
-      // 直接用 Webview 传来的路径构造 metadata，避免重新列举所有 session
-      const sessions = await this.sessionManager.listSessions();
-      const target = sessions.find(
-        (s) => s.id === message.sessionId || s.path === message.sessionPath,
-      );
+      const sessions = await this.listAvailableSessions();
+      const target = this.findSessionByPath(sessions, message);
       if (!target) {
         this.postMessage({
           type: 'delete_session_result',
@@ -312,6 +329,116 @@ export class ScoutController implements vscode.Disposable {
     }
   }
 
+  private async handleRequestSessions(): Promise<void> {
+    try {
+      const sessions = await this.listAvailableSessions();
+      const items: ScoutSessionListItem[] = sessions.map((session) => ({
+        id: session.id,
+        path: session.path,
+        cwd: session.cwd,
+        createdAt: session.createdAt,
+        parentSessionPath: session.parentSessionPath,
+      }));
+      this.postMessage({ type: 'sessions_data', sessions: items });
+    } catch (error) {
+      this.postMessage({ type: 'sessions_data', sessions: [] });
+      this.outputChannel.appendLine(
+        `[scout] List sessions failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async handleRestoreSession(message: {
+    sessionId: string;
+    sessionPath: string;
+    cwdOverride?: string;
+  }): Promise<void> {
+    try {
+      const sessions = await this.listAvailableSessions();
+      const target = this.findSessionByPath(sessions, message);
+      if (!target) {
+        this.postMessage({
+          type: 'restore_session_result',
+          success: false,
+          error: `Session not found: ${message.sessionId}`,
+        });
+        return;
+      }
+
+      const cwd = message.cwdOverride ?? (await this.resolveSessionCwd(target.cwd));
+      if (!cwd) {
+        this.postMessage({ type: 'restore_session_result', success: false, error: 'cancelled' });
+        return;
+      }
+
+      const result = await this.sessionManager.restore(target, { cwdOverride: cwd });
+      this.postMessage({
+        type: 'restore_session_result',
+        success: !result.cancelled,
+        error: result.cancelled ? 'cancelled' : undefined,
+      });
+      if (!result.cancelled) {
+        this.pushState();
+        await this.pushTreeData();
+      }
+    } catch (error) {
+      this.postMessage({
+        type: 'restore_session_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async handleImportSession(message: {
+    sessionPath: string;
+    cwdOverride?: string;
+  }): Promise<void> {
+    try {
+      const sessionInfo = readSessionFileInfo(message.sessionPath);
+      const cwd = message.cwdOverride ?? (await this.resolveSessionCwd(sessionInfo.cwd));
+      if (!cwd) {
+        this.postMessage({ type: 'import_session_result', success: false, error: 'cancelled' });
+        return;
+      }
+
+      const result = await this.sessionManager.importSessionFromJsonl(message.sessionPath, {
+        cwdOverride: cwd,
+      });
+      this.postMessage({
+        type: 'import_session_result',
+        success: !result.cancelled,
+        error: result.cancelled ? 'cancelled' : undefined,
+      });
+      if (!result.cancelled) {
+        this.pushState();
+        await this.pushTreeData();
+      }
+    } catch (error) {
+      this.postMessage({
+        type: 'import_session_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async handlePickImportSession(): Promise<void> {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      filters: { 'JSONL Session': ['jsonl'], 'All Files': ['*'] },
+      openLabel: 'Import Session',
+    });
+    const sessionPath = selected?.[0]?.fsPath;
+    if (!sessionPath) {
+      this.postMessage({ type: 'import_session_result', success: false, error: 'cancelled' });
+      return;
+    }
+    await this.handleImportSession({ sessionPath });
+  }
+
   private async pushTreeData(): Promise<void> {
     const tree = await this.sessionManager.getTree();
     const leafId = this.sessionManager.leafId;
@@ -319,6 +446,91 @@ export class ScoutController implements vscode.Disposable {
   }
 
   // ---------- 辅助 ----------
+
+  private getWorkspaceFolders(): string[] {
+    return vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
+  }
+
+  private async listAvailableSessions() {
+    return this.sessionManager.listSessions({ all: true });
+  }
+
+  private findSessionByPath(
+    sessions: Awaited<ReturnType<SessionManager['listSessions']>>,
+    message: { sessionId: string; sessionPath: string },
+  ) {
+    const byPath = sessions.find((session) => session.path === message.sessionPath);
+    if (byPath) return byPath;
+    return message.sessionPath
+      ? undefined
+      : sessions.find((session) => session.id === message.sessionId);
+  }
+
+  private getFallbackCwd(workspaceFolders: string[]): string {
+    if (workspaceFolders.some((folder) => isPathInsideOrEqual(this.cwd, folder))) {
+      return this.cwd;
+    }
+    return workspaceFolders[0] ?? this.cwd;
+  }
+
+  private async resolveSessionCwd(sessionCwd?: string): Promise<string | undefined> {
+    const workspaceFolders = this.getWorkspaceFolders();
+    const decision = resolveSessionCwdPolicy({
+      sessionCwd,
+      fallbackCwd: this.getFallbackCwd(workspaceFolders),
+      workspaceFolders,
+    });
+
+    if (decision.type === 'use-session-cwd' || decision.type === 'use-fallback-cwd') {
+      return decision.cwd;
+    }
+
+    if (decision.reason === 'missing-path') {
+      const selected = await vscode.window.showWarningMessage(
+        `The original session folder no longer exists:\n${decision.sessionCwd}\n\nUse current workspace instead?`,
+        'Use Current Workspace',
+        'Choose Folder',
+        'Cancel',
+      );
+      if (selected === 'Use Current Workspace') return decision.fallbackCwd;
+      if (selected === 'Choose Folder') return this.pickFolder();
+      return undefined;
+    }
+
+    if (decision.reason === 'no-workspace') {
+      const selected = await vscode.window.showWarningMessage(
+        `This session was created in:\n${decision.sessionCwd}\n\nNo VS Code workspace is open.`,
+        'Use Original Folder',
+        'Choose Folder',
+        'Cancel',
+      );
+      if (selected === 'Use Original Folder') return decision.sessionCwd;
+      if (selected === 'Choose Folder') return this.pickFolder();
+      return undefined;
+    }
+
+    const selected = await vscode.window.showWarningMessage(
+      `This session was created outside the current workspace:\n${decision.sessionCwd}\n\nCurrent workspace:\n${decision.fallbackCwd}`,
+      'Use Original Folder',
+      'Use Current Workspace',
+      'Choose Folder',
+      'Cancel',
+    );
+    if (selected === 'Use Original Folder') return decision.sessionCwd;
+    if (selected === 'Use Current Workspace') return decision.fallbackCwd;
+    if (selected === 'Choose Folder') return this.pickFolder();
+    return undefined;
+  }
+
+  private async pickFolder(): Promise<string | undefined> {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: 'Use Folder',
+    });
+    return selected?.[0]?.fsPath;
+  }
 
   private resolveAgentDir(): string {
     // 默认在 cwd 下的 .scout 目录

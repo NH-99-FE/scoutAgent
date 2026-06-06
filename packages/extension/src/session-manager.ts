@@ -5,6 +5,7 @@
 // ============================================================
 
 import * as vscode from 'vscode';
+import { rmSync } from 'node:fs';
 import type { JsonlSessionMetadata } from '@scout-agent/agent';
 import { JsonlSessionRepo, InMemorySessionRepo } from '@scout-agent/agent';
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
@@ -17,6 +18,7 @@ import type {
 } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
 import { ScoutResourceLoader } from './resource-loader.ts';
+import { copySessionFileIntoAgentDir, readSessionFileInfo } from './session-file.ts';
 
 // ---------- 内部 Repo 接口（供 JsonlSessionRepo 和 InMemorySessionRepo 共用） ----------
 
@@ -63,10 +65,14 @@ type SessionManagerReplacementResult = Pick<
   'cancelled' | 'teardownError' | 'withSessionError'
 >;
 
+type SessionManagerSessionReplacementOptions = SessionReplacementOptions & {
+  cwdOverride?: string;
+};
+
 // ---------- SessionManager ----------
 
 export class SessionManager implements vscode.Disposable {
-  private readonly cwd: string;
+  private cwd: string;
   private readonly agentDir: string;
   private readonly outputChannel: vscode.OutputChannel;
   private readonly configManager: ConfigManager;
@@ -215,8 +221,9 @@ export class SessionManager implements vscode.Disposable {
   /** 从 JSONL 文件恢复 session */
   async restore(
     sessionMeta: JsonlSessionMetadata,
-    options?: SessionReplacementOptions,
+    options?: SessionManagerSessionReplacementOptions,
   ): Promise<SessionManagerReplacementResult> {
+    const targetCwd = options?.cwdOverride ?? sessionMeta.cwd ?? this.cwd;
     if (!this.sessionRepo) {
       const env = new NodeExecutionEnv({
         cwd: this.cwd,
@@ -232,10 +239,11 @@ export class SessionManager implements vscode.Disposable {
       const session = await this.sessionRepo.open(sessionMeta);
       const runtimeResult = await this.createRuntime({
         session,
+        cwd: targetCwd,
         sessionStartEvent: { type: 'session_start', reason: 'resume' },
       });
       const runtime = new AgentSessionRuntime(runtimeResult.session, {
-        cwd: this.cwd,
+        cwd: targetCwd,
         createRuntime: this.createRuntime,
         diagnostics: runtimeResult.diagnostics,
         modelFallbackMessage: runtimeResult.modelFallbackMessage,
@@ -246,6 +254,7 @@ export class SessionManager implements vscode.Disposable {
       this.setAgentSession(runtime.session, false);
       await runtime.session.emitSessionStart({ type: 'session_start', reason: 'resume' });
       runtime.appendDiagnostics(await runtime.session.discoverExtensionResources('startup'));
+      this.cwd = targetCwd;
       this.emit({ type: 'state_change' });
       this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
       let withSessionError: unknown;
@@ -267,11 +276,42 @@ export class SessionManager implements vscode.Disposable {
       );
       return { cancelled: true };
     }
+    this.cwd = targetCwd;
     this.emit({ type: 'state_change' });
     this.logReplacementTeardownError(result.teardownError);
     this.logReplacementWithSessionError(result.withSessionError);
     this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
     return result;
+  }
+
+  async importSessionFromJsonl(
+    sessionPath: string,
+    options?: SessionManagerSessionReplacementOptions,
+  ): Promise<SessionManagerReplacementResult> {
+    const sourceInfo = readSessionFileInfo(sessionPath);
+    const targetCwd = options?.cwdOverride ?? sourceInfo.cwd ?? this.cwd;
+    const copiedInfo = copySessionFileIntoAgentDir({
+      sourcePath: sourceInfo.path,
+      agentDir: this.agentDir,
+      cwd: targetCwd,
+    });
+    const metadata: JsonlSessionMetadata = {
+      id: copiedInfo.id ?? sourceInfo.id ?? `imported-${Date.now()}`,
+      createdAt: copiedInfo.createdAt ?? sourceInfo.createdAt ?? new Date().toISOString(),
+      cwd: targetCwd,
+      path: copiedInfo.path,
+      parentSessionPath: copiedInfo.parentSessionPath ?? sourceInfo.parentSessionPath,
+    };
+    try {
+      const result = await this.restore(metadata, { ...options, cwdOverride: targetCwd });
+      if (result.cancelled) {
+        this.rollbackImportedSessionFile(copiedInfo.path);
+      }
+      return result;
+    } catch (error) {
+      this.rollbackImportedSessionFile(copiedInfo.path, error);
+      throw error;
+    }
   }
 
   async newSession(options?: SessionReplacementOptions): Promise<SessionManagerReplacementResult> {
@@ -313,10 +353,13 @@ export class SessionManager implements vscode.Disposable {
     return result;
   }
 
-  async listSessions(): Promise<JsonlSessionMetadata[]> {
+  async listSessions(options?: { cwd?: string; all?: boolean }): Promise<JsonlSessionMetadata[]> {
     if (!this.sessionRepo) return [];
     try {
-      return await this.sessionRepo.list({ cwd: this.cwd });
+      if (options?.all) {
+        return await this.sessionRepo.list();
+      }
+      return await this.sessionRepo.list({ cwd: options?.cwd ?? this.cwd });
     } catch {
       return [];
     }
@@ -509,6 +552,24 @@ export class SessionManager implements vscode.Disposable {
     this.emit({ type: 'error', message: `withSession failed: ${errorMessage}` });
   }
 
+  private rollbackImportedSessionFile(path: string, failure?: unknown): void {
+    try {
+      rmSync(path, { force: true });
+    } catch (cleanupError) {
+      if (typeof failure === 'object' && failure !== null) {
+        (failure as { suppressed?: unknown[] }).suppressed = [
+          ...((failure as { suppressed?: unknown[] }).suppressed ?? []),
+          cleanupError,
+        ];
+      }
+      const errorMessage =
+        cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      this.outputChannel.appendLine(
+        `[scout] Failed to rollback imported session file ${path}: ${errorMessage}`,
+      );
+    }
+  }
+
   private async cleanupCreatedSessionAfterFailure(
     session: Session | undefined,
     failure: unknown,
@@ -534,11 +595,13 @@ export class SessionManager implements vscode.Disposable {
 
   private readonly createRuntime: CreateAgentSessionRuntimeFactory = async ({
     session,
+    cwd,
     activeToolNames,
     includeAllExtensionTools,
   }) => {
     const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
     let modelFallbackMessage: string | undefined;
+    const runtimeCwd = cwd ?? this.cwd;
 
     const context = await session.buildContext();
     if (context.model) {
@@ -559,9 +622,9 @@ export class SessionManager implements vscode.Disposable {
       }
     }
 
-    const extensionRunner = await this.loadExtensions(diagnostics);
+    const extensionRunner = await this.loadExtensions(runtimeCwd, diagnostics);
     const resourceLoader = new ScoutResourceLoader({
-      cwd: this.cwd,
+      cwd: runtimeCwd,
       agentDir: this.agentDir,
     });
     const runtimeResources = await resourceLoader.load();
@@ -569,7 +632,7 @@ export class SessionManager implements vscode.Disposable {
     const agentSession = new AgentSession({
       session: session as Session,
       configManager: this.configManager,
-      cwd: this.cwd,
+      cwd: runtimeCwd,
       outputChannel: this.outputChannel,
       skills: runtimeResources.skills,
       promptTemplates: runtimeResources.promptTemplates,
@@ -615,12 +678,13 @@ export class SessionManager implements vscode.Disposable {
 
   /** 发现并加载扩展，返回 ScoutExtensionRunner 或 undefined */
   private async loadExtensions(
+    cwd: string,
     diagnostics?: AgentSessionRuntimeDiagnostic[],
   ): Promise<ScoutExtensionRunner | undefined> {
     const configuredPaths = this.configManager.getExtensionPaths();
     const { extensions, errors, runtime } = await discoverAndLoadExtensions(
       configuredPaths,
-      this.cwd,
+      cwd,
       this.agentDir,
     );
 
@@ -638,7 +702,7 @@ export class SessionManager implements vscode.Disposable {
     const extensionRunner = new ScoutExtensionRunner(
       extensions,
       runtime,
-      this.cwd,
+      cwd,
       this,
       this.configManager,
     );

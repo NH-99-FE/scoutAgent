@@ -23,6 +23,7 @@ export interface CreateAgentSessionRuntimeResult {
 
 export type CreateAgentSessionRuntimeFactory = (options: {
   session: Session;
+  cwd?: string;
   activeToolNames?: string[];
   includeAllExtensionTools?: boolean;
   sessionStartEvent: SessionStartEvent;
@@ -35,6 +36,7 @@ export type AgentSessionReplacementResult = {
 };
 
 type AgentSessionReplacementOptions = SessionReplacementOptions;
+type AgentSessionSwitchOptions = AgentSessionReplacementOptions & { cwdOverride?: string };
 
 interface SessionRepoLike {
   create(options?: { cwd?: string; id?: string }): Promise<Session>;
@@ -50,7 +52,7 @@ export class AgentSessionRuntime {
   private rebindSession?: (session: AgentSession) => Promise<void> | void;
   private beforeSessionInvalidate?: () => void;
   private _session: AgentSession;
-  private readonly cwd: string;
+  private cwd: string;
   private readonly createRuntime: CreateAgentSessionRuntimeFactory;
   private _diagnostics: AgentSessionRuntimeDiagnostic[];
   private _modelFallbackMessage?: string;
@@ -200,6 +202,7 @@ export class AgentSessionRuntime {
   private async replaceCurrent(
     reason: NonNullable<SessionShutdownEvent['reason']>,
     targetSessionFile: string | undefined,
+    targetCwd: string | undefined,
     nextRuntime: CreateAgentSessionRuntimeResult,
     sessionStartEvent: SessionStartEvent,
     options?: AgentSessionReplacementOptions,
@@ -213,6 +216,9 @@ export class AgentSessionRuntime {
     }
 
     this.apply(nextRuntime);
+    if (targetCwd) {
+      this.cwd = targetCwd;
+    }
     try {
       withSessionError = await this.finishSessionReplacement(
         sessionStartEvent,
@@ -272,7 +278,11 @@ export class AgentSessionRuntime {
     let targetMetadata: JsonlSessionMetadata;
     try {
       targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
-      nextRuntime = await this.createRuntime({ session: targetSession, sessionStartEvent });
+      nextRuntime = await this.createRuntime({
+        session: targetSession,
+        cwd: this.cwd,
+        sessionStartEvent,
+      });
     } catch (error) {
       this.disposeTargetSession(targetSession);
       await this.cleanupCreatedSessionAfterFailure(repo, targetSession, error);
@@ -282,6 +292,7 @@ export class AgentSessionRuntime {
     const replacementResult = await this.replaceCurrent(
       'new',
       targetMetadata.path,
+      this.cwd,
       nextRuntime,
       sessionStartEvent,
       options,
@@ -292,7 +303,7 @@ export class AgentSessionRuntime {
   async switchSession(
     repo: SessionRepoLike,
     metadata: JsonlSessionMetadata,
-    options?: AgentSessionReplacementOptions,
+    options?: AgentSessionSwitchOptions,
   ): Promise<AgentSessionReplacementResult> {
     const beforeResult = await this.emitBeforeSwitch('resume', metadata.path);
     if (beforeResult.cancelled) return beforeResult;
@@ -304,11 +315,16 @@ export class AgentSessionRuntime {
       reason: 'resume',
       previousSessionFile: previousMetadata.path,
     };
+    const targetCwd = options?.cwdOverride ?? metadata.cwd ?? this.cwd;
     let nextRuntime: CreateAgentSessionRuntimeResult;
     let targetMetadata: JsonlSessionMetadata;
     try {
       targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
-      nextRuntime = await this.createRuntime({ session: targetSession, sessionStartEvent });
+      nextRuntime = await this.createRuntime({
+        session: targetSession,
+        cwd: targetCwd,
+        sessionStartEvent,
+      });
     } catch (error) {
       this.disposeTargetSession(targetSession);
       throw error;
@@ -317,6 +333,7 @@ export class AgentSessionRuntime {
     const replacementResult = await this.replaceCurrent(
       'resume',
       targetMetadata.path ?? metadata.path,
+      targetCwd,
       nextRuntime,
       sessionStartEvent,
       options,
@@ -355,6 +372,7 @@ export class AgentSessionRuntime {
       targetMetadata = (await targetSession.getMetadata()) as JsonlSessionMetadata;
       nextRuntime = await this.createRuntime({
         session: targetSession,
+        cwd: this.cwd,
         activeToolNames,
         sessionStartEvent,
       });
@@ -367,6 +385,7 @@ export class AgentSessionRuntime {
     const replacementResult = await this.replaceCurrent(
       'fork',
       targetMetadata.path,
+      this.cwd,
       nextRuntime,
       sessionStartEvent,
       options,
@@ -386,6 +405,7 @@ export class AgentSessionRuntime {
     const sessionStartEvent: SessionStartEvent = { type: 'session_start', reason: 'reload' };
     const nextRuntime = await this.createRuntime({
       session: targetSession,
+      cwd: this.cwd,
       activeToolNames,
       includeAllExtensionTools: true,
       sessionStartEvent,
@@ -394,6 +414,7 @@ export class AgentSessionRuntime {
     const replacementResult = await this.replaceCurrent(
       'reload',
       undefined,
+      this.cwd,
       nextRuntime,
       sessionStartEvent,
       options,

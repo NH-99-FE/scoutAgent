@@ -102,6 +102,7 @@ describe('AgentSessionRuntime', () => {
     );
     expect(createRuntime).toHaveBeenCalledWith({
       session: targetSession,
+      cwd: '/test/project',
       activeToolNames: ['read', 'bash'],
       sessionStartEvent: {
         type: 'session_start',
@@ -131,6 +132,7 @@ describe('AgentSessionRuntime', () => {
 
     expect(createRuntime).toHaveBeenCalledWith({
       session: backingSession,
+      cwd: '/test/project',
       activeToolNames: undefined,
       includeAllExtensionTools: true,
       sessionStartEvent: {
@@ -159,6 +161,7 @@ describe('AgentSessionRuntime', () => {
 
     expect(createRuntime).toHaveBeenCalledWith({
       session: backingSession,
+      cwd: '/test/project',
       activeToolNames: ['read'],
       includeAllExtensionTools: true,
       sessionStartEvent: {

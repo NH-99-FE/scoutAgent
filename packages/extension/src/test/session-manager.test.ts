@@ -5,7 +5,10 @@
 // 详细的 retry/compaction/fork/tree 测试已迁移到 agent-session.test.ts
 // ============================================================
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------- 预定义 mock 值 ----------
 
@@ -319,6 +322,21 @@ import { SessionManager } from '../session-manager.ts';
 import { ConfigManager } from '../config-manager.ts';
 import { ScoutExtensionRunner, discoverAndLoadExtensions } from '../extensions/index.ts';
 import { loadSkills } from '../skill-loader.ts';
+import { encodeSessionCwd } from '../session-file.ts';
+
+const tempRoots: string[] = [];
+
+function makeTempRoot(): string {
+  const root = mkdtempSync(join(tmpdir(), 'scout-session-manager-'));
+  tempRoots.push(root);
+  return root;
+}
+
+afterEach(() => {
+  for (const root of tempRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function makeOutputChannel() {
   return {
@@ -342,6 +360,40 @@ function makeSessionManager(): SessionManager {
     outputChannel: makeOutputChannel(),
     configManager,
   });
+}
+
+function makeSessionManagerAt(cwd: string, agentDir: string): SessionManager {
+  const configManager = new ConfigManager({ cwd, agentDir } as any);
+  return new SessionManager({
+    cwd,
+    agentDir,
+    outputChannel: makeOutputChannel(),
+    configManager,
+  });
+}
+
+function writeSessionJsonl(root: string, cwd: string): string {
+  const sessionPath = join(root, 'source-session.jsonl');
+  writeFileSync(
+    sessionPath,
+    [
+      JSON.stringify({
+        type: 'session',
+        id: 'imported-session',
+        timestamp: '2026-06-07T00:00:00.000Z',
+        cwd,
+      }),
+      JSON.stringify({ type: 'user_message', content: 'hello' }),
+    ].join('\n'),
+    'utf-8',
+  );
+  return sessionPath;
+}
+
+function listImportedSessionFiles(agentDir: string, cwd: string): string[] {
+  const sessionDir = join(agentDir, encodeSessionCwd(cwd));
+  if (!existsSync(sessionDir)) return [];
+  return readdirSync(sessionDir).filter((name) => name.endsWith('.jsonl'));
 }
 
 async function makeInitializedSessionManager(): Promise<SessionManager> {
@@ -1040,6 +1092,38 @@ describe('SessionManager — 协调层', () => {
       targetSessionFile: '/sessions/cancelled.jsonl',
     });
     expect(MockAgentHarness).toHaveBeenCalledTimes(harnessCount);
+    manager.dispose();
+  });
+
+  it('rolls back copied session file when imported restore is cancelled', async () => {
+    const root = makeTempRoot();
+    const cwd = join(root, 'workspace');
+    const agentDir = join(root, '.scout');
+    const sourcePath = writeSessionJsonl(root, cwd);
+    const manager = makeSessionManagerAt(cwd, agentDir);
+    vi.spyOn(manager, 'restore').mockResolvedValueOnce({ cancelled: true });
+
+    const result = await manager.importSessionFromJsonl(sourcePath, { cwdOverride: cwd });
+
+    expect(result.cancelled).toBe(true);
+    expect(listImportedSessionFiles(agentDir, cwd)).toEqual([]);
+    manager.dispose();
+  });
+
+  it('rolls back copied session file when imported restore throws', async () => {
+    const root = makeTempRoot();
+    const cwd = join(root, 'workspace');
+    const agentDir = join(root, '.scout');
+    const sourcePath = writeSessionJsonl(root, cwd);
+    const manager = makeSessionManagerAt(cwd, agentDir);
+    const restoreError = new Error('restore failed');
+    vi.spyOn(manager, 'restore').mockRejectedValueOnce(restoreError);
+
+    await expect(manager.importSessionFromJsonl(sourcePath, { cwdOverride: cwd })).rejects.toBe(
+      restoreError,
+    );
+
+    expect(listImportedSessionFiles(agentDir, cwd)).toEqual([]);
     manager.dispose();
   });
 

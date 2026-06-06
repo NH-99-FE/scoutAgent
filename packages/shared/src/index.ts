@@ -42,6 +42,14 @@ export interface ScoutSessionTreeNode {
   children: ScoutSessionTreeNode[];
 }
 
+export interface ScoutSessionListItem {
+  id: string;
+  path: string;
+  cwd?: string;
+  createdAt: string;
+  parentSessionPath?: string;
+}
+
 // ---------- Webview → Extension ----------
 
 export type WebviewMessage =
@@ -64,6 +72,10 @@ export type WebviewMessage =
     }
   | { type: 'set_label'; entryId: string; label?: string }
   | { type: 'continue_session' }
+  | { type: 'request_sessions' }
+  | { type: 'restore_session'; sessionId: string; sessionPath: string; cwdOverride?: string }
+  | { type: 'pick_import_session' }
+  | { type: 'import_session'; sessionPath: string; cwdOverride?: string }
   | { type: 'delete_session'; sessionId: string; sessionPath: string };
 
 // ---------- 消息内容块 ----------
@@ -254,6 +266,9 @@ export type ExtensionMessage =
   | ScoutThinkingLevelChangedEvent
   | { type: 'fork_result'; success: boolean; error?: string }
   | { type: 'tree_data'; tree: ScoutSessionTreeNode[]; leafId: string | null }
+  | { type: 'sessions_data'; sessions: ScoutSessionListItem[] }
+  | { type: 'restore_session_result'; success: boolean; error?: string }
+  | { type: 'import_session_result'; success: boolean; error?: string }
   | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }
   | { type: 'label_result'; success: boolean; error?: string }
   | { type: 'delete_session_result'; success: boolean; error?: string };

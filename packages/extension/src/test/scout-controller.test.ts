@@ -36,6 +36,12 @@ const {
   mockSessionManagerGetActiveToolNames,
   mockSessionManagerGetAllToolInfos,
   mockSessionManagerSetActiveTools,
+  mockSessionManagerListSessions,
+  mockSessionManagerRestore,
+  mockSessionManagerImportSessionFromJsonl,
+  mockSessionManagerDeleteSession,
+  mockShowWarningMessage,
+  mockShowOpenDialog,
 } = vi.hoisted(() => {
   const mockUri = {
     parse: vi.fn(),
@@ -97,6 +103,12 @@ const {
       },
     ]),
     mockSessionManagerSetActiveTools: vi.fn(async () => {}),
+    mockSessionManagerListSessions: vi.fn(async () => [] as any[]),
+    mockSessionManagerRestore: vi.fn(async () => ({ cancelled: false })),
+    mockSessionManagerImportSessionFromJsonl: vi.fn(async () => ({ cancelled: false })),
+    mockSessionManagerDeleteSession: vi.fn(async () => {}),
+    mockShowWarningMessage: vi.fn(),
+    mockShowOpenDialog: vi.fn(),
   };
 });
 
@@ -116,6 +128,8 @@ vi.mock('vscode', () => ({
       hide: vi.fn(),
       dispose: vi.fn(),
     })),
+    showWarningMessage: mockShowWarningMessage,
+    showOpenDialog: mockShowOpenDialog,
   },
   workspace: {
     getConfiguration: vi.fn(),
@@ -210,6 +224,10 @@ vi.mock('../session-manager.ts', () => ({
     this.getActiveToolNames = mockSessionManagerGetActiveToolNames;
     this.getAllToolInfos = mockSessionManagerGetAllToolInfos;
     this.setActiveTools = mockSessionManagerSetActiveTools;
+    this.listSessions = mockSessionManagerListSessions;
+    this.restore = mockSessionManagerRestore;
+    this.importSessionFromJsonl = mockSessionManagerImportSessionFromJsonl;
+    this.deleteSession = mockSessionManagerDeleteSession;
   }),
 }));
 
@@ -293,6 +311,12 @@ describe('ScoutController', () => {
     mockSessionManagerGetScoutMessages.mockReturnValue([]);
     mockSessionManagerGetModel.mockReturnValue({ id: 'test-model' });
     mockSessionManagerGetThinkingLevel.mockReturnValue('off');
+    mockSessionManagerListSessions.mockResolvedValue([]);
+    mockSessionManagerRestore.mockResolvedValue({ cancelled: false });
+    mockSessionManagerImportSessionFromJsonl.mockResolvedValue({ cancelled: false });
+    mockSessionManagerDeleteSession.mockResolvedValue(undefined);
+    mockShowWarningMessage.mockReset();
+    mockShowOpenDialog.mockReset();
   });
 
   it('creates controller without error', () => {
@@ -499,6 +523,113 @@ describe('ScoutController', () => {
     controller.handleWebviewMessage({ type: 'set_active_tools', toolNames: ['read', 'grep'] });
 
     expect(mockSessionManagerSetActiveTools).toHaveBeenCalledWith(['read', 'grep']);
+    controller.dispose();
+  });
+
+  it('handles request_sessions by posting session list data', async () => {
+    mockSessionManagerListSessions.mockResolvedValue([
+      {
+        id: 'session-1',
+        path: '/test/project/.scout/session.jsonl',
+        cwd: '/test/project',
+        createdAt: '2026-06-07T00:00:00.000Z',
+      },
+    ]);
+    const controller = makeController();
+    const webview = makeWebview();
+    controller.bindWebview(webview);
+
+    controller.handleWebviewMessage({ type: 'request_sessions' });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(webview.postMessage).toHaveBeenCalledWith({
+      type: 'sessions_data',
+      sessions: [
+        expect.objectContaining({
+          id: 'session-1',
+          path: '/test/project/.scout/session.jsonl',
+        }),
+      ],
+    });
+    controller.dispose();
+  });
+
+  it('handles restore_session with an explicit cwd override', async () => {
+    mockSessionManagerListSessions.mockResolvedValue([
+      {
+        id: 'session-1',
+        path: '/test/project/.scout/first.jsonl',
+        cwd: '/test/project',
+        createdAt: '2026-06-07T00:00:00.000Z',
+      },
+      {
+        id: 'session-1',
+        path: '/test/project/.scout/second.jsonl',
+        cwd: '/old/project',
+        createdAt: '2026-06-07T00:00:00.000Z',
+      },
+    ]);
+    const controller = makeController();
+    const webview = makeWebview();
+    controller.bindWebview(webview);
+
+    controller.handleWebviewMessage({
+      type: 'restore_session',
+      sessionId: 'session-1',
+      sessionPath: '/test/project/.scout/second.jsonl',
+      cwdOverride: '/test/project',
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockSessionManagerRestore).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/test/project/.scout/second.jsonl' }),
+      { cwdOverride: '/test/project' },
+    );
+    expect(webview.postMessage).toHaveBeenCalledWith({
+      type: 'restore_session_result',
+      success: true,
+      error: undefined,
+    });
+    controller.dispose();
+  });
+
+  it('handles delete_session from the all-cwd session list by path', async () => {
+    mockSessionManagerListSessions.mockResolvedValue([
+      {
+        id: 'session-1',
+        path: '/test/project/.scout/current.jsonl',
+        cwd: '/test/project',
+        createdAt: '2026-06-07T00:00:00.000Z',
+      },
+      {
+        id: 'session-1',
+        path: '/other/project/.scout/outside.jsonl',
+        cwd: '/other/project',
+        createdAt: '2026-06-07T00:00:00.000Z',
+      },
+    ]);
+    const controller = makeController();
+    const webview = makeWebview();
+    controller.bindWebview(webview);
+
+    controller.handleWebviewMessage({
+      type: 'delete_session',
+      sessionId: 'session-1',
+      sessionPath: '/other/project/.scout/outside.jsonl',
+    });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockSessionManagerListSessions).toHaveBeenCalledWith({ all: true });
+    expect(mockSessionManagerDeleteSession).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/other/project/.scout/outside.jsonl' }),
+    );
+    expect(webview.postMessage).toHaveBeenCalledWith({
+      type: 'delete_session_result',
+      success: true,
+    });
     controller.dispose();
   });
 
