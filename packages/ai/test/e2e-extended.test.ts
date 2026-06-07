@@ -1,10 +1,11 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // E2E 扩展测试 — 验证关键行为
 // 没有对应 API key 的测试会自动 skip
 // ============================================================
 
 import { describe, it, expect } from 'vitest';
-import { stream, complete, streamSimple, completeSimple } from '../src/stream';
+import { complete, streamSimple } from '../src/stream';
 import { isContextOverflow } from '../src/utils/overflow';
 import type { Context, Tool, AssistantMessage } from '../src/types';
 import {

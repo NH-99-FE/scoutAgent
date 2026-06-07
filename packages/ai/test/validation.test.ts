@@ -202,7 +202,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
           },
         },
       ],
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('allof_tool', { count: '42' });
     const result = validateToolArguments(tool, toolCall);
     expect(result.count).toBe(42);
@@ -223,7 +223,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
           },
         },
       ],
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('anyof_tool', { value: '10' });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(10);
@@ -244,7 +244,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
           },
         },
       ],
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('oneof_tool', { flag: 'true' });
     const result = validateToolArguments(tool, toolCall);
     expect(result.flag).toBe(true);
@@ -275,7 +275,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
           },
         },
       ],
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('allof_nested', {
       config: { enabled: 'true', count: '5' },
     });
@@ -303,7 +303,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
           required: ['str'],
         },
       ],
-    } as any);
+    } as unknown as Tool['parameters']);
     // "7" should be coerced to 7 in the first variant
     const toolCall = createToolCall('anyof_multi', { num: '7' });
     const result = validateToolArguments(tool, toolCall);
@@ -319,7 +319,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
           items: { type: 'number' },
         },
       },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('array_items', {
       items: ['1', '2', '3'],
     });
@@ -334,7 +334,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
         name: { type: 'string' },
       },
       additionalProperties: { type: 'number' },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('additional_props', {
       name: 'test',
       extra1: '10',
@@ -352,7 +352,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
       properties: {
         value: { type: 'number' },
       },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('primitive_str_num', { value: '3.14' });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBeCloseTo(3.14);
@@ -364,7 +364,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
       properties: {
         flag: { type: 'boolean' },
       },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('primitive_num_bool', { flag: 1 });
     const result = validateToolArguments(tool, toolCall);
     expect(result.flag).toBe(true);
@@ -376,7 +376,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
       properties: {
         count: { type: 'number' },
       },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('primitive_bool_num', { count: true });
     const result = validateToolArguments(tool, toolCall);
     expect(result.count).toBe(1);
@@ -388,7 +388,7 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
       properties: {
         id: { type: 'integer' },
       },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('integer_type', { id: '42' });
     const result = validateToolArguments(tool, toolCall);
     expect(result.id).toBe(42);
@@ -403,7 +403,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('null_to_num', {
       type: 'object',
       properties: { value: { type: 'number' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('null_to_num', { value: null });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(0);
@@ -413,7 +413,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('null_to_int', {
       type: 'object',
       properties: { value: { type: 'integer' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('null_to_int', { value: null });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(0);
@@ -423,7 +423,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('null_to_bool', {
       type: 'object',
       properties: { value: { type: 'boolean' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('null_to_bool', { value: null });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(false);
@@ -433,7 +433,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('null_to_str', {
       type: 'object',
       properties: { value: { type: 'string' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('null_to_str', { value: null });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe('');
@@ -443,7 +443,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('str_to_null', {
       type: 'object',
       properties: { value: { type: 'null' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('str_to_null', { value: '' });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBeNull();
@@ -453,7 +453,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('zero_to_null', {
       type: 'object',
       properties: { value: { type: 'null' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('zero_to_null', { value: 0 });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBeNull();
@@ -463,7 +463,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('false_to_null', {
       type: 'object',
       properties: { value: { type: 'null' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('false_to_null', { value: false });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBeNull();
@@ -473,7 +473,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('bool_false_num', {
       type: 'object',
       properties: { value: { type: 'number' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('bool_false_num', { value: false });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(0);
@@ -483,7 +483,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('bool_true_int', {
       type: 'object',
       properties: { value: { type: 'integer' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('bool_true_int', { value: true });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(1);
@@ -493,7 +493,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('zero_to_bool', {
       type: 'object',
       properties: { value: { type: 'boolean' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('zero_to_bool', { value: 0 });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(false);
@@ -503,7 +503,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('num_to_str', {
       type: 'object',
       properties: { value: { type: 'string' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('num_to_str', { value: 42 });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe('42');
@@ -513,7 +513,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('bool_to_str', {
       type: 'object',
       properties: { value: { type: 'string' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('bool_to_str', { value: true });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe('true');
@@ -523,7 +523,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('nan_num', {
       type: 'object',
       properties: { value: { type: 'number' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('nan_num', { value: 'not-a-number' });
     // "not-a-number" can't be parsed to finite number, coercion leaves it as-is, then validation fails
     expect(() => validateToolArguments(tool, toolCall)).toThrow(/Validation failed/);
@@ -533,7 +533,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('float_int', {
       type: 'object',
       properties: { value: { type: 'integer' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('float_int', { value: '3.14' });
     // "3.14" is not an integer, coercion leaves it as-is, then validation fails
     expect(() => validateToolArguments(tool, toolCall)).toThrow(/Validation failed/);
@@ -543,7 +543,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('str_to_bool', {
       type: 'object',
       properties: { value: { type: 'boolean' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('str_to_bool', { value: 'yes' });
     // "yes" is not "true"/"false", coercion leaves it as-is, then validation fails
     expect(() => validateToolArguments(tool, toolCall)).toThrow(/Validation failed/);
@@ -553,7 +553,7 @@ describe('validateToolArguments — coercePrimitiveByType edge cases', () => {
     const tool = createTool('one_to_bool', {
       type: 'object',
       properties: { value: { type: 'boolean' } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('one_to_bool', { value: 1 });
     const result = validateToolArguments(tool, toolCall);
     expect(result.value).toBe(true);
@@ -567,7 +567,7 @@ describe('validateToolArguments — type union coercion', () => {
     const tool = createTool('union_str_num', {
       type: 'object',
       properties: { value: { type: ['string', 'number'] } },
-    } as any);
+    } as unknown as Tool['parameters']);
     // A number value already matches "number" in the union
     const toolCall = createToolCall('union_str_num', { value: 42 });
     const result = validateToolArguments(tool, toolCall);
@@ -578,7 +578,7 @@ describe('validateToolArguments — type union coercion', () => {
     const tool = createTool('union_str_num_coerce', {
       type: 'object',
       properties: { value: { type: ['string', 'number'] } },
-    } as any);
+    } as unknown as Tool['parameters']);
     // null does not match string or number, should be coerced
     const toolCall = createToolCall('union_str_num_coerce', { value: null });
     const result = validateToolArguments(tool, toolCall);
@@ -590,7 +590,7 @@ describe('validateToolArguments — type union coercion', () => {
     const tool = createTool('array_type', {
       type: 'object',
       properties: { items: { type: 'array', items: { type: 'number' } } },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('array_type', { items: ['1', '2'] });
     const result = validateToolArguments(tool, toolCall);
     expect(result.items).toEqual([1, 2]);
@@ -605,7 +605,7 @@ describe('validateToolArguments — type union coercion', () => {
           items: [{ type: 'number' }, { type: 'boolean' }],
         },
       },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('tuple_items', { pair: ['42', 1] });
     const result = validateToolArguments(tool, toolCall);
     expect(result.pair[0]).toBe(42);
@@ -621,7 +621,7 @@ describe('validateToolArguments — error path formatting', () => {
       type: 'object',
       properties: { name: { type: 'string' } },
       required: ['name'],
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('required_root', {});
     expect(() => validateToolArguments(tool, toolCall)).toThrow(/name/);
   });
@@ -637,7 +637,7 @@ describe('validateToolArguments — error path formatting', () => {
           },
         },
       },
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('nested_error', { config: { value: 'bad' } });
     expect(() => validateToolArguments(tool, toolCall)).toThrow(/config/);
   });
@@ -661,7 +661,7 @@ describe('validateToolArguments — union schema coercion edge cases', () => {
           required: ['str'],
         },
       ],
-    } as any);
+    } as unknown as Tool['parameters']);
     // Neither variant should match with empty object
     const toolCall = createToolCall('anyof_no_match', {});
     expect(() => validateToolArguments(tool, toolCall)).toThrow(/Validation failed/);
@@ -682,7 +682,7 @@ describe('validateToolArguments — union schema coercion edge cases', () => {
           required: ['count'],
         },
       ],
-    } as any);
+    } as unknown as Tool['parameters']);
     const toolCall = createToolCall('oneof_multi', { flag: 'true' });
     const result = validateToolArguments(tool, toolCall);
     expect(result.flag).toBe(true);

@@ -56,6 +56,21 @@ export interface AnthropicOptions extends StreamOptions {
   client?: Anthropic;
 }
 
+type AnthropicImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
+
+type StreamingOutputBlock = (
+  | ThinkingContent
+  | TextContent
+  | (ToolCall & { partialJson?: string })
+) & {
+  index?: number;
+};
+
+interface StreamingOutputState {
+  index?: number;
+  partialJson?: string;
+}
+
 // ---------- Compat 辅助 ----------
 
 function getAnthropicCompat(
@@ -276,7 +291,11 @@ function convertMessages(
             return { type: 'text' as const, text: sanitizeSurrogates(item.text) };
           return {
             type: 'image' as const,
-            source: { type: 'base64' as const, media_type: item.mimeType as any, data: item.data },
+            source: {
+              type: 'base64' as const,
+              media_type: item.mimeType as AnthropicImageMediaType,
+              data: item.data,
+            },
           };
         });
         const filtered = blocks.filter((b) =>
@@ -586,10 +605,7 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
         model,
       );
       stream.push({ type: 'start', partial: output });
-      type Block = (ThinkingContent | TextContent | (ToolCall & { partialJson: string })) & {
-        index: number;
-      };
-      const blocks = output.content as Block[];
+      const blocks = output.content as StreamingOutputBlock[];
       for await (const event of iterateAnthropicEvents(response, options?.signal)) {
         if (event.type === 'message_start') {
           output.responseId = event.message.id;
@@ -605,7 +621,7 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
           calculateCost(model, output.usage);
         } else if (event.type === 'content_block_start') {
           if (event.content_block.type === 'text') {
-            const block: Block = { type: 'text', text: '', index: event.index };
+            const block: StreamingOutputBlock = { type: 'text', text: '', index: event.index };
             output.content.push(block);
             stream.push({
               type: 'text_start',
@@ -613,7 +629,7 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
               partial: output,
             });
           } else if (event.content_block.type === 'thinking') {
-            const block: Block = {
+            const block: StreamingOutputBlock = {
               type: 'thinking',
               thinking: '',
               thinkingSignature: '',
@@ -626,7 +642,7 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
               partial: output,
             });
           } else if (event.content_block.type === 'redacted_thinking') {
-            const block: Block = {
+            const block: StreamingOutputBlock = {
               type: 'thinking',
               thinking: '[Reasoning redacted]',
               thinkingSignature: (event.content_block as { data: string }).data,
@@ -640,7 +656,7 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
               partial: output,
             });
           } else if (event.content_block.type === 'tool_use') {
-            const block: Block = {
+            const block: StreamingOutputBlock = {
               type: 'toolCall',
               id: event.content_block.id,
               name: event.content_block.name,
@@ -705,7 +721,7 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
           const index = blocks.findIndex((b) => b.index === event.index);
           const block = blocks[index];
           if (block) {
-            delete (block as any).index;
+            delete block.index;
             if (block.type === 'text')
               stream.push({
                 type: 'text_end',
@@ -722,7 +738,7 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
               });
             else if (block.type === 'toolCall') {
               block.arguments = parseStreamingJson(block.partialJson);
-              delete (block as any).partialJson;
+              delete block.partialJson;
               stream.push({
                 type: 'toolcall_end',
                 contentIndex: index,
@@ -754,8 +770,8 @@ export const streamAnthropic: StreamFunction<'anthropic-messages', AnthropicOpti
       stream.end();
     } catch (error) {
       for (const block of output.content) {
-        delete (block as any).index;
-        delete (block as any).partialJson;
+        delete (block as StreamingOutputState).index;
+        delete (block as StreamingOutputState).partialJson;
       }
       output.stopReason = options?.signal?.aborted ? 'aborted' : 'error';
       output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);

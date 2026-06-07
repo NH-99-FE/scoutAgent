@@ -1,4 +1,4 @@
-import type { Model } from '@scout-agent/ai';
+import type { Api, Model } from '@scout-agent/ai';
 import { completeSimple } from '@scout-agent/ai';
 import type { AgentMessage } from '../../types.ts';
 import {
@@ -50,7 +50,7 @@ export interface CollectEntriesResult {
 /** 生成分支摘要的选项。 */
 export interface GenerateBranchSummaryOptions {
   /** 用于摘要的模型。 */
-  model: Model<any>;
+  model: Model<Api>;
   /** 转发到供应商的 API key。 */
   apiKey: string;
   /** 转发到供应商的可选请求头。 */

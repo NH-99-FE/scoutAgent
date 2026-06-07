@@ -26,7 +26,6 @@ const {
   mockHarnessSetModel,
   mockHarnessSetThinkingLevel,
   mockHarnessCompact,
-  mockHarnessSetTools,
   mockHarnessSetResources,
   mockHarnessGetModel,
   mockHarnessGetThinkingLevel,

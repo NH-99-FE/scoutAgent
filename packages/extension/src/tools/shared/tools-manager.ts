@@ -362,13 +362,13 @@ export async function ensureTool(
   }
 
   if (!silent) {
-    console.log(`${config.name} not found. Downloading...`);
+    process.stdout.write(`${config.name} not found. Downloading...\n`);
   }
 
   try {
     const path = await downloadTool(tool, options?.signal);
     if (!silent) {
-      console.log(`${config.name} installed to ${path}`);
+      process.stdout.write(`${config.name} installed to ${path}\n`);
     }
     return path;
   } catch (error) {

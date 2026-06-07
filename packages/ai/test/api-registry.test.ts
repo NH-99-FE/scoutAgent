@@ -125,8 +125,8 @@ describe('api-registry', () => {
     const stream1 = makeFakeStreamFn(customApi);
     const stream2 = makeFakeStreamFn(customApi);
 
-    registerApiProvider({ api: customApi, stream: stream1, streamSimple: stream1 as any });
-    registerApiProvider({ api: customApi, stream: stream2, streamSimple: stream2 as any });
+    registerApiProvider({ api: customApi, stream: stream1, streamSimple: stream1 });
+    registerApiProvider({ api: customApi, stream: stream2, streamSimple: stream2 });
 
     const provider = getApiProvider(customApi);
     expect(provider).toBeDefined();
@@ -153,7 +153,7 @@ describe('api-registry', () => {
     const customApi = 'test-api-mismatch' as Api;
     const streamFn = makeFakeStreamFn(customApi);
 
-    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn as any });
+    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn });
 
     const provider = getApiProvider(customApi)!;
     const wrongModel = makeFakeModel('different-api' as Api);
@@ -165,7 +165,7 @@ describe('api-registry', () => {
     const customApi = 'test-api-match' as Api;
     const streamFn = makeFakeStreamFn(customApi);
 
-    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn as any });
+    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn });
 
     const provider = getApiProvider(customApi)!;
     const model = makeFakeModel(customApi);
@@ -186,7 +186,7 @@ describe('api-registry', () => {
   it('getApiProviders includes newly registered providers', () => {
     const customApi = 'test-get-all-api' as Api;
     const streamFn = makeFakeStreamFn(customApi);
-    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn as any });
+    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn });
 
     const providers = getApiProviders();
     const apis = providers.map((p) => p.api);
@@ -201,8 +201,8 @@ describe('api-registry', () => {
     const streamFnA = makeFakeStreamFn(apiA);
     const streamFnB = makeFakeStreamFn(apiB);
 
-    registerApiProvider({ api: apiA, stream: streamFnA, streamSimple: streamFnA as any }, sourceA);
-    registerApiProvider({ api: apiB, stream: streamFnB, streamSimple: streamFnB as any }, sourceB);
+    registerApiProvider({ api: apiA, stream: streamFnA, streamSimple: streamFnA }, sourceA);
+    registerApiProvider({ api: apiB, stream: streamFnB, streamSimple: streamFnB }, sourceB);
 
     expect(getApiProvider(apiA)).toBeDefined();
     expect(getApiProvider(apiB)).toBeDefined();
@@ -216,7 +216,7 @@ describe('api-registry', () => {
   it('unregisterApiProviders does not remove providers without sourceId', () => {
     const customApi = 'test-api-no-source' as Api;
     const streamFn = makeFakeStreamFn(customApi);
-    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn as any });
+    registerApiProvider({ api: customApi, stream: streamFn, streamSimple: streamFn });
 
     unregisterApiProviders('nonexistent-source');
 
@@ -230,8 +230,8 @@ describe('api-registry', () => {
     const streamFn1 = makeFakeStreamFn(api1);
     const streamFn2 = makeFakeStreamFn(api2);
 
-    registerApiProvider({ api: api1, stream: streamFn1, streamSimple: streamFn1 as any }, sourceId);
-    registerApiProvider({ api: api2, stream: streamFn2, streamSimple: streamFn2 as any }, sourceId);
+    registerApiProvider({ api: api1, stream: streamFn1, streamSimple: streamFn1 }, sourceId);
+    registerApiProvider({ api: api2, stream: streamFn2, streamSimple: streamFn2 }, sourceId);
 
     expect(getApiProvider(api1)).toBeDefined();
     expect(getApiProvider(api2)).toBeDefined();

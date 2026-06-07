@@ -4,6 +4,7 @@
 // ============================================================
 
 import type {
+  Api,
   Model,
   SimpleStreamOptions,
   StreamOptions,
@@ -25,7 +26,7 @@ const DEFAULT_THINKING_BUDGETS: ThinkingBudgets = {
  * 解析 API key、传输方式和会话设置。
  */
 export function buildBaseOptions(
-  model: Model<any>,
+  model: Model<Api>,
   options: SimpleStreamOptions | undefined,
   apiKey: string,
 ): StreamOptions {
@@ -52,7 +53,7 @@ export function buildBaseOptions(
  * 如果请求的等级在该模型上不可用，回退到最近的支持等级。
  */
 export function clampReasoning(
-  model: Model<any>,
+  model: Model<Api>,
   reasoning: ThinkingLevel | undefined,
 ): ThinkingLevel | undefined {
   if (!reasoning) return undefined;

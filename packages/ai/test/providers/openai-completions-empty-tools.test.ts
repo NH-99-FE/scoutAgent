@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // streamOpenAICompletions — 空 tools 处理测试
 // 验证空 tools 数组不序列化为 tools: []
@@ -6,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions.js';
 import type { OpenAICompletionsOptions } from '../../src/providers/openai-completions';
-import type { Api, AssistantMessage, Context, Model, Tool } from '../../src/types';
+import type { AssistantMessage, Context, Model, Tool } from '../../src/types';
 
 // ---------- 辅助 ----------
 
@@ -76,7 +77,7 @@ let mockStreamChunks: ChatCompletionChunk[] = [];
 vi.mock('openai', () => {
   return {
     default: class MockOpenAI {
-      constructor(config: any) {
+      constructor(_config: unknown) {
         /* no-op */
       }
       chat = {

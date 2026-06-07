@@ -25,7 +25,7 @@ function restoreEnv(key: string) {
 
 describe('findEnvKeys', () => {
   it('returns undefined for unknown provider', () => {
-    expect(findEnvKeys('unknown-provider' as any)).toBeUndefined();
+    expect(findEnvKeys('unknown-provider')).toBeUndefined();
   });
 
   it('returns env var names that are set for anthropic', () => {
@@ -86,7 +86,7 @@ describe('getEnvApiKey', () => {
   });
 
   it('returns undefined for unknown provider', () => {
-    expect(getEnvApiKey('unknown-provider' as any)).toBeUndefined();
+    expect(getEnvApiKey('unknown-provider')).toBeUndefined();
   });
 
   it('returns ANTHROPIC_API_KEY for anthropic', () => {

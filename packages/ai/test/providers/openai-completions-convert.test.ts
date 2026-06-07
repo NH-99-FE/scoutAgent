@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // openai-completions convertMessages 测试
 // ============================================================
@@ -5,15 +6,12 @@
 import { describe, it, expect } from 'vitest';
 import { convertMessages } from '../../src/providers/openai-completions';
 import type {
-  Api,
   Context,
   ImageContent,
-  Message,
   Model,
   TextContent,
   ThinkingContent,
   ToolCall,
-  ToolResultMessage,
 } from '../../src/types';
 
 // ---------- 辅助 ----------

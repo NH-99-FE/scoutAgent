@@ -3,7 +3,7 @@
 // Lifecycle 语义以 Pi extension API 为唯一来源。
 // ============================================================
 
-import type { Model, ImageContent, TextContent, AssistantMessageEvent } from '@scout-agent/ai';
+import type { Api, AssistantMessageEvent, ImageContent, Model, TextContent } from '@scout-agent/ai';
 import type {
   AgentMessage,
   AgentHarnessResources,
@@ -243,8 +243,8 @@ export interface ToolExecutionEndEvent {
 
 export interface ModelSelectEvent {
   type: 'model_select';
-  model: Model<any>;
-  previousModel: Model<any> | undefined;
+  model: Model<Api>;
+  previousModel: Model<Api> | undefined;
   source: ModelSelectSource;
 }
 
@@ -492,7 +492,7 @@ export interface ScoutExtensionContext {
   readonly cwd: string;
   readonly sessionManager: SessionManager;
   readonly configManager: ConfigManager;
-  readonly model: Model<any> | undefined;
+  readonly model: Model<Api> | undefined;
   isIdle(): boolean;
   readonly signal: AbortSignal | undefined;
   abort(): void;
@@ -662,7 +662,7 @@ export interface ScoutExtensionActions {
 
 /** bindCore() 接收的上下文动作集 */
 export interface ScoutExtensionContextActions {
-  getModel: () => Model<any> | undefined;
+  getModel: () => Model<Api> | undefined;
   isIdle: () => boolean;
   abort: () => void;
   getSystemPrompt: () => string;

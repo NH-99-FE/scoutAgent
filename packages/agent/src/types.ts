@@ -1,4 +1,5 @@
 import type {
+  Api,
   AssistantMessage,
   AssistantMessageEvent,
   ImageContent,
@@ -101,7 +102,7 @@ export interface AfterToolCallContext {
   /** 经过目标工具 schema 验证的工具参数。 */
   args: unknown;
   /** 应用 `afterToolCall` 覆盖之前的已执行工具结果。 */
-  result: AgentToolResult<any>;
+  result: AgentToolResult<unknown>;
   /** 当前已执行工具结果是否被视为错误。 */
   isError: boolean;
   /** 工具调用完成时的当前 Agent 上下文。 */
@@ -125,7 +126,7 @@ export interface AgentLoopTurnUpdate {
   /** 下一次 provider 请求的上下文。 */
   context?: AgentContext;
   /** 下一次 provider 请求的模型。 */
-  model?: Model<any>;
+  model?: Model<Api>;
   /** 下一次 provider 请求的 thinking 级别。 */
   thinkingLevel?: ThinkingLevel;
 }
@@ -133,7 +134,7 @@ export interface AgentLoopTurnUpdate {
 export type PrepareNextTurnContext = ShouldStopAfterTurnContext;
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
-  model: Model<any>;
+  model: Model<Api>;
 
   /**
    * 在每次 LLM 调用前将 AgentMessage[] 转换为 LLM 兼容的 Message[]。
@@ -321,12 +322,12 @@ export interface AgentState {
   /** 随每次模型请求发送的系统提示。 */
   systemPrompt: string;
   /** 未来 turn 使用的活跃模型。 */
-  model: Model<any>;
+  model: Model<Api>;
   /** 未来 turn 请求的推理级别。 */
   thinkingLevel: ThinkingLevel;
   /** 可用工具。赋值新数组时会拷贝顶层数组。 */
-  set tools(tools: AgentTool<any>[]);
-  get tools(): AgentTool<any>[];
+  set tools(tools: AgentTool[]);
+  get tools(): AgentTool[];
   /** 对话记录。赋值新数组时会拷贝顶层数组。 */
   set messages(messages: AgentMessage[]);
   get messages(): AgentMessage[];
@@ -358,12 +359,12 @@ export interface AgentToolResult<T> {
 }
 
 /** 工具用于流式传输部分执行更新的回调。 */
-export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
+export type AgentToolUpdateCallback<T = unknown> = (partialResult: AgentToolResult<T>) => void;
 
 /** Agent 运行时使用的工具定义。 */
 export interface AgentTool<
   TParameters extends TSchema = TSchema,
-  TDetails = any,
+  TDetails = unknown,
 > extends Tool<TParameters> {
   /** UI 展示用的人类可读标签。 */
   label: string;
@@ -406,7 +407,7 @@ export interface AgentContext {
   /** 模型可见的对话记录。 */
   messages: AgentMessage[];
   /** 本次运行可用的工具。 */
-  tools?: AgentTool<any>[];
+  tools?: AgentTool[];
 }
 
 /**
@@ -428,18 +429,23 @@ export type AgentEvent =
   | { type: 'message_update'; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent }
   | { type: 'message_end'; message: AgentMessage }
   // 工具执行生命周期
-  | { type: 'tool_execution_start'; toolCallId: string; toolName: string; args: any }
+  | {
+      type: 'tool_execution_start';
+      toolCallId: string;
+      toolName: string;
+      args: Record<string, unknown>;
+    }
   | {
       type: 'tool_execution_update';
       toolCallId: string;
       toolName: string;
-      args: any;
-      partialResult: any;
+      args: Record<string, unknown>;
+      partialResult: AgentToolResult<unknown>;
     }
   | {
       type: 'tool_execution_end';
       toolCallId: string;
       toolName: string;
-      result: any;
+      result: AgentToolResult<unknown>;
       isError: boolean;
     };

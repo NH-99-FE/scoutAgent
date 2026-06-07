@@ -258,13 +258,13 @@ function formatValidationPath(error: TLocalizedValidationError): string {
 
 // ---------- 公开 API ----------
 
-export function validateToolCall(tools: Tool[], toolCall: ToolCall): any {
+export function validateToolCall(tools: Tool[], toolCall: ToolCall): Record<string, unknown> {
   const tool = tools.find((t) => t.name === toolCall.name);
   if (!tool) throw new Error(`Tool "${toolCall.name}" not found`);
   return validateToolArguments(tool, toolCall);
 }
 
-export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
+export function validateToolArguments(tool: Tool, toolCall: ToolCall): Record<string, unknown> {
   const args = structuredClone(toolCall.arguments);
   Value.Convert(tool.parameters, args);
 
@@ -280,7 +280,7 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
         }
         Object.assign(args, coerced);
       } else {
-        return validator.Check(coerced) ? coerced : args;
+        return validator.Check(coerced) && isRecord(coerced) ? coerced : args;
       }
     }
   }

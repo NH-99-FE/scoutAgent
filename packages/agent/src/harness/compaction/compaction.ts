@@ -1,4 +1,11 @@
-import type { AssistantMessage, ImageContent, Model, TextContent, Usage } from '@scout-agent/ai';
+import type {
+  Api,
+  AssistantMessage,
+  ImageContent,
+  Model,
+  TextContent,
+  Usage,
+} from '@scout-agent/ai';
 import { completeSimple } from '@scout-agent/ai';
 import type { AgentMessage, ThinkingLevel } from '../../types.ts';
 import {
@@ -481,7 +488,7 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 /** 生成或更新用于 compaction 的对话摘要。 */
 export async function generateSummary(
   currentMessages: AgentMessage[],
-  model: Model<any>,
+  model: Model<Api>,
   reserveTokens: number,
   apiKey: string,
   headers?: Record<string, string>,
@@ -659,7 +666,7 @@ export { serializeConversation } from './utils.ts';
 /** 从已准备的 Session 历史生成 compaction 摘要数据。 */
 export async function compact(
   preparation: CompactionPreparation,
-  model: Model<any>,
+  model: Model<Api>,
   apiKey: string,
   headers?: Record<string, string>,
   customInstructions?: string,
@@ -744,7 +751,7 @@ export async function compact(
 }
 async function generateTurnPrefixSummary(
   messages: AgentMessage[],
-  model: Model<any>,
+  model: Model<Api>,
   reserveTokens: number,
   apiKey: string,
   headers?: Record<string, string>,

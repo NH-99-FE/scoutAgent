@@ -7,7 +7,6 @@
 import { describe, it, expect } from 'vitest';
 import { transformMessages } from '../../src/providers/transform-messages';
 import type {
-  Api,
   AssistantMessage,
   Message,
   Model,
@@ -53,7 +52,7 @@ function makeOpenAIModel(
   };
 }
 
-function makeToolCall(id: string, name: string, args: Record<string, any> = {}): ToolCall {
+function makeToolCall(id: string, name: string, args: Record<string, unknown> = {}): ToolCall {
   return { type: 'toolCall', id, name, arguments: args };
 }
 

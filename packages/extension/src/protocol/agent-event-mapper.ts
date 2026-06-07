@@ -123,7 +123,8 @@ function toolResultToString(result: unknown): string {
   if (!Array.isArray(r.content)) return '';
   return r.content
     .filter(
-      (c): c is TextContent => typeof c === 'object' && c !== null && (c as any).type === 'text',
+      (c): c is TextContent =>
+        typeof c === 'object' && c !== null && (c as Record<string, unknown>).type === 'text',
     )
     .map((c) => c.text)
     .join('');

@@ -8,11 +8,17 @@ import {
   clampReasoning,
   adjustMaxTokensForThinking,
 } from '../../src/providers/simple-options';
-import type { Model, SimpleStreamOptions } from '../../src/types';
+import type {
+  Api,
+  Model,
+  ModelThinkingLevel,
+  SimpleStreamOptions,
+  ThinkingLevel,
+} from '../../src/types';
 
 // ---------- 辅助 ----------
 
-function makeModel(overrides: Partial<Model<any>> = {}): Model<any> {
+function makeModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
   return {
     id: 'test-model',
     name: 'Test Model',
@@ -102,7 +108,7 @@ describe('clampReasoning', () => {
 
   it('returns off -> undefined for non-reasoning model', () => {
     const model = makeModel({ reasoning: false });
-    expect(clampReasoning(model, 'off' as any)).toBeUndefined();
+    expect(clampReasoning(model, 'off' as unknown as ThinkingLevel)).toBeUndefined();
   });
 });
 
@@ -166,7 +172,11 @@ describe('adjustMaxTokensForThinking', () => {
   });
 
   it('falls back to 8192 for unknown reasoning level', () => {
-    const result = adjustMaxTokensForThinking(undefined, 100000, 'xhigh' as any);
+    const result = adjustMaxTokensForThinking(
+      undefined,
+      100000,
+      'xhigh' as unknown as ModelThinkingLevel,
+    );
     // No budget for xhigh, falls back to 8192
     expect(result.thinkingBudget).toBe(8192);
   });

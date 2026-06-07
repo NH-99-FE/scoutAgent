@@ -236,7 +236,8 @@ describe('agentLoop with AgentMessage', () => {
 
     const stream = agentLoop([userPrompt], context, config, undefined, streamFn);
 
-    for await (const _ of stream) {
+    for await (const event of stream) {
+      void event;
       // consume
     }
 
@@ -372,7 +373,8 @@ describe('agentLoop with AgentMessage', () => {
     };
 
     const stream = agentLoop([userPrompt], context, config, undefined, streamFn);
-    for await (const _event of stream) {
+    for await (const event of stream) {
+      void event;
       // consume
     }
 
@@ -452,7 +454,8 @@ describe('agentLoop with AgentMessage', () => {
     };
 
     const stream = agentLoop([userPrompt], context, config, undefined, streamFn);
-    for await (const _event of stream) {
+    for await (const event of stream) {
+      void event;
       // consume
     }
 
@@ -976,7 +979,8 @@ describe('agentLoop with AgentMessage', () => {
       },
     );
 
-    for await (const _event of stream) {
+    for await (const event of stream) {
+      void event;
       // consume
     }
 
@@ -1195,7 +1199,8 @@ describe('agentLoop with AgentMessage', () => {
       return mockStream;
     });
 
-    for await (const _event of stream) {
+    for await (const event of stream) {
+      void event;
       // consume
     }
 
@@ -1257,7 +1262,8 @@ describe('agentLoop with AgentMessage', () => {
       },
     );
 
-    for await (const _event of stream) {
+    for await (const event of stream) {
+      void event;
       // consume
     }
 
@@ -1322,7 +1328,9 @@ describe('agentLoopContinue with AgentMessage', () => {
     // Should NOT have user message events (that's the key difference from agentLoop)
     const messageEndEvents = events.filter((e) => e.type === 'message_end');
     expect(messageEndEvents.length).toBe(1);
-    expect((messageEndEvents[0] as any).message.role).toBe('assistant');
+    expect((messageEndEvents[0] as Extract<AgentEvent, { type: 'message_end' }>).message.role).toBe(
+      'assistant',
+    );
   });
 
   it('should allow custom message types as last message (caller responsibility)', async () => {
@@ -1351,10 +1359,11 @@ describe('agentLoopContinue with AgentMessage', () => {
         // Convert custom to user message
         return messages
           .map((m) => {
-            if ((m as any).role === 'custom') {
+            const maybeCustom = m as { role?: unknown; text?: unknown };
+            if (maybeCustom.role === 'custom' && typeof maybeCustom.text === 'string') {
               return {
                 role: 'user' as const,
-                content: (m as any).text,
+                content: maybeCustom.text,
                 timestamp: m.timestamp,
               };
             }

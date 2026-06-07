@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // E2E 测试 — 通过真实 API 调用验证流式完整流程
 // 使用模型：GLM-5.1 (OpenAI协议+思考) + Claude Haiku 4.5 (Anthropic协议)
@@ -261,6 +262,11 @@ describe('OpenAI E2E (GLM-5.1)', () => {
     const result = await s.result();
     expect(result.stopReason).oneOf(['stop', 'toolUse', 'error']);
     expect(result.content.length).toBeGreaterThan(0);
+    const finalText = result.content
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
+      .join('');
+    expect(textChunks).toBe(finalText);
   });
 
   it.skipIf(!apiKey)('tool calling', { timeout: 30000 }, async () => {
@@ -525,6 +531,7 @@ describe('GLM-5.1 Thinking E2E', () => {
 
       const result = await s.result();
       expect(result.stopReason).toBe('stop');
+      void textChunks;
       // 流式增量应该和最终结果一致
       const thinking = result.content.find((b) => b.type === 'thinking') as any;
       if (thinking) {
@@ -638,6 +645,7 @@ describe('Anthropic Thinking E2E (GLM-5.1)', () => {
 
       const result = await s.result();
       expect(result.stopReason).oneOf(['stop', 'toolUse', 'error']);
+      void textChunks;
       const thinking = result.content.find((b) => b.type === 'thinking') as any;
       if (thinking) {
         expect(thinkingChunks.length).toBeGreaterThan(0);

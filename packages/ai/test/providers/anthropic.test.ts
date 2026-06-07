@@ -1,11 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // anthropic provider 测试 — mock client 注入
 // ============================================================
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { streamAnthropic, streamSimpleAnthropic } from '../../src/providers/anthropic';
 import type { AnthropicOptions } from '../../src/providers/anthropic';
-import type { Api, Context, Model, Tool } from '../../src/types';
+import type { Context, Model, Tool } from '../../src/types';
 
 // ---------- vi.mock 让 streamSimpleAnthropic 内部创建的 Anthropic 客户端走 mock ----------
 

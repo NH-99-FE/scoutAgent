@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // Anthropic SSE 解析器容错性测试
 // 验证异常 SSE 数据的处理行为
 // ============================================================
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { streamAnthropic } from '../../src/providers/anthropic';
 import type { AnthropicOptions } from '../../src/providers/anthropic';
 import type { Context, Model } from '../../src/types';

@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { Session } from '@scout-agent/agent';
 import { AgentSessionRuntime } from '../agent-session-runtime.ts';
 import type { AgentSession } from '../agent-session.ts';
 import type { ReplacedSessionContext } from '../extensions/types.ts';
+
+type SessionRepoLike = Parameters<AgentSessionRuntime['newSession']>[0];
+type MockSession = Session & {
+  getMetadata: ReturnType<typeof vi.fn>;
+  dispose: ReturnType<typeof vi.fn>;
+};
 
 function makeSession(overrides?: Partial<AgentSession>) {
   const backingSession = {} as ReturnType<AgentSession['getBackingSession']>;
@@ -26,7 +33,7 @@ function makeRepo() {
   const targetSession = {
     getMetadata: vi.fn(async () => ({ id: 'target-session', path: '/sessions/target.jsonl' })),
     dispose: vi.fn(),
-  };
+  } as unknown as MockSession;
   return {
     targetSession,
     repo: {
@@ -34,7 +41,7 @@ function makeRepo() {
       open: vi.fn(async () => targetSession),
       delete: vi.fn(async () => undefined),
       fork: vi.fn(async () => targetSession),
-    },
+    } satisfies SessionRepoLike,
   };
 }
 
@@ -51,7 +58,7 @@ describe('AgentSessionRuntime', () => {
     });
     runtime.setRebindSession(rebind);
 
-    await expect(runtime.newSession(repo as any)).rejects.toThrow('init failed');
+    await expect(runtime.newSession(repo)).rejects.toThrow('init failed');
 
     expect(oldSession.emitSessionShutdown).not.toHaveBeenCalled();
     expect(oldSession.dispose).not.toHaveBeenCalled();
@@ -92,7 +99,7 @@ describe('AgentSessionRuntime', () => {
     });
     runtime.setRebindSession(rebind);
 
-    const result = await runtime.fork(repo as any, 'entry-1', 'before');
+    const result = await runtime.fork(repo, 'entry-1', 'before');
 
     expect(result).toEqual({ cancelled: false });
     expect(oldSession.abort).toHaveBeenCalled();
@@ -206,7 +213,7 @@ describe('AgentSessionRuntime', () => {
       expect(runtime.session).toBe(nextSession);
     });
 
-    await runtime.newSession(repo as any, { withSession });
+    await runtime.newSession(repo, { withSession });
 
     expect(withSession).toHaveBeenCalledTimes(1);
     expect(nextSession.createReplacedSessionContext).toHaveBeenCalledTimes(1);
@@ -241,7 +248,7 @@ describe('AgentSessionRuntime', () => {
       events.push('rebind');
     });
 
-    const result = await runtime.newSession(repo as any, {
+    const result = await runtime.newSession(repo, {
       withSession: async () => {
         events.push('withSession');
         throw callbackError;
@@ -281,7 +288,7 @@ describe('AgentSessionRuntime', () => {
       events.push('rebind');
     });
 
-    await runtime.newSession(repo as any);
+    await runtime.newSession(repo);
 
     expect(events).toEqual(['shutdown', 'before-invalidate', 'dispose', 'rebind', 'start']);
   });
@@ -320,7 +327,7 @@ describe('AgentSessionRuntime', () => {
       }),
     });
 
-    await expect(runtime.newSession(repo as any)).rejects.toThrow('init failed');
+    await expect(runtime.newSession(repo)).rejects.toThrow('init failed');
 
     expect(targetSession.dispose).toHaveBeenCalled();
     expect(repo.delete).toHaveBeenCalledWith({
@@ -387,7 +394,7 @@ describe('AgentSessionRuntime', () => {
       events.push('rebind');
     });
 
-    const result = await runtime.newSession(repo as any);
+    const result = await runtime.newSession(repo);
 
     expect(result).toEqual({ cancelled: false, teardownError: shutdownError });
     expect(runtime.session).toBe(nextSession);
@@ -411,7 +418,7 @@ describe('AgentSessionRuntime', () => {
       createRuntime: vi.fn(),
     });
 
-    await expect(runtime.newSession(repo as any)).rejects.toBe(metadataError);
+    await expect(runtime.newSession(repo)).rejects.toBe(metadataError);
 
     expect(targetSession.dispose).toHaveBeenCalled();
     expect(repo.delete).not.toHaveBeenCalled();

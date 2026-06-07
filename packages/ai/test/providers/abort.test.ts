@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // 流式传输中途 abort 行为测试
 // 验证 Anthropic + OpenAI 两个 provider 的 abort 完整行为
@@ -6,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { streamAnthropic } from '../../src/providers/anthropic';
 import type { AnthropicOptions } from '../../src/providers/anthropic';
-import type { Api, Context, Model, Tool } from '../../src/types';
+import type { Context, Model, Tool } from '../../src/types';
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions.js';
 import type { OpenAICompletionsOptions } from '../../src/providers/openai-completions';
 
@@ -57,14 +58,6 @@ function toolContext(): Context {
   };
 }
 
-function createSseResponse(events: Array<{ event: string; data: string }>): Response {
-  const body = events.map(({ event, data }) => `event: ${event}\ndata: ${data}\n`).join('\n');
-  return new Response(body, {
-    status: 200,
-    headers: { 'content-type': 'text/event-stream' },
-  });
-}
-
 function messageStartEvent(inputTokens = 10, outputTokens = 0) {
   return {
     event: 'message_start',
@@ -101,13 +94,6 @@ function textDeltaEvent(index: number, text: string) {
       index,
       delta: { type: 'text_delta', text },
     }),
-  };
-}
-
-function blockStopEvent(index: number) {
-  return {
-    event: 'content_block_stop',
-    data: JSON.stringify({ type: 'content_block_stop', index }),
   };
 }
 
@@ -153,32 +139,6 @@ function thinkingDeltaEvent(index: number, thinking: string) {
       delta: { type: 'thinking_delta', thinking },
     }),
   };
-}
-
-function signatureDeltaEvent(index: number, signature: string) {
-  return {
-    event: 'content_block_delta',
-    data: JSON.stringify({
-      type: 'content_block_delta',
-      index,
-      delta: { type: 'signature_delta', signature },
-    }),
-  };
-}
-
-function messageDeltaEvent(stopReason: string, outputTokens = 5) {
-  return {
-    event: 'message_delta',
-    data: JSON.stringify({
-      type: 'message_delta',
-      delta: { stop_reason: stopReason },
-      usage: { output_tokens: outputTokens },
-    }),
-  };
-}
-
-function messageStopEvent() {
-  return { event: 'message_stop', data: JSON.stringify({ type: 'message_stop' }) };
 }
 
 function createMockClient(response: Response) {
@@ -420,7 +380,7 @@ let mockStreamChunks: ChatCompletionChunk[] = [];
 vi.mock('openai', () => {
   return {
     default: class MockOpenAI {
-      constructor(config: any) {
+      constructor(_config: unknown) {
         /* no-op */
       }
       chat = {

@@ -881,7 +881,10 @@ describe('AgentHarness lifecycle', () => {
         content: [{ type: 'text', text: 'replacement with details' }],
       },
     });
-    expect((entries[0] as any).message.details.marker).toBe(marker);
+    const messageEntry = entries[0] as {
+      message: { details: { marker: { ok: boolean } } };
+    };
+    expect(messageEntry.message.details.marker).toBe(marker);
   });
 
   it('orders pending listener session writes after finalized agent messages', async () => {

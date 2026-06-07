@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // streamAnthropic — thinking 禁用路径测试
 // 验证 thinkingEnabled=false 时不产生 thinking 事件

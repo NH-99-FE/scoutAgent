@@ -133,7 +133,7 @@ export interface ToolCall {
   type: 'toolCall';
   id: string;
   name: string;
-  arguments: Record<string, any>;
+  arguments: Record<string, unknown>;
   /** 加密推理签名，用于复用思考上下文（如 o3/o4-mini 的 reasoning_details） */
   thoughtSignature?: string;
 }
@@ -164,7 +164,7 @@ export interface AssistantMessage {
   timestamp: number;
 }
 
-export interface ToolResultMessage<TDetails = any> {
+export interface ToolResultMessage<TDetails = unknown> {
   role: 'toolResult';
   toolCallId: string;
   toolName: string;

@@ -1,4 +1,5 @@
 import {
+  type Api,
   type AssistantMessage,
   type ImageContent,
   type Model,
@@ -63,7 +64,7 @@ function createUserMessage(text: string, images?: ImageContent[]): UserMessage {
 }
 
 function createFailureMessage(
-  model: Model<any>,
+  model: Model<Api>,
   error: unknown,
   aborted: boolean,
 ): AssistantMessage {
@@ -156,7 +157,10 @@ function applyStreamOptionsPatch(
 
 const SUBSCRIBER_EVENT_TYPE = '*';
 
-type AgentHarnessHandler = (event: any, signal?: AbortSignal) => Promise<any> | any;
+type AgentHarnessHandler = (
+  event: AgentHarnessEvent,
+  signal?: AbortSignal,
+) => Promise<unknown> | unknown;
 type MessageEndEvent = Extract<AgentEvent, { type: 'message_end' }>;
 type AgentHarnessHookEvent<
   TSkill extends Skill = Skill,
@@ -191,7 +195,7 @@ interface AgentHarnessTurnState<
   streamOptions: AgentHarnessStreamOptions;
   sessionId: string;
   systemPrompt: string;
-  model: Model<any>;
+  model: Model<Api>;
   thinkingLevel: ThinkingLevel;
   tools: TTool[];
   activeTools: TTool[];
@@ -208,7 +212,7 @@ export class AgentHarness<
   private runAbortController?: AbortController;
   private runPromise?: Promise<void>;
   private pendingSessionWrites: PendingSessionWrite[] = [];
-  private model: Model<any>;
+  private model: Model<Api>;
   private thinkingLevel: ThinkingLevel;
   private systemPrompt: AgentHarnessOptions<TSkill, TPromptTemplate, TTool>['systemPrompt'];
   private streamOptions: AgentHarnessStreamOptions;
@@ -285,7 +289,7 @@ export class AgentHarness<
     let lastResult: AgentHarnessEventResultMap[TType] | undefined;
     for (const handler of handlers) {
       try {
-        const result = await handler(event);
+        const result = (await handler(event)) as AgentHarnessEventResultMap[TType] | undefined;
         if (result !== undefined) {
           lastResult = result;
         }
@@ -331,7 +335,7 @@ export class AgentHarness<
   }
 
   private async emitBeforeProviderRequest(
-    model: Model<any>,
+    model: Model<Api>,
     sessionId: string,
     streamOptions: AgentHarnessStreamOptions,
   ): Promise<AgentHarnessStreamOptions> {
@@ -340,12 +344,12 @@ export class AgentHarness<
     if (!handlers || handlers.size === 0) return current;
     for (const handler of handlers) {
       try {
-        const result = await handler({
+        const result = (await handler({
           type: 'before_provider_request',
           model,
           sessionId,
           streamOptions: cloneStreamOptions(current),
-        });
+        })) as AgentHarnessEventResultMap['before_provider_request'] | undefined;
         if (result?.streamOptions) {
           current = applyStreamOptionsPatch(current, result.streamOptions);
         }
@@ -356,13 +360,17 @@ export class AgentHarness<
     return current;
   }
 
-  private async emitBeforeProviderPayload(model: Model<any>, payload: unknown): Promise<unknown> {
+  private async emitBeforeProviderPayload(model: Model<Api>, payload: unknown): Promise<unknown> {
     const handlers = this.getHandlers('before_provider_payload');
     let current = payload;
     if (!handlers || handlers.size === 0) return current;
     for (const handler of handlers) {
       try {
-        const result = await handler({ type: 'before_provider_payload', model, payload: current });
+        const result = (await handler({
+          type: 'before_provider_payload',
+          model,
+          payload: current,
+        })) as AgentHarnessEventResultMap['before_provider_payload'] | undefined;
         if (result !== undefined) {
           current = result.payload;
         }
@@ -648,7 +656,7 @@ export class AgentHarness<
   }
 
   private async emitRunFailure(
-    model: Model<any>,
+    model: Model<Api>,
     error: unknown,
     aborted: boolean,
     signal: AbortSignal,
@@ -1181,7 +1189,7 @@ export class AgentHarness<
     }
   }
 
-  getModel(): Model<any> {
+  getModel(): Model<Api> {
     return this.model;
   }
 
@@ -1199,7 +1207,7 @@ export class AgentHarness<
     return this.thinkingLevel;
   }
 
-  async setModel(model: Model<any>): Promise<void> {
+  async setModel(model: Model<Api>): Promise<void> {
     try {
       const previousModel = this.model;
       if (this.phase === 'idle') {

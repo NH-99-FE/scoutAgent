@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // streamOpenAICompletions — retry 行为测试
 // 验证 maxRetries 选项正确传递给 OpenAI SDK
@@ -77,7 +78,7 @@ let capturedRequestOptions: any = null;
 vi.mock('openai', () => {
   return {
     default: class MockOpenAI {
-      constructor(config: any) {
+      constructor(_config: unknown) {
         /* no-op */
       }
       chat = {

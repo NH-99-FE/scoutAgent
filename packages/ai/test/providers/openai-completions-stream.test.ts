@@ -1,11 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // ============================================================
 // openai-completions 流式处理测试 — mock OpenAI 模块
 // ============================================================
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatCompletionChunk } from 'openai/resources/chat/completions.js';
 import type { OpenAICompletionsOptions } from '../../src/providers/openai-completions';
-import type { Api, Context, Model, Tool } from '../../src/types';
+import type { Context, Model, Tool } from '../../src/types';
 
 // ---------- 辅助 ----------
 

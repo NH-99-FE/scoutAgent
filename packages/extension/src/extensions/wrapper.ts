@@ -36,7 +36,7 @@ export function wrapRegisteredTools(
 function wrapToolDefinition<TDetails = unknown>(
   definition: ScoutToolDefinition<TSchema, TDetails>,
   ctxFactory?: () => ScoutExtensionContext,
-): AgentTool<any, TDetails> {
+): AgentTool<TSchema, TDetails> {
   return {
     name: definition.name,
     label: definition.label,

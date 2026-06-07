@@ -63,7 +63,7 @@ function makeAssistantMessage(
   };
 }
 
-function makeToolCall(id: string, name: string, args: Record<string, any> = {}): ToolCall {
+function makeToolCall(id: string, name: string, args: Record<string, unknown> = {}): ToolCall {
   return { type: 'toolCall', id, name, arguments: args };
 }
 
@@ -414,6 +414,6 @@ describe('transformMessages — mixed scenarios', () => {
     const result = transformMessages(messages, model);
     const content = (result[0] as AssistantMessage).content;
     const tc = content[0] as ToolCall;
-    expect((tc as any).thoughtSignature).toBeUndefined();
+    expect((tc as ToolCall).thoughtSignature).toBeUndefined();
   });
 });

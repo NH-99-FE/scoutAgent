@@ -14,14 +14,14 @@ const esbuildProblemMatcherPlugin = {
 
   setup(build) {
     build.onStart(() => {
-      console.log('[watch] build started');
+      process.stdout.write('[watch] build started\n');
     });
     build.onEnd((result) => {
       for (const { text, location } of result.errors) {
         console.error(`✘ [ERROR] ${text}`);
         console.error(`    ${location.file}:${location.line}:${location.column}:`);
       }
-      console.log('[watch] build finished');
+      process.stdout.write('[watch] build finished\n');
     });
   },
 };
@@ -46,7 +46,7 @@ const copyWebviewPlugin = {
       }
 
       fs.cpSync(src, dest, { recursive: true });
-      console.log('[copy-webview] copied webview dist → dist/webview');
+      process.stdout.write('[copy-webview] copied webview dist -> dist/webview\n');
     });
   },
 };

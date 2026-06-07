@@ -47,6 +47,40 @@ export interface OpenAICompletionsOptions extends StreamOptions {
   reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 }
 
+type ChatCompletionAssistantMessageWithExtensions = ChatCompletionAssistantMessageParam & {
+  [key: string]: unknown;
+  reasoning_details?: unknown[];
+  reasoning_content?: string;
+};
+
+type ChatCompletionToolMessageWithName = ChatCompletionToolMessageParam & { name?: string };
+
+type ChatCompletionParamsWithExtensions = Omit<
+  OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+  'reasoning_effort'
+> & {
+  stream_options?: { include_usage: boolean };
+  max_tokens?: number;
+  thinking?: { type: 'enabled' | 'disabled' };
+  reasoning_effort?: string;
+};
+
+interface StreamingToolCallBlock extends ToolCall {
+  partialArgs?: string;
+  streamIndex?: number;
+}
+
+interface ChoiceWithUsage {
+  usage?: Parameters<typeof parseChunkUsage>[0];
+}
+
+interface ReasoningDetail {
+  type?: string;
+  id?: string;
+  data?: unknown;
+  [key: string]: unknown;
+}
+
 // ---------- 已解析的兼容性配置 ----------
 
 type ResolvedCompat = Omit<Required<OpenAICompletionsCompat>, 'cacheControlFormat'> & {
@@ -190,7 +224,7 @@ export function convertMessages(
         params.push({ role: 'user', content });
       }
     } else if (msg.role === 'assistant') {
-      const assistantMsg: ChatCompletionAssistantMessageParam = {
+      const assistantMsg: ChatCompletionAssistantMessageWithExtensions = {
         role: 'assistant',
         content: null,
       };
@@ -209,7 +243,7 @@ export function convertMessages(
         if (text.length > 0) assistantMsg.content = text;
         const signature = thinkingBlocks[0].thinkingSignature || 'reasoning_content';
         if (signature.length > 0) {
-          (assistantMsg as any)[signature] = thinkingBlocks.map((b) => b.thinking).join('\n');
+          assistantMsg[signature] = thinkingBlocks.map((b) => b.thinking).join('\n');
         }
       } else if (thinkingBlocks.length > 0 && compat.requiresThinkingAsText) {
         const thinkingText = thinkingBlocks.map((b) => b.thinking).join('\n\n');
@@ -241,7 +275,7 @@ export function convertMessages(
           })
           .filter(Boolean);
         if (reasoningDetails.length > 0) {
-          (assistantMsg as any).reasoning_details = reasoningDetails;
+          assistantMsg.reasoning_details = reasoningDetails;
         }
       }
 
@@ -249,9 +283,9 @@ export function convertMessages(
       if (
         compat.requiresReasoningContentOnAssistantMessages &&
         model.reasoning &&
-        (assistantMsg as { reasoning_content?: string }).reasoning_content === undefined
+        assistantMsg.reasoning_content === undefined
       ) {
-        (assistantMsg as { reasoning_content?: string }).reasoning_content = '';
+        assistantMsg.reasoning_content = '';
       }
 
       // 跳过空的 assistant 消息
@@ -259,7 +293,7 @@ export function convertMessages(
         assistantMsg.content !== null &&
         (typeof assistantMsg.content === 'string'
           ? assistantMsg.content.length > 0
-          : (assistantMsg.content as any[]).length > 0);
+          : Array.isArray(assistantMsg.content) && assistantMsg.content.length > 0);
       if (!hasContent && !assistantMsg.tool_calls) continue;
 
       params.push(assistantMsg);
@@ -274,13 +308,13 @@ export function convertMessages(
           .join('\n');
         const hasImages = toolMsg.content.some((c) => c.type === 'image');
         const hasText = textResult.length > 0;
-        const toolResultMsg: ChatCompletionToolMessageParam = {
+        const toolResultMsg: ChatCompletionToolMessageWithName = {
           role: 'tool',
           content: sanitizeSurrogates(hasText ? textResult : '(see attached image)'),
           tool_call_id: toolMsg.toolCallId,
         };
         if (compat.requiresToolResultName && toolMsg.toolName) {
-          (toolResultMsg as any).name = toolMsg.toolName;
+          toolResultMsg.name = toolMsg.toolName;
         }
         params.push(toolResultMsg);
 
@@ -322,7 +356,7 @@ function convertTools(
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: tool.parameters as any,
+      parameters: tool.parameters as Record<string, unknown>,
       ...(compat.supportsStrictMode !== false && { strict: false }),
     },
   }));
@@ -387,9 +421,9 @@ function buildParams(
   options: OpenAICompletionsOptions | undefined,
   compat: ResolvedCompat,
   cacheRetention: CacheRetention = resolveCacheRetention(options?.cacheRetention),
-): OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming {
+): ChatCompletionParamsWithExtensions {
   const messages = convertMessages(model, context, compat);
-  const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+  const params: ChatCompletionParamsWithExtensions = {
     model: model.id,
     messages,
     stream: true,
@@ -403,7 +437,7 @@ function buildParams(
   };
 
   if (compat.supportsUsageInStreaming !== false) {
-    (params as any).stream_options = { include_usage: true };
+    params.stream_options = { include_usage: true };
   }
 
   if (compat.supportsStore) {
@@ -412,7 +446,7 @@ function buildParams(
 
   if (options?.maxTokens) {
     if (compat.maxTokensField === 'max_tokens') {
-      (params as any).max_tokens = options.maxTokens;
+      params.max_tokens = options.maxTokens;
     } else {
       params.max_completion_tokens = options.maxTokens;
     }
@@ -434,9 +468,9 @@ function buildParams(
 
   // 思考/推理
   if (compat.thinkingFormat === 'deepseek' && model.reasoning) {
-    (params as any).thinking = { type: options?.reasoningEffort ? 'enabled' : 'disabled' };
+    params.thinking = { type: options?.reasoningEffort ? 'enabled' : 'disabled' };
     if (options?.reasoningEffort) {
-      (params as any).reasoning_effort =
+      params.reasoning_effort =
         model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
     }
   } else if (compat.thinkingFormat === 'openrouter' && model.reasoning) {
@@ -459,12 +493,12 @@ function buildParams(
         model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
     }
   } else if (options?.reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
-    (params as any).reasoning_effort =
+    params.reasoning_effort =
       model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
   } else if (!options?.reasoningEffort && model.reasoning && compat.supportsReasoningEffort) {
     const offValue = model.thinkingLevelMap?.off;
     if (typeof offValue === 'string') {
-      (params as any).reasoning_effort = offValue;
+      params.reasoning_effort = offValue;
     }
   }
 
@@ -507,8 +541,7 @@ export const streamOpenAICompletions: StreamFunction<
       let params = buildParams(model, context, options, compat, cacheRetention);
 
       const nextParams = await options?.onPayload?.(params, model);
-      if (nextParams !== undefined)
-        params = nextParams as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming;
+      if (nextParams !== undefined) params = nextParams as ChatCompletionParamsWithExtensions;
 
       const requestOptions = {
         ...(options?.signal ? { signal: options.signal } : {}),
@@ -517,7 +550,10 @@ export const streamOpenAICompletions: StreamFunction<
       };
 
       const { data: openaiStream, response } = await client.chat.completions
-        .create(params, requestOptions)
+        .create(
+          params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+          requestOptions,
+        )
         .withResponse();
       await options?.onResponse?.(
         { status: response.status, headers: Object.fromEntries(response.headers.entries()) },
@@ -526,10 +562,6 @@ export const streamOpenAICompletions: StreamFunction<
       stream.push({ type: 'start', partial: output });
 
       // 流式状态
-      interface StreamingToolCallBlock extends ToolCall {
-        partialArgs?: string;
-        streamIndex?: number;
-      }
       type StreamingBlock = TextContent | ThinkingContent | StreamingToolCallBlock;
 
       let textBlock: TextContent | null = null;
@@ -646,8 +678,9 @@ export const streamOpenAICompletions: StreamFunction<
         if (!choice) continue;
 
         // 从 choice 中回退获取用量
-        if (!chunk.usage && (choice as any).usage) {
-          output.usage = parseChunkUsage((choice as any).usage, model);
+        const choiceUsage = (choice as ChoiceWithUsage).usage;
+        if (!chunk.usage && choiceUsage) {
+          output.usage = parseChunkUsage(choiceUsage, model);
         }
 
         if (choice.finish_reason) {
@@ -708,7 +741,8 @@ export const streamOpenAICompletions: StreamFunction<
           }
 
           // 加密推理详情 — o3/o4-mini 的 reasoning_details
-          const reasoningDetails = (choice.delta as any).reasoning_details;
+          const reasoningDetails = (choice.delta as { reasoning_details?: ReasoningDetail[] })
+            .reasoning_details;
           if (reasoningDetails && Array.isArray(reasoningDetails)) {
             for (const detail of reasoningDetails) {
               if (detail.type === 'reasoning.encrypted' && detail.id && detail.data) {
@@ -737,8 +771,8 @@ export const streamOpenAICompletions: StreamFunction<
       stream.end();
     } catch (error) {
       for (const block of output.content) {
-        delete (block as any).partialArgs;
-        delete (block as any).streamIndex;
+        delete (block as Partial<StreamingToolCallBlock>).partialArgs;
+        delete (block as Partial<StreamingToolCallBlock>).streamIndex;
       }
       output.stopReason = options?.signal?.aborted ? 'aborted' : 'error';
       output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);

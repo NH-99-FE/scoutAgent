@@ -5,11 +5,13 @@ import {
   getModel,
   streamSimple,
 } from '@scout-agent/ai';
+import { Type } from 'typebox';
 import { describe, expect, it } from 'vitest';
 
 // streamSimple 的副作用导入会触发 register-builtins，确保内置 provider 已注册
 void streamSimple;
 import { Agent } from '../src/index.ts';
+import type { AgentMessage, AgentTool, AgentToolResult } from '../src/index.ts';
 
 // Mock stream that mimics AssistantMessageEventStream
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -272,7 +274,18 @@ describe('Agent', () => {
     expect(agent.state.thinkingLevel).toBe('high');
 
     // Test setTools
-    const tools = [{ name: 'test', description: 'test tool' } as any];
+    const tools: AgentTool[] = [
+      {
+        name: 'test',
+        label: 'Test',
+        description: 'test tool',
+        parameters: Type.Object({}),
+        execute: async (): Promise<AgentToolResult<unknown>> => ({
+          content: [{ type: 'text', text: 'ok' }],
+          details: {},
+        }),
+      },
+    ];
     agent.state.tools = tools;
     expect(agent.state.tools).toEqual(tools);
     expect(agent.state.tools).not.toBe(tools); // Should be a copy
@@ -288,7 +301,7 @@ describe('Agent', () => {
       role: 'assistant' as const,
       content: [{ type: 'text' as const, text: 'Hi' }],
     };
-    agent.state.messages.push(newMessage as any);
+    agent.state.messages.push(newMessage as AgentMessage);
     expect(agent.state.messages).toHaveLength(2);
     expect(agent.state.messages[1]).toBe(newMessage);
 

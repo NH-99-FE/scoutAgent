@@ -4,8 +4,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { mapAgentEventToScout } from '../../protocol/agent-event-mapper.ts';
-import type { AgentEvent } from '@scout-agent/agent';
-import type { ScoutAssistantMessage } from '@scout-agent/shared';
+import type { AgentEvent, AgentMessage } from '@scout-agent/agent';
+import type {
+  ScoutAssistantMessage,
+  ScoutToolResultMessage,
+  ScoutUserMessage,
+} from '@scout-agent/shared';
 
 // ---------- 夹具：AgentMessage ----------
 
@@ -114,8 +118,8 @@ describe('mapAgentEventToScout', () => {
     expect(result?.type).toBe('message_start');
     if (result?.type === 'message_start') {
       expect(result.message.role).toBe('user');
-      expect((result.message as ScoutAssistantMessage).content).toBe('hello');
-      expect(typeof (result.message as any).timestamp).toBe('number');
+      expect((result.message as ScoutUserMessage).content).toBe('hello');
+      expect(typeof (result.message as ScoutUserMessage).timestamp).toBe('number');
     }
   });
 
@@ -164,17 +168,17 @@ describe('mapAgentEventToScout', () => {
     expect(result?.type).toBe('message_end');
     if (result?.type === 'message_end') {
       expect(result.message.role).toBe('toolResult');
-      expect((result.message as any).toolCallId).toBe('tc-1');
-      expect((result.message as any).toolName).toBe('echo');
+      expect((result.message as ScoutToolResultMessage).toolCallId).toBe('tc-1');
+      expect((result.message as ScoutToolResultMessage).toolName).toBe('echo');
     }
   });
 
   it('returns null for message_start with custom role', () => {
     const customMessage = {
-      role: 'custom' as any,
+      role: 'custom',
       content: 'custom content',
       timestamp: Date.now(),
-    };
+    } as unknown as AgentMessage;
     const event: AgentEvent = { type: 'message_start', message: customMessage };
     expect(mapAgentEventToScout(event)).toBeNull();
   });

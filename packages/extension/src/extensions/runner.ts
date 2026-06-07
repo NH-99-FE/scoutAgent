@@ -3,7 +3,7 @@
 // Lifecycle reducer 语义以 Pi ExtensionRunner 为来源。
 // ============================================================
 
-import type { Model } from '@scout-agent/ai';
+import type { Api, Model } from '@scout-agent/ai';
 import type { AgentMessage } from '@scout-agent/agent';
 import type { ScoutContextUsage } from '@scout-agent/shared';
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from './types.ts';
@@ -121,7 +121,7 @@ export class ScoutExtensionRunner {
   private commandDiagnostics: ResourceDiagnostic[] = [];
 
   // bindCore 注入的上下文动作
-  private getModelFn: () => Model<any> | undefined = () => undefined;
+  private getModelFn: () => Model<Api> | undefined = () => undefined;
   private isIdleFn: () => boolean = () => true;
   private abortFn: () => void = () => {};
   private getSystemPromptFn: () => string = () => '';

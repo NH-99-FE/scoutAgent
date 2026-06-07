@@ -4,19 +4,7 @@
 // ============================================================
 
 import { describe, it, expect } from 'vitest';
-import type {
-  Api,
-  AssistantMessage,
-  Context,
-  ImageContent,
-  Message,
-  Model,
-  TextContent,
-  ThinkingContent,
-  Tool,
-  ToolCall,
-  ToolResultMessage,
-} from '../../src/types';
+import type { AssistantMessage, Message, Model, TextContent, ToolCall } from '../../src/types';
 
 // ---------- 辅助 ----------
 
@@ -107,24 +95,10 @@ function makeAnthropicAssistantWithToolCall(
   };
 }
 
-function makeToolResult(toolCallId: string, toolName: string, text: string): ToolResultMessage {
-  return {
-    role: 'toolResult',
-    toolCallId,
-    toolName,
-    content: [{ type: 'text', text }],
-    isError: false,
-    timestamp: Date.now(),
-  };
-}
-
 // ---------- 测试 ----------
 
 describe('Cross-provider message handoff', () => {
   it('OpenAI assistant with toolCall converts to Anthropic format', async () => {
-    // 动态导入以避免循环依赖
-    const { convertMessages: convertAnthropicMessages } =
-      await import('../../src/providers/anthropic');
     // convertMessages 在 anthropic.ts 中不是 exported，需要通过 buildParams 间接测试
     // 实际上通过 streamAnthropic 的 onPayload 捕获 messages 来测试
     // 但这里我们可以用 transformMessages 来测试消息变换

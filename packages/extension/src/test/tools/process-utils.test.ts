@@ -3,8 +3,9 @@
 // ============================================================
 
 import { describe, it, expect, vi } from 'vitest';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { killProcessTree, waitForChildProcess } from '../../tools/shared/process-utils.ts';
 
 describe('killProcessTree', () => {
@@ -46,16 +47,18 @@ describe('waitForChildProcess', () => {
   });
 
   it('resolves after exit even when inherited stdio handles never close', async () => {
-    const child = new EventEmitter() as any;
-    child.stdout = Object.assign(new EventEmitter(), { destroy: vi.fn() });
-    child.stderr = Object.assign(new EventEmitter(), { destroy: vi.fn() });
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const stdoutDestroy = vi.spyOn(stdout, 'destroy');
+    const stderrDestroy = vi.spyOn(stderr, 'destroy');
+    const child = Object.assign(new EventEmitter(), { stdout, stderr }) as unknown as ChildProcess;
 
     const promise = waitForChildProcess(child);
     child.emit('exit', 0);
 
     const exitCode = await promise;
     expect(exitCode).toBe(0);
-    expect(child.stdout.destroy).toHaveBeenCalled();
-    expect(child.stderr.destroy).toHaveBeenCalled();
+    expect(stdoutDestroy).toHaveBeenCalled();
+    expect(stderrDestroy).toHaveBeenCalled();
   });
 });

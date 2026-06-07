@@ -8,6 +8,7 @@ import { clearApiProviders, registerApiProvider } from '../src/api-registry';
 import { AssistantMessageEventStream } from '../src/event-stream';
 import type {
   Api,
+  AssistantMessage,
   Context,
   Model,
   SimpleStreamOptions,
@@ -48,7 +49,7 @@ function makeStreamSimpleFn(): StreamFunction<Api, SimpleStreamOptions> {
   return (_model, _context, _options) => new AssistantMessageEventStream();
 }
 
-function makeFakeMessage(): any {
+function makeFakeMessage(): AssistantMessage {
   return {
     role: 'assistant' as const,
     content: [{ type: 'text' as const, text: 'hi' }],

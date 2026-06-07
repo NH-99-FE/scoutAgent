@@ -5,7 +5,14 @@
 // ============================================================
 
 import * as vscode from 'vscode';
-import type { Model, Api, AssistantMessage, ImageContent, TextContent } from '@scout-agent/ai';
+import type {
+  Api,
+  AssistantMessage,
+  AssistantMessageEvent,
+  ImageContent,
+  Model,
+  TextContent,
+} from '@scout-agent/ai';
 import { isContextOverflow } from '@scout-agent/ai';
 import type {
   AgentEvent,
@@ -1476,7 +1483,10 @@ export class AgentSession implements vscode.Disposable {
         message: (event as { message: AgentMessage }).message,
       });
     } else if (type === 'message_update') {
-      const messageUpdate = event as { message: AgentMessage; assistantMessageEvent: any };
+      const messageUpdate = event as {
+        message: AgentMessage;
+        assistantMessageEvent: AssistantMessageEvent;
+      };
       await runner.emit({
         type: 'message_update',
         message: messageUpdate.message,

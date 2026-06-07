@@ -4,14 +4,27 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { Type } from '@sinclair/typebox';
-import type { JsonlSessionMetadata } from '@scout-agent/agent';
+import type {
+  AgentMessage,
+  CompactionPreparation,
+  JsonlSessionMetadata,
+  TreePreparation,
+} from '@scout-agent/agent';
 import { ScoutExtensionRunner } from '../../extensions/runner.ts';
 import { createExtensionRuntime } from '../../extensions/loader.ts';
 import type {
+  BeforeProviderRequestEvent,
+  InputEvent,
+  MessageEndEvent,
   ScoutExtension,
   ScoutExtensionActions,
   ScoutExtensionContextActions,
+  ScoutExtensionContext,
+  ToolCallEvent,
+  ToolResultEvent,
 } from '../../extensions/types.ts';
+import type { ConfigManager } from '../../config-manager.ts';
+import type { SessionManager } from '../../session-manager.ts';
 
 // ---------- 测试夹具 ----------
 
@@ -20,14 +33,14 @@ function makeMockSessionManager() {
     prompt: vi.fn(),
     abort: vi.fn(),
     compact: vi.fn(),
-  } as any;
+  } as unknown as SessionManager;
 }
 
 function makeMockConfigManager() {
   return {
     getApiKey: vi.fn(() => 'test-key'),
     getExtensionPaths: vi.fn(() => []),
-  } as any;
+  } as unknown as ConfigManager;
 }
 
 function makeExtension(
@@ -448,14 +461,16 @@ describe('ScoutExtensionRunner.emitBeforeAgentStart', () => {
   it('chains ctx.getSystemPrompt through handler modifications', async () => {
     const seen: string[] = [];
     const ext1 = makeExtension({
-      before_agent_start: async (_event, ctx: any) => {
-        seen.push(ctx.getSystemPrompt());
+      before_agent_start: async (_event: unknown, ctx: unknown) => {
+        const extensionContext = ctx as ScoutExtensionContext;
+        seen.push(extensionContext.getSystemPrompt());
         return { systemPrompt: 'first' };
       },
     });
     const ext2 = makeExtension({
-      before_agent_start: async (_event, ctx: any) => {
-        seen.push(ctx.getSystemPrompt());
+      before_agent_start: async (_event: unknown, ctx: unknown) => {
+        const extensionContext = ctx as ScoutExtensionContext;
+        seen.push(extensionContext.getSystemPrompt());
         return { systemPrompt: 'second' };
       },
     });
@@ -486,14 +501,14 @@ describe('ScoutExtensionRunner.emitContext', () => {
 
     const result = await runner.emitContext([]);
     expect(result).toHaveLength(1);
-    expect((result[0] as any).content).toBe('second');
+    expect((result[0] as Extract<AgentMessage, { role: 'user' }>).content).toBe('second');
   });
 
   it('returns original messages when no handlers modify', async () => {
     const runner = makeRunner([makeExtension()]);
     runner.bindCore(makeActions(), makeContextActions());
 
-    const original = [{ role: 'user', content: 'hello', timestamp: 0 }] as any[];
+    const original: AgentMessage[] = [{ role: 'user', content: 'hello', timestamp: 0 }];
     const result = await runner.emitContext(original);
     expect(result).toEqual(original);
   });
@@ -536,12 +551,16 @@ describe('ScoutExtensionRunner.emitToolCall', () => {
 
   it('lets argument mutations remain visible to later handlers', async () => {
     const ext1 = makeExtension({
-      tool_call: async (event: any) => {
-        event.input.command = 'echo patched';
+      tool_call: async (event: unknown) => {
+        const toolCall = event as ToolCallEvent;
+        toolCall.input.command = 'echo patched';
       },
     });
     const ext2 = makeExtension({
-      tool_call: async (event: any) => ({ block: event.input.command === 'echo patched' }),
+      tool_call: async (event: unknown) => {
+        const toolCall = event as ToolCallEvent;
+        return { block: toolCall.input.command === 'echo patched' };
+      },
     });
     const runner = makeRunner([ext1, ext2]);
     runner.bindCore(makeActions(), makeContextActions());
@@ -606,12 +625,19 @@ describe('ScoutExtensionRunner.emitToolResult', () => {
       tool_result: async () => ({ content: [{ type: 'text', text: 'patched' }], isError: true }),
     });
     const ext2 = makeExtension({
-      tool_result: async (event: any) => ({
-        details: {
-          sawContent: event.content[0].text,
-          sawIsError: event.isError,
-        },
-      }),
+      tool_result: async (event: unknown) => {
+        const toolResult = event as ToolResultEvent;
+        const firstContent = toolResult.content[0] as Extract<
+          ToolResultEvent['content'][number],
+          { type: 'text' }
+        >;
+        return {
+          details: {
+            sawContent: firstContent.text,
+            sawIsError: toolResult.isError,
+          },
+        };
+      },
     });
     const runner = makeRunner([ext1, ext2]);
     runner.bindCore(makeActions(), makeContextActions());
@@ -650,10 +676,16 @@ describe('ScoutExtensionRunner.emitToolResult', () => {
 describe('ScoutExtensionRunner.emitBeforeProviderRequest', () => {
   it('chains payload transformations', async () => {
     const ext1 = makeExtension({
-      before_provider_request: async (event: any) => ({ ...event.payload, first: true }),
+      before_provider_request: async (event: unknown) => ({
+        ...((event as BeforeProviderRequestEvent).payload as Record<string, unknown>),
+        first: true,
+      }),
     });
     const ext2 = makeExtension({
-      before_provider_request: async (event: any) => ({ ...event.payload, second: true }),
+      before_provider_request: async (event: unknown) => ({
+        ...((event as BeforeProviderRequestEvent).payload as Record<string, unknown>),
+        second: true,
+      }),
     });
     const runner = makeRunner([ext1, ext2]);
     runner.bindCore(makeActions(), makeContextActions());
@@ -667,10 +699,16 @@ describe('ScoutExtensionRunner.emitBeforeProviderRequest', () => {
 describe('ScoutExtensionRunner.emitInput', () => {
   it('chains transform results', async () => {
     const ext1 = makeExtension({
-      input: async (event: any) => ({ action: 'transform', text: `${event.text} one` }),
+      input: async (event: unknown) => ({
+        action: 'transform',
+        text: `${(event as InputEvent).text} one`,
+      }),
     });
     const ext2 = makeExtension({
-      input: async (event: any) => ({ action: 'transform', text: `${event.text} two` }),
+      input: async (event: unknown) => ({
+        action: 'transform',
+        text: `${(event as InputEvent).text} two`,
+      }),
     });
     const runner = makeRunner([ext1, ext2]);
     runner.bindCore(makeActions(), makeContextActions());
@@ -701,24 +739,27 @@ describe('ScoutExtensionRunner.emitInput', () => {
 describe('ScoutExtensionRunner.emitMessageEnd', () => {
   it('chains same-role message replacements', async () => {
     const ext1 = makeExtension({
-      message_end: async (event: any) => ({
-        message: { ...event.message, content: 'first' },
-      }),
+      message_end: async (event: unknown) => {
+        const messageEnd = event as MessageEndEvent;
+        return { message: { ...messageEnd.message, content: 'first' } };
+      },
     });
     const ext2 = makeExtension({
-      message_end: async (event: any) => ({
-        message: { ...event.message, content: `${event.message.content} second` },
-      }),
+      message_end: async (event: unknown) => {
+        const messageEnd = event as MessageEndEvent;
+        const message = messageEnd.message as Extract<AgentMessage, { role: 'assistant' }>;
+        return { message: { ...message, content: `${message.content} second` } };
+      },
     });
     const runner = makeRunner([ext1, ext2]);
     runner.bindCore(makeActions(), makeContextActions());
 
     const result = await runner.emitMessageEnd({
       type: 'message_end',
-      message: { role: 'assistant', content: 'original', timestamp: 0 } as any,
+      message: { role: 'assistant', content: 'original', timestamp: 0 } as unknown as AgentMessage,
     });
 
-    expect((result as any).content).toBe('first second');
+    expect((result as Extract<AgentMessage, { role: 'assistant' }>).content).toBe('first second');
   });
 
   it('rejects replacements with a different role and emits an error', async () => {
@@ -734,7 +775,7 @@ describe('ScoutExtensionRunner.emitMessageEnd', () => {
 
     const result = await runner.emitMessageEnd({
       type: 'message_end',
-      message: { role: 'assistant', content: 'original', timestamp: 0 } as any,
+      message: { role: 'assistant', content: 'original', timestamp: 0 } as unknown as AgentMessage,
     });
 
     expect(result).toBeUndefined();
@@ -784,7 +825,7 @@ describe('ScoutExtensionRunner.emitSessionBeforeCompact', () => {
 
     const result = await runner.emitSessionBeforeCompact({
       type: 'session_before_compact',
-      preparation: {} as any,
+      preparation: {} as unknown as CompactionPreparation,
       branchEntries: [],
       signal: new AbortController().signal,
     });
@@ -806,7 +847,7 @@ describe('ScoutExtensionRunner session before hooks', () => {
 
     const result = await runner.emitSessionBeforeTree({
       type: 'session_before_tree',
-      preparation: {} as any,
+      preparation: {} as unknown as TreePreparation,
       signal: new AbortController().signal,
     });
 
