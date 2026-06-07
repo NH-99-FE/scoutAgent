@@ -1,11 +1,12 @@
 // ============================================================
 // 注册内置 API provider
-// 第一期：Anthropic Messages + OpenAI Chat Completions
+// 第一期：Anthropic Messages + OpenAI Chat Completions/Responses
 // ============================================================
 
 import { clearApiProviders, registerApiProvider } from '../api-registry';
 import { streamAnthropic, streamSimpleAnthropic } from './anthropic';
 import { streamOpenAICompletions, streamSimpleOpenAICompletions } from './openai-completions';
+import { streamOpenAIResponses, streamSimpleOpenAIResponses } from './openai-responses';
 
 export function registerBuiltInApiProviders(): void {
   registerApiProvider({
@@ -18,6 +19,12 @@ export function registerBuiltInApiProviders(): void {
     api: 'openai-completions',
     stream: streamOpenAICompletions,
     streamSimple: streamSimpleOpenAICompletions,
+  });
+
+  registerApiProvider({
+    api: 'openai-responses',
+    stream: streamOpenAIResponses,
+    streamSimple: streamSimpleOpenAIResponses,
   });
 }
 

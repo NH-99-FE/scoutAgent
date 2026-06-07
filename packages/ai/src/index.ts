@@ -80,3 +80,4 @@ export {
 export type { DiagnosticErrorInfo, AssistantMessageDiagnostic } from './utils/diagnostics';
 export { isContextOverflow, getOverflowPatterns } from './utils/overflow';
 export { transformMessages } from './providers/transform-messages';
+export type { OpenAIResponsesOptions } from './providers/openai-responses';

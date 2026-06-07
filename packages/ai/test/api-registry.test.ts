@@ -15,6 +15,10 @@ import {
   streamOpenAICompletions,
   streamSimpleOpenAICompletions,
 } from '../src/providers/openai-completions';
+import {
+  streamOpenAIResponses,
+  streamSimpleOpenAIResponses,
+} from '../src/providers/openai-responses';
 import { resetApiProviders } from '../src/providers/register-builtins';
 import type {
   Api,
@@ -69,6 +73,11 @@ function registerBuiltins() {
     stream: streamOpenAICompletions,
     streamSimple: streamSimpleOpenAICompletions,
   });
+  registerApiProvider({
+    api: 'openai-responses',
+    stream: streamOpenAIResponses,
+    streamSimple: streamSimpleOpenAIResponses,
+  });
 }
 
 // ---------- 测试 ----------
@@ -88,6 +97,7 @@ describe('api-registry', () => {
   it('has built-in providers registered after import', () => {
     expect(getApiProvider('anthropic-messages')).toBeDefined();
     expect(getApiProvider('openai-completions')).toBeDefined();
+    expect(getApiProvider('openai-responses')).toBeDefined();
   });
 
   it('returns undefined for unregistered API', () => {
@@ -126,6 +136,7 @@ describe('api-registry', () => {
     clearApiProviders();
     expect(getApiProvider('anthropic-messages')).toBeUndefined();
     expect(getApiProvider('openai-completions')).toBeUndefined();
+    expect(getApiProvider('openai-responses')).toBeUndefined();
   });
 
   it('resetApiProviders restores built-in providers', () => {
@@ -135,6 +146,7 @@ describe('api-registry', () => {
 
     expect(getApiProvider('anthropic-messages')).toBeDefined();
     expect(getApiProvider('openai-completions')).toBeDefined();
+    expect(getApiProvider('openai-responses')).toBeDefined();
   });
 
   it('registered provider stream throws on API mismatch', () => {
@@ -168,6 +180,7 @@ describe('api-registry', () => {
     const apis = providers.map((p) => p.api);
     expect(apis).toContain('anthropic-messages');
     expect(apis).toContain('openai-completions');
+    expect(apis).toContain('openai-responses');
   });
 
   it('getApiProviders includes newly registered providers', () => {

@@ -33,14 +33,7 @@ export interface BranchSummarySettings {
 
 const SECTION = 'scout-agent';
 const VALID_TRANSPORTS: Transport[] = ['sse', 'websocket', 'websocket-cached', 'auto'];
-const VALID_THINKING_LEVELS: ThinkingLevel[] = [
-  'off',
-  'minimal',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-];
+const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
 export interface ConfigManagerOptions {
   cwd: string;
@@ -140,7 +133,9 @@ function parseConfiguredModel(value: unknown): Model<Api> | undefined {
         ? 'anthropic-messages'
         : 'openai-completions';
   if (provider === 'anthropic' && api !== 'anthropic-messages') return undefined;
-  if (provider === 'openai' && api !== 'openai-completions') return undefined;
+  if (provider === 'openai' && api !== 'openai-completions' && api !== 'openai-responses') {
+    return undefined;
+  }
 
   const baseUrl =
     typeof value.baseUrl === 'string' && value.baseUrl.trim()

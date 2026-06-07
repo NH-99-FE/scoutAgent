@@ -341,6 +341,47 @@ describe('ConfigManager', () => {
     }
   });
 
+  it('loads OpenAI Responses custom models from .scout/models.json', () => {
+    const tempDir = join(tmpdir(), `scout-responses-models-test-${Date.now()}`);
+    const scoutDir = join(tempDir, '.scout');
+    try {
+      mkdirSync(scoutDir, { recursive: true });
+      writeFileSync(
+        join(scoutDir, 'models.json'),
+        JSON.stringify({
+          models: [
+            {
+              id: 'custom-gpt-5',
+              name: 'Custom GPT-5',
+              api: 'openai-responses',
+              provider: 'openai',
+              baseUrl: 'https://api.openai.com/v1',
+              reasoning: true,
+              thinkingLevelMap: { off: null },
+              input: ['text', 'image'],
+              cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 },
+              contextWindow: 400000,
+              maxTokens: 128000,
+            },
+          ],
+        }),
+      );
+
+      const cm = new ConfigManager({
+        cwd: tempDir,
+        agentDir: scoutDir,
+        getConfiguration: () =>
+          makeMockConfiguration({ openaiApiKey: 'test-key' }) as vscode.WorkspaceConfiguration,
+      });
+
+      const model = cm.findModel('openai/custom-gpt-5');
+      expect(model?.api).toBe('openai-responses');
+      expect(model?.name).toBe('Custom GPT-5');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps project custom models isolated to their ConfigManager', () => {
     const tempDir = join(tmpdir(), `scout-model-isolation-test-${Date.now()}-${Math.random()}`);
     const workspaceA = join(tempDir, 'workspace-a');

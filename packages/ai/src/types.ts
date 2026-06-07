@@ -13,7 +13,7 @@ export type { AssistantMessageEventStream } from './event-stream';
 // ---------- API / Provider ----------
 // 已知的 API 协议和供应商，扩展时往这里加
 
-export type KnownApi = 'anthropic-messages' | 'openai-completions';
+export type KnownApi = 'anthropic-messages' | 'openai-completions' | 'openai-responses';
 
 export type Api = KnownApi | (string & {});
 
