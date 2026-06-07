@@ -3,7 +3,7 @@
 // 第一期：Anthropic Messages + OpenAI Chat Completions
 // ============================================================
 
-import { registerApiProvider } from '../api-registry';
+import { clearApiProviders, registerApiProvider } from '../api-registry';
 import { streamAnthropic, streamSimpleAnthropic } from './anthropic';
 import { streamOpenAICompletions, streamSimpleOpenAICompletions } from './openai-completions';
 
@@ -19,6 +19,11 @@ export function registerBuiltInApiProviders(): void {
     stream: streamOpenAICompletions,
     streamSimple: streamSimpleOpenAICompletions,
   });
+}
+
+export function resetApiProviders(): void {
+  clearApiProviders();
+  registerBuiltInApiProviders();
 }
 
 // 导入时自动注册

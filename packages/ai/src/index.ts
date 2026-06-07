@@ -50,6 +50,7 @@ export {
   unregisterApiProviders,
   clearApiProviders,
 } from './api-registry';
+export { registerBuiltInApiProviders, resetApiProviders } from './providers/register-builtins';
 export { stream, complete, streamSimple, completeSimple } from './stream';
 export {
   getModel,

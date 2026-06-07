@@ -11,6 +11,10 @@ Webview 当前只保留临时占位入口。会话恢复、导入、消息渲染
 - 发送 `import_session` 支持手动路径导入 JSONL。
 - 发送 `delete_session` 删除指定 session，必须携带 `sessionPath`。
 - 消费 `restore_session_result`、`import_session_result`、`delete_session_result` 展示操作结果。
+- 后续需要补充 context usage 协议：请求当前上下文估算，展示 token 数、context window 和占比；压缩后 token 数未知时展示未知状态。
+- 后续需要补充 manual compaction 协议：触发手动压缩、消费 `compaction_start` / `compaction_end`，并允许 `abort` 取消压缩。
+- 后续需要补充 commands 协议：获取 slash commands、prompt templates、skills 和 extension commands，并支持从输入框触发。
+- 后续若支持图片输入或图片工具结果，协议需要新增可序列化 image content，不能继续只传 text/thinking/toolCall。
 
 ## 会话 UI
 
@@ -33,6 +37,7 @@ Webview 当前只保留临时占位入口。会话恢复、导入、消息渲染
 - 根据 `config_update` 和 `state_update` 展示当前模型。
 - `config_update` 还包含 `branchSummary` 设置，Tree UI 必须按该配置决定默认交互。
 - 支持 `select_model`、`select_thinking`。
+- thinking level 必须支持 `off`、`minimal`、`low`、`medium`、`high`、`xhigh`；UI 应按当前模型支持情况禁用不可用等级。
 - 根据 `tools` 和 `activeToolNames` 渲染工具列表，发送 `set_active_tools` 更新启用项。
 
 ## Tree / Fork / Label

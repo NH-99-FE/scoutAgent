@@ -33,6 +33,14 @@ export interface BranchSummarySettings {
 
 const SECTION = 'scout-agent';
 const VALID_TRANSPORTS: Transport[] = ['sse', 'websocket', 'websocket-cached', 'auto'];
+const VALID_THINKING_LEVELS: ThinkingLevel[] = [
+  'off',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+];
 
 export interface ConfigManagerOptions {
   cwd: string;
@@ -250,9 +258,9 @@ export class ConfigManager {
   getDefaultThinkingLevel(): ThinkingLevel | undefined {
     const level = this.getSetting<string>('defaultThinkingLevel');
     if (!level) return undefined;
-    // 校验是否为合法 ThinkingLevel 值
-    const valid: string[] = ['off', 'minimal', 'low', 'medium', 'high'];
-    return valid.includes(level) ? (level as ThinkingLevel) : undefined;
+    return VALID_THINKING_LEVELS.includes(level as ThinkingLevel)
+      ? (level as ThinkingLevel)
+      : undefined;
   }
 
   getCompactionSettings(): CompactionSettings {

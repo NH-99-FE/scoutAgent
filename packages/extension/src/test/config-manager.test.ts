@@ -132,6 +132,11 @@ describe('ConfigManager', () => {
     expect(cm.getDefaultThinkingLevel()).toBe('medium');
   });
 
+  it('reads xhigh default thinking level from settings', () => {
+    const cm = makeConfigManager({ defaultThinkingLevel: 'xhigh' });
+    expect(cm.getDefaultThinkingLevel()).toBe('xhigh');
+  });
+
   it('returns undefined for empty default thinking level', () => {
     const cm = makeConfigManager({ defaultThinkingLevel: '' });
     expect(cm.getDefaultThinkingLevel()).toBeUndefined();

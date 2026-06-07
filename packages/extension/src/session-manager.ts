@@ -758,7 +758,7 @@ export class SessionManager implements vscode.Disposable {
       },
       setModel: (modelId: string) => agentSession.setModel(modelId),
       setThinkingLevel: (level: string) => {
-        const VALID_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high'];
+        const VALID_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
         const validated = VALID_LEVELS.includes(level as ThinkingLevel)
           ? (level as ThinkingLevel)
           : 'off';

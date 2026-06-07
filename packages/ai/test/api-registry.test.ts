@@ -15,6 +15,7 @@ import {
   streamOpenAICompletions,
   streamSimpleOpenAICompletions,
 } from '../src/providers/openai-completions';
+import { resetApiProviders } from '../src/providers/register-builtins';
 import type {
   Api,
   Context,
@@ -125,6 +126,15 @@ describe('api-registry', () => {
     clearApiProviders();
     expect(getApiProvider('anthropic-messages')).toBeUndefined();
     expect(getApiProvider('openai-completions')).toBeUndefined();
+  });
+
+  it('resetApiProviders restores built-in providers', () => {
+    clearApiProviders();
+
+    resetApiProviders();
+
+    expect(getApiProvider('anthropic-messages')).toBeDefined();
+    expect(getApiProvider('openai-completions')).toBeDefined();
   });
 
   it('registered provider stream throws on API mismatch', () => {

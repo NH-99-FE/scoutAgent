@@ -6,7 +6,7 @@
 
 // ---------- Thinking levels ----------
 
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high';
+export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 // ---------- Source / Tool info ----------
 

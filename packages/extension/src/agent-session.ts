@@ -266,8 +266,7 @@ export class AgentSession implements vscode.Disposable {
 
   get thinkingLevel(): ThinkingLevel {
     const raw = this.harness?.getThinkingLevel();
-    if (!raw || raw === 'xhigh') return 'high';
-    return raw as ThinkingLevel;
+    return raw ? (raw as ThinkingLevel) : 'off';
   }
 
   get isStreaming(): boolean {

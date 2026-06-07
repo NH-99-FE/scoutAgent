@@ -67,7 +67,8 @@
             "minimal",
             "low",
             "medium",
-            "high"
+            "high",
+            "xhigh"
           ],
           "default": "off",
           "description": "Default thinking level for reasoning models"

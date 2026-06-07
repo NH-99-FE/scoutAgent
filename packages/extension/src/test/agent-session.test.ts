@@ -648,6 +648,13 @@ describe('AgentSession', () => {
     agentSession.dispose();
   });
 
+  it('preserves xhigh thinkingLevel from harness', async () => {
+    mockHarnessGetThinkingLevel.mockReturnValue('xhigh');
+    const agentSession = await makeInitializedAgentSession();
+    expect(agentSession.thinkingLevel).toBe('xhigh');
+    agentSession.dispose();
+  });
+
   it('returns parentSessionPath from metadata', async () => {
     mockSessionGetMetadata.mockResolvedValue({
       id: 'session-child',
