@@ -383,6 +383,7 @@ vi.mock('../extensions/index.ts', () => ({
 import { AgentSession } from '../agent-session.ts';
 import { ConfigManager } from '../config-manager.ts';
 import { mapAgentEventToScout } from '../protocol/agent-event-mapper.ts';
+import { buildSystemPrompt } from '../system-prompt.ts';
 
 function makeOutputChannel() {
   return {
@@ -431,6 +432,7 @@ function makeAgentSession(overrides?: {
   extensionRunner?: any;
   skills?: any[];
   promptTemplates?: any[];
+  contextFiles?: Array<{ path: string; content: string }>;
   includeAllExtensionTools?: boolean;
 }): AgentSession {
   const configManager = new ConfigManager({
@@ -444,6 +446,7 @@ function makeAgentSession(overrides?: {
     outputChannel: makeOutputChannel(),
     skills: overrides?.skills ?? [],
     promptTemplates: overrides?.promptTemplates,
+    contextFiles: overrides?.contextFiles,
     extensionRunner: overrides?.extensionRunner,
     includeAllExtensionTools: overrides?.includeAllExtensionTools,
   });
@@ -454,6 +457,7 @@ async function makeInitializedAgentSession(overrides?: {
   extensionRunner?: any;
   skills?: any[];
   promptTemplates?: any[];
+  contextFiles?: Array<{ path: string; content: string }>;
   includeAllExtensionTools?: boolean;
 }): Promise<AgentSession> {
   const agentSession = makeAgentSession(overrides);
@@ -566,6 +570,19 @@ describe('AgentSession', () => {
           maxRetries: 2,
           maxRetryDelayMs: 60000,
         }),
+      }),
+    );
+    agentSession.dispose();
+  });
+
+  it('passes context files into the initial system prompt', async () => {
+    const contextFiles = [{ path: '/test/project/AGENTS.md', content: 'Use project rules.' }];
+
+    const agentSession = await makeInitializedAgentSession({ contextFiles });
+
+    expect(buildSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextFiles,
       }),
     );
     agentSession.dispose();
@@ -1047,6 +1064,9 @@ describe('AgentSession — 运行时操作', () => {
       ],
       skills: [],
     });
+    const contextFiles = [
+      { path: '/test/project/AGENTS.md', content: 'Follow project instructions.' },
+    ];
 
     await agentSession.setResources({
       promptTemplates: [
@@ -1066,6 +1086,7 @@ describe('AgentSession — 运行时操作', () => {
           disableModelInvocation: false,
         },
       ],
+      contextFiles,
     });
 
     expect(mockHarnessSetResources).toHaveBeenCalledWith({
@@ -1095,6 +1116,11 @@ describe('AgentSession — 运行时操作', () => {
         source: 'skill',
       }),
     ]);
+    expect(buildSystemPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextFiles,
+      }),
+    );
     agentSession.dispose();
   });
 

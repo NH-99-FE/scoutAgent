@@ -4,7 +4,8 @@
 //       形状对齐 Pi ResourceLoader，先覆盖 Scout 已启用的资源类型。
 // ============================================================
 
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import type { PromptTemplate } from '@scout-agent/agent';
 import { loadSourcedPromptTemplates } from '@scout-agent/agent';
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
@@ -24,15 +25,79 @@ export interface DiscoveredExtensionResources {
 
 export type SourcedScoutSkill = ScoutSkill & { sourceInfo?: SourceInfo };
 
+export interface ScoutContextFile {
+  path: string;
+  content: string;
+}
+
 export interface LoadedScoutResources {
   skills: SourcedScoutSkill[];
   promptTemplates: SourcedPromptTemplate[];
+  contextFiles: ScoutContextFile[];
   diagnostics: AgentSessionRuntimeDiagnostic[];
 }
 
 export interface ScoutResourceLoaderOptions {
   cwd: string;
   agentDir: string;
+}
+
+// ---------- 项目上下文 ----------
+
+const CONTEXT_FILE_CANDIDATES = ['AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD'];
+
+function loadContextFileFromDir(dir: string): ScoutContextFile | null {
+  for (const filename of CONTEXT_FILE_CANDIDATES) {
+    const filePath = join(dir, filename);
+    if (!existsSync(filePath)) continue;
+
+    try {
+      return {
+        path: filePath,
+        content: readFileSync(filePath, 'utf-8'),
+      };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+export function loadProjectContextFiles(options: {
+  cwd: string;
+  agentDir: string;
+}): ScoutContextFile[] {
+  const resolvedCwd = resolve(options.cwd);
+  const resolvedAgentDir = resolve(options.agentDir);
+  const contextFiles: ScoutContextFile[] = [];
+  const seenPaths = new Set<string>();
+
+  const globalContext = loadContextFileFromDir(resolvedAgentDir);
+  if (globalContext) {
+    contextFiles.push(globalContext);
+    seenPaths.add(resolve(globalContext.path));
+  }
+
+  const ancestorContextFiles: ScoutContextFile[] = [];
+  let currentDir = resolvedCwd;
+
+  while (true) {
+    const contextFile = loadContextFileFromDir(currentDir);
+    if (contextFile) {
+      const normalizedPath = resolve(contextFile.path);
+      if (!seenPaths.has(normalizedPath)) {
+        ancestorContextFiles.unshift(contextFile);
+        seenPaths.add(normalizedPath);
+      }
+    }
+
+    const parentDir = resolve(currentDir, '..');
+    if (parentDir === currentDir) break;
+    currentDir = parentDir;
+  }
+
+  contextFiles.push(...ancestorContextFiles);
+  return contextFiles;
 }
 
 // ---------- ResourceLoader ----------
@@ -133,6 +198,7 @@ export class ScoutResourceLoader {
     return {
       skills,
       promptTemplates: dedupedPromptResult.promptTemplates,
+      contextFiles: loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }),
       diagnostics,
     };
   }

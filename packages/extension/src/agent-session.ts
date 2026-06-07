@@ -84,6 +84,7 @@ import { createSyntheticSourceInfo } from './source-info.ts';
 import {
   ScoutResourceLoader,
   type DiscoveredExtensionResources,
+  type ScoutContextFile,
   type LoadedScoutResources,
 } from './resource-loader.ts';
 import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
@@ -152,6 +153,7 @@ export interface AgentSessionOptions {
   outputChannel: vscode.OutputChannel;
   skills: ScoutSkill[];
   promptTemplates?: PromptTemplate[];
+  contextFiles?: ScoutContextFile[];
   extensionRunner?: ScoutExtensionRunner;
   loadExtensionResources?: (
     resources: DiscoveredExtensionResources,
@@ -182,6 +184,7 @@ export class AgentSession implements vscode.Disposable {
   private readonly outputChannel: vscode.OutputChannel;
   private skills: ScoutSkill[];
   private promptTemplates: PromptTemplate[];
+  private contextFiles: ScoutContextFile[];
   private extensionRunner?: ScoutExtensionRunner;
   private loadExtensionResources?: (
     resources: DiscoveredExtensionResources,
@@ -245,6 +248,7 @@ export class AgentSession implements vscode.Disposable {
     this.outputChannel = options.outputChannel;
     this.skills = options.skills;
     this.promptTemplates = options.promptTemplates ?? [];
+    this.contextFiles = options.contextFiles ?? [];
     this.extensionRunner = options.extensionRunner;
     this.loadExtensionResources = options.loadExtensionResources;
     this.activeToolNames = options.activeToolNames ?? [...DEFAULT_ACTIVE_TOOL_NAMES];
@@ -599,9 +603,11 @@ export class AgentSession implements vscode.Disposable {
   async setResources(resources: {
     skills?: ScoutSkill[];
     promptTemplates?: PromptTemplate[];
+    contextFiles?: ScoutContextFile[];
   }): Promise<void> {
     this.skills = resources.skills ?? [];
     this.promptTemplates = resources.promptTemplates ?? [];
+    this.contextFiles = resources.contextFiles ?? [];
     await this.harness?.setResources({
       skills: this.skills as Skill[],
       promptTemplates: this.promptTemplates,
@@ -724,6 +730,7 @@ export class AgentSession implements vscode.Disposable {
     await this.setResources({
       skills: loadedResources.skills,
       promptTemplates: loadedResources.promptTemplates,
+      contextFiles: loadedResources.contextFiles,
     });
     for (const diag of loadedResources.diagnostics) {
       const prefix = diag.type === 'error' ? 'ERROR' : 'WARN';
@@ -1971,6 +1978,7 @@ export class AgentSession implements vscode.Disposable {
       promptGuidelines: toolGuidelines,
       cwd: this.cwd,
       skills: this.skills,
+      contextFiles: this.contextFiles,
     });
   }
 }

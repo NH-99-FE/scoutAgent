@@ -3,7 +3,10 @@
 // ResourceLoader 测试
 // ============================================================
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { mockLoadSkills, mockLoadSourcedPromptTemplates } = vi.hoisted(() => ({
   mockLoadSkills: vi.fn(() => ({ skills: [] as any[], diagnostics: [] as any[] })),
@@ -25,9 +28,11 @@ vi.mock('@scout-agent/agent/node', () => ({
   NodeExecutionEnv: vi.fn(function (this: any) {}),
 }));
 
-import { ScoutResourceLoader } from '../resource-loader.ts';
+import { ScoutResourceLoader, loadProjectContextFiles } from '../resource-loader.ts';
 
 describe('ScoutResourceLoader', () => {
+  const tempDirs: string[] = [];
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockLoadSkills.mockReturnValue({ skills: [], diagnostics: [] });
@@ -36,6 +41,18 @@ describe('ScoutResourceLoader', () => {
       diagnostics: [],
     });
   });
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeTempDir(): string {
+    const dir = mkdtempSync(join(tmpdir(), 'scout-resource-loader-'));
+    tempDirs.push(dir);
+    return dir;
+  }
 
   it('loads default prompt template locations', async () => {
     const loader = new ScoutResourceLoader({ cwd: '/test/project', agentDir: '/test/agent' });
@@ -49,6 +66,70 @@ describe('ScoutResourceLoader', () => {
     expect(promptInputPaths).toEqual(
       expect.arrayContaining(['/test/agent/prompts', '/test/project/.scout/prompts']),
     );
+  });
+
+  it('loads context files from agent dir and cwd ancestors in Pi order', () => {
+    const root = makeTempDir();
+    const agentDir = join(root, '.scout');
+    const packageDir = join(root, 'packages');
+    const cwd = join(packageDir, 'app');
+    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(join(agentDir, 'AGENTS.md'), 'global instructions');
+    writeFileSync(join(root, 'AGENTS.md'), 'root instructions');
+    writeFileSync(join(packageDir, 'CLAUDE.md'), 'package instructions');
+    writeFileSync(join(cwd, 'AGENTS.md'), 'cwd instructions');
+
+    const contextFiles = loadProjectContextFiles({ cwd, agentDir });
+    const scopedPaths = contextFiles
+      .filter((entry) => entry.path.startsWith(root))
+      .map((entry) => relative(root, entry.path).replace(/\\/g, '/'));
+
+    expect(scopedPaths).toEqual([
+      '.scout/AGENTS.md',
+      'AGENTS.md',
+      'packages/CLAUDE.md',
+      'packages/app/AGENTS.md',
+    ]);
+    expect(contextFiles.map((entry) => entry.content)).toEqual(
+      expect.arrayContaining([
+        'global instructions',
+        'root instructions',
+        'package instructions',
+        'cwd instructions',
+      ]),
+    );
+  });
+
+  it('uses AGENTS.md before CLAUDE.md in the same directory', () => {
+    const root = makeTempDir();
+    const agentDir = join(root, '.scout');
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(root, 'AGENTS.md'), 'agents instructions');
+    writeFileSync(join(root, 'CLAUDE.md'), 'claude instructions');
+
+    const contextFiles = loadProjectContextFiles({ cwd: root, agentDir });
+    const projectContext = contextFiles.find((entry) => entry.path === join(root, 'AGENTS.md'));
+
+    expect(projectContext?.content).toBe('agents instructions');
+    expect(contextFiles.some((entry) => entry.path === join(root, 'CLAUDE.md'))).toBe(false);
+  });
+
+  it('returns loaded context files with other resources', async () => {
+    const root = makeTempDir();
+    const agentDir = join(root, '.scout');
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(root, 'AGENTS.md'), 'project instructions');
+    const loader = new ScoutResourceLoader({ cwd: root, agentDir });
+
+    const result = await loader.load();
+
+    expect(result.contextFiles).toEqual([
+      expect.objectContaining({
+        path: join(root, 'AGENTS.md'),
+        content: 'project instructions',
+      }),
+    ]);
   });
 
   it('extends resources with extension paths and keeps first prompt on collision', async () => {

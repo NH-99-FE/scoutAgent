@@ -641,6 +641,7 @@ export class SessionManager implements vscode.Disposable {
       outputChannel: this.outputChannel,
       skills: runtimeResources.skills,
       promptTemplates: runtimeResources.promptTemplates,
+      contextFiles: runtimeResources.contextFiles,
       extensionRunner,
       loadExtensionResources: (resources) => resourceLoader.extendResources(resources),
       activeToolNames,
