@@ -2,36 +2,75 @@
 // E2E 测试辅助 — 凭证检测与模型构建
 // ============================================================
 
+import { existsSync, readFileSync } from 'node:fs';
 import type { Model } from '../src/types';
+import { getModel } from '../src/models';
+
+const ROOT_ENV_URL = new URL('../../../.env', import.meta.url);
+
+function shouldRunE2E(): boolean {
+  const value = process.env.RUN_E2E?.trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on';
+}
+
+function readDotEnvValue(name: string): string {
+  if (!existsSync(ROOT_ENV_URL)) return '';
+  const content = readFileSync(ROOT_ENV_URL, 'utf-8');
+  for (const line of content.split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match || match[1] !== name) continue;
+    return match[2].replace(/^['"]|['"]$/g, '');
+  }
+  return '';
+}
+
+function getEnvValue(name: string): string {
+  if (!shouldRunE2E()) return '';
+  return import.meta.env[name] || process.env[name] || readDotEnvValue(name);
+}
 
 /** 检查 Anthropic 凭证是否可用 */
 export function hasAnthropicCredentials(): boolean {
-  return !!import.meta.env.VITE_ANTHROPIC_API_KEY;
+  return !!getAnthropicApiKey();
 }
 
 /** 检查 OpenAI 兼容凭证是否可用 */
 export function hasOpenAICredentials(): boolean {
-  return !!import.meta.env.VITE_OPENAI_API_KEY;
+  return !!getOpenAIApiKey();
+}
+
+/** 检查官方 OpenAI 凭证是否可用 */
+export function hasOfficialOpenAICredentials(): boolean {
+  return (
+    !!getOpenAIApiKey() && getOpenAIBaseUrl().replace(/\/+$/, '') === 'https://api.openai.com/v1'
+  );
 }
 
 /** 获取 Anthropic base URL */
 export function getAnthropicBaseUrl(): string {
-  return import.meta.env.VITE_ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1';
+  return getEnvValue('VITE_ANTHROPIC_BASE_URL') || 'https://api.anthropic.com/v1';
 }
 
 /** 获取 OpenAI base URL */
 export function getOpenAIBaseUrl(): string {
-  return import.meta.env.VITE_OPENAI_BASE_URL || 'https://api.openai.com/v1';
+  return getEnvValue('VITE_OPENAI_BASE_URL') || 'https://api.openai.com/v1';
 }
 
 /** 获取 OpenAI 兼容的 API Key */
 export function getOpenAIApiKey(): string {
-  return import.meta.env.VITE_OPENAI_API_KEY || '';
+  return getEnvValue('VITE_OPENAI_API_KEY');
 }
 
 /** 获取 Anthropic API Key */
 export function getAnthropicApiKey(): string {
-  return import.meta.env.VITE_ANTHROPIC_API_KEY || '';
+  return getEnvValue('VITE_ANTHROPIC_API_KEY');
+}
+
+/** 官方 OpenAI Responses 模型 */
+export function getOfficialOpenAIResponsesModel(): Model<'openai-responses'> {
+  const model = getModel<'openai-responses'>('openai', 'gpt-4o-mini');
+  if (!model) throw new Error('内置 OpenAI Responses 模型缺失: openai/gpt-4o-mini');
+  return { ...model, baseUrl: getOpenAIBaseUrl() };
 }
 
 /** GLM-5.1（通过 OpenAI 兼容协议，支持思考） */

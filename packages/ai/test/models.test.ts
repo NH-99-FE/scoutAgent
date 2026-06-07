@@ -38,7 +38,7 @@ describe('getModel', () => {
     const model = getModel('openai', 'gpt-4o');
     expect(model).toBeDefined();
     expect(model!.id).toBe('gpt-4o');
-    expect(model!.api).toBe('openai-completions');
+    expect(model!.api).toBe('openai-responses');
     expect(model!.provider).toBe('openai');
   });
 
@@ -84,7 +84,7 @@ describe('getModels', () => {
     const models = getModels();
     const apis = new Set(models.map((m) => m.api));
     expect(apis.has('anthropic-messages')).toBe(true);
-    expect(apis.has('openai-completions')).toBe(true);
+    expect(apis.has('openai-responses')).toBe(true);
   });
 
   it('filters by provider — anthropic', () => {
@@ -218,10 +218,16 @@ describe('getSupportedThinkingLevels', () => {
   });
 
   it('excludes off for reasoning models where off maps to null', () => {
-    const model = getModel('openai', 'o3')!;
+    const model = getModel('openai', 'gpt-5')!;
     const levels = getSupportedThinkingLevels(model);
     expect(levels).not.toContain('off');
     expect(levels).toContain('minimal');
+  });
+
+  it('includes xhigh for Pi OpenAI models that declare it', () => {
+    const model = getModel('openai', 'gpt-5.2')!;
+    const levels = getSupportedThinkingLevels(model);
+    expect(levels).toContain('xhigh');
   });
 });
 
@@ -247,7 +253,7 @@ describe('clampThinkingLevel', () => {
   });
 
   it('clamps off to first available for reasoning models', () => {
-    const model = getModel('openai', 'o3')!;
+    const model = getModel('openai', 'gpt-5')!;
     const result = clampThinkingLevel(model, 'off');
     expect(result).toBeDefined();
     expect(result).not.toBe('off');

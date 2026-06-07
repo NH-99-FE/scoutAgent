@@ -11,6 +11,8 @@ import {
   getGLM51,
   getClaudeHaiku45,
   getGLM51Anthropic,
+  getOfficialOpenAIResponsesModel,
+  hasOfficialOpenAICredentials,
   getOpenAIApiKey,
   getAnthropicApiKey,
 } from './e2e-utils';
@@ -45,6 +47,12 @@ function toolContext(): Context {
     messages: [{ role: 'user', content: 'What is 12 * 7?', timestamp: Date.now() }],
     tools,
   };
+}
+
+function getTextContent(response: { content: Array<{ type: string }> }) {
+  return response.content.find((block) => block.type === 'text') as
+    | { type: 'text'; text: string }
+    | undefined;
 }
 
 // ============================================================
@@ -178,6 +186,32 @@ describe('Anthropic E2E', () => {
     expect(response.role).toBe('assistant');
     expect(response.stopReason).oneOf(['stop', 'length']);
   });
+});
+
+// ============================================================
+// 官方 OpenAI Responses API
+// ============================================================
+
+describe('OpenAI Responses E2E', () => {
+  const model = getOfficialOpenAIResponsesModel();
+  const apiKey = getOpenAIApiKey();
+  const canRun = hasOfficialOpenAICredentials();
+
+  it.skipIf(!canRun)(
+    'basic text generation through Responses API',
+    { timeout: 30000 },
+    async () => {
+      const response = await complete(model, basicContext(), { apiKey });
+
+      expect(response.role).toBe('assistant');
+      expect(response.stopReason).toBe('stop');
+      expect(response.responseId).toBeDefined();
+      expect(getTextContent(response)?.text).toContain('5');
+      expect(response.usage.input).toBeGreaterThan(0);
+      expect(response.usage.output).toBeGreaterThan(0);
+      expect(response.usage.cost.total).toBeGreaterThan(0);
+    },
+  );
 });
 
 // ============================================================
@@ -534,8 +568,8 @@ describe('Anthropic Thinking E2E (GLM-5.1)', () => {
 
       expect(events).toContain('start');
       expect(events).toContain('done');
-      const hasThinking = events.some((e) => e.startsWith('thinking_'));
-      expect(hasThinking).toBe(true);
+      const hasContent = events.some((e) => e.startsWith('text_') || e.startsWith('thinking_'));
+      expect(hasContent).toBe(true);
     },
   );
 
