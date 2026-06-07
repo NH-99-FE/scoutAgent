@@ -3,6 +3,7 @@
 // ============================================================
 
 import { afterEach, describe, it, expect } from 'vitest';
+import { MODELS } from '../src/models.generated';
 import {
   getModel,
   getModels,
@@ -58,7 +59,7 @@ describe('getModel', () => {
     expect(getModel('anthropic', 'gpt-4o')).toBeUndefined();
   });
 
-  it('Opus 4.7 supports xhigh thinking from Pi catalog', () => {
+  it('Opus 4.7 supports xhigh thinking from the built-in catalog', () => {
     const model = getModel('anthropic', 'claude-opus-4-7');
     expect(model).toBeDefined();
     expect(model!.thinkingLevelMap!.xhigh).toBe('xhigh');
@@ -102,6 +103,29 @@ describe('getModels', () => {
   it('returns empty array for unknown provider', () => {
     const models = getModels('nonexistent');
     expect(models).toEqual([]);
+  });
+});
+
+// ---------- generated catalog ----------
+
+describe('generated model catalog', () => {
+  it('contains only Scout built-in providers and APIs', () => {
+    expect(Object.keys(MODELS).sort()).toEqual(['anthropic', 'openai']);
+
+    for (const [providerId, models] of Object.entries(MODELS)) {
+      const expectedApi = providerId === 'anthropic' ? 'anthropic-messages' : 'openai-responses';
+
+      for (const model of Object.values(models)) {
+        expect(model.provider).toBe(providerId);
+        expect(model.api).toBe(expectedApi);
+      }
+    }
+  });
+
+  it('keeps reasoning metadata for current OpenAI models', () => {
+    expect(MODELS.openai['gpt-5.2']).toBeDefined();
+    expect(MODELS.openai['gpt-5.2'].thinkingLevelMap?.xhigh).toBe('xhigh');
+    expect(MODELS.openai['gpt-5.2'].api).toBe('openai-responses');
   });
 });
 
@@ -224,7 +248,7 @@ describe('getSupportedThinkingLevels', () => {
     expect(levels).toContain('minimal');
   });
 
-  it('includes xhigh for Pi OpenAI models that declare it', () => {
+  it('includes xhigh for OpenAI models that declare it', () => {
     const model = getModel('openai', 'gpt-5.2')!;
     const levels = getSupportedThinkingLevels(model);
     expect(levels).toContain('xhigh');
