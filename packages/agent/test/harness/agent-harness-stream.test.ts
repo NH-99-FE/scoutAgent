@@ -10,6 +10,7 @@ import {
   type Model,
   type SimpleStreamOptions,
   type StreamFunction,
+  type ToolCall,
   unregisterApiProviders,
 } from '@scout-agent/ai';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -44,13 +45,8 @@ function createModel(): Model<TestApi> {
 }
 
 function createAssistantMessage(
-  textOrContent:
-    | string
-    | Array<
-        | { type: 'text'; text: string }
-        | { type: 'toolCall'; id: string; name: string; arguments: unknown }
-      >,
-  stopReason: AssistantMessage['stopReason'] = 'stop',
+  textOrContent: string | Array<{ type: 'text'; text: string } | ToolCall>,
+  stopReason: Extract<AssistantMessage['stopReason'], 'stop' | 'length' | 'toolUse'> = 'stop',
 ): AssistantMessage {
   return {
     role: 'assistant',
@@ -79,6 +75,10 @@ function registerResponses(responses: ResponseFactory[]): void {
     const stream = createAssistantMessageEventStream();
     queueMicrotask(async () => {
       const message = await response(context, options, model);
+      if (message.stopReason === 'error' || message.stopReason === 'aborted') {
+        stream.push({ type: 'error', reason: message.stopReason, error: message });
+        return;
+      }
       stream.push({ type: 'done', reason: message.stopReason, message });
     });
     return stream;

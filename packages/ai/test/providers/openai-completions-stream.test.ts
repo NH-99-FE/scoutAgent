@@ -1025,7 +1025,7 @@ describe('streamSimpleOpenAICompletions', () => {
     const s = streamSimpleOpenAICompletions(model, basicContext(), {
       apiKey: 'test-key',
       reasoning: 'medium',
-      onPayload: (payload) => {
+      onPayload: (payload: unknown) => {
         capturedPayload = payload;
       },
     } as any);

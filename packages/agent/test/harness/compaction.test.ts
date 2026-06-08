@@ -93,7 +93,7 @@ function createAssistantMessage(
     provider: 'anthropic',
     model: 'claude-sonnet-4-5',
     usage,
-    stopReason: 'stop',
+    stopReason: 'stop' as const,
     timestamp: Date.now(),
     ...overrides,
   };
@@ -111,7 +111,7 @@ function createSummaryMessage(
     provider: 'test-provider',
     model: 'test-model',
     usage,
-    stopReason: 'stop',
+    stopReason: 'stop' as const,
     timestamp: Date.now(),
     ...overrides,
   };
@@ -139,6 +139,10 @@ function registerResponses(responses: ResponseFactory[]): void {
     const stream = createAssistantMessageEventStream();
     queueMicrotask(async () => {
       const message = await response(context, options, model);
+      if (message.stopReason === 'error' || message.stopReason === 'aborted') {
+        stream.push({ type: 'error', reason: message.stopReason, error: message });
+        return;
+      }
       stream.push({ type: 'done', reason: message.stopReason, message });
     });
     return stream;

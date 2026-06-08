@@ -75,7 +75,7 @@ function createSummaryMessage(
       totalTokens: 0,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
-    stopReason: 'stop',
+    stopReason: 'stop' as const,
     timestamp: Date.now(),
     ...overrides,
   };
@@ -88,6 +88,10 @@ function registerResponses(responses: ResponseFactory[]): void {
     const stream = createAssistantMessageEventStream();
     queueMicrotask(async () => {
       const message = await response(context, options, model);
+      if (message.stopReason === 'error' || message.stopReason === 'aborted') {
+        stream.push({ type: 'error', reason: message.stopReason, error: message });
+        return;
+      }
       stream.push({ type: 'done', reason: message.stopReason, message });
     });
     return stream;
@@ -163,15 +167,13 @@ describe('branch summarization', () => {
 
   it('prepares branch entries without tool results and carries file-operation details', () => {
     const branchSummary = createBranchSummaryEntry();
-    const toolAssistant = createMessageEntry(
-      {
-        ...createAssistantMessage('tool call'),
-        content: [
-          { type: 'toolCall', id: 'tool-1', name: 'write', arguments: { path: 'new-file.ts' } },
-        ],
-      },
-      branchSummary.id,
-    );
+    const toolAssistantMessage: AssistantMessage = {
+      ...(createAssistantMessage('tool call') as AssistantMessage),
+      content: [
+        { type: 'toolCall', id: 'tool-1', name: 'write', arguments: { path: 'new-file.ts' } },
+      ],
+    };
+    const toolAssistant = createMessageEntry(toolAssistantMessage, branchSummary.id);
     const toolResult = createMessageEntry(
       {
         role: 'toolResult',
@@ -214,12 +216,13 @@ describe('branch summarization', () => {
         return createSummaryMessage('## Goal\nBranch summary');
       },
     ]);
-    const assistantWithRead = createMessageEntry({
-      ...createAssistantMessage('reading'),
+    const assistantWithReadMessage: AssistantMessage = {
+      ...(createAssistantMessage('reading') as AssistantMessage),
       content: [
         { type: 'toolCall', id: 'tool-1', name: 'read', arguments: { path: 'src/index.ts' } },
       ],
-    });
+    };
+    const assistantWithRead = createMessageEntry(assistantWithReadMessage);
 
     const result = getOrThrow(
       await generateBranchSummary([assistantWithRead], {

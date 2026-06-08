@@ -26,7 +26,7 @@ function readDotEnvValue(name: string): string {
 
 function getEnvValue(name: string): string {
   if (!shouldRunE2E()) return '';
-  return import.meta.env[name] || process.env[name] || readDotEnvValue(name);
+  return process.env[name] || readDotEnvValue(name);
 }
 
 /** 检查 Anthropic 凭证是否可用 */

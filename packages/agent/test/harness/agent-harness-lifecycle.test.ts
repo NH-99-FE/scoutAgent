@@ -10,6 +10,7 @@ import {
   registerApiProvider,
   type SimpleStreamOptions,
   type StreamFunction,
+  type ToolCall,
   unregisterApiProviders,
 } from '@scout-agent/ai';
 import { AgentHarness } from '../../src/harness/agent-harness.ts';
@@ -21,7 +22,7 @@ import type { ExecutionEnv, PromptTemplate, Skill } from '../../src/harness/type
 import type { AgentEvent, AgentMessage, AgentTool } from '../../src/types.ts';
 import { createTempDir } from './session-test-utils.ts';
 
-type HarnessWithEventHandler = AgentHarness & {
+type HarnessWithEventHandler = {
   handleAgentEvent(event: AgentEvent): Promise<void>;
 };
 
@@ -118,12 +119,7 @@ function makeAssistantMessage(): AgentMessage {
 }
 
 function makeProviderAssistantMessage(
-  textOrContent:
-    | string
-    | Array<
-        | { type: 'text'; text: string }
-        | { type: 'toolCall'; id: string; name: string; arguments: unknown }
-      >,
+  textOrContent: string | Array<{ type: 'text'; text: string } | ToolCall>,
   overrides?: Partial<AssistantMessage>,
 ): AssistantMessage {
   return {
@@ -151,6 +147,9 @@ function makeToolUseAssistantMessage(): AssistantMessage {
   return {
     role: 'assistant',
     content: [{ type: 'toolCall', id: 'tool-1', name: 'echo', arguments: { text: 'hello' } }],
+    api: 'test-lifecycle-api',
+    provider: 'test-provider',
+    model: 'test-model',
     timestamp: 10,
     stopReason: 'toolUse',
     usage: {
@@ -168,6 +167,9 @@ function makeAssistantTextMessage(text: string, timestamp: number): AssistantMes
   return {
     role: 'assistant',
     content: [{ type: 'text', text }],
+    api: 'test-lifecycle-api',
+    provider: 'test-provider',
+    model: 'test-model',
     timestamp,
     stopReason: 'stop',
     usage: {
@@ -218,9 +220,20 @@ function makeAssistantStream(
     },
   );
   queueMicrotask(() => {
-    stream.push({ type: 'done', reason: message.stopReason, message });
+    pushDone(stream, message);
   });
   return stream;
+}
+
+function pushDone(
+  stream: EventStream<AssistantMessageEvent, AssistantMessage>,
+  message: AssistantMessage,
+): void {
+  if (message.stopReason === 'error' || message.stopReason === 'aborted') {
+    stream.push({ type: 'error', reason: message.stopReason, error: message });
+    return;
+  }
+  stream.push({ type: 'done', reason: message.stopReason, message });
 }
 
 function registerResponses(responses: ResponseFactory[]): void {
@@ -230,7 +243,7 @@ function registerResponses(responses: ResponseFactory[]): void {
     const stream = createAssistantMessageEventStream();
     queueMicrotask(async () => {
       const message = await response(context, options, model);
-      stream.push({ type: 'done', reason: message.stopReason, message });
+      pushDone(stream, message);
     });
     return stream;
   };
@@ -297,6 +310,7 @@ function hookReplacement(harness: AgentHarness): void {
     const mutableMessage = event.message as unknown as Record<string, unknown>;
     mutableMessage.content = [{ type: 'text', text: 'replacement' }];
     mutableMessage.timestamp = 2;
+    return undefined;
   });
 }
 
@@ -757,7 +771,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('persists message_end hook replacements', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const message = makeAssistantMessage();
 
@@ -799,7 +813,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('notifies message_end subscribers after finalized message persistence', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const message = makeAssistantMessage();
     let observedMessages: AgentMessage[] | undefined;
@@ -822,7 +836,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('keeps finalized message persisted when a message_end subscriber fails', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const message = makeAssistantMessage();
 
@@ -843,7 +857,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('rejects message_end replacements with mismatched roles before persistence', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const message = makeAssistantMessage();
 
@@ -858,7 +872,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('supports message_end replacements with non-cloneable details', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const message = makeAssistantMessage();
     const marker = () => 'details marker';
@@ -888,7 +902,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('orders pending listener session writes after finalized agent messages', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const internals = harness as unknown as HarnessInternals;
     const assistant = makeAssistantMessage();
@@ -916,7 +930,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('preserves pending message order before finalized custom messages', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const internals = harness as unknown as HarnessInternals;
     const userMessage: AgentMessage = {
@@ -958,7 +972,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('waitForIdle waits for awaited agent_end listeners and settled notifications', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const internals = harness as unknown as HarnessInternals;
     const barrier = createDeferred();
@@ -998,7 +1012,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('keeps assistant/toolResult persistence order when message_end subscribers yield', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     const harness = makeHarness(session);
     const internals = harness as unknown as HarnessInternals;
     const responses = [makeToolUseAssistantMessage(), makeAssistantTextMessage('done', 20)];
@@ -1040,7 +1054,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('continue waits for the full tool loop when the continuation response uses tools', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     await session.appendMessage(makeUserMessage('retry from here'));
     const harness = makeHarness(session);
     const internals = harness as unknown as HarnessInternals;
@@ -1086,7 +1100,7 @@ describe('AgentHarness lifecycle', () => {
   });
 
   it('continues queued follow-up messages from an assistant tail', async () => {
-    const session = new Session(new InMemorySessionStorage({ cwd: '/test' }));
+    const session = new Session(new InMemorySessionStorage());
     await session.appendMessage(makeAssistantMessage());
     const harness = makeHarness(session);
     const internals = harness as unknown as HarnessInternals;

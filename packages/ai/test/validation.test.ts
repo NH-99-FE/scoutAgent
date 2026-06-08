@@ -280,8 +280,9 @@ describe('validateToolArguments — coercion for allOf/anyOf/oneOf', () => {
       config: { enabled: 'true', count: '5' },
     });
     const result = validateToolArguments(tool, toolCall);
-    expect(result.config.enabled).toBe(true);
-    expect(result.config.count).toBe(5);
+    const config = result.config as { enabled: boolean; count: number };
+    expect(config.enabled).toBe(true);
+    expect(config.count).toBe(5);
   });
 
   it('picks the first matching variant in anyOf', () => {
@@ -608,8 +609,9 @@ describe('validateToolArguments — type union coercion', () => {
     } as unknown as Tool['parameters']);
     const toolCall = createToolCall('tuple_items', { pair: ['42', 1] });
     const result = validateToolArguments(tool, toolCall);
-    expect(result.pair[0]).toBe(42);
-    expect(result.pair[1]).toBe(true);
+    const pair = result.pair as [number, boolean];
+    expect(pair[0]).toBe(42);
+    expect(pair[1]).toBe(true);
   });
 });
 

@@ -93,9 +93,9 @@ function replaceUnpairedSurrogates(content: string): string {
           continue;
         }
       }
-      output += 'â–';
+      output += '\ufffd';
     } else if (code >= 0xdc00 && code <= 0xdfff) {
-      output += 'â–';
+      output += '\ufffd';
     } else {
       output += content[i];
     }
@@ -303,6 +303,7 @@ function truncateStringToBytesFromEnd(str: string, maxBytes: number): string {
     const code = str.charCodeAt(characterStart);
     let characterBytes: number;
     let unpairedSurrogate = false;
+
     if (code >= 0xdc00 && code <= 0xdfff && characterStart > 0) {
       const previous = str.charCodeAt(characterStart - 1);
       if (previous >= 0xd800 && previous <= 0xdbff) {
@@ -318,6 +319,7 @@ function truncateStringToBytesFromEnd(str: string, maxBytes: number): string {
     } else {
       characterBytes = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : 3;
     }
+
     if (outputBytes + characterBytes > maxBytes) break;
     outputBytes += characterBytes;
     start = characterStart;

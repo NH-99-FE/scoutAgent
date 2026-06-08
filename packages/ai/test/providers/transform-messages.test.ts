@@ -301,10 +301,8 @@ describe('transformMessages — synthetic tool results', () => {
 
     const result = transformMessages(messages, model);
     expect(result.length).toBe(3);
-    expect(
-      (result[2] as ToolResultMessage).content[0].type === 'text' &&
-        (result[2] as ToolResultMessage).content[0].text === 'file content',
-    ).toBe(true);
+    const content = (result[2] as ToolResultMessage).content[0];
+    expect(content?.type === 'text' && content.text === 'file content').toBe(true);
   });
 
   it('inserts synthetic result when user message interrupts tool flow', () => {

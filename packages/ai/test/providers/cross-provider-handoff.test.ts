@@ -4,7 +4,14 @@
 // ============================================================
 
 import { describe, it, expect } from 'vitest';
-import type { AssistantMessage, Message, Model, TextContent, ToolCall } from '../../src/types';
+import type {
+  AssistantMessage,
+  Message,
+  Model,
+  TextContent,
+  ToolCall,
+  ToolResultMessage,
+} from '../../src/types';
 
 // ---------- 辅助 ----------
 

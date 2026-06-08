@@ -123,6 +123,14 @@ describe('truncate utilities', () => {
     expect(result.outputBytes).toBe(0);
   });
 
+  it('preserves U+FEFF at the beginning of a retained byte tail', () => {
+    const result = truncateTail('xx\ufeffabc', { maxBytes: 6, maxLines: 10 });
+
+    expect(result.content).toBe('\ufeffabc');
+    expect(result.outputBytes).toBe(6);
+    expect(result.lastLinePartial).toBe(true);
+  });
+
   it('matches Buffer tail truncation semantics for surrogate edge cases', () => {
     const inputs = [
       'a\ud83d',

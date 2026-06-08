@@ -1432,7 +1432,7 @@ describe('streamAnthropic — cache_control with tool results', () => {
         { role: 'user', content: 'Run tool', timestamp: Date.now() },
         {
           role: 'assistant',
-          content: [{ type: 'toolCall', id: 'tool_1', name: 'test_tool', arguments: '{}' }],
+          content: [{ type: 'toolCall', id: 'tool_1', name: 'test_tool', arguments: {} }],
           api: 'anthropic-messages' as const,
           provider: 'anthropic',
           model: 'test',
