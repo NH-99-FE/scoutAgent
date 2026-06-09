@@ -1,10 +1,24 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import {
+  createAssistantMessageEventStream,
+  registerApiProvider,
+  registerModel,
+  unregisterApiProviders,
+  unregisterModels,
+  type Context,
+  type Model,
+  type SimpleStreamOptions,
+} from '@scout-agent/ai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentSession } from '../../src/core/agent-session.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
 import { createConfigManager, mockModel, userMessage, assistantMessage } from './test-utils.ts';
+import { ConfigManager } from '../../src/config-manager.ts';
+
+const STREAM_OPTIONS_TEST_SOURCE = 'agent-session-compaction-stream-options-test';
+const STREAM_OPTIONS_TEST_API = 'test-agent-session-compaction-api';
 
 function createSession(tempDir: string): AgentSession {
   return new AgentSession({
@@ -28,6 +42,8 @@ describe('AgentSession', () => {
   });
 
   afterEach(() => {
+    unregisterApiProviders(STREAM_OPTIONS_TEST_SOURCE);
+    unregisterModels(STREAM_OPTIONS_TEST_SOURCE);
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -72,6 +88,84 @@ describe('AgentSession', () => {
     await session.compact();
 
     expect(order).toEqual(['unsubscribe', 'abort', 'compact', 'subscribe']);
+  });
+
+  it('forwards compaction maxTokens through the real agent streamFn to the provider', async () => {
+    const model = mockModel({
+      id: 'test-compaction-model',
+      api: STREAM_OPTIONS_TEST_API,
+      maxTokens: 1234,
+    });
+    const seenOptions: SimpleStreamOptions[] = [];
+    const streamSimple = vi.fn(
+      (
+        _model: Model<typeof STREAM_OPTIONS_TEST_API>,
+        _context: Context,
+        options?: SimpleStreamOptions,
+      ) => {
+        if (options) seenOptions.push(options);
+        const stream = createAssistantMessageEventStream();
+        queueMicrotask(() => {
+          stream.push({
+            type: 'done',
+            reason: 'stop',
+            message: assistantMessage('summary', {
+              api: STREAM_OPTIONS_TEST_API,
+              model: model.id,
+              provider: model.provider,
+            }),
+          });
+        });
+        return stream;
+      },
+    );
+    registerApiProvider(
+      {
+        api: STREAM_OPTIONS_TEST_API,
+        stream: streamSimple,
+        streamSimple,
+      },
+      STREAM_OPTIONS_TEST_SOURCE,
+    );
+    registerModel(model, { sourceId: STREAM_OPTIONS_TEST_SOURCE });
+
+    const values: Record<string, unknown> = {
+      anthropicApiKey: 'test-key',
+      defaultModel: `${model.provider}/${model.id}`,
+    };
+    const configManager = new ConfigManager({
+      cwd: tempDir,
+      agentDir: tempDir,
+      getConfiguration: () =>
+        ({
+          get: <T>(key: string) => values[key] as T,
+          has: (key: string) => key in values,
+          inspect: () => undefined,
+          update: async () => undefined,
+        }) as never,
+    });
+    const backingSession = SessionManager.inMemory(tempDir);
+    backingSession.appendMessage(userMessage('first prompt'));
+    backingSession.appendMessage(assistantMessage('first response'));
+    backingSession.appendMessage(userMessage('second prompt'));
+    const session = new AgentSession({
+      session: backingSession,
+      configManager,
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+
+    await session.initialize();
+    try {
+      await session.compact();
+    } finally {
+      session.dispose();
+    }
+
+    expect(streamSimple).toHaveBeenCalledOnce();
+    expect(seenOptions).toHaveLength(1);
+    expect(seenOptions[0]?.maxTokens).toBe(1234);
   });
 
   it('ignores extension-provided tree summaries unless navigation requests summarization', async () => {

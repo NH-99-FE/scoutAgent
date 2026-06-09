@@ -13,18 +13,14 @@ import type {
   ThinkingLevel,
   ToolExecutionMode,
 } from '@scout-agent/agent';
-import type {
-  CompactionPreparation,
-  CompactionResult,
-  TreePreparation,
-} from '../compaction/index.ts';
+import type { CompactionPreparation, CompactionResult } from '../compaction/index.ts';
 import type {
   BranchSummaryEntry,
   CompactionEntry,
   JsonlSessionMetadata,
   ReadonlySessionManager,
   Session,
-  SessionTreeEntry,
+  SessionEntry,
 } from '../session/index.ts';
 import type { Static, TSchema } from '@sinclair/typebox';
 import type { EventBus } from './event-bus.ts';
@@ -135,9 +131,20 @@ export interface AfterProviderResponseEvent {
 export interface SessionBeforeCompactEvent {
   type: 'session_before_compact';
   preparation: CompactionPreparation;
-  branchEntries: SessionTreeEntry[];
+  branchEntries: SessionEntry[];
   customInstructions?: string;
   signal: AbortSignal;
+}
+
+export interface TreePreparation {
+  targetId: string;
+  oldLeafId: string | null;
+  commonAncestorId: string | null;
+  entriesToSummarize: SessionEntry[];
+  userWantsSummary: boolean;
+  customInstructions?: string;
+  replaceInstructions?: boolean;
+  label?: string;
 }
 
 export interface SessionBeforeTreeEvent {

@@ -1174,7 +1174,7 @@ export class AgentSession implements CoreDisposable {
       const targetEntry = await this.session.getEntry(targetId);
       if (!targetEntry) throw new Error(`Entry ${targetId} not found`);
 
-      const { entries, commonAncestorId } = await collectEntriesForBranchSummary(
+      const { entries, commonAncestorId } = collectEntriesForBranchSummary(
         this.session,
         oldLeafId,
         targetId,
@@ -1894,6 +1894,7 @@ export class AgentSession implements CoreDisposable {
       };
 
       return streamSimple(model, context, {
+        ...streamOptions,
         cacheRetention: requestOptions.cacheRetention,
         headers: requestOptions.headers,
         maxRetries: requestOptions.maxRetries,
@@ -2209,6 +2210,7 @@ export class AgentSession implements CoreDisposable {
           options.customInstructions,
           options.signal,
           this.agent?.state.thinkingLevel,
+          this.agent?.streamFn,
         );
     if (options.signal.aborted) throw new Error('Compaction aborted');
 

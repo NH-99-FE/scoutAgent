@@ -76,14 +76,6 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 
 const TOOL_RESULT_MAX_CHARS = 2000;
 
-function safeJsonStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? 'undefined';
-  } catch {
-    return '[unserializable]';
-  }
-}
-
 function truncateForSummary(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const truncatedChars = text.length - maxChars;
@@ -117,7 +109,7 @@ export function serializeConversation(messages: Message[]): string {
         } else if (block.type === 'toolCall') {
           const args = block.arguments as Record<string, unknown>;
           const argsStr = Object.entries(args)
-            .map(([k, v]) => `${k}=${safeJsonStringify(v)}`)
+            .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
             .join(', ');
           toolCalls.push(`${block.name}(${argsStr})`);
         }
@@ -145,3 +137,7 @@ export function serializeConversation(messages: Message[]): string {
 
   return parts.join('\n\n');
 }
+
+export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
+
+Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;

@@ -7,14 +7,15 @@ import {
   createCustomMessage,
   type AgentMessage,
 } from '@scout-agent/agent';
-import { type ReadonlySessionManager, type SessionTreeEntry } from '../session/index.ts';
-import { estimateTokens, SUMMARIZATION_SYSTEM_PROMPT } from './compaction.ts';
+import { type ReadonlySessionManager, type SessionEntry } from '../session/index.ts';
+import { estimateTokens } from './compaction.ts';
 import {
   computeFileLists,
   createFileOps,
   extractFileOpsFromMessage,
   type FileOperations,
   formatFileOperations,
+  SUMMARIZATION_SYSTEM_PROMPT,
   serializeConversation,
 } from './utils.ts';
 
@@ -24,18 +25,6 @@ export interface BranchSummaryDetails {
   readFiles: string[];
   /** 在探索被摘要分支时修改的文件。 */
   modifiedFiles: string[];
-}
-
-export type BranchSummaryErrorCode = 'aborted' | 'summarization_failed' | 'invalid_session';
-
-export class BranchSummaryError extends Error {
-  public code: BranchSummaryErrorCode;
-
-  constructor(code: BranchSummaryErrorCode, message: string, cause?: Error) {
-    super(message, cause === undefined ? undefined : { cause });
-    this.name = 'BranchSummaryError';
-    this.code = code;
-  }
 }
 
 export interface BranchSummaryResult {
@@ -61,21 +50,9 @@ export interface BranchPreparation {
 /** 选定用于分支摘要的条目。 */
 export interface CollectEntriesResult {
   /** 按时间顺序排列的需要摘要的条目。 */
-  entries: SessionTreeEntry[];
+  entries: SessionEntry[];
   /** 前一个叶节点和目标条目之间的最深公共祖先。 */
   commonAncestorId: string | null;
-}
-
-/** 树导航前提供给扩展 hook 的摘要准备信息。 */
-export interface TreePreparation {
-  targetId: string;
-  oldLeafId: string | null;
-  commonAncestorId: string | null;
-  entriesToSummarize: SessionTreeEntry[];
-  userWantsSummary: boolean;
-  customInstructions?: string;
-  replaceInstructions?: boolean;
-  label?: string;
 }
 
 /** 生成分支摘要的选项。 */
@@ -97,11 +74,11 @@ export interface GenerateBranchSummaryOptions {
 }
 
 /** 收集在导航到不同 Session 树条目之前应被摘要的条目。 */
-export async function collectEntriesForBranchSummary(
+export function collectEntriesForBranchSummary(
   session: ReadonlySessionManager,
   oldLeafId: string | null,
   targetId: string,
-): Promise<CollectEntriesResult> {
+): CollectEntriesResult {
   if (!oldLeafId) {
     return { entries: [], commonAncestorId: null };
   }
@@ -114,20 +91,20 @@ export async function collectEntriesForBranchSummary(
       break;
     }
   }
-  const entries: SessionTreeEntry[] = [];
+  const entries: SessionEntry[] = [];
   let current: string | null = oldLeafId;
 
   while (current && current !== commonAncestorId) {
     const entry = session.getEntry(current);
     if (!entry) break;
-    entries.push(entry as SessionTreeEntry);
+    entries.push(entry);
     current = entry.parentId;
   }
   entries.reverse();
 
   return { entries, commonAncestorId };
 }
-function getMessageFromEntry(entry: SessionTreeEntry): AgentMessage | undefined {
+function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
   switch (entry.type) {
     case 'message':
       if (entry.message.role === 'toolResult') return undefined;
@@ -158,7 +135,7 @@ function getMessageFromEntry(entry: SessionTreeEntry): AgentMessage | undefined 
 
 /** 在可选的 token 预算内准备分支条目以进行摘要。 */
 export function prepareBranchEntries(
-  entries: SessionTreeEntry[],
+  entries: SessionEntry[],
   tokenBudget: number = 0,
 ): BranchPreparation {
   const messages: AgentMessage[] = [];
@@ -237,7 +214,7 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 
 /** 为被放弃的分支条目生成摘要。 */
 export async function generateBranchSummary(
-  entries: SessionTreeEntry[],
+  entries: SessionEntry[],
   options: GenerateBranchSummaryOptions,
 ): Promise<BranchSummaryResult> {
   const {

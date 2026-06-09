@@ -1,8 +1,10 @@
 import type {
   Api,
   AssistantMessage,
+  Context,
   ImageContent,
   Model,
+  SimpleStreamOptions,
   TextContent,
   Usage,
 } from '@scout-agent/ai';
@@ -13,19 +15,17 @@ import {
   createCompactionSummaryMessage,
   createCustomMessage,
   type AgentMessage,
+  type StreamFn,
   type ThinkingLevel,
 } from '@scout-agent/agent';
-import {
-  buildSessionContext,
-  type CompactionEntry,
-  type SessionTreeEntry,
-} from '../session/index.ts';
+import { buildSessionContext, type CompactionEntry, type SessionEntry } from '../session/index.ts';
 import {
   computeFileLists,
   createFileOps,
   extractFileOpsFromMessage,
   type FileOperations,
   formatFileOperations,
+  SUMMARIZATION_SYSTEM_PROMPT,
   serializeConversation,
 } from './utils.ts';
 
@@ -37,32 +37,9 @@ export interface CompactionDetails {
   modifiedFiles: string[];
 }
 
-export type CompactionErrorCode =
-  | 'aborted'
-  | 'summarization_failed'
-  | 'invalid_session'
-  | 'unknown';
-
-export class CompactionError extends Error {
-  public code: CompactionErrorCode;
-
-  constructor(code: CompactionErrorCode, message: string, cause?: Error) {
-    super(message, cause === undefined ? undefined : { cause });
-    this.name = 'CompactionError';
-    this.code = code;
-  }
-}
-function safeJsonStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? 'undefined';
-  } catch {
-    return '[unserializable]';
-  }
-}
-
 function extractFileOperations(
   messages: AgentMessage[],
-  entries: SessionTreeEntry[],
+  entries: SessionEntry[],
   prevCompactionIndex: number,
 ): FileOperations {
   const fileOps = createFileOps();
@@ -84,7 +61,7 @@ function extractFileOperations(
 
   return fileOps;
 }
-function getMessageFromEntry(entry: SessionTreeEntry): AgentMessage | undefined {
+function getMessageFromEntry(entry: SessionEntry): AgentMessage | undefined {
   if (entry.type === 'message') {
     return entry.message as AgentMessage;
   }
@@ -106,7 +83,7 @@ function getMessageFromEntry(entry: SessionTreeEntry): AgentMessage | undefined 
   return undefined;
 }
 
-function getMessageFromEntryForCompaction(entry: SessionTreeEntry): AgentMessage | undefined {
+function getMessageFromEntryForCompaction(entry: SessionEntry): AgentMessage | undefined {
   if (entry.type === 'compaction') {
     return undefined;
   }
@@ -161,7 +138,7 @@ function getAssistantUsage(msg: AgentMessage): Usage | undefined {
 }
 
 /** 返回 Session 条目中最后一个成功 assistant 消息的 usage。 */
-export function getLastAssistantUsage(entries: SessionTreeEntry[]): Usage | undefined {
+export function getLastAssistantUsage(entries: SessionEntry[]): Usage | undefined {
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type === 'message') {
@@ -274,7 +251,7 @@ export function estimateTokens(message: AgentMessage): number {
         } else if (block.type === 'thinking') {
           chars += block.thinking.length;
         } else if (block.type === 'toolCall') {
-          chars += block.name.length + safeJsonStringify(block.arguments).length;
+          chars += block.name.length + JSON.stringify(block.arguments).length;
         }
       }
       return Math.ceil(chars / 4);
@@ -298,7 +275,7 @@ export function estimateTokens(message: AgentMessage): number {
   return 0;
 }
 function findValidCutPoints(
-  entries: SessionTreeEntry[],
+  entries: SessionEntry[],
   startIndex: number,
   endIndex: number,
 ): number[] {
@@ -341,7 +318,7 @@ function findValidCutPoints(
 
 /** 找到包含某个条目的回合中，用户可见的起始消息。 */
 export function findTurnStartIndex(
-  entries: SessionTreeEntry[],
+  entries: SessionEntry[],
   entryIndex: number,
   startIndex: number,
 ): number {
@@ -372,7 +349,7 @@ export interface CutPointResult {
 
 /** 找到保留约请求的近期 token 预算的 compaction 切割点。 */
 export function findCutPoint(
-  entries: SessionTreeEntry[],
+  entries: SessionEntry[],
   startIndex: number,
   endIndex: number,
   keepRecentTokens: number,
@@ -420,10 +397,6 @@ export function findCutPoint(
     isSplitTurn: !isUserMessage && turnStartIndex !== -1,
   };
 }
-
-export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI coding assistant, then produce a structured summary following the exact format specified.
-
-Do NOT continue the conversation. Do NOT respond to any questions in the conversation. ONLY output the structured summary.`;
 
 const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
@@ -497,17 +470,46 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.`;
 
+function createSummarizationOptions(
+  model: Model<Api>,
+  maxTokens: number,
+  apiKey: string | undefined,
+  headers: Record<string, string> | undefined,
+  signal: AbortSignal | undefined,
+  thinkingLevel: ThinkingLevel | undefined,
+): SimpleStreamOptions {
+  const options: SimpleStreamOptions = { maxTokens, signal, apiKey, headers };
+  if (model.reasoning && thinkingLevel && thinkingLevel !== 'off') {
+    options.reasoning = thinkingLevel;
+  }
+  return options;
+}
+
+async function completeSummarization(
+  model: Model<Api>,
+  context: Context,
+  options: SimpleStreamOptions,
+  streamFn?: StreamFn,
+): Promise<AssistantMessage> {
+  if (!streamFn) {
+    return completeSimple(model, context, options);
+  }
+  const stream = await streamFn(model, context, options);
+  return stream.result();
+}
+
 /** 生成或更新用于 compaction 的对话摘要。 */
 export async function generateSummary(
   currentMessages: AgentMessage[],
   model: Model<Api>,
   reserveTokens: number,
-  apiKey: string,
+  apiKey: string | undefined,
   headers?: Record<string, string>,
   signal?: AbortSignal,
   customInstructions?: string,
   previousSummary?: string,
   thinkingLevel?: ThinkingLevel,
+  streamFn?: StreamFn,
 ): Promise<string> {
   const maxTokens = Math.min(
     Math.floor(0.8 * reserveTokens),
@@ -533,15 +535,20 @@ export async function generateSummary(
     },
   ];
 
-  const completionOptions =
-    model.reasoning && thinkingLevel && thinkingLevel !== 'off'
-      ? { maxTokens, signal, apiKey, headers, reasoning: thinkingLevel }
-      : { maxTokens, signal, apiKey, headers };
+  const completionOptions = createSummarizationOptions(
+    model,
+    maxTokens,
+    apiKey,
+    headers,
+    signal,
+    thinkingLevel,
+  );
 
-  const response = await completeSimple(
+  const response = await completeSummarization(
     model,
     { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
     completionOptions,
+    streamFn,
   );
   if (response.stopReason === 'error') {
     throw new Error(`Summarization failed: ${response.errorMessage || 'Unknown error'}`);
@@ -577,7 +584,7 @@ export interface CompactionPreparation {
 
 /** 准备 Session 条目以进行 compaction，当 compaction 不适用时返回 undefined。 */
 export function prepareCompaction(
-  pathEntries: SessionTreeEntry[],
+  pathEntries: SessionEntry[],
   settings: CompactionSettings,
 ): CompactionPreparation | undefined {
   if (pathEntries.length === 0 || pathEntries[pathEntries.length - 1].type === 'compaction') {
@@ -666,11 +673,12 @@ export { serializeConversation } from './utils.ts';
 export async function compact(
   preparation: CompactionPreparation,
   model: Model<Api>,
-  apiKey: string,
+  apiKey: string | undefined,
   headers?: Record<string, string>,
   customInstructions?: string,
   signal?: AbortSignal,
   thinkingLevel?: ThinkingLevel,
+  streamFn?: StreamFn,
 ): Promise<CompactionResult> {
   const {
     firstKeptEntryId,
@@ -682,10 +690,6 @@ export async function compact(
     fileOps,
     settings,
   } = preparation;
-
-  if (!firstKeptEntryId) {
-    throw new Error('First kept entry has no UUID - session may need migration');
-  }
 
   let summary: string;
 
@@ -702,6 +706,7 @@ export async function compact(
             customInstructions,
             previousSummary,
             thinkingLevel,
+            streamFn,
           )
         : Promise.resolve('No prior history.'),
       generateTurnPrefixSummary(
@@ -712,6 +717,7 @@ export async function compact(
         headers,
         signal,
         thinkingLevel,
+        streamFn,
       ),
     ]);
     summary = `${historyResult}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult}`;
@@ -726,11 +732,16 @@ export async function compact(
       customInstructions,
       previousSummary,
       thinkingLevel,
+      streamFn,
     );
   }
 
   const { readFiles, modifiedFiles } = computeFileLists(fileOps);
   summary += formatFileOperations(readFiles, modifiedFiles);
+
+  if (!firstKeptEntryId) {
+    throw new Error('First kept entry has no UUID - session may need migration');
+  }
 
   return {
     summary,
@@ -743,10 +754,11 @@ async function generateTurnPrefixSummary(
   messages: AgentMessage[],
   model: Model<Api>,
   reserveTokens: number,
-  apiKey: string,
+  apiKey: string | undefined,
   headers?: Record<string, string>,
   signal?: AbortSignal,
   thinkingLevel?: ThinkingLevel,
+  streamFn?: StreamFn,
 ): Promise<string> {
   const maxTokens = Math.min(
     Math.floor(0.5 * reserveTokens),
@@ -763,12 +775,11 @@ async function generateTurnPrefixSummary(
     },
   ];
 
-  const response = await completeSimple(
+  const response = await completeSummarization(
     model,
     { systemPrompt: SUMMARIZATION_SYSTEM_PROMPT, messages: summarizationMessages },
-    model.reasoning && thinkingLevel && thinkingLevel !== 'off'
-      ? { maxTokens, signal, apiKey, headers, reasoning: thinkingLevel }
-      : { maxTokens, signal, apiKey, headers },
+    createSummarizationOptions(model, maxTokens, apiKey, headers, signal, thinkingLevel),
+    streamFn,
   );
   if (response.stopReason === 'error') {
     throw new Error(
