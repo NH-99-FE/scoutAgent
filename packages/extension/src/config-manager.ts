@@ -7,29 +7,18 @@ import * as vscode from 'vscode';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Model, Api, ThinkingBudgets, Transport } from '@scout-agent/ai';
-import type { AgentHarnessStreamOptions, CompactionSettings, QueueMode } from '@scout-agent/agent';
 import type { ScoutConfig, ThinkingLevel } from '@scout-agent/shared';
-import { ScoutModelRegistry } from './model-registry.ts';
-import { ScoutModelResolver, type ModelResolution } from './model-resolver.ts';
-
-// ---------- Retry 配置 ----------
-
-export interface RetrySettings {
-  enabled: boolean;
-  maxRetries: number;
-  baseDelayMs: number;
-}
-
-export interface ProviderRetrySettings {
-  timeoutMs?: number;
-  maxRetries?: number;
-  maxRetryDelayMs: number;
-}
-
-export interface BranchSummarySettings {
-  reserveTokens: number;
-  skipPrompt: boolean;
-}
+import { ScoutModelRegistry } from './core/model-registry.ts';
+import { ScoutModelResolver, type ModelResolution } from './core/model-resolver.ts';
+import type { CompactionSettings } from './core/compaction/index.ts';
+import type {
+  BranchSummarySettings,
+  ProviderRetrySettings,
+  RetrySettings,
+  ScoutCoreConfig,
+  ScoutStreamOptions,
+} from './core/config.ts';
+import type { QueueMode } from '@scout-agent/agent';
 
 const SECTION = 'scout-agent';
 const VALID_TRANSPORTS: Transport[] = ['sse', 'websocket', 'websocket-cached', 'auto'];
@@ -190,7 +179,7 @@ function parseConfiguredModels(value: unknown): Model<Api>[] {
 
 // ---------- ConfigManager ----------
 
-export class ConfigManager {
+export class ConfigManager implements ScoutCoreConfig {
   readonly cwd: string;
   readonly agentDir: string;
   private readonly _getConfiguration: (section: string) => vscode.WorkspaceConfiguration;
@@ -339,7 +328,7 @@ export class ConfigManager {
     return this.getSetting<number>('websocketConnectTimeoutMs');
   }
 
-  getStreamOptions(): AgentHarnessStreamOptions {
+  getStreamOptions(): ScoutStreamOptions {
     const providerRetry = this.getProviderRetrySettings();
     return {
       transport: this.getTransport(),

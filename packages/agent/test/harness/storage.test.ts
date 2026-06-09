@@ -72,6 +72,7 @@ describe('InMemorySessionStorage', () => {
       label: 'checkpoint',
     });
     expect(await storage.getLabel('entry-1')).toBe('checkpoint');
+    expect(await storage.getLeafId()).toBe('label-1');
     await storage.appendEntry({
       type: 'label',
       id: 'label-2',
@@ -81,6 +82,7 @@ describe('InMemorySessionStorage', () => {
       label: undefined,
     });
     expect(await storage.getLabel('entry-1')).toBeUndefined();
+    expect(await storage.getLeafId()).toBe('label-2');
   });
 
   it('walks paths to root', async () => {
@@ -281,6 +283,7 @@ describe('JsonlSessionStorage', () => {
       label: 'checkpoint',
     });
     expect(await storage.getLabel('entry-1')).toBe('checkpoint');
+    expect(await storage.getLeafId()).toBe('label-1');
     await storage.appendEntry({
       type: 'label',
       id: 'label-2',
@@ -290,8 +293,10 @@ describe('JsonlSessionStorage', () => {
       label: undefined,
     });
     expect(await storage.getLabel('entry-1')).toBeUndefined();
+    expect(await storage.getLeafId()).toBe('label-2');
     const loaded = await JsonlSessionStorage.open(env, filePath);
     expect(await loaded.getLabel('entry-1')).toBeUndefined();
+    expect(await loaded.getLeafId()).toBe('label-2');
   });
 
   it('reads session metadata through the line-reading filesystem operation', async () => {

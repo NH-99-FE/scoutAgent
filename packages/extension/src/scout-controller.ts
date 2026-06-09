@@ -1,7 +1,7 @@
 // ============================================================
 // ScoutController — Webview 路由层 + 事件转发
-// 职责仅剩：Webview 消息路由 → 委托 SessionManager
-//            SessionManager 事件 → 转发 Webview
+// 职责仅剩：Webview 消息路由 → 委托 ExtensionSessionCoordinator
+//            ExtensionSessionCoordinator 事件 → 转发 Webview
 // ============================================================
 
 import * as vscode from 'vscode';
@@ -12,9 +12,9 @@ import type {
   WebviewMessage,
 } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
-import { SessionManager, type ScoutSessionEvent } from './session-manager.ts';
-import { readSessionFileInfo } from './session-file.ts';
-import { isPathInsideOrEqual, resolveSessionCwdPolicy } from './session-cwd-policy.ts';
+import { ExtensionSessionCoordinator, type ScoutSessionEvent } from './host/session-coordinator.ts';
+import { readSessionFileInfo } from './core/session-file.ts';
+import { isPathInsideOrEqual, resolveSessionCwdPolicy } from './core/session-cwd.ts';
 
 // ---------- 接口 ----------
 
@@ -32,7 +32,7 @@ export class ScoutController implements vscode.Disposable {
   private readonly cwd: string;
   private readonly agentDir: string;
   private readonly configManager: ConfigManager;
-  private readonly sessionManager: SessionManager;
+  private readonly sessionManager: ExtensionSessionCoordinator;
   private readonly disposables: vscode.Disposable[] = [];
 
   private webview?: vscode.Webview;
@@ -46,14 +46,14 @@ export class ScoutController implements vscode.Disposable {
     this.agentDir = this.resolveAgentDir();
     this.configManager = new ConfigManager({ cwd: this.cwd, agentDir: this.agentDir });
 
-    this.sessionManager = new SessionManager({
+    this.sessionManager = new ExtensionSessionCoordinator({
       cwd: this.cwd,
       agentDir: this.agentDir,
       outputChannel: this.outputChannel,
       configManager: this.configManager,
     });
 
-    // 监听 SessionManager 事件
+    // 监听 ExtensionSessionCoordinator 事件
     this.unsubscribeSession = this.sessionManager.subscribe((event) => this.onSessionEvent(event));
 
     // 监听配置变更
@@ -83,7 +83,7 @@ export class ScoutController implements vscode.Disposable {
         this.onReady();
         break;
       case 'user_message':
-        this.sessionManager.prompt(message.text);
+        this.sessionManager.prompt(message.text, { deliverAs: message.deliverAs });
         break;
       case 'abort':
         this.sessionManager.abort();
@@ -144,7 +144,7 @@ export class ScoutController implements vscode.Disposable {
     this.disposePromise = (async () => {
       this.unsubscribeSession?.();
       this.unsubscribeSession = undefined;
-      const sessionManager = this.sessionManager as SessionManager & {
+      const sessionManager = this.sessionManager as ExtensionSessionCoordinator & {
         disposeAsync?: () => Promise<void>;
       };
       if (sessionManager.disposeAsync) {
@@ -164,7 +164,7 @@ export class ScoutController implements vscode.Disposable {
     void this.disposeAsync();
   }
 
-  // ---------- SessionManager 事件转发 ----------
+  // ---------- SessionCoordinator 事件转发 ----------
 
   private onSessionEvent(event: ScoutSessionEvent): void {
     if (event.type === 'agent_event') {
@@ -209,11 +209,11 @@ export class ScoutController implements vscode.Disposable {
     }
 
     if (event.type === 'state_change' || event.type === 'error') {
-      this.pushState();
+      void this.pushState();
     }
 
     if (event.type === 'tree_change') {
-      this.pushTreeData();
+      void this.pushTreeData();
     }
   }
 
@@ -223,21 +223,21 @@ export class ScoutController implements vscode.Disposable {
     this.outputChannel.appendLine('[scout] Webview ready');
     await this.sessionManager.initialize();
     this.pushConfig();
-    this.pushState();
+    await this.pushState();
     await this.handleRequestSessions();
   }
 
   // ---------- 状态同步 ----------
 
-  private pushState(): void {
-    this.postMessage({ type: 'state_update', state: this.buildState() });
+  private async pushState(): Promise<void> {
+    this.postMessage({ type: 'state_update', state: await this.buildState() });
   }
 
   private pushConfig(): void {
     this.postMessage({ type: 'config_update', config: this.configManager.getScoutConfig() });
   }
 
-  private buildState(): ScoutWebviewState {
+  private async buildState(): Promise<ScoutWebviewState> {
     return {
       messages: this.sessionManager.getScoutMessages(),
       isStreaming: this.sessionManager.isStreaming,
@@ -248,7 +248,7 @@ export class ScoutController implements vscode.Disposable {
       activeToolNames: this.sessionManager.getActiveToolNames(),
       sessionId: this.sessionManager.sessionId,
       parentSessionPath: this.sessionManager.parentSessionPath,
-      leafId: this.sessionManager.leafId,
+      leafId: await this.sessionManager.getVisibleLeafId(),
     };
   }
 
@@ -380,7 +380,7 @@ export class ScoutController implements vscode.Disposable {
         error: result.cancelled ? 'cancelled' : undefined,
       });
       if (!result.cancelled) {
-        this.pushState();
+        await this.pushState();
         await this.pushTreeData();
       }
     } catch (error) {
@@ -413,7 +413,7 @@ export class ScoutController implements vscode.Disposable {
         error: result.cancelled ? 'cancelled' : undefined,
       });
       if (!result.cancelled) {
-        this.pushState();
+        await this.pushState();
         await this.pushTreeData();
       }
     } catch (error) {
@@ -442,8 +442,7 @@ export class ScoutController implements vscode.Disposable {
   }
 
   private async pushTreeData(): Promise<void> {
-    const tree = await this.sessionManager.getTree();
-    const leafId = this.sessionManager.leafId;
+    const { tree, leafId } = await this.sessionManager.getTreeData();
     this.postMessage({ type: 'tree_data', tree, leafId });
   }
 
@@ -458,7 +457,7 @@ export class ScoutController implements vscode.Disposable {
   }
 
   private findSessionByPath(
-    sessions: Awaited<ReturnType<SessionManager['listSessions']>>,
+    sessions: Awaited<ReturnType<ExtensionSessionCoordinator['listSessions']>>,
     message: { sessionId: string; sessionPath: string },
   ) {
     const byPath = sessions.find((session) => session.path === message.sessionPath);

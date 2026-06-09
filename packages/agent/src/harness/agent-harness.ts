@@ -224,9 +224,6 @@ export class AgentHarness<
   private steeringQueueMode: QueueMode;
   private followUpQueue: UserMessage[] = [];
   private followUpQueueMode: QueueMode;
-  private drainExternalSteeringMessages?: AgentHarnessOptions['drainSteeringMessages'];
-  private drainExternalFollowUpMessages?: AgentHarnessOptions['drainFollowUpMessages'];
-  private hasExternalQueuedMessages?: AgentHarnessOptions['hasQueuedMessages'];
   private nextTurnQueue: AgentMessage[] = [];
   private handlers = new Map<string, Set<AgentHarnessHandler>>();
 
@@ -246,9 +243,6 @@ export class AgentHarness<
       options.activeToolNames ?? (options.tools ?? []).map((tool) => tool.name);
     this.steeringQueueMode = options.steeringMode ?? 'one-at-a-time';
     this.followUpQueueMode = options.followUpMode ?? 'one-at-a-time';
-    this.drainExternalSteeringMessages = options.drainSteeringMessages;
-    this.drainExternalFollowUpMessages = options.drainFollowUpMessages;
-    this.hasExternalQueuedMessages = options.hasQueuedMessages;
   }
 
   private getHandlers(type: string): Set<AgentHarnessHandler> | undefined {
@@ -560,9 +554,10 @@ export class AgentHarness<
           skipInitialSteeringPoll = false;
           return [];
         }
-        return this.drainSteeringMessages();
+        return this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode);
       },
-      getFollowUpMessages: async () => this.drainFollowUpMessages(),
+      getFollowUpMessages: async () =>
+        this.drainQueuedMessages(this.followUpQueue, this.followUpQueueMode),
     };
   }
 
@@ -735,26 +730,6 @@ export class AgentHarness<
     }
   }
 
-  private async drainSteeringMessages(): Promise<AgentMessage[]> {
-    const ownMessages = await this.drainQueuedMessages(this.steerQueue, this.steeringQueueMode);
-    if (this.steeringQueueMode === 'one-at-a-time' && ownMessages.length > 0) {
-      return ownMessages;
-    }
-    const externalMessages =
-      (await this.drainExternalSteeringMessages?.(this.steeringQueueMode)) ?? [];
-    return [...ownMessages, ...externalMessages];
-  }
-
-  private async drainFollowUpMessages(): Promise<AgentMessage[]> {
-    const ownMessages = await this.drainQueuedMessages(this.followUpQueue, this.followUpQueueMode);
-    if (this.followUpQueueMode === 'one-at-a-time' && ownMessages.length > 0) {
-      return ownMessages;
-    }
-    const externalMessages =
-      (await this.drainExternalFollowUpMessages?.(this.followUpQueueMode)) ?? [];
-    return [...ownMessages, ...externalMessages];
-  }
-
   private async executeTurn(
     turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
     text: string,
@@ -886,7 +861,10 @@ export class AgentHarness<
         throw new AgentHarnessError('invalid_state', 'No messages to continue from');
       }
       if (lastMessage.role === 'assistant') {
-        const queuedSteering = await this.drainSteeringMessages();
+        const queuedSteering = await this.drainQueuedMessages(
+          this.steerQueue,
+          this.steeringQueueMode,
+        );
         if (queuedSteering.length > 0) {
           return await this.executePromptMessages(turnState, queuedSteering, {
             skipInitialSteeringPoll: true,
@@ -895,7 +873,10 @@ export class AgentHarness<
           });
         }
 
-        const queuedFollowUps = await this.drainFollowUpMessages();
+        const queuedFollowUps = await this.drainQueuedMessages(
+          this.followUpQueue,
+          this.followUpQueueMode,
+        );
         if (queuedFollowUps.length > 0) {
           return await this.executePromptMessages(turnState, queuedFollowUps, {
             missingAssistantLabel:
@@ -1100,8 +1081,10 @@ export class AgentHarness<
       if (hookResult?.cancel) return { cancelled: true };
       if (signal.aborted) return { cancelled: true };
       let summaryEntry: NavigateTreeResult['summaryEntry'];
-      let summaryText: string | undefined = hookResult?.summary?.summary;
-      let summaryDetails: unknown = hookResult?.summary?.details;
+      let summaryText: string | undefined = options?.summarize
+        ? hookResult?.summary?.summary
+        : undefined;
+      let summaryDetails: unknown = options?.summarize ? hookResult?.summary?.details : undefined;
       if (!summaryText && options?.summarize && entries.length > 0) {
         const model = this.model;
         if (!model) throw new AgentHarnessError('invalid_state', 'No model set for branch summary');
@@ -1173,6 +1156,10 @@ export class AgentHarness<
       if (summaryId) {
         const entry = await this.session.getEntry(summaryId);
         if (entry?.type === 'branch_summary') summaryEntry = entry;
+      }
+      const label = hookResult?.label ?? options?.label;
+      if (label) {
+        await this.session.appendLabel(summaryId ?? targetId, label);
       }
       await this.emitOwn({
         type: 'session_tree',
@@ -1343,11 +1330,7 @@ export class AgentHarness<
   }
 
   hasPendingMessages(): boolean {
-    return (
-      this.steerQueue.length > 0 ||
-      this.followUpQueue.length > 0 ||
-      (this.hasExternalQueuedMessages?.() ?? false)
-    );
+    return this.steerQueue.length > 0 || this.followUpQueue.length > 0;
   }
 
   getSignal(): AbortSignal | undefined {

@@ -98,8 +98,10 @@ async function runSessionSuite(
     it('supports labels and session info entries without affecting context', async () => {
       const session = new Session(await createStorage());
       const user1 = await session.appendMessage(createUserMessage('one'));
-      await session.appendLabel(user1, 'checkpoint');
-      await session.appendSessionName('name');
+      const labelId = await session.appendLabel(user1, 'checkpoint');
+      expect(await session.getLeafId()).toBe(labelId);
+      const sessionInfoId = await session.appendSessionName('name');
+      expect(await session.getLeafId()).toBe(sessionInfoId);
       const entries = await session.getEntries();
       expect(entries.some((entry) => entry.type === 'label')).toBe(true);
       expect(entries.some((entry) => entry.type === 'session_info')).toBe(true);

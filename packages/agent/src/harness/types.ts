@@ -849,15 +849,6 @@ export interface AgentHarnessOptions<
   activeToolNames?: string[];
   steeringMode?: QueueMode;
   followUpMode?: QueueMode;
-  /**
-   * 上层 Agent/Session 队列适配器。
-   *
-   * Harness 的公开 steer/followUp/nextTurn API 保持 Pi 的 text-only 语义；
-   * 需要注入 custom AgentMessage 的宿主可在这里按 QueueMode 排空自己的队列。
-   */
-  drainSteeringMessages?: (mode: QueueMode) => AgentMessage[] | Promise<AgentMessage[]>;
-  drainFollowUpMessages?: (mode: QueueMode) => AgentMessage[] | Promise<AgentMessage[]>;
-  hasQueuedMessages?: () => boolean;
 }
 
 export type { AgentHarness } from './agent-harness.ts';

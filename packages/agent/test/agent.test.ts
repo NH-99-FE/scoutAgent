@@ -215,6 +215,72 @@ describe('Agent', () => {
     expect(agent.state.isStreaming).toBe(false);
   });
 
+  it('uses in-place message_end mutations before executing assistant tool calls', async () => {
+    const executed: unknown[] = [];
+    const agent = new Agent({
+      initialState: {
+        tools: [
+          {
+            name: 'echo',
+            label: 'Echo',
+            description: 'echo tool',
+            parameters: Type.Object({ value: Type.String() }),
+            execute: async (_toolCallId, params): Promise<AgentToolResult<unknown>> => {
+              executed.push(params);
+              return {
+                content: [{ type: 'text', text: 'ok' }],
+                details: {},
+              };
+            },
+          },
+        ],
+      },
+      streamFn: () => {
+        const stream = new MockAssistantStream();
+        queueMicrotask(() => {
+          stream.push({
+            type: 'done',
+            reason: 'stop',
+            message: {
+              ...createAssistantMessage(''),
+              content: [
+                {
+                  type: 'toolCall',
+                  id: 'tool-1',
+                  name: 'echo',
+                  arguments: { value: 'original' },
+                },
+              ],
+            },
+          });
+        });
+        return stream;
+      },
+    });
+
+    agent.subscribe((event) => {
+      if (event.type !== 'message_end' || event.message.role !== 'assistant') return;
+      const target = event.message as unknown as Record<string, unknown>;
+      for (const key of Object.keys(target)) {
+        delete target[key];
+      }
+      Object.assign(target, createAssistantMessage('replacement without tool calls'));
+    });
+
+    await agent.prompt('hello');
+
+    expect(executed).toEqual([]);
+    expect(agent.state.messages).not.toContainEqual(
+      expect.objectContaining({ role: 'toolResult' }),
+    );
+    const assistant = agent.state.messages.find((message) => message.role === 'assistant');
+    expect(assistant).toEqual(
+      expect.objectContaining({
+        content: [{ type: 'text', text: 'replacement without tool calls' }],
+      }),
+    );
+  });
+
   it('should pass the active abort signal to subscribers', async () => {
     let receivedSignal: AbortSignal | undefined;
     const agent = new Agent({

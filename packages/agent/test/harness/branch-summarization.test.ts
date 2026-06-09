@@ -22,7 +22,12 @@ import {
 import { NodeExecutionEnv } from '../../src/harness/env/nodejs.ts';
 import { InMemorySessionStorage } from '../../src/harness/session/memory-storage.ts';
 import { Session } from '../../src/harness/session/session.ts';
-import type { BranchSummaryEntry, CompactionEntry, MessageEntry } from '../../src/harness/types.ts';
+import type {
+  BranchSummaryEntry,
+  CompactionEntry,
+  LabelEntry,
+  MessageEntry,
+} from '../../src/harness/types.ts';
 import { getOrThrow } from '../../src/harness/types.ts';
 import type { AgentMessage } from '../../src/types.ts';
 import { createAssistantMessage, createUserMessage } from './session-test-utils.ts';
@@ -349,6 +354,85 @@ describe('branch summarization', () => {
     });
     expect(result.summaryEntry?.summary).toContain('Generated branch');
     expect(result.summaryEntry?.details).toEqual({ readFiles: [], modifiedFiles: [] });
+  });
+
+  it('labels the summary entry when navigating with a summary label', async () => {
+    registerResponses([() => createSummaryMessage('## Goal\nGenerated branch')]);
+    const session = new Session(new InMemorySessionStorage());
+    const rootAssistant = await session.appendMessage(createAssistantMessage('root answer'));
+    await session.appendMessage(createUserMessage('abandoned'));
+    await session.appendMessage(createAssistantMessage('abandoned answer'));
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: createModel(),
+      getApiKeyAndHeaders: async () => ({ apiKey: 'test-key' }),
+    });
+    const leafEvents: Array<string | null> = [];
+    harness.subscribe((event) => {
+      if (event.type === 'session_tree') leafEvents.push(event.newLeafId);
+    });
+
+    const result = await harness.navigateTree(rootAssistant, {
+      summarize: true,
+      label: 'checkpoint',
+    });
+
+    expect(result.summaryEntry?.id).toBeDefined();
+    expect(await session.getLabel(result.summaryEntry!.id)).toBe('checkpoint');
+    expect(await session.getLabel(rootAssistant)).toBeUndefined();
+    const labelEntry = (await session.getEntries()).find(
+      (entry): entry is LabelEntry =>
+        entry.type === 'label' && entry.targetId === result.summaryEntry!.id,
+    );
+    expect(labelEntry).toBeDefined();
+    expect(await session.getLeafId()).toBe(labelEntry!.id);
+    expect(leafEvents).toEqual([labelEntry!.id]);
+  });
+
+  it('labels the target entry when navigating without a summary', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    const rootAssistant = await session.appendMessage(createAssistantMessage('root answer'));
+    await session.appendMessage(createUserMessage('abandoned'));
+    await session.appendMessage(createAssistantMessage('abandoned answer'));
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: createModel(),
+    });
+    const leafEvents: Array<string | null> = [];
+    harness.subscribe((event) => {
+      if (event.type === 'session_tree') leafEvents.push(event.newLeafId);
+    });
+
+    const result = await harness.navigateTree(rootAssistant, { label: 'checkpoint' });
+
+    expect(result.summaryEntry).toBeUndefined();
+    expect(await session.getLabel(rootAssistant)).toBe('checkpoint');
+    const labelEntry = (await session.getEntries()).find(
+      (entry): entry is LabelEntry =>
+        entry.type === 'label' && entry.targetId === rootAssistant,
+    );
+    expect(labelEntry).toBeDefined();
+    expect(await session.getLeafId()).toBe(labelEntry!.id);
+    expect(leafEvents).toEqual([labelEntry!.id]);
+  });
+
+  it('lets session_before_tree override the navigation label', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    const rootAssistant = await session.appendMessage(createAssistantMessage('root answer'));
+    await session.appendMessage(createUserMessage('abandoned'));
+    await session.appendMessage(createAssistantMessage('abandoned answer'));
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: createModel(),
+    });
+    harness.on('session_before_tree', () => ({ label: 'from hook' }));
+
+    await harness.navigateTree(rootAssistant, { label: 'from option' });
+
+    expect(await session.getLabel(rootAssistant)).toBe('from hook');
   });
 
   it('does not move the leaf when aborted after branch summary generation', async () => {

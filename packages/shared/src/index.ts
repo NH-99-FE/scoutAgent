@@ -54,7 +54,7 @@ export interface ScoutSessionListItem {
 
 export type WebviewMessage =
   | { type: 'ready' }
-  | { type: 'user_message'; text: string }
+  | { type: 'user_message'; text: string; deliverAs?: 'steer' | 'followUp' }
   | { type: 'abort' }
   | { type: 'abort_retry' }
   | { type: 'select_model'; provider: string; modelId: string }
@@ -99,7 +99,17 @@ export interface ScoutToolCallContent {
   arguments: Record<string, unknown>;
 }
 
-export type ScoutContent = ScoutTextContent | ScoutThinkingContent | ScoutToolCallContent;
+export interface ScoutImageContent {
+  type: 'image';
+  data: string;
+  mimeType: string;
+}
+
+export type ScoutContent =
+  | ScoutTextContent
+  | ScoutThinkingContent
+  | ScoutToolCallContent
+  | ScoutImageContent;
 
 // ---------- 可序列化消息 ----------
 
@@ -137,11 +147,30 @@ export interface ScoutBranchSummaryMessage {
   entryId?: string;
 }
 
+export interface ScoutCompactionSummaryMessage {
+  role: 'compactionSummary';
+  summary: string;
+  tokensBefore: number;
+  timestamp: number;
+  entryId?: string;
+}
+
+export interface ScoutCustomMessage {
+  role: 'custom';
+  customType: string;
+  content: string | ScoutContent[];
+  details?: unknown;
+  timestamp: number;
+  entryId?: string;
+}
+
 export type ScoutMessage =
   | ScoutUserMessage
   | ScoutAssistantMessage
   | ScoutToolResultMessage
-  | ScoutBranchSummaryMessage;
+  | ScoutBranchSummaryMessage
+  | ScoutCompactionSummaryMessage
+  | ScoutCustomMessage;
 
 // ---------- Extension → Webview ----------
 

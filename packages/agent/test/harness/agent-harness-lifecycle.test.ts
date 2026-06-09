@@ -353,6 +353,30 @@ describe('AgentHarness lifecycle', () => {
     expect(harness.getFollowUpMode()).toBe('one-at-a-time');
   });
 
+  it('hydrates existing session context when appending before first runtime use', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    await session.appendMessage(makeUserMessage('existing request'));
+    await session.appendMessage(makeProviderAssistantMessage('existing answer'));
+    const capturedUserTexts: string[][] = [];
+    registerResponses([
+      (context) => {
+        capturedUserTexts.push(textFromUserMessages(context.messages));
+        return makeProviderAssistantMessage('continued');
+      },
+    ]);
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: makeProviderModel(),
+      systemPrompt: 'test',
+    });
+
+    await harness.appendMessage(makeUserMessage('new tail'));
+    await harness.continue();
+
+    expect(capturedUserTexts).toEqual([['existing request', 'new tail']]);
+  });
+
   it('appends before_agent_start messages and persists them', async () => {
     let requestText: string[] = [];
     registerResponses([
@@ -496,54 +520,6 @@ describe('AgentHarness lifecycle', () => {
     expect(requestText).toEqual([['next', 'prompt']]);
     expect(harness.hasPendingMessages()).toBe(false);
     expect(settledNextTurnCounts).toEqual([0]);
-  });
-
-  it('drains upper adapter queues with global queue mode and persists custom messages', async () => {
-    const requestText: string[][] = [];
-    registerResponses([
-      (context) => {
-        requestText.push(textFromUserMessages(context.messages));
-        return makeProviderAssistantMessage('first');
-      },
-      (context) => {
-        requestText.push(textFromUserMessages(context.messages));
-        return makeProviderAssistantMessage('second');
-      },
-      (context) => {
-        requestText.push(textFromUserMessages(context.messages));
-        return makeProviderAssistantMessage('third');
-      },
-    ]);
-    const session = new Session(new InMemorySessionStorage());
-    const externalSteeringQueue: AgentMessage[] = [];
-    const harness = new AgentHarness({
-      env: new NodeExecutionEnv({ cwd: process.cwd() }),
-      session,
-      model: makeProviderModel(),
-      steeringMode: 'one-at-a-time',
-      drainSteeringMessages: (mode) =>
-        mode === 'all' ? externalSteeringQueue.splice(0) : externalSteeringQueue.splice(0, 1),
-      hasQueuedMessages: () => externalSteeringQueue.length > 0,
-    });
-    let queued = false;
-    harness.subscribe((event) => {
-      if (event.type === 'message_start' && event.message.role === 'assistant' && !queued) {
-        queued = true;
-        void harness.steer('own');
-        externalSteeringQueue.push({
-          role: 'custom',
-          customType: 'adapter',
-          content: 'custom',
-          display: true,
-          timestamp: Date.now(),
-        });
-      }
-    });
-
-    await harness.prompt('hello');
-
-    expect(requestText).toEqual([['hello'], ['hello', 'own'], ['hello', 'own', 'custom']]);
-    expect((await session.getBranch()).some((entry) => entry.type === 'custom_message')).toBe(true);
   });
 
   it('abort clears steer and follow-up queues but preserves next-turn messages', async () => {
@@ -1051,6 +1027,48 @@ describe('AgentHarness lifecycle', () => {
       entry.type === 'message' ? [entry.message.role] : [],
     );
     expect(roles).toEqual(['user', 'assistant', 'toolResult', 'assistant']);
+  });
+
+  it('includes pending appended messages in the next provider context', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    const harness = makeHarness(session);
+    const internals = harness as unknown as HarnessInternals;
+    const responses = [makeToolUseAssistantMessage(), makeAssistantTextMessage('done', 20)];
+    const capturedUserTexts: string[][] = [];
+
+    internals.createStreamFn = () => (_model: unknown, context: Context) => {
+      capturedUserTexts.push(textFromUserMessages(context.messages));
+      const response = responses.shift();
+      if (!response) throw new Error('No response queued');
+      return makeAssistantStream(response);
+    };
+    await harness.setTools(
+      [
+        {
+          name: 'echo',
+          label: 'Echo',
+          description: 'Echo text back',
+          parameters: {
+            type: 'object',
+            properties: { text: { type: 'string' } },
+            required: ['text'],
+          },
+          execute: async (_toolCallId, input) => ({
+            content: [{ type: 'text', text: `echo:${(input as { text: string }).text}` }],
+            details: input,
+          }),
+        },
+      ],
+      ['echo'],
+    );
+    harness.subscribe(async (event) => {
+      if (event.type !== 'message_end' || event.message.role !== 'assistant') return;
+      await harness.appendMessage(makeUserMessage('listener injected'));
+    });
+
+    await harness.prompt('run tool');
+
+    expect(capturedUserTexts).toEqual([['run tool'], ['run tool', 'listener injected']]);
   });
 
   it('continue waits for the full tool loop when the continuation response uses tools', async () => {
