@@ -8,6 +8,8 @@ import type { AgentTool, AgentToolResult } from '@scout-agent/agent';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { type Static, Type } from '@sinclair/typebox';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { pathExists, resolveToCwd } from './shared/path-utils.ts';
 import { ensureTool } from './shared/tools-manager.ts';
 import {
@@ -74,10 +76,10 @@ function toPosixPath(value: string): string {
 
 // ---------- 工厂函数 ----------
 
-export function createFindTool(
+export function createFindToolDefinition(
   cwd: string,
   options?: FindToolOptions,
-): AgentTool<typeof findSchema, FindToolDetails> {
+): ToolDefinition<typeof findSchema, FindToolDetails> {
   const customOps = options?.operations;
 
   return {
@@ -334,4 +336,11 @@ export function createFindTool(
       });
     },
   };
+}
+
+export function createFindTool(
+  cwd: string,
+  options?: FindToolOptions,
+): AgentTool<typeof findSchema, FindToolDetails> {
+  return wrapToolDefinition(createFindToolDefinition(cwd, options));
 }

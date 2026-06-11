@@ -7,6 +7,8 @@ import type { AgentTool } from '@scout-agent/agent';
 import { constants } from 'node:fs';
 import { access as fsAccess, readFile as fsReadFile } from 'node:fs/promises';
 import { type Static, Type } from '@sinclair/typebox';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { resolveReadPathAsync } from './shared/path-utils.ts';
 import {
   DEFAULT_MAX_BYTES,
@@ -69,10 +71,10 @@ export interface ReadToolOptions {
 
 // ---------- 工厂函数 ----------
 
-export function createReadTool(
+export function createReadToolDefinition(
   cwd: string,
   options?: ReadToolOptions,
-): AgentTool<typeof readSchema, ReadToolDetails | undefined> {
+): ToolDefinition<typeof readSchema, ReadToolDetails | undefined> {
   const ops = options?.operations ?? defaultReadOperations;
   const isVisionModel = options?.isVisionModel;
 
@@ -227,4 +229,11 @@ export function createReadTool(
       });
     },
   };
+}
+
+export function createReadTool(
+  cwd: string,
+  options?: ReadToolOptions,
+): AgentTool<typeof readSchema, ReadToolDetails | undefined> {
+  return wrapToolDefinition(createReadToolDefinition(cwd, options));
 }

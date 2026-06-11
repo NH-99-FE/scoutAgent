@@ -8,6 +8,8 @@ import { access as fsAccess } from 'node:fs/promises';
 import type { AgentTool } from '@scout-agent/agent';
 import { spawn } from 'node:child_process';
 import { type Static, Type } from '@sinclair/typebox';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { OutputAccumulator } from './shared/output-accumulator.ts';
 import {
   DEFAULT_MAX_BYTES,
@@ -173,10 +175,10 @@ const BASH_UPDATE_THROTTLE_MS = 100;
 
 // ---------- 创建工具 ----------
 
-export function createBashTool(
+export function createBashToolDefinition(
   cwd: string,
   options?: BashToolOptions,
-): AgentTool<typeof bashSchema, BashToolDetails | undefined> {
+): ToolDefinition<typeof bashSchema, BashToolDetails | undefined> {
   const ops = options?.operations ?? createLocalBashOperations({ shellPath: options?.shellPath });
   const commandPrefix = options?.commandPrefix;
   const spawnHook = options?.spawnHook;
@@ -316,4 +318,11 @@ export function createBashTool(
       }
     },
   };
+}
+
+export function createBashTool(
+  cwd: string,
+  options?: BashToolOptions,
+): AgentTool<typeof bashSchema, BashToolDetails | undefined> {
+  return wrapToolDefinition(createBashToolDefinition(cwd, options));
 }

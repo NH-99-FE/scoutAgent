@@ -7,6 +7,8 @@ import type { AgentTool } from '@scout-agent/agent';
 import { mkdir as fsMkdir, writeFile as fsWriteFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { type Static, Type } from '@sinclair/typebox';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { withFileMutationQueue } from './shared/file-mutation-queue.ts';
 import { resolveToCwd } from './shared/path-utils.ts';
 
@@ -46,10 +48,10 @@ export interface WriteToolOptions {
 
 // ---------- 工厂函数 ----------
 
-export function createWriteTool(
+export function createWriteToolDefinition(
   cwd: string,
   options?: WriteToolOptions,
-): AgentTool<typeof writeSchema, undefined> {
+): ToolDefinition<typeof writeSchema, undefined> {
   const ops = options?.operations ?? defaultWriteOperations;
 
   return {
@@ -96,4 +98,11 @@ export function createWriteTool(
       });
     },
   };
+}
+
+export function createWriteTool(
+  cwd: string,
+  options?: WriteToolOptions,
+): AgentTool<typeof writeSchema, undefined> {
+  return wrapToolDefinition(createWriteToolDefinition(cwd, options));
 }

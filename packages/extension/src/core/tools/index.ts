@@ -4,6 +4,7 @@
 
 export {
   createReadTool,
+  createReadToolDefinition,
   type ReadToolInput,
   type ReadToolDetails,
   type ReadToolOptions,
@@ -11,6 +12,7 @@ export {
 } from './read.ts';
 export {
   createBashTool,
+  createBashToolDefinition,
   type BashToolInput,
   type BashToolDetails,
   type BashToolOptions,
@@ -21,6 +23,7 @@ export {
 } from './bash.ts';
 export {
   createEditTool,
+  createEditToolDefinition,
   type EditToolInput,
   type EditToolDetails,
   type EditToolOptions,
@@ -28,12 +31,14 @@ export {
 } from './edit.ts';
 export {
   createWriteTool,
+  createWriteToolDefinition,
   type WriteToolInput,
   type WriteToolOptions,
   type WriteOperations,
 } from './write.ts';
 export {
   createGrepTool,
+  createGrepToolDefinition,
   type GrepToolInput,
   type GrepToolDetails,
   type GrepToolOptions,
@@ -41,6 +46,7 @@ export {
 } from './grep.ts';
 export {
   createFindTool,
+  createFindToolDefinition,
   type FindToolInput,
   type FindToolDetails,
   type FindToolOptions,
@@ -48,23 +54,39 @@ export {
 } from './find.ts';
 export {
   createLsTool,
+  createLsToolDefinition,
   type LsToolInput,
   type LsToolDetails,
   type LsToolOptions,
   type LsOperations,
 } from './ls.ts';
 export {
+  createTool,
+  createToolDefinition,
   createTools,
   createDefaultTools,
+  createAllToolDefinitions,
   createBuiltinToolDefinitionEntries,
   BUILTIN_TOOL_DEFINITION_ENTRIES,
   DEFAULT_ACTIVE_TOOL_NAMES,
   ALL_TOOL_NAMES,
   type ToolName,
-  type ToolDefinition,
+  type ToolDef,
   type ToolDefinitionEntry,
   type ToolsOptions,
 } from './create-tools.ts';
+export {
+  wrapToolDefinition,
+  wrapToolDefinitions,
+  createToolDefinitionFromAgentTool,
+} from './tool-definition-wrapper.ts';
+export type {
+  ToolDefinition,
+  ToolRenderComponent,
+  ToolRenderContext,
+  ToolRenderResultOptions,
+  ToolRenderTheme,
+} from '../extensions/types.ts';
 export { withFileMutationQueue } from './shared/file-mutation-queue.ts';
 export {
   DEFAULT_MAX_BYTES,

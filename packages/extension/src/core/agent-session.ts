@@ -43,16 +43,16 @@ import {
 import type { ScoutCoreConfig, ScoutStreamOptions } from './config.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import {
-  createTools,
   DEFAULT_ACTIVE_TOOL_NAMES,
   ALL_TOOL_NAMES,
   createBuiltinToolDefinitionEntries,
+  wrapToolDefinition,
   createLocalBashOperations,
   OutputAccumulator,
   type BashOperations,
   type ToolDefinition,
 } from './tools/index.ts';
-import { ScoutExtensionRunner, wrapRegisteredTools } from './extensions/index.ts';
+import { ScoutExtensionRunner } from './extensions/index.ts';
 import type {
   ToolInfo,
   SendMessageInput,
@@ -1450,15 +1450,10 @@ export class AgentSession implements CoreDisposable {
       Array.from(ALL_TOOL_NAMES),
       { read: readOptions },
     );
-    const builtinTools = createTools(this.cwd, Array.from(ALL_TOOL_NAMES), { read: readOptions });
-    const builtinToolsByName = new Map(builtinTools.map((tool) => [tool.name, tool]));
     const registry = new Map<string, ToolRegistryEntry>();
 
     for (const entry of builtinEntries) {
-      const tool = builtinToolsByName.get(entry.definition.name);
-      if (!tool) {
-        continue;
-      }
+      const tool = wrapToolDefinition(entry.definition);
       registry.set(entry.definition.name, {
         definition: entry.definition,
         tool,
@@ -1468,12 +1463,11 @@ export class AgentSession implements CoreDisposable {
     }
 
     if (this.extensionRunner) {
+      const runner = this.extensionRunner;
       const registeredTools = this.extensionRunner.getAllRegisteredTools();
-      const extensionTools = wrapRegisteredTools(registeredTools, this.extensionRunner);
-      for (let i = 0; i < extensionTools.length; i++) {
-        const tool = extensionTools[i]!;
-        const registered = registeredTools[i]!;
-        registry.set(tool.name, {
+      for (const registered of registeredTools) {
+        const tool = wrapToolDefinition(registered.definition, () => runner.createContext());
+        registry.set(registered.definition.name, {
           definition: registered.definition,
           tool,
           sourceInfo: registered.sourceInfo,

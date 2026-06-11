@@ -34,29 +34,71 @@ import type { EventBus } from './event-bus.ts';
 import type { ScoutCoreConfig } from '../config.ts';
 import type { SourceInfo } from '../source-info.ts';
 
-// ---------- 扩展工具定义 ----------
+// ---------- 工具定义 ----------
+
+export type ToolRenderTheme = unknown;
+export type ToolRenderComponent = unknown;
+
+export interface ToolRenderContext<TState = unknown, TArgs = unknown> {
+  state?: TState;
+  args?: TArgs;
+}
+
+export interface ToolRenderResultOptions {
+  isError?: boolean;
+}
 
 /**
- * 扩展注册的工具定义。
- * 相比 AgentTool，execute 接收额外的 ScoutExtensionContext 参数。
+ * Pi-style 工具定义。
+ * Agent runtime 只消费包装后的 AgentTool；metadata/render 字段保留在 definition registry。
  */
-export interface ScoutToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown> {
+export interface ToolDefinition<
+  TParams extends TSchema = TSchema,
+  TDetails = unknown,
+  TState = unknown,
+> {
   name: string;
   label: string;
   description: string;
   parameters: TParams;
   promptSnippet?: string;
   promptGuidelines?: string[];
+  renderShell?: 'default' | 'self';
   prepareArguments?: (args: unknown) => Static<TParams>;
   executionMode?: ToolExecutionMode;
-  execute: (
+  execute(
     toolCallId: string,
     params: Static<TParams>,
     signal?: AbortSignal,
     onUpdate?: AgentToolUpdateCallback<TDetails>,
     ctx?: ScoutExtensionContext,
-  ) => Promise<AgentToolResult<TDetails>>;
+  ): Promise<AgentToolResult<TDetails>>;
+  renderCall?(
+    args: Static<TParams>,
+    theme: ToolRenderTheme,
+    context: ToolRenderContext<TState, Static<TParams>>,
+  ): ToolRenderComponent;
+  renderResult?(
+    result: AgentToolResult<TDetails>,
+    options: ToolRenderResultOptions,
+    theme: ToolRenderTheme,
+    context: ToolRenderContext<TState, Static<TParams>>,
+  ): ToolRenderComponent;
 }
+
+type AnyToolDefinition = ToolDefinition<TSchema, unknown, unknown>;
+
+export function defineTool<TParams extends TSchema, TDetails = unknown, TState = unknown>(
+  tool: ToolDefinition<TParams, TDetails, TState>,
+): ToolDefinition<TParams, TDetails, TState> & AnyToolDefinition {
+  return tool as ToolDefinition<TParams, TDetails, TState> & AnyToolDefinition;
+}
+
+export type ScoutToolDefinition<
+  TParams extends TSchema = TSchema,
+  TDetails = unknown,
+  TState = unknown,
+> = ToolDefinition<TParams, TDetails, TState>;
 
 // ---------- 事件类型 ----------
 

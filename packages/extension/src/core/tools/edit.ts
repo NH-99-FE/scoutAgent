@@ -11,6 +11,8 @@ import {
   writeFile as fsWriteFile,
 } from 'node:fs/promises';
 import { type Static, Type } from '@sinclair/typebox';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import {
   applyEditsToNormalizedContent,
   detectLineEnding,
@@ -138,10 +140,10 @@ function validateEditInput(input: EditToolInput): { path: string; edits: Edit[] 
 
 // ---------- 创建工具 ----------
 
-export function createEditTool(
+export function createEditToolDefinition(
   cwd: string,
   options?: EditToolOptions,
-): AgentTool<typeof editSchema, EditToolDetails> {
+): ToolDefinition<typeof editSchema, EditToolDetails> {
   const ops = options?.operations ?? defaultEditOperations;
 
   return {
@@ -216,4 +218,11 @@ export function createEditTool(
       });
     },
   };
+}
+
+export function createEditTool(
+  cwd: string,
+  options?: EditToolOptions,
+): AgentTool<typeof editSchema, EditToolDetails> {
+  return wrapToolDefinition(createEditToolDefinition(cwd, options));
 }

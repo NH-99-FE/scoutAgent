@@ -1,15 +1,17 @@
 // ============================================================
-// 工具工厂 — 从工具名列表创建 AgentTool[]
+// 工具工厂 — Pi-style ToolDefinition-first registry
 // ============================================================
 
 import type { AgentTool } from '@scout-agent/agent';
-import { createReadTool, type ReadToolOptions } from './read.ts';
-import { createBashTool, type BashToolOptions } from './bash.ts';
-import { createEditTool, type EditToolOptions } from './edit.ts';
-import { createWriteTool, type WriteToolOptions } from './write.ts';
-import { createGrepTool, type GrepToolOptions } from './grep.ts';
-import { createFindTool, type FindToolOptions } from './find.ts';
-import { createLsTool, type LsToolOptions } from './ls.ts';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { type ReadToolOptions, createReadToolDefinition } from './read.ts';
+import { type BashToolOptions, createBashToolDefinition } from './bash.ts';
+import { type EditToolOptions, createEditToolDefinition } from './edit.ts';
+import { type WriteToolOptions, createWriteToolDefinition } from './write.ts';
+import { type GrepToolOptions, createGrepToolDefinition } from './grep.ts';
+import { type FindToolOptions, createFindToolDefinition } from './find.ts';
+import { type LsToolOptions, createLsToolDefinition } from './ls.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { createSyntheticSourceInfo, type SourceInfo } from '../source-info.ts';
 
 export type ToolName = 'read' | 'bash' | 'edit' | 'write' | 'grep' | 'find' | 'ls';
@@ -37,54 +39,36 @@ export interface ToolsOptions {
   ls?: LsToolOptions;
 }
 
-export interface ToolDefinition {
-  name: string;
-  label: string;
-  description: string;
-  parameters: AgentTool['parameters'];
-  promptSnippet?: AgentTool['promptSnippet'];
-  promptGuidelines?: AgentTool['promptGuidelines'];
-  prepareArguments?: AgentTool['prepareArguments'];
-  executionMode?: AgentTool['executionMode'];
-}
+export type ToolDef = ToolDefinition;
 
 export interface ToolDefinitionEntry {
   definition: ToolDefinition;
   sourceInfo: SourceInfo;
 }
 
-function createToolByName(name: ToolName, cwd: string, options?: ToolsOptions): AgentTool {
+export function createToolDefinition(name: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
   switch (name) {
     case 'read':
-      return createReadTool(cwd, options?.read);
+      return createReadToolDefinition(cwd, options?.read);
     case 'bash':
-      return createBashTool(cwd, options?.bash);
+      return createBashToolDefinition(cwd, options?.bash);
     case 'edit':
-      return createEditTool(cwd, options?.edit);
+      return createEditToolDefinition(cwd, options?.edit);
     case 'write':
-      return createWriteTool(cwd, options?.write);
+      return createWriteToolDefinition(cwd, options?.write);
     case 'grep':
-      return createGrepTool(cwd, options?.grep);
+      return createGrepToolDefinition(cwd, options?.grep);
     case 'find':
-      return createFindTool(cwd, options?.find);
+      return createFindToolDefinition(cwd, options?.find);
     case 'ls':
-      return createLsTool(cwd, options?.ls);
+      return createLsToolDefinition(cwd, options?.ls);
     default:
       throw new Error(`Unknown tool name: ${name}`);
   }
 }
 
-function extractToolDefinition(tool: AgentTool): ToolDefinition {
-  return {
-    name: tool.name as ToolName,
-    label: tool.label,
-    description: tool.description,
-    parameters: tool.parameters,
-    promptSnippet: tool.promptSnippet,
-    promptGuidelines: tool.promptGuidelines,
-    prepareArguments: tool.prepareArguments,
-    executionMode: tool.executionMode,
-  };
+export function createTool(name: ToolName, cwd: string, options?: ToolsOptions): AgentTool {
+  return wrapToolDefinition(createToolDefinition(name, cwd, options));
 }
 
 export function createBuiltinToolDefinitionEntries(
@@ -93,9 +77,8 @@ export function createBuiltinToolDefinitionEntries(
   options?: ToolsOptions,
 ): ToolDefinitionEntry[] {
   return toolNames.map((name) => {
-    const tool = createToolByName(name, cwd, options);
     return {
-      definition: extractToolDefinition(tool),
+      definition: createToolDefinition(name, cwd, options),
       sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: 'builtin' }),
     };
   });
@@ -108,13 +91,27 @@ export const BUILTIN_TOOL_DEFINITION_ENTRIES: ReadonlyMap<ToolName, ToolDefiniti
   ]),
 );
 
-/** 从工具名列表创建 AgentTool[] */
 export function createTools(
   cwd: string,
   toolNames: ToolName[],
   options?: ToolsOptions,
 ): AgentTool[] {
-  return toolNames.map((name) => createToolByName(name, cwd, options));
+  return toolNames.map((name) => createTool(name, cwd, options));
+}
+
+export function createAllToolDefinitions(
+  cwd: string,
+  options?: ToolsOptions,
+): Record<ToolName, ToolDef> {
+  return {
+    read: createReadToolDefinition(cwd, options?.read),
+    bash: createBashToolDefinition(cwd, options?.bash),
+    edit: createEditToolDefinition(cwd, options?.edit),
+    write: createWriteToolDefinition(cwd, options?.write),
+    grep: createGrepToolDefinition(cwd, options?.grep),
+    find: createFindToolDefinition(cwd, options?.find),
+    ls: createLsToolDefinition(cwd, options?.ls),
+  };
 }
 
 /** 创建默认活跃工具集 */

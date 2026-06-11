@@ -7,6 +7,8 @@ import type { AgentTool } from '@scout-agent/agent';
 import { readdir as fsReaddir, stat as fsStat } from 'node:fs/promises';
 import nodePath from 'node:path';
 import { type Static, Type } from '@sinclair/typebox';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { pathExists, resolveToCwd } from './shared/path-utils.ts';
 import {
   DEFAULT_MAX_BYTES,
@@ -69,10 +71,10 @@ export interface LsToolOptions {
 
 // ---------- 工厂函数 ----------
 
-export function createLsTool(
+export function createLsToolDefinition(
   cwd: string,
   options?: LsToolOptions,
-): AgentTool<typeof lsSchema, LsToolDetails | undefined> {
+): ToolDefinition<typeof lsSchema, LsToolDetails | undefined> {
   const ops = options?.operations ?? defaultLsOperations;
 
   return {
@@ -199,4 +201,11 @@ export function createLsTool(
       });
     },
   };
+}
+
+export function createLsTool(
+  cwd: string,
+  options?: LsToolOptions,
+): AgentTool<typeof lsSchema, LsToolDetails | undefined> {
+  return wrapToolDefinition(createLsToolDefinition(cwd, options));
 }

@@ -9,6 +9,8 @@ import type { AgentTool } from '@scout-agent/agent';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { type Static, Type } from '@sinclair/typebox';
+import type { ToolDefinition } from '../extensions/types.ts';
+import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { resolveToCwd } from './shared/path-utils.ts';
 import { ensureTool } from './shared/tools-manager.ts';
 import {
@@ -85,10 +87,10 @@ export interface GrepToolOptions {
 
 // ---------- 创建工具 ----------
 
-export function createGrepTool(
+export function createGrepToolDefinition(
   cwd: string,
   options?: GrepToolOptions,
-): AgentTool<typeof grepSchema, GrepToolDetails | undefined> {
+): ToolDefinition<typeof grepSchema, GrepToolDetails | undefined> {
   const customOps = options?.operations;
 
   return {
@@ -357,4 +359,11 @@ export function createGrepTool(
       });
     },
   };
+}
+
+export function createGrepTool(
+  cwd: string,
+  options?: GrepToolOptions,
+): AgentTool<typeof grepSchema, GrepToolDetails | undefined> {
+  return wrapToolDefinition(createGrepToolDefinition(cwd, options));
 }

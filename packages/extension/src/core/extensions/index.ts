@@ -4,7 +4,12 @@
 
 export { createEventBus, type EventBus, type EventBusController } from './event-bus.ts';
 export type {
+  ToolDefinition,
   ScoutToolDefinition,
+  ToolRenderComponent,
+  ToolRenderContext,
+  ToolRenderResultOptions,
+  ToolRenderTheme,
   ScoutExtensionEventType,
   ResourcesDiscoverEvent,
   ResourcesDiscoverResult,
@@ -78,6 +83,7 @@ export type {
   ScoutExtensionActions,
   ScoutExtensionContextActions,
 } from './types.ts';
+export { defineTool } from './types.ts';
 export { wrapRegisteredTool, wrapRegisteredTools } from './wrapper.ts';
 export {
   createExtensionRuntime,
