@@ -10,15 +10,6 @@ import {
   unregisterApiProviders,
   clearApiProviders,
 } from '../src/api-registry';
-import { streamAnthropic, streamSimpleAnthropic } from '../src/providers/anthropic';
-import {
-  streamOpenAICompletions,
-  streamSimpleOpenAICompletions,
-} from '../src/providers/openai-completions';
-import {
-  streamOpenAIResponses,
-  streamSimpleOpenAIResponses,
-} from '../src/providers/openai-responses';
 import { resetApiProviders } from '../src/providers/register-builtins';
 import type {
   Api,
@@ -62,36 +53,18 @@ function makeContext(): Context {
   };
 }
 
-function registerBuiltins() {
-  registerApiProvider({
-    api: 'anthropic-messages',
-    stream: streamAnthropic,
-    streamSimple: streamSimpleAnthropic,
-  });
-  registerApiProvider({
-    api: 'openai-completions',
-    stream: streamOpenAICompletions,
-    streamSimple: streamSimpleOpenAICompletions,
-  });
-  registerApiProvider({
-    api: 'openai-responses',
-    stream: streamOpenAIResponses,
-    streamSimple: streamSimpleOpenAIResponses,
-  });
-}
-
 // ---------- 测试 ----------
 
 describe('api-registry', () => {
   beforeEach(() => {
     if (!getApiProvider('anthropic-messages')) {
-      registerBuiltins();
+      resetApiProviders();
     }
   });
 
   afterEach(() => {
     clearApiProviders();
-    registerBuiltins();
+    resetApiProviders();
   });
 
   it('has built-in providers registered after import', () => {
@@ -147,6 +120,20 @@ describe('api-registry', () => {
     expect(getApiProvider('anthropic-messages')).toBeDefined();
     expect(getApiProvider('openai-completions')).toBeDefined();
     expect(getApiProvider('openai-responses')).toBeDefined();
+  });
+
+  it('returns built-in streamSimple provider errors through the event stream', async () => {
+    resetApiProviders();
+    const provider = getApiProvider('openai-responses');
+    expect(provider).toBeDefined();
+
+    const stream = provider!.streamSimple(makeFakeModel('openai-responses', 'missing-provider'), {
+      messages: [{ role: 'user', content: 'hello', timestamp: Date.now() }],
+    });
+
+    const result = await stream.result();
+    expect(result.stopReason).toBe('error');
+    expect(result.errorMessage).toMatch(/No API key for provider: missing-provider/);
   });
 
   it('registered provider stream throws on API mismatch', () => {

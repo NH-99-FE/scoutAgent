@@ -11,6 +11,7 @@ import type {
   AssistantMessage,
   Context,
   Model,
+  ProviderStreamOptions,
   SimpleStreamOptions,
   StreamFunction,
   StreamOptions,
@@ -104,13 +105,30 @@ describe('stream', () => {
 
     const model = makeModel(testApi);
     const ctx = makeContext();
-    const opts: StreamOptions = { temperature: 0.5, maxTokens: 512 };
+    const opts: ProviderStreamOptions = { temperature: 0.5, maxTokens: 512 };
     stream(model, ctx, opts);
 
     expect(received).not.toBeNull();
     expect(received!.model).toBe(model);
     expect(received!.context).toBe(ctx);
     expect(received!.options).toBe(opts);
+  });
+
+  it('accepts provider-specific stream options', () => {
+    let received: { options: unknown } | null = null;
+    const streamFn: StreamFunction<Api, StreamOptions> = (_model, _context, options) => {
+      received = { options };
+      return new AssistantMessageEventStream();
+    };
+    registerApiProvider({ api: testApi, stream: streamFn, streamSimple: makeStreamSimpleFn() });
+
+    stream(makeModel(testApi), makeContext(), {
+      temperature: 0.5,
+      providerSpecificOption: 'kept',
+    });
+
+    expect(received).not.toBeNull();
+    expect((received!.options as Record<string, unknown>).providerSpecificOption).toBe('kept');
   });
 });
 

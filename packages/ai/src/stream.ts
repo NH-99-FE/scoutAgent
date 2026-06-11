@@ -12,6 +12,7 @@ import type {
   AssistantMessageEventStream,
   Context,
   Model,
+  ProviderStreamOptions,
   SimpleStreamOptions,
   StreamOptions,
 } from './types';
@@ -25,16 +26,16 @@ function resolveApiProvider(api: Api) {
 export function stream<TApi extends Api>(
   model: Model<TApi>,
   context: Context,
-  options?: StreamOptions,
+  options?: ProviderStreamOptions,
 ): AssistantMessageEventStream {
   const provider = resolveApiProvider(model.api);
-  return provider.stream(model, context, options);
+  return provider.stream(model, context, options as StreamOptions);
 }
 
 export async function complete<TApi extends Api>(
   model: Model<TApi>,
   context: Context,
-  options?: StreamOptions,
+  options?: ProviderStreamOptions,
 ): Promise<AssistantMessage> {
   return stream(model, context, options).result();
 }

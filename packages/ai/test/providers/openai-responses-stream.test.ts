@@ -57,7 +57,7 @@ function completedEvent(
 
 // ---------- OpenAI mock ----------
 
-let mockStreamEvents: ResponseStreamEvent[] = [];
+let mockStreamEvents: Array<ResponseStreamEvent | Error> = [];
 let capturedPayload: ResponseCreateParamsStreaming | null = null;
 let capturedClientConfig: { defaultHeaders?: Record<string, string> } | null = null;
 
@@ -78,7 +78,10 @@ vi.mock('openai', () => {
           return {
             withResponse: async () => {
               async function* gen() {
-                for (const event of mockStreamEvents) yield event;
+                for (const event of mockStreamEvents) {
+                  if (event instanceof Error) throw event;
+                  yield event;
+                }
               }
               return {
                 data: gen(),
@@ -172,6 +175,22 @@ describe('streamOpenAIResponses — session affinity headers', () => {
     expect(capturedClientConfig?.defaultHeaders?.['x-client-request-id']).toBe('session-affinity');
   });
 
+  it('sets prompt_cache_key for non-OpenAI base URLs when cacheRetention is enabled', async () => {
+    const stream = streamOpenAIResponses(
+      makeModel({ baseUrl: 'https://proxy.example/v1' }),
+      makeContext(),
+      {
+        apiKey: 'test-key',
+        sessionId: 'proxy-session',
+      },
+    );
+
+    await stream.result();
+
+    expect(capturedPayload?.prompt_cache_key).toBe('proxy-session');
+    expect(capturedPayload?.prompt_cache_retention).toBeUndefined();
+  });
+
   it('omits session affinity headers when cacheRetention is none', async () => {
     const stream = streamOpenAIResponses(makeModel(), makeContext(), {
       apiKey: 'test-key',
@@ -200,5 +219,41 @@ describe('streamOpenAIResponses — session affinity headers', () => {
 
     expect(capturedClientConfig?.defaultHeaders?.session_id).toBe('override-session');
     expect(capturedClientConfig?.defaultHeaders?.['x-client-request-id']).toBe('override-request');
+  });
+});
+
+// ---------- error cleanup ----------
+
+describe('streamOpenAIResponses — error cleanup', () => {
+  beforeEach(() => {
+    mockStreamEvents = [];
+    capturedPayload = null;
+    capturedClientConfig = null;
+  });
+
+  it('removes streaming scratch fields from partial tool calls on provider errors', async () => {
+    mockStreamEvents = [
+      {
+        type: 'response.output_item.added',
+        item: {
+          type: 'function_call',
+          id: 'fc_123',
+          call_id: 'call_123',
+          name: 'read',
+          arguments: '{"path":',
+        },
+      } as ResponseStreamEvent,
+      new Error('stream failed'),
+    ];
+
+    const stream = streamOpenAIResponses(makeModel(), makeContext(), { apiKey: 'test-key' });
+    const result = await stream.result();
+
+    expect(result.stopReason).toBe('error');
+    expect(result.errorMessage).toContain('stream failed');
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]).toMatchObject({ type: 'toolCall', name: 'read' });
+    expect(result.content[0]).not.toHaveProperty('partialJson');
+    expect(result.content[0]).not.toHaveProperty('index');
   });
 });

@@ -161,10 +161,7 @@ function buildParams(
     stream: true,
     store: false,
     prompt_cache_key:
-      (model.baseUrl?.includes('api.openai.com') && cacheRetention !== 'none') ||
-      (cacheRetention === 'long' && compat.supportsLongCacheRetention)
-        ? clampOpenAIPromptCacheKey(options?.sessionId)
-        : undefined,
+      cacheRetention === 'none' ? undefined : clampOpenAIPromptCacheKey(options?.sessionId),
     prompt_cache_retention:
       cacheRetention === 'long' && compat.supportsLongCacheRetention ? '24h' : undefined,
   };
@@ -276,6 +273,7 @@ export const streamOpenAIResponses: StreamFunction<'openai-responses', OpenAIRes
       stream.end();
     } catch (error) {
       for (const block of output.content) {
+        delete (block as { index?: number }).index;
         delete (block as { partialJson?: string }).partialJson;
       }
       output.stopReason = options?.signal?.aborted ? 'aborted' : 'error';
