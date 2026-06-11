@@ -158,6 +158,14 @@ function registerResponses(responses: ResponseFactory[]): void {
   );
 }
 
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {};
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function createMessageEntry(message: AgentMessage, parentId: string | null = null): MessageEntry {
   return {
     type: 'message',
@@ -958,19 +966,72 @@ describe('harness compaction', () => {
 
     const abortController = new AbortController();
     let hookSignal: AbortSignal | undefined;
+    let hookUsedHarnessSignal = false;
     harness.on('session_before_compact', (event) => {
       hookSignal = event.signal;
+      hookUsedHarnessSignal = event.signal === harness.getSignal();
       return { cancel: true };
     });
 
     await expect(harness.compact(undefined, { signal: abortController.signal })).rejects.toThrow(
       'Compaction cancelled',
     );
-    expect(hookSignal).toBe(abortController.signal);
+    expect(hookSignal).toBeDefined();
+    expect(hookSignal).not.toBe(abortController.signal);
+    expect(hookUsedHarnessSignal).toBe(true);
 
     abortController.abort();
     await expect(harness.compact(undefined, { signal: abortController.signal })).rejects.toThrow(
       'Compaction aborted',
     );
+  });
+
+  it('aborts in-flight compaction through the harness operation signal', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    await session.appendMessage(createUserMessage('hello'));
+    await session.appendMessage(createAssistantMessage('first', createMockUsage(50000, 0)));
+    await session.appendMessage(createUserMessage('again'));
+    await session.appendMessage(createAssistantMessage('second', createMockUsage(50000, 0)));
+
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: {
+        id: 'test-model',
+        name: 'Test Model',
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        baseUrl: 'https://example.com',
+        reasoning: false,
+        input: ['text'],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 4096,
+      },
+      getApiKeyAndHeaders: async () => ({ apiKey: 'test-key' }),
+    });
+    const enteredHook = createDeferred();
+    const releaseHook = createDeferred();
+    let hookSignal: AbortSignal | undefined;
+
+    harness.on('session_before_compact', async (event) => {
+      hookSignal = event.signal;
+      enteredHook.resolve();
+      await releaseHook.promise;
+      return { cancel: true };
+    });
+
+    const compactPromise = harness.compact();
+    await enteredHook.promise;
+
+    expect(harness.getSignal()).toBe(hookSignal);
+
+    const abortPromise = harness.abort();
+    expect(hookSignal?.aborted).toBe(true);
+    releaseHook.resolve();
+
+    await expect(compactPromise).rejects.toThrow('Compaction aborted');
+    await abortPromise;
+    expect(harness.getSignal()).toBeUndefined();
   });
 });

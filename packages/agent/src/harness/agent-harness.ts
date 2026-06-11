@@ -115,16 +115,7 @@ function applyStreamOptionsPatch(
 ): AgentHarnessStreamOptions {
   const result = cloneStreamOptions(base);
   if (!patch) return result;
-
-  if (Object.hasOwn(patch, 'transport')) result.transport = patch.transport;
-  if (Object.hasOwn(patch, 'timeoutMs')) result.timeoutMs = patch.timeoutMs;
-  if (Object.hasOwn(patch, 'maxRetries')) result.maxRetries = patch.maxRetries;
-  if (Object.hasOwn(patch, 'maxRetryDelayMs')) result.maxRetryDelayMs = patch.maxRetryDelayMs;
-  if (Object.hasOwn(patch, 'websocketConnectTimeoutMs')) {
-    result.websocketConnectTimeoutMs = patch.websocketConnectTimeoutMs;
-  }
-  if (Object.hasOwn(patch, 'cacheRetention')) result.cacheRetention = patch.cacheRetention;
-  if (Object.hasOwn(patch, 'thinkingBudgets')) result.thinkingBudgets = patch.thinkingBudgets;
+  const mutable = result as Record<string, unknown>;
 
   if (Object.hasOwn(patch, 'headers')) {
     if (patch.headers === undefined) {
@@ -152,7 +143,23 @@ function applyStreamOptionsPatch(
     }
   }
 
+  for (const [key, value] of Object.entries(patch)) {
+    if (key === 'headers' || key === 'metadata') continue;
+    mutable[key] = value;
+  }
+
   return result;
+}
+
+function linkAbortSignal(controller: AbortController, signal?: AbortSignal): () => void {
+  if (!signal) return () => {};
+  const abort = () => controller.abort(signal.reason);
+  if (signal.aborted) {
+    abort();
+    return () => {};
+  }
+  signal.addEventListener('abort', abort, { once: true });
+  return () => signal.removeEventListener('abort', abort);
 }
 
 const SUBSCRIBER_EVENT_TYPE = '*';
@@ -211,6 +218,7 @@ export class AgentHarness<
   private phase: AgentHarnessPhase = 'idle';
   private runAbortController?: AbortController;
   private runPromise?: Promise<void>;
+  private activeRuntimeMessages?: AgentMessage[];
   private pendingSessionWrites: PendingSessionWrite[] = [];
   private model: Model<Api>;
   private thinkingLevel: ThinkingLevel;
@@ -395,6 +403,52 @@ export class AgentHarness<
     };
   }
 
+  private beginAbortableOperation(externalSignal?: AbortSignal): {
+    signal: AbortSignal;
+    finish: () => void;
+  } {
+    const abortController = new AbortController();
+    const unlinkAbortSignal = linkAbortSignal(abortController, externalSignal);
+    const finishRunPromise = this.startRunPromise();
+    this.runAbortController = abortController;
+    return {
+      signal: abortController.signal,
+      finish: () => {
+        unlinkAbortSignal();
+        this.runAbortController = undefined;
+        finishRunPromise();
+      },
+    };
+  }
+
+  private setActiveRuntimeMessages(messages: AgentMessage[]): void {
+    this.activeRuntimeMessages = messages.slice();
+  }
+
+  private replaceLastActiveRuntimeMessage(message: AgentMessage): void {
+    if (!this.activeRuntimeMessages) return;
+    if (this.activeRuntimeMessages.length === 0) {
+      this.activeRuntimeMessages.push(message);
+      return;
+    }
+    this.activeRuntimeMessages[this.activeRuntimeMessages.length - 1] = message;
+  }
+
+  private recordActiveRuntimeEvent(event: AgentEvent): void {
+    if (!this.activeRuntimeMessages) return;
+    if (event.type === 'message_start') {
+      this.activeRuntimeMessages.push(event.message);
+      return;
+    }
+    if (event.type === 'message_update' || event.type === 'message_end') {
+      this.replaceLastActiveRuntimeMessage(event.message);
+    }
+  }
+
+  private getRuntimeMessages(): AgentMessage[] | undefined {
+    return this.activeRuntimeMessages?.slice();
+  }
+
   private async createTurnState(): Promise<AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>> {
     const context = await this.session.buildContext();
     const resources = this.getResources();
@@ -456,11 +510,7 @@ export class AgentHarness<
         snapshotOptions,
       );
       return streamSimple(model, context, {
-        cacheRetention: requestOptions.cacheRetention,
-        headers: requestOptions.headers,
-        maxRetries: requestOptions.maxRetries,
-        maxRetryDelayMs: requestOptions.maxRetryDelayMs,
-        metadata: requestOptions.metadata,
+        ...requestOptions,
         onPayload: async (payload) => await this.emitBeforeProviderPayload(model, payload),
         onResponse: async (response) => {
           const headers = { ...(response.headers as Record<string, string>) };
@@ -472,10 +522,6 @@ export class AgentHarness<
         reasoning: streamOptions?.reasoning,
         signal: streamOptions?.signal,
         sessionId: turnState.sessionId,
-        thinkingBudgets: requestOptions.thinkingBudgets,
-        timeoutMs: requestOptions.timeoutMs,
-        transport: requestOptions.transport,
-        websocketConnectTimeoutMs: requestOptions.websocketConnectTimeoutMs,
         apiKey: auth?.apiKey,
       });
     };
@@ -542,6 +588,7 @@ export class AgentHarness<
       prepareNextTurn: async () => {
         await this.flushPendingSessionWrites();
         const nextTurnState = await this.createTurnState();
+        this.setActiveRuntimeMessages(nextTurnState.messages);
         setTurnState(nextTurnState);
         return {
           context: this.createContext(nextTurnState),
@@ -621,9 +668,13 @@ export class AgentHarness<
   }
 
   private async handleAgentEvent(event: AgentEvent, signal?: AbortSignal): Promise<void> {
+    if (event.type === 'message_start' || event.type === 'message_update') {
+      this.recordActiveRuntimeEvent(event);
+    }
     if (event.type === 'message_end') {
       const finalizedEvent = await this.finalizeMessageEnd(event);
       await this.appendFinalizedMessage(finalizedEvent.message);
+      this.recordActiveRuntimeEvent(finalizedEvent);
       await this.emitAny(finalizedEvent, signal);
       return;
     }
@@ -682,6 +733,7 @@ export class AgentHarness<
     const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => {
       activeTurnState = nextTurnState;
     };
+    this.setActiveRuntimeMessages(turnState.messages);
     this.runAbortController = abortController;
     const runResultPromise = (async () => {
       try {
@@ -726,6 +778,7 @@ export class AgentHarness<
         await this.flushPendingSessionWrites();
       } finally {
         this.runAbortController = undefined;
+        this.activeRuntimeMessages = undefined;
       }
     }
   }
@@ -770,6 +823,7 @@ export class AgentHarness<
     const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => {
       activeTurnState = nextTurnState;
     };
+    this.setActiveRuntimeMessages(turnState.messages);
     this.runAbortController = abortController;
     const runResultPromise = (async () => {
       try {
@@ -814,6 +868,7 @@ export class AgentHarness<
         await this.flushPendingSessionWrites();
       } finally {
         this.runAbortController = undefined;
+        this.activeRuntimeMessages = undefined;
       }
     }
   }
@@ -963,6 +1018,7 @@ export class AgentHarness<
         await this.session.appendMessage(message);
       } else {
         this.pendingSessionWrites.push({ type: 'message', message });
+        this.activeRuntimeMessages?.push(message);
       }
     } catch (error) {
       throw normalizeHarnessError(error, 'session');
@@ -981,27 +1037,31 @@ export class AgentHarness<
     if (this.phase !== 'idle')
       throw new AgentHarnessError('busy', 'compact() requires idle harness');
     this.phase = 'compaction';
+    const operation = this.beginAbortableOperation(options?.signal);
+    const signal = operation.signal;
     try {
-      if (options?.signal?.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
+      if (signal.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const model = this.model;
       if (!model) throw new AgentHarnessError('invalid_state', 'No model set for compaction');
       const auth = await this.getApiKeyAndHeaders?.(model);
       if (!auth) throw new AgentHarnessError('auth', 'No auth available for compaction');
+      if (signal.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const branchEntries = await this.session.getBranch();
       const settings = options?.settings ?? DEFAULT_COMPACTION_SETTINGS;
       const preparationResult = prepareCompaction(branchEntries, settings);
       if (!preparationResult.ok) throw preparationResult.error;
       const preparation = preparationResult.value;
       if (!preparation) throw new AgentHarnessError('compaction', 'Nothing to compact');
+      if (signal.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const hookResult = await this.emitHook({
         type: 'session_before_compact',
         preparation,
         branchEntries,
         customInstructions,
-        signal: options?.signal ?? new AbortController().signal,
+        signal,
       });
+      if (signal.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       if (hookResult?.cancel) throw new AgentHarnessError('compaction', 'Compaction cancelled');
-      if (options?.signal?.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const provided = hookResult?.compaction;
       const compactResult = provided
         ? { ok: true as const, value: provided }
@@ -1011,11 +1071,11 @@ export class AgentHarness<
             auth.apiKey,
             auth.headers,
             customInstructions,
-            options?.signal,
+            signal,
             this.thinkingLevel,
           );
       if (!compactResult.ok) throw compactResult.error;
-      if (options?.signal?.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
+      if (signal.aborted) throw new AgentHarnessError('compaction', 'Compaction aborted');
       const result = compactResult.value;
       const entryId = await this.session.appendCompaction(
         result.summary,
@@ -1037,6 +1097,7 @@ export class AgentHarness<
       throw normalizeHarnessError(error, 'compaction');
     } finally {
       this.phase = 'idle';
+      operation.finish();
     }
   }
 
@@ -1054,12 +1115,16 @@ export class AgentHarness<
     if (this.phase !== 'idle')
       throw new AgentHarnessError('busy', 'navigateTree() requires idle harness');
     this.phase = 'branch_summary';
+    const operation = this.beginAbortableOperation(options?.signal);
+    const signal = operation.signal;
     try {
       const oldLeafId = await this.session.getLeafId();
       if (oldLeafId === targetId) return { cancelled: false };
+      if (signal.aborted) return { cancelled: true };
       const targetEntry = await this.session.getEntry(targetId);
       if (!targetEntry)
         throw new AgentHarnessError('invalid_argument', `Entry ${targetId} not found`);
+      if (signal.aborted) return { cancelled: true };
       const { entries, commonAncestorId } = await collectEntriesForBranchSummary(
         this.session,
         oldLeafId,
@@ -1075,7 +1140,6 @@ export class AgentHarness<
         replaceInstructions: options?.replaceInstructions,
         label: options?.label,
       };
-      const signal = options?.signal ?? new AbortController().signal;
       if (signal.aborted) return { cancelled: true };
       const hookResult = await this.emitHook({ type: 'session_before_tree', preparation, signal });
       if (hookResult?.cancel) return { cancelled: true };
@@ -1173,6 +1237,7 @@ export class AgentHarness<
       throw normalizeHarnessError(error, 'branch_summary');
     } finally {
       this.phase = 'idle';
+      operation.finish();
     }
   }
 
@@ -1186,6 +1251,8 @@ export class AgentHarness<
   }
 
   async getContextUsage(): Promise<ContextUsageEstimate> {
+    const runtimeMessages = this.getRuntimeMessages();
+    if (runtimeMessages) return estimateContextTokens(runtimeMessages);
     const context = await this.session.buildContext();
     return estimateContextTokens(context.messages);
   }

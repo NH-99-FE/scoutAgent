@@ -133,12 +133,16 @@ describe('AgentHarness stream configuration', () => {
 
     const harness = createHarness({
       streamOptions: {
+        temperature: 0.25,
+        maxTokens: 1234,
         timeoutMs: 1000,
         maxRetries: 2,
         maxRetryDelayMs: 3000,
+        websocketConnectTimeoutMs: 1500,
         headers: { 'x-base': 'base' },
         metadata: { base: true },
         cacheRetention: 'none',
+        thinkingBudgets: { low: 128, medium: 256 },
       },
       getApiKeyAndHeaders: async () => ({ apiKey: 'secret', headers: { 'x-auth': 'auth' } }),
     });
@@ -158,11 +162,15 @@ describe('AgentHarness stream configuration', () => {
 
     expect(capturedOptions).toMatchObject({
       apiKey: 'secret',
+      temperature: 0.25,
+      maxTokens: 1234,
       timeoutMs: 1000,
       maxRetries: 2,
       maxRetryDelayMs: 3000,
+      websocketConnectTimeoutMs: 1500,
       sessionId: 'session-1',
       cacheRetention: 'none',
+      thinkingBudgets: { low: 128, medium: 256 },
     });
     expect(capturedOptions?.headers).toEqual({
       'x-base': 'base',
@@ -183,6 +191,7 @@ describe('AgentHarness stream configuration', () => {
 
     const harness = createHarness({
       streamOptions: {
+        temperature: 0.4,
         timeoutMs: 1000,
         maxRetries: 2,
         headers: { keep: 'base', remove: 'base' },
@@ -205,6 +214,7 @@ describe('AgentHarness stream configuration', () => {
       return {
         streamOptions: {
           timeoutMs: undefined,
+          temperature: 0.8,
           headers: { second: '2' },
           metadata: undefined,
         },
@@ -214,6 +224,7 @@ describe('AgentHarness stream configuration', () => {
     await harness.prompt('hello');
 
     expect(capturedOptions?.timeoutMs).toBeUndefined();
+    expect(capturedOptions?.temperature).toBe(0.8);
     expect(capturedOptions?.maxRetries).toBe(2);
     expect(capturedOptions?.headers).toEqual({ keep: 'base', first: '1', second: '2' });
     expect(capturedOptions?.metadata).toBeUndefined();

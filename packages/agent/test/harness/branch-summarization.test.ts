@@ -112,6 +112,14 @@ function registerResponses(responses: ResponseFactory[]): void {
   );
 }
 
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {};
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 function createMessageEntry(message: AgentMessage, parentId: string | null = null): MessageEntry {
   return {
     type: 'message',
@@ -410,8 +418,7 @@ describe('branch summarization', () => {
     expect(result.summaryEntry).toBeUndefined();
     expect(await session.getLabel(rootAssistant)).toBe('checkpoint');
     const labelEntry = (await session.getEntries()).find(
-      (entry): entry is LabelEntry =>
-        entry.type === 'label' && entry.targetId === rootAssistant,
+      (entry): entry is LabelEntry => entry.type === 'label' && entry.targetId === rootAssistant,
     );
     expect(labelEntry).toBeDefined();
     expect(await session.getLeafId()).toBe(labelEntry!.id);
@@ -523,6 +530,46 @@ describe('branch summarization', () => {
     expect(result).toEqual({ cancelled: true });
     expect(await session.getLeafId()).toBe(oldLeaf);
     expect(events).toEqual([]);
+  });
+
+  it('aborts in-flight navigation through the harness operation signal', async () => {
+    const session = new Session(new InMemorySessionStorage());
+    const rootAssistant = await session.appendMessage(createAssistantMessage('root answer'));
+    await session.appendMessage(createUserMessage('abandoned'));
+    const oldLeaf = await session.appendMessage(createAssistantMessage('abandoned answer'));
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session,
+      model: createModel(),
+    });
+    const enteredHook = createDeferred();
+    const releaseHook = createDeferred();
+    const events: string[] = [];
+    let hookSignal: AbortSignal | undefined;
+    harness.on('session_before_tree', async (event) => {
+      hookSignal = event.signal;
+      enteredHook.resolve();
+      await releaseHook.promise;
+      return {};
+    });
+    harness.subscribe((event) => {
+      if (event.type === 'session_tree') events.push(event.type);
+    });
+
+    const navigatePromise = harness.navigateTree(rootAssistant, { summarize: true });
+    await enteredHook.promise;
+
+    expect(harness.getSignal()).toBe(hookSignal);
+
+    const abortPromise = harness.abort();
+    expect(hookSignal?.aborted).toBe(true);
+    releaseHook.resolve();
+
+    await expect(navigatePromise).resolves.toEqual({ cancelled: true });
+    await abortPromise;
+    expect(await session.getLeafId()).toBe(oldLeaf);
+    expect(events).toEqual([]);
+    expect(harness.getSignal()).toBeUndefined();
   });
 
   it('returns editor text when navigating to a user message', async () => {

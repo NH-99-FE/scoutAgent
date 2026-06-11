@@ -1,11 +1,4 @@
-import type {
-  Api,
-  ImageContent,
-  Model,
-  SimpleStreamOptions,
-  TextContent,
-  Transport,
-} from '@scout-agent/ai';
+import type { Api, ImageContent, Model, SimpleStreamOptions, TextContent } from '@scout-agent/ai';
 import type { AgentEvent, AgentMessage, AgentTool, QueueMode, ThinkingLevel } from '../index.ts';
 import type { Session } from './session/session.ts';
 
@@ -86,27 +79,11 @@ export interface AgentHarnessResources<
   skills?: TSkill[];
 }
 
-/** Harness 拥有的精选 provider 请求选项，每个 turn 快照一次。 */
-export interface AgentHarnessStreamOptions {
-  /** 转发给流式函数的首选传输方式。 */
-  transport?: Transport;
-  /** provider 请求超时时间（毫秒）。 */
-  timeoutMs?: number;
-  /** 最大 provider 重试次数。 */
-  maxRetries?: number;
-  /** 可选的 provider 请求重试延迟上限。 */
-  maxRetryDelayMs?: number;
-  /** WebSocket 连接握手超时时间（毫秒）。 */
-  websocketConnectTimeoutMs?: SimpleStreamOptions['websocketConnectTimeoutMs'];
-  /** 与 auth 和生命周期头合并的额外请求头。 */
-  headers?: Record<string, string>;
-  /** 随请求转发的 provider 元数据。 */
-  metadata?: SimpleStreamOptions['metadata'];
-  /** provider 缓存保留提示。 */
-  cacheRetention?: SimpleStreamOptions['cacheRetention'];
-  /** 自定义各推理等级的 token 预算。 */
-  thinkingBudgets?: SimpleStreamOptions['thinkingBudgets'];
-}
+/** Harness 拥有的 provider 请求选项，每个 turn 快照一次。运行态字段由 harness 覆盖。 */
+export type AgentHarnessStreamOptions = Omit<
+  Partial<SimpleStreamOptions>,
+  'apiKey' | 'onPayload' | 'onResponse' | 'reasoning' | 'sessionId' | 'signal'
+>;
 
 /** provider 钩子返回的每次请求流式选项补丁。 */
 export interface AgentHarnessStreamOptionsPatch extends Omit<

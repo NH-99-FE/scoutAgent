@@ -575,6 +575,29 @@ describe('AgentHarness lifecycle', () => {
     expect(secondRequestText).toEqual(['first', 'next', 'second']);
   });
 
+  it('reports active runtime context usage and signal during provider requests', async () => {
+    let usageDuringRun: Awaited<ReturnType<AgentHarness['getContextUsage']>> | undefined;
+    let signalDuringRun: AbortSignal | undefined;
+    registerResponses([
+      async () => {
+        usageDuringRun = await harness.getContextUsage();
+        signalDuringRun = harness.getSignal();
+        return makeProviderAssistantMessage('done');
+      },
+    ]);
+    const harness = new AgentHarness({
+      env: new NodeExecutionEnv({ cwd: process.cwd() }),
+      session: new Session(new InMemorySessionStorage()),
+      model: makeProviderModel(),
+    });
+
+    await harness.prompt('active context');
+
+    expect(usageDuringRun?.tokens).toBeGreaterThan(0);
+    expect(signalDuringRun?.aborted).toBe(false);
+    expect(harness.getSignal()).toBeUndefined();
+  });
+
   it('settles thrown hook failures with persisted assistant error messages', async () => {
     registerResponses([() => makeProviderAssistantMessage('should not be used')]);
     const session = new Session(new InMemorySessionStorage());
