@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   createAssistantMessageEventStream,
+  getDefaultModel,
   registerApiProvider,
   registerModel,
   unregisterApiProviders,
@@ -34,6 +35,23 @@ function attachFakeAgent(session: AgentSession, agent: unknown): void {
   (session as unknown as { agent: unknown }).agent = agent;
 }
 
+function createConfigManagerWithValues(
+  cwd: string,
+  values: Record<string, unknown>,
+): ConfigManager {
+  return new ConfigManager({
+    cwd,
+    agentDir: cwd,
+    getConfiguration: () =>
+      ({
+        get: <T>(key: string) => values[key] as T,
+        has: (key: string) => key in values,
+        inspect: () => undefined,
+        update: async () => undefined,
+      }) as never,
+  });
+}
+
 describe('AgentSession', () => {
   let tempDir: string;
 
@@ -45,6 +63,113 @@ describe('AgentSession', () => {
     unregisterApiProviders(STREAM_OPTIONS_TEST_SOURCE);
     unregisterModels(STREAM_OPTIONS_TEST_SOURCE);
     fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('persists the initial model and thinking level for a new session', async () => {
+    const defaultModel = getDefaultModel();
+    const backingSession = SessionManager.inMemory(tempDir);
+    const session = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManagerWithValues(tempDir, {
+        anthropicApiKey: 'test-key',
+        defaultThinkingLevel: 'high',
+      }),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+
+    await session.initialize();
+    try {
+      const entries = backingSession.getEntries();
+      expect(entries[0]).toMatchObject({
+        type: 'model_change',
+        provider: defaultModel.provider,
+        modelId: defaultModel.id,
+        parentId: null,
+      });
+      expect(entries[1]).toMatchObject({
+        type: 'thinking_level_change',
+        thinkingLevel: 'high',
+        parentId: entries[0]?.id,
+      });
+      expect(backingSession.buildContext()).toMatchObject({
+        model: { provider: defaultModel.provider, modelId: defaultModel.id },
+        thinkingLevel: 'high',
+        messages: [],
+      });
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('restores selected model and thinking level from metadata-only session state', async () => {
+    const selectedModel = mockModel({
+      id: 'metadata-only-selected-model',
+      name: 'Metadata Only Selected Model',
+    });
+    registerModel(selectedModel, { sourceId: STREAM_OPTIONS_TEST_SOURCE });
+    const backingSession = SessionManager.inMemory(tempDir);
+    backingSession.appendModelChange(selectedModel.provider, selectedModel.id);
+    backingSession.appendThinkingLevelChange('high');
+    const session = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManagerWithValues(tempDir, {
+        anthropicApiKey: 'test-key',
+        defaultThinkingLevel: 'low',
+      }),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+
+    await session.initialize();
+    try {
+      expect(session.model).toMatchObject({
+        provider: selectedModel.provider,
+        id: selectedModel.id,
+      });
+      expect(session.thinkingLevel).toBe('high');
+      const entries = backingSession.getEntries();
+      expect(entries.filter((entry) => entry.type === 'model_change')).toHaveLength(1);
+      expect(entries.filter((entry) => entry.type === 'thinking_level_change')).toHaveLength(1);
+      expect(backingSession.buildContext()).toMatchObject({
+        model: { provider: selectedModel.provider, modelId: selectedModel.id },
+        thinkingLevel: 'high',
+        messages: [],
+      });
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('backfills a missing thinking level when restoring an existing message session', async () => {
+    const backingSession = SessionManager.inMemory(tempDir);
+    const firstMessageId = backingSession.appendMessage(userMessage('existing prompt'));
+    const session = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManagerWithValues(tempDir, {
+        anthropicApiKey: 'test-key',
+        defaultThinkingLevel: 'medium',
+      }),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+
+    await session.initialize();
+    try {
+      const entries = backingSession.getEntries();
+      expect(entries.filter((entry) => entry.type === 'model_change')).toEqual([]);
+      expect(entries.at(-1)).toMatchObject({
+        type: 'thinking_level_change',
+        thinkingLevel: 'medium',
+        parentId: firstMessageId,
+      });
+      expect(backingSession.buildContext().thinkingLevel).toBe('medium');
+    } finally {
+      session.dispose();
+    }
   });
 
   it('aborts and disconnects the current agent before manual compaction', async () => {
@@ -396,5 +521,44 @@ describe('AgentSession', () => {
     await expect(session.followUp('/reload later')).rejects.toThrow(
       'Extension command "/reload" cannot be queued.',
     );
+  });
+
+  it('emits Pi-compatible extension lifecycle turn indexes without host retry fields', async () => {
+    const session = createSession(tempDir);
+    const emitted: unknown[] = [];
+    const emit = vi.fn(async (event: unknown) => {
+      emitted.push(event);
+    });
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = { emit };
+    const handleAgentEvent = (
+      session as unknown as {
+        handleAgentEvent: (event: unknown) => Promise<void>;
+      }
+    ).handleAgentEvent.bind(session);
+
+    await handleAgentEvent({ type: 'agent_start' });
+    await handleAgentEvent({ type: 'turn_start' });
+    await handleAgentEvent({
+      type: 'turn_end',
+      message: assistantMessage('first'),
+      toolResults: [],
+    });
+    await handleAgentEvent({ type: 'turn_start' });
+    await handleAgentEvent({
+      type: 'turn_end',
+      message: assistantMessage('second'),
+      toolResults: [],
+    });
+    await handleAgentEvent({ type: 'agent_end', messages: [assistantMessage('done')] });
+
+    expect(emitted).toEqual([
+      { type: 'agent_start' },
+      { type: 'turn_start', turnIndex: 0, timestamp: expect.any(Number) },
+      { type: 'turn_end', turnIndex: 0, message: assistantMessage('first'), toolResults: [] },
+      { type: 'turn_start', turnIndex: 1, timestamp: expect.any(Number) },
+      { type: 'turn_end', turnIndex: 1, message: assistantMessage('second'), toolResults: [] },
+      { type: 'agent_end', messages: [assistantMessage('done')] },
+    ]);
+    expect(emitted.at(-1)).not.toHaveProperty('willRetry');
   });
 });

@@ -3,7 +3,14 @@
 // Lifecycle 语义以 Pi extension API 为唯一来源。
 // ============================================================
 
-import type { Api, AssistantMessageEvent, ImageContent, Model, TextContent } from '@scout-agent/ai';
+import type {
+  Api,
+  AssistantMessageEvent,
+  ImageContent,
+  Model,
+  TextContent,
+  ToolResultMessage,
+} from '@scout-agent/ai';
 import type {
   AgentMessage,
   AgentToolResult,
@@ -202,20 +209,19 @@ export interface AgentStartEvent {
 export interface AgentEndEvent {
   type: 'agent_end';
   messages: AgentMessage[];
-  willRetry: boolean;
 }
 
 export interface TurnStartEvent {
   type: 'turn_start';
-  turnIndex?: number;
-  timestamp?: number;
+  turnIndex: number;
+  timestamp: number;
 }
 
 export interface TurnEndEvent {
   type: 'turn_end';
-  turnIndex?: number;
+  turnIndex: number;
   message: AgentMessage;
-  toolResults: AgentMessage[];
+  toolResults: ToolResultMessage[];
 }
 
 export interface MessageStartEvent {

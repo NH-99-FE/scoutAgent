@@ -13,6 +13,7 @@ import type {
   ImageContent,
   Model,
   TextContent,
+  ToolResultMessage,
 } from '@scout-agent/ai';
 import { isContextOverflow, streamSimple } from '@scout-agent/ai';
 import type {
@@ -293,6 +294,8 @@ export class AgentSession implements CoreDisposable {
    * 对齐 Pi 的 _lastAssistantMessage 模式，避免在 message_end 事件回调中重入 Agent。
    */
   private lastAssistantMessage: AssistantMessage | undefined;
+  /** Pi extension lifecycle turn index；agent_start 时重置，turn_end 后递增。 */
+  private turnIndex = 0;
 
   /** 从 session.buildContext() 缓存内部 AgentMessage；webview 协议转换由 host 负责。 */
   private cachedMessages: SessionAgentMessage[] = [];
@@ -1806,6 +1809,10 @@ export class AgentSession implements CoreDisposable {
   /** 重建 Agent runtime（initialize/fork/resume 复用） */
   private async rebuildRuntime(): Promise<void> {
     const context = await this.session.buildContext();
+    const branch = await this.session.getBranch();
+    const hasThinkingEntry = branch.some((entry) => entry.type === 'thinking_level_change');
+    const hasRestorableSessionState =
+      context.messages.length > 0 || context.model !== null || hasThinkingEntry;
     let model: Model<Api> | undefined;
     if (context.model) {
       const restoredModel = this.configManager.findModelByProvider(
@@ -1824,10 +1831,15 @@ export class AgentSession implements CoreDisposable {
       return;
     }
 
-    const thinkingLevel =
-      (context.thinkingLevel as ThinkingLevel) ??
-      this.configManager.getDefaultThinkingLevel() ??
-      'off';
+    const thinkingLevel = hasThinkingEntry
+      ? (context.thinkingLevel as ThinkingLevel)
+      : (this.configManager.getDefaultThinkingLevel() ?? 'off');
+    await this.persistInitialSessionState({
+      hasRestorableSessionState,
+      hasThinkingEntry,
+      model,
+      thinkingLevel,
+    });
     this.rebuildToolRegistry(model);
     this.normalizeActiveToolNames({
       includeAllExtensionTools: this.includeAllExtensionToolsOnInitialize,
@@ -1847,6 +1859,23 @@ export class AgentSession implements CoreDisposable {
     this.unsubscribeAgent = this.agent.subscribe((event, signal) =>
       this.handleAgentEvent(event, signal),
     );
+  }
+
+  private async persistInitialSessionState(options: {
+    hasRestorableSessionState: boolean;
+    hasThinkingEntry: boolean;
+    model: Model<Api>;
+    thinkingLevel: ThinkingLevel;
+  }): Promise<void> {
+    if (options.hasRestorableSessionState) {
+      if (!options.hasThinkingEntry) {
+        await this.session.appendThinkingLevelChange(options.thinkingLevel);
+      }
+      return;
+    }
+
+    await this.session.appendModelChange(options.model.provider, options.model.id);
+    await this.session.appendThinkingLevelChange(options.thinkingLevel);
   }
 
   private createAgent(options: {
@@ -2102,22 +2131,24 @@ export class AgentSession implements CoreDisposable {
     const type = (event as { type: string }).type;
 
     if (type === 'agent_start') {
+      this.turnIndex = 0;
       await runner.emit({ type: 'agent_start' });
     } else if (type === 'agent_end') {
       await runner.emit({
         type: 'agent_end',
         messages: (event as { messages: AgentMessage[] }).messages,
-        willRetry: (event as { willRetry?: boolean }).willRetry ?? false,
       });
     } else if (type === 'turn_start') {
-      await runner.emit({ type: 'turn_start', timestamp: Date.now() });
+      await runner.emit({ type: 'turn_start', turnIndex: this.turnIndex, timestamp: Date.now() });
     } else if (type === 'turn_end') {
-      const turnEnd = event as { message: AgentMessage; toolResults: AgentMessage[] };
+      const turnEnd = event as { message: AgentMessage; toolResults: ToolResultMessage[] };
       await runner.emit({
         type: 'turn_end',
+        turnIndex: this.turnIndex,
         message: turnEnd.message,
         toolResults: turnEnd.toolResults,
       });
+      this.turnIndex++;
     } else if (type === 'message_start') {
       await runner.emit({
         type: 'message_start',
