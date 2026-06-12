@@ -13,10 +13,11 @@ function makeWebview() {
   };
 }
 
-function makePanel() {
+function makePanel(viewColumn = vscode.ViewColumn.Active) {
   let disposeListener: (() => void) | undefined;
   const panel = {
     webview: makeWebview(),
+    viewColumn,
     reveal: vi.fn(),
     dispose: vi.fn(() => disposeListener?.()),
     onDidDispose: vi.fn((listener: () => void) => {
@@ -58,7 +59,7 @@ describe('ScoutWebviewPanelManager', () => {
     await manager.openTreePanel();
 
     expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1);
-    expect(panel.reveal).toHaveBeenCalledWith(vscode.ViewColumn.Beside);
+    expect(panel.reveal).toHaveBeenCalledWith(vscode.ViewColumn.Active);
     expect(controller.bindWebview).toHaveBeenCalledWith(panel.webview, 'tree');
   });
 
@@ -81,7 +82,7 @@ describe('ScoutWebviewPanelManager', () => {
     await Promise.all([firstOpen, secondOpen]);
 
     expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1);
-    expect(panel.reveal).toHaveBeenCalledWith(vscode.ViewColumn.Beside);
+    expect(panel.reveal).toHaveBeenCalledWith(vscode.ViewColumn.Active);
     expect(htmlLoader).toHaveBeenCalledTimes(1);
     expect(controller.bindWebview).toHaveBeenCalledTimes(1);
     expect(controller.bindWebview).toHaveBeenCalledWith(panel.webview, 'tree');
@@ -109,8 +110,8 @@ describe('ScoutWebviewPanelManager', () => {
     expect(controller.bindWebview).not.toHaveBeenCalled();
   });
 
-  it('closes the other singleton panel before opening a different surface', async () => {
-    const settingsPanel = makePanel();
+  it('opens different surfaces as independent tabs in the same editor group', async () => {
+    const settingsPanel = makePanel(vscode.ViewColumn.Beside);
     const treePanel = makePanel();
     vi.mocked(vscode.window.createWebviewPanel)
       .mockReturnValueOnce(settingsPanel as never)
@@ -125,9 +126,15 @@ describe('ScoutWebviewPanelManager', () => {
     await manager.openSettingsPanel();
     await manager.openTreePanel();
 
-    expect(settingsPanel.dispose).toHaveBeenCalledTimes(1);
-    expect(settingsBinding.dispose).toHaveBeenCalledTimes(1);
+    expect(settingsPanel.dispose).not.toHaveBeenCalled();
+    expect(settingsBinding.dispose).not.toHaveBeenCalled();
     expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2);
+    expect(vscode.window.createWebviewPanel).toHaveBeenLastCalledWith(
+      'scout-agent.tree',
+      'Scout Tree',
+      settingsPanel.viewColumn,
+      { enableScripts: true, retainContextWhenHidden: false },
+    );
     expect(controller.bindWebview).toHaveBeenLastCalledWith(treePanel.webview, 'tree');
   });
 

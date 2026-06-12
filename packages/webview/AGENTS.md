@@ -8,7 +8,8 @@
 - 聊天页点击设置入口时，只通过 shared 协议向 extension host 发送打开设置页的意图；不得在 webview 内直接耦合 VS Code API 或设置页实现。
 - 聊天页点击 Tree 入口时，只通过 shared 协议向 extension host 发送打开 Tree 页面的意图；不得在聊天页内直接实现完整 tree 页面或耦合 Tree 页面内部状态。
 - extension host 负责打开或复用设置页与 Tree 页面：如果对应 panel 已经存在则 `reveal`，否则创建新的 `WebviewPanel`。
-- Settings 与 Tree 各自保持同 surface singleton，但非 chat editor panel 是互斥产品约束：打开 Settings 会关闭 Tree，打开 Tree 会关闭 Settings，不保证被关闭页面的临时 UI 状态保留。
+- Settings 与 Tree 各自保持同 surface singleton；不同 surface 打开在同一个 editor group 的独立 tab 中，不通过互相 dispose 省资源。
+- Settings / Tree 默认允许隐藏时回收 Webview 运行时，重新显示后通过 `ready` + `request_*` 恢复 extension 权威数据；未保存表单、展开项、搜索词、滚动位置等小型临时 UI 状态应使用 VS Code webview `setState/getState` 快照，禁止把完整消息、完整 tree 或工具输出等大对象塞入快照。
 - 聊天页、设置页和 Tree 页面由 extension host 编排，不互相耦合；三者可以共享 `components/ui`、通用 hooks/utils 和 shared 协议类型，但不得共享对方的业务 store 或页面内部组件。
 - 设置数据的读取与写入归 extension host 管理，设置页通过 postMessage 协议请求读取/更新配置；需要暴露给 VS Code 原生设置 UI 的配置仍应通过 extension `contributes.configuration` 声明。
 

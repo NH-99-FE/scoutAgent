@@ -46,6 +46,7 @@ export const Uri = {
 };
 
 export const ViewColumn = {
+  Active: -1,
   Beside: 2,
 };
 

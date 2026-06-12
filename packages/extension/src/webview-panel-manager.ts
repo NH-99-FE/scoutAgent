@@ -1,5 +1,6 @@
 // ============================================================
-// Webview Panel Manager — Settings / Tree singleton 面板编排
+// Webview Panel Manager — 辅助 WebviewPanel 编排
+// 负责：Settings / Tree 独立 singleton tab 的创建、复用和释放。
 // ============================================================
 
 import * as vscode from 'vscode';
@@ -7,8 +8,10 @@ import type { ScoutController } from './scout-controller.ts';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 import { configureScoutWebview, getScoutWebviewHtml } from './webview-content.ts';
 
+type ScoutPanelSurface = Exclude<ScoutWebviewSurface, 'chat'>;
+
 interface ScoutPanelSpec {
-  surface: Exclude<ScoutWebviewSurface, 'chat'>;
+  surface: ScoutPanelSurface;
   viewType: string;
   title: string;
 }
@@ -18,8 +21,6 @@ interface ScoutPanelBinding {
   webviewBinding: vscode.Disposable;
   disposeListener: vscode.Disposable;
 }
-
-type ScoutWebviewHtmlLoader = typeof getScoutWebviewHtml;
 
 type ScoutPanelState =
   | {
@@ -34,6 +35,8 @@ type ScoutPanelState =
       status: 'ready';
       binding: ScoutPanelBinding;
     };
+
+type ScoutWebviewHtmlLoader = typeof getScoutWebviewHtml;
 
 const SETTINGS_PANEL: ScoutPanelSpec = {
   surface: 'settings',
@@ -86,22 +89,21 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
     const existing = this.getState(spec.surface);
     if (existing) {
       const panel = this.getPanel(existing);
-      panel?.reveal(vscode.ViewColumn.Beside);
+      panel?.reveal(this.getTargetColumn(spec.surface));
       if (existing.status === 'pending') {
         await existing.opening;
       }
       return;
     }
 
-    this.closeOtherPanel(spec.surface);
-
     const panel = vscode.window.createWebviewPanel(
       spec.viewType,
       spec.title,
-      vscode.ViewColumn.Beside,
+      this.getTargetColumn(spec.surface),
       {
         enableScripts: true,
-        retainContextWhenHidden: true,
+        // 隐藏 tab 时允许 VS Code 回收运行时；重新显示后由 ready/request_* 恢复权威数据。
+        retainContextWhenHidden: false,
       },
     );
     const pendingState: Extract<ScoutPanelState, { status: 'pending' }> = {
@@ -156,11 +158,16 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
     }
   }
 
-  private getState(surface: ScoutPanelSpec['surface']): ScoutPanelState | undefined {
+  private getTargetColumn(surface: ScoutPanelSurface): vscode.ViewColumn {
+    const otherSurface = surface === 'settings' ? 'tree' : 'settings';
+    return this.getPanel(this.getState(otherSurface))?.viewColumn ?? vscode.ViewColumn.Active;
+  }
+
+  private getState(surface: ScoutPanelSurface): ScoutPanelState | undefined {
     return surface === 'settings' ? this.settings : this.tree;
   }
 
-  private setState(surface: ScoutPanelSpec['surface'], state: ScoutPanelState): void {
+  private setState(surface: ScoutPanelSurface, state: ScoutPanelState): void {
     if (surface === 'settings') {
       this.settings = state;
     } else {
@@ -168,7 +175,7 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
     }
   }
 
-  private clearState(surface: ScoutPanelSpec['surface'], panel: vscode.WebviewPanel): void {
+  private clearState(surface: ScoutPanelSurface, panel: vscode.WebviewPanel): void {
     const current = this.getState(surface);
     if (this.getPanel(current) !== panel) return;
     if (surface === 'settings') {
@@ -176,11 +183,6 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
     } else {
       this.tree = undefined;
     }
-  }
-
-  private closeOtherPanel(surface: ScoutPanelSpec['surface']): void {
-    const otherSurface = surface === 'settings' ? 'tree' : 'settings';
-    this.getPanel(this.getState(otherSurface))?.dispose();
   }
 
   private getPanel(state: ScoutPanelState | undefined): vscode.WebviewPanel | undefined {

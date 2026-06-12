@@ -2,7 +2,7 @@
 // VS Code API — Webview postMessage 封装
 // ============================================================
 
-interface VsCodeApi<TState = unknown> {
+export interface VsCodeApi<TState = unknown> {
   getState: () => TState | undefined;
   setState: (state: TState) => void;
   postMessage: (message: unknown) => void;
@@ -12,13 +12,13 @@ declare global {
   function acquireVsCodeApi<TState = unknown>(): VsCodeApi<TState>;
 }
 
-let cachedApi: VsCodeApi | undefined;
+let cachedApi: VsCodeApi<unknown> | undefined;
 
-export function getVsCodeApi(): VsCodeApi {
-  if (cachedApi) return cachedApi;
+export function getVsCodeApi<TState = unknown>(): VsCodeApi<TState> {
+  if (cachedApi) return cachedApi as VsCodeApi<TState>;
   if (typeof acquireVsCodeApi === 'function') {
     cachedApi = acquireVsCodeApi();
-    return cachedApi;
+    return cachedApi as VsCodeApi<TState>;
   }
 
   cachedApi = {
@@ -32,5 +32,5 @@ export function getVsCodeApi(): VsCodeApi {
       console.warn('[scout:webview] postMessage fallback', message);
     },
   };
-  return cachedApi;
+  return cachedApi as VsCodeApi<TState>;
 }
