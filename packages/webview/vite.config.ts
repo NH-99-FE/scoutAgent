@@ -6,6 +6,11 @@ import path from 'path';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
   build: {
     // 输出到 extension 包，作为静态资源被加载
     outDir: path.resolve(__dirname, '../extension/dist/webview'),
