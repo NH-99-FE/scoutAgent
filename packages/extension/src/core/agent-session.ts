@@ -687,7 +687,7 @@ export class AgentSession implements CoreDisposable {
     }
   }
 
-  async compact(): Promise<void> {
+  async compact(customInstructions?: string): Promise<void> {
     if (!this.agent) return;
     if (this.manualCompactionAbortController) {
       this.logger.appendLine(
@@ -714,6 +714,7 @@ export class AgentSession implements CoreDisposable {
       const result = await this.runCompactionCore({
         signal: abortController.signal,
         settings: this.configManager.getCompactionSettings(),
+        customInstructions,
       });
       await this.syncRuntimeMessagesFromSession();
       await this.rebuildCachedMessages();

@@ -4,11 +4,13 @@
 // ============================================================
 
 import * as vscode from 'vscode';
-import { existsSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import type {
   ScoutAgentEvent,
+  ScoutCommandInfo,
+  ScoutImageContent,
   ScoutMessage,
+  ScoutSessionStats,
   ScoutSessionTreeNode,
   ThinkingLevel,
   ToolInfo,
@@ -17,9 +19,9 @@ import { ConfigManager } from '../config-manager.ts';
 import { readSessionFileInfo } from '../core/session-file.ts';
 import {
   SessionManager as CoreSessionManager,
-  loadEntriesFromFile,
   type JsonlSessionMetadata,
   type Session,
+  type SessionInfo,
 } from '../core/session/index.ts';
 import { getDefaultSessionDir, getSessionsRoot } from './session-paths.ts';
 
@@ -131,6 +133,14 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return this.agentSession?.parentSessionPath;
   }
 
+  get currentCwd(): string {
+    return this.cwd;
+  }
+
+  get sessionFile(): string | undefined {
+    return this.agentSession?.sessionFile;
+  }
+
   get leafId(): string | null {
     return this.agentSession?.leafId ?? null;
   }
@@ -153,6 +163,18 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       ...tool,
       active: active.has(tool.name),
     }));
+  }
+
+  getCommands(): ScoutCommandInfo[] {
+    return this.agentSession?.getCommands() ?? [];
+  }
+
+  async getSessionName(): Promise<string | undefined> {
+    return this.agentSession?.getSessionName();
+  }
+
+  async getSessionStats(): Promise<ScoutSessionStats | undefined> {
+    return this.agentSession?.getSessionStats();
   }
 
   async setActiveTools(toolNames: string[]): Promise<void> {
@@ -356,20 +378,31 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   // ---------- 运行时委托 ----------
 
-  async prompt(text: string, options?: { deliverAs?: 'steer' | 'followUp' }): Promise<void> {
+  async prompt(
+    text: string,
+    options?: { deliverAs?: 'steer' | 'followUp'; images?: ScoutImageContent[] },
+  ): Promise<void> {
     if (!this.agentSession) {
       await this.initialize();
     }
     if (!this.agentSession) return;
     if (this.agentSession.isStreaming) {
       if (options?.deliverAs === 'followUp') {
-        await this.agentSession.followUp(text);
+        if (options.images) {
+          await this.agentSession.followUp(text, options.images);
+        } else {
+          await this.agentSession.followUp(text);
+        }
       } else {
-        await this.agentSession.steer(text);
+        if (options?.images) {
+          await this.agentSession.steer(text, options.images);
+        } else {
+          await this.agentSession.steer(text);
+        }
       }
       return;
     }
-    await this.agentSession.prompt(text);
+    await this.agentSession.prompt(text, { images: options?.images });
   }
 
   async abort(): Promise<void> {
@@ -389,8 +422,20 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     await this.agentSession?.setThinkingLevel(level);
   }
 
-  async compact(): Promise<void> {
-    await this.agentSession?.compact();
+  async compact(customInstructions?: string): Promise<void> {
+    await this.agentSession?.compact(customInstructions);
+  }
+
+  async setSessionName(name: string): Promise<void> {
+    if (!this.agentSession) {
+      this.emit({ type: 'error', message: 'No active session' });
+      return;
+    }
+    await this.agentSession.setSessionName(name);
+  }
+
+  exportSessionToJsonl(outputPath?: string): string | undefined {
+    return this.agentSession?.exportToJsonl(outputPath);
   }
 
   async reload(): Promise<ExtensionSessionCoordinatorReplacementResult> {
@@ -584,18 +629,17 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.emit({ type: 'error', message: `withSession failed: ${errorMessage}` });
   }
 
-  private sessionInfoToMetadata(info: {
-    id: string;
-    path: string;
-    cwd: string;
-    parentSessionPath?: string;
-    created: Date;
-  }): JsonlSessionMetadata {
+  private sessionInfoToMetadata(info: SessionInfo): JsonlSessionMetadata {
     return {
       id: info.id,
       createdAt: info.created.toISOString(),
       cwd: info.cwd,
       path: info.path,
+      modifiedAt: info.modified.toISOString(),
+      name: info.name,
+      messageCount: info.messageCount,
+      firstMessage: info.firstMessage,
+      allMessagesText: info.allMessagesText,
       parentSessionPath: info.parentSessionPath,
     };
   }
@@ -605,32 +649,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return infos.map((info) => this.sessionInfoToMetadata(info));
   }
 
-  private listAllSessions(): JsonlSessionMetadata[] {
-    const sessionsRoot = getSessionsRoot(this.agentDir);
-    if (!existsSync(sessionsRoot)) return [];
-
-    const sessions: JsonlSessionMetadata[] = [];
-    for (const dirent of readdirSync(sessionsRoot, { withFileTypes: true })) {
-      if (!dirent.isDirectory()) continue;
-      const dir = join(sessionsRoot, dirent.name);
-      for (const file of readdirSync(dir)) {
-        if (!file.endsWith('.jsonl')) continue;
-        const path = join(dir, file);
-        const entries = loadEntriesFromFile(path);
-        const header = entries.find((entry) => entry.type === 'session');
-        if (!header || header.type !== 'session') continue;
-        sessions.push({
-          id: header.id,
-          createdAt: header.timestamp,
-          cwd: header.cwd,
-          path,
-          parentSessionPath: header.parentSession,
-        });
-      }
-    }
-
-    sessions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    return sessions;
+  private async listAllSessions(): Promise<JsonlSessionMetadata[]> {
+    const infos = await CoreSessionManager.listAll(getSessionsRoot(this.agentDir));
+    return infos.map((info) => this.sessionInfoToMetadata(info));
   }
 
   private async cleanupCreatedSessionAfterFailure(

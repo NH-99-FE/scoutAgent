@@ -193,6 +193,11 @@ export interface JsonlSessionMetadata {
   createdAt: string;
   cwd: string;
   path: string;
+  modifiedAt?: string;
+  name?: string;
+  messageCount?: number;
+  firstMessage?: string;
+  allMessagesText?: string;
   parentSessionPath?: string;
 }
 

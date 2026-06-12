@@ -19,7 +19,7 @@ import type {
   ScoutContent,
   ScoutCustomMessage,
   ScoutMessage,
-  ScoutTextContent,
+  ScoutToolExecutionResult,
   ScoutToolResultMessage,
   ScoutUserMessage,
 } from '@scout-agent/shared';
@@ -79,9 +79,12 @@ function convertCustomContent(
   });
 }
 
-function convertToolResultContent(content: ToolResultMessage['content']): ScoutTextContent[] {
-  return content.flatMap((block): ScoutTextContent[] => {
+function convertToolResultContent(content: ToolResultMessage['content']): ScoutContent[] {
+  return content.flatMap((block): ScoutContent[] => {
     if (block.type === 'text') return [{ type: 'text', text: block.text }];
+    if (block.type === 'image') {
+      return [{ type: 'image', data: block.data, mimeType: block.mimeType }];
+    }
     return [];
   });
 }
@@ -118,6 +121,7 @@ export function convertMessage(message: AgentMessage): ScoutMessage | null {
       toolCallId: msg.toolCallId,
       toolName: msg.toolName,
       content: convertToolResultContent(msg.content),
+      details: msg.details,
       isError: msg.isError,
       timestamp: msg.timestamp,
     };
@@ -162,19 +166,29 @@ export function convertMessage(message: AgentMessage): ScoutMessage | null {
   return null;
 }
 
-// ---------- AgentToolResult → string ----------
+// ---------- AgentToolResult → ScoutToolExecutionResult ----------
 
-function toolResultToString(result: unknown): string {
-  if (!result || typeof result !== 'object') return '';
+function convertToolExecutionResult(result: unknown): ScoutToolExecutionResult {
+  if (!result || typeof result !== 'object') return { content: [] };
   const r = result as { content?: unknown[] };
-  if (!Array.isArray(r.content)) return '';
-  return r.content
-    .filter(
-      (c): c is TextContent =>
-        typeof c === 'object' && c !== null && (c as Record<string, unknown>).type === 'text',
-    )
-    .map((c) => c.text)
-    .join('');
+  if (!Array.isArray(r.content)) return { content: [] };
+  const content = r.content.flatMap((block): ScoutContent[] => {
+    if (typeof block !== 'object' || block === null) return [];
+    const typed = block as Record<string, unknown>;
+    if (typed.type === 'text' && typeof typed.text === 'string') {
+      return [{ type: 'text', text: typed.text }];
+    }
+    if (
+      typed.type === 'image' &&
+      typeof typed.data === 'string' &&
+      typeof typed.mimeType === 'string'
+    ) {
+      return [{ type: 'image', data: typed.data, mimeType: typed.mimeType }];
+    }
+    return [];
+  });
+  const details = (result as { details?: unknown }).details;
+  return details === undefined ? { content } : { content, details };
 }
 
 // ---------- 主映射函数 ----------
@@ -231,7 +245,7 @@ export function mapAgentEventToScout(event: AgentEvent): ScoutAgentEvent | null 
         type: 'tool_execution_update',
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        partialResult: toolResultToString(event.partialResult),
+        partialResult: convertToolExecutionResult(event.partialResult),
       };
 
     case 'tool_execution_end':
@@ -239,7 +253,7 @@ export function mapAgentEventToScout(event: AgentEvent): ScoutAgentEvent | null 
         type: 'tool_execution_end',
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        result: toolResultToString(event.result),
+        result: convertToolExecutionResult(event.result),
         isError: event.isError,
       };
   }

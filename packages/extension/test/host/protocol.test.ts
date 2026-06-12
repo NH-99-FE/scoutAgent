@@ -44,7 +44,7 @@ describe('agent event mapper', () => {
     });
   });
 
-  it('maps tool execution results to text-only webview events', () => {
+  it('maps tool execution results with content blocks and details', () => {
     const event = mapAgentEventToScout({
       type: 'tool_execution_end',
       toolCallId: 'tool-1',
@@ -54,7 +54,7 @@ describe('agent event mapper', () => {
           { type: 'text', text: 'ok' },
           { type: 'image', data: 'base64', mimeType: 'image/png' },
         ],
-        details: undefined,
+        details: { path: 'a.png' },
       },
       isError: false,
     });
@@ -63,7 +63,13 @@ describe('agent event mapper', () => {
       type: 'tool_execution_end',
       toolCallId: 'tool-1',
       toolName: 'read',
-      result: 'ok',
+      result: {
+        content: [
+          { type: 'text', text: 'ok' },
+          { type: 'image', data: 'base64', mimeType: 'image/png' },
+        ],
+        details: { path: 'a.png' },
+      },
       isError: false,
     });
   });

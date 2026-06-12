@@ -382,7 +382,14 @@ export class ConfigManager implements ScoutCoreConfig {
     const available = this.getAvailableModels();
     const defaultModel = this.findDefaultModel();
     return {
-      models: available.map((m) => ({ provider: m.provider, id: m.id, name: m.name })),
+      models: available.map((m) => ({
+        provider: m.provider,
+        id: m.id,
+        name: m.name,
+        reasoning: m.model.reasoning,
+        input: m.model.input,
+        contextWindow: m.model.contextWindow,
+      })),
       defaultModelProvider: defaultModel?.provider ?? '',
       defaultModelId: defaultModel?.id ?? '',
       branchSummary: this.getBranchSummarySettings(),

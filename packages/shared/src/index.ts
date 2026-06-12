@@ -30,14 +30,54 @@ export interface ToolInfo {
   sourceInfo: SourceInfo;
 }
 
+// ---------- Models / Commands / Diagnostics ----------
+
+export interface ScoutModelInfo {
+  provider: string;
+  id: string;
+  name: string;
+  reasoning: boolean;
+  input: Array<'text' | 'image'>;
+  contextWindow: number;
+}
+
+export type ScoutCommandSource = 'builtin' | 'extension' | 'prompt' | 'skill';
+
+export interface ScoutCommandInfo {
+  name: string;
+  description?: string;
+  source: ScoutCommandSource;
+  sourceInfo: SourceInfo;
+}
+
+export type ScoutDiagnosticType = 'info' | 'warning' | 'error' | 'collision';
+
+export interface ScoutDiagnostic {
+  type: ScoutDiagnosticType;
+  message: string;
+  path?: string;
+  collision?: unknown;
+}
+
 // ---------- Session Tree ----------
+
+export type ScoutSessionTreeNodeKind =
+  | 'user'
+  | 'assistant'
+  | 'toolResult'
+  | 'compaction'
+  | 'branchSummary'
+  | 'custom';
 
 export interface ScoutSessionTreeNode {
   id: string;
   parentId: string | null;
   timestamp: string;
   type: string;
+  kind?: ScoutSessionTreeNodeKind;
+  role?: string;
   label?: string;
+  labelTimestamp?: string;
   preview?: string;
   children: ScoutSessionTreeNode[];
 }
@@ -47,20 +87,62 @@ export interface ScoutSessionListItem {
   path: string;
   cwd?: string;
   createdAt: string;
+  modifiedAt?: string;
+  name?: string;
+  messageCount?: number;
+  firstMessage?: string;
   parentSessionPath?: string;
+  isCurrent?: boolean;
+}
+
+// ---------- Tasks / Mentions ----------
+
+export type ScoutFileMentionKind = 'file' | 'directory';
+
+export interface ScoutFileMentionItem {
+  id: string;
+  kind: ScoutFileMentionKind;
+  path: string;
+  label: string;
+  description?: string;
+}
+
+export interface ScoutTaskItem {
+  id: string;
+  sessionId: string;
+  sessionPath: string;
+  title: string;
+  cwd?: string;
+  createdAt: string;
+  modifiedAt?: string;
+  parentSessionPath?: string;
+  messageCount?: number;
+  isCurrent?: boolean;
 }
 
 // ---------- Webview → Extension ----------
 
 export type WebviewMessage =
   | { type: 'ready' }
-  | { type: 'user_message'; text: string; deliverAs?: 'steer' | 'followUp' }
+  | { type: 'request_state' }
+  | { type: 'request_config' }
+  | { type: 'request_context_usage' }
+  | {
+      type: 'user_message';
+      text: string;
+      images?: ScoutImageContent[];
+      deliverAs?: 'steer' | 'followUp';
+    }
   | { type: 'abort' }
   | { type: 'abort_retry' }
+  | { type: 'compact'; customInstructions?: string }
   | { type: 'select_model'; provider: string; modelId: string }
   | { type: 'select_thinking'; level: ThinkingLevel }
   | { type: 'set_active_tools'; toolNames: string[] }
   | { type: 'clear_conversation' }
+  | { type: 'reload_resources' }
+  | { type: 'open_settings_panel' }
+  | { type: 'open_tree_panel' }
   | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
   | { type: 'request_tree' }
   | {
@@ -72,12 +154,19 @@ export type WebviewMessage =
       label?: string;
     }
   | { type: 'set_label'; entryId: string; label?: string }
+  | { type: 'set_session_name'; name: string }
   | { type: 'continue_session' }
+  | { type: 'request_commands' }
+  | { type: 'request_file_mentions'; query: string; limit?: number }
+  | { type: 'request_tasks'; limit?: number }
+  | { type: 'search_tasks'; query: string; limit?: number; requestId?: string }
+  | { type: 'open_task'; taskId: string; sessionPath: string; cwdOverride?: string }
   | { type: 'request_sessions' }
   | { type: 'restore_session'; sessionId: string; sessionPath: string; cwdOverride?: string }
   | { type: 'pick_import_session' }
   | { type: 'import_session'; sessionPath: string; cwdOverride?: string }
-  | { type: 'delete_session'; sessionId: string; sessionPath: string };
+  | { type: 'delete_session'; sessionId: string; sessionPath: string }
+  | { type: 'export_session'; format: 'jsonl'; outputPath?: string };
 
 // ---------- 消息内容块 ----------
 
@@ -133,7 +222,8 @@ export interface ScoutToolResultMessage {
   role: 'toolResult';
   toolCallId: string;
   toolName: string;
-  content: ScoutTextContent[];
+  content: ScoutContent[];
+  details?: unknown;
   isError: boolean;
   timestamp: number;
   entryId?: string;
@@ -174,22 +264,49 @@ export type ScoutMessage =
 
 // ---------- Extension → Webview ----------
 
+export type ScoutBusyKind =
+  | 'idle'
+  | 'agent'
+  | 'retry'
+  | 'compaction'
+  | 'branch_summary'
+  | 'session'
+  | 'tool';
+
+export interface ScoutBusyState {
+  kind: ScoutBusyKind;
+  label?: string;
+  cancellable: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+  reason?: string;
+}
+
 export interface ScoutWebviewState {
   messages: ScoutMessage[];
   isStreaming: boolean;
+  busyState: ScoutBusyState;
   modelProvider: string;
   modelId: string;
   thinkingLevel: ThinkingLevel;
   tools: ToolInfo[];
   activeToolNames: string[];
+  commands: ScoutCommandInfo[];
+  cwd?: string;
   errorMessage?: string;
   sessionId?: string;
+  sessionName?: string;
+  sessionFile?: string;
   parentSessionPath?: string;
   leafId?: string | null;
+  contextUsage?: ScoutContextUsage;
+  sessionStats?: ScoutSessionStats;
+  diagnostics?: ScoutDiagnostic[];
+  modelFallbackMessage?: string;
 }
 
 export interface ScoutConfig {
-  models: { provider: string; id: string; name: string }[];
+  models: ScoutModelInfo[];
   defaultModelProvider: string;
   defaultModelId: string;
   branchSummary: {
@@ -204,6 +321,30 @@ export interface ScoutContextUsage {
   tokens: number | null;
   contextWindow: number;
   percent: number | null;
+}
+
+export interface ScoutSessionStats {
+  sessionFile?: string;
+  sessionId: string;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  toolResults: number;
+  totalMessages: number;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  cost: number;
+  contextUsage?: ScoutContextUsage;
+}
+
+export interface ScoutToolExecutionResult {
+  content: ScoutContent[];
+  details?: unknown;
 }
 
 /**
@@ -225,12 +366,17 @@ export type ScoutAgentEvent =
       toolName: string;
       args: Record<string, unknown>;
     }
-  | { type: 'tool_execution_update'; toolCallId: string; toolName: string; partialResult: string }
+  | {
+      type: 'tool_execution_update';
+      toolCallId: string;
+      toolName: string;
+      partialResult: ScoutToolExecutionResult;
+    }
   | {
       type: 'tool_execution_end';
       toolCallId: string;
       toolName: string;
-      result: string;
+      result: ScoutToolExecutionResult;
       isError: boolean;
     };
 
@@ -283,10 +429,18 @@ export interface ScoutThinkingLevelChangedEvent {
   level: ThinkingLevel;
 }
 
+export interface ScoutNotificationMessage {
+  type: 'notification';
+  level: 'info' | 'warning' | 'error';
+  message: string;
+}
+
 export type ExtensionMessage =
   | { type: 'state_update'; state: ScoutWebviewState }
   | { type: 'agent_event'; event: ScoutAgentEvent }
   | { type: 'config_update'; config: ScoutConfig }
+  | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
+  | ScoutNotificationMessage
   | {
       type: 'auto_retry_start';
       attempt: number;
@@ -300,9 +454,18 @@ export type ExtensionMessage =
   | ScoutThinkingLevelChangedEvent
   | { type: 'fork_result'; success: boolean; error?: string }
   | { type: 'tree_data'; tree: ScoutSessionTreeNode[]; leafId: string | null }
+  | { type: 'commands_data'; commands: ScoutCommandInfo[] }
+  | { type: 'file_mentions_data'; query: string; items: ScoutFileMentionItem[] }
+  | { type: 'tasks_data'; tasks: ScoutTaskItem[]; query?: string; requestId?: string }
   | { type: 'sessions_data'; sessions: ScoutSessionListItem[] }
+  | { type: 'open_settings_panel_result'; success: boolean; error?: string }
+  | { type: 'open_tree_panel_result'; success: boolean; error?: string }
+  | { type: 'open_task_result'; success: boolean; error?: string }
   | { type: 'restore_session_result'; success: boolean; error?: string }
   | { type: 'import_session_result'; success: boolean; error?: string }
+  | { type: 'export_session_result'; success: boolean; path?: string; error?: string }
   | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }
   | { type: 'label_result'; success: boolean; error?: string }
+  | { type: 'set_session_name_result'; success: boolean; error?: string }
+  | { type: 'reload_result'; success: boolean; error?: string }
   | { type: 'delete_session_result'; success: boolean; error?: string };

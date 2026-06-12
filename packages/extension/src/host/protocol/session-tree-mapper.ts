@@ -3,7 +3,7 @@
 // 负责：将 core session tree 映射为 shared webview 协议树，并解析可见 leaf。
 // ============================================================
 
-import type { ScoutSessionTreeNode } from '@scout-agent/shared';
+import type { ScoutSessionTreeNode, ScoutSessionTreeNodeKind } from '@scout-agent/shared';
 import type { SessionTreeEntry, SessionTreeNode } from '../../core/session/index.ts';
 
 export function mapSessionTreeToScout(nodes: SessionTreeNode[]): ScoutSessionTreeNode[] {
@@ -21,7 +21,10 @@ export function mapSessionTreeToScout(nodes: SessionTreeNode[]): ScoutSessionTre
       parentId: visibleParentId,
       timestamp: entry.timestamp,
       type: entry.type,
+      kind: getNodeKind(entry),
+      role: getNodeRole(entry),
       label: node.label,
+      labelTimestamp: node.labelTimestamp,
       preview: extractPreview(entry),
       children: node.children.flatMap((child) => mapNode(child, entry.id)),
     };
@@ -55,6 +58,23 @@ export function resolveVisibleSessionLeafId(
     currentId = node.entry.parentId;
   }
   return null;
+}
+
+function getNodeKind(entry: SessionTreeEntry): ScoutSessionTreeNodeKind | undefined {
+  if (entry.type === 'message') {
+    if (entry.message.role === 'user') return 'user';
+    if (entry.message.role === 'assistant') return 'assistant';
+    if (entry.message.role === 'toolResult') return 'toolResult';
+    return undefined;
+  }
+  if (entry.type === 'compaction') return 'compaction';
+  if (entry.type === 'branch_summary') return 'branchSummary';
+  if (entry.type === 'custom_message') return 'custom';
+  return undefined;
+}
+
+function getNodeRole(entry: SessionTreeEntry): string | undefined {
+  return entry.type === 'message' ? entry.message.role : undefined;
 }
 
 function isVisibleSessionTreeEntry(entry: SessionTreeEntry): boolean {
