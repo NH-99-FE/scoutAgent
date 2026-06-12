@@ -2,6 +2,15 @@
 
 Webview 当前只保留临时占位入口。会话恢复、导入、消息渲染等交互能力已经在 shared 协议和 extension 侧准备好，后续单独开发 Webview 时再接入。
 
+## Webview 容器策略
+
+- 聊天页是常驻工作区 `WebviewView`，挂在 VS Code 侧栏或 panel 中，负责任务入口、消息流、session tree 入口、模型/思考等级选择和输入框。
+- 设置页是按需打开的 singleton `WebviewPanel`，展示在 editor tab 中，负责插件配置、provider 配置、MCP/工具配置和其它较重的设置交互。
+- 聊天页点击设置入口时，只通过 shared 协议向 extension host 发送打开设置页的意图；不得在 webview 内直接耦合 VS Code API 或设置页实现。
+- extension host 负责打开或复用设置页：如果设置页已经存在则 `reveal`，否则创建新的 `WebviewPanel`。
+- 聊天页和设置页由 extension host 编排，不互相耦合；两者可以共享 `components/ui`、通用 hooks/utils 和 shared 协议类型，但不得共享对方的业务 store 或页面内部组件。
+- 设置数据的读取与写入归 extension host 管理，设置页通过 postMessage 协议请求读取/更新配置；需要暴露给 VS Code 原生设置 UI 的配置仍应通过 extension `contributes.configuration` 声明。
+
 ## 需要接入的消息协议
 
 - 启动后发送 `ready`，等待 extension 返回 `state_update` 和 `config_update`。
