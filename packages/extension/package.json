@@ -13,9 +13,6 @@
     "Machine Learning",
     "Chat"
   ],
-  "activationEvents": [
-    "onView:scout-agent.sidebar"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -30,6 +27,7 @@
     "views": {
       "scout-agent": [
         {
+          "icon": "resources/icon.svg",
           "type": "webview",
           "id": "scout-agent.sidebar",
           "name": "Scout Agent"
@@ -40,6 +38,14 @@
       {
         "command": "scout-agent.openSidebar",
         "title": "Open Scout Agent"
+      },
+      {
+        "command": "scout-agent.openSettings",
+        "title": "Open Scout Settings"
+      },
+      {
+        "command": "scout-agent.openTree",
+        "title": "Open Scout Tree"
       }
     ],
     "configuration": {

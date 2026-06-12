@@ -28,6 +28,7 @@ export const commands = {
 
 export const window = {
   createWebviewPanel: vi.fn(),
+  createOutputChannel: vi.fn(),
   registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
   showInformationMessage: vi.fn(),
   showWarningMessage: vi.fn(),
@@ -38,6 +39,14 @@ export const Uri = {
   file(path: string) {
     return { fsPath: path, path, scheme: 'file' };
   },
+  joinPath(base: { fsPath: string; path?: string; scheme?: string }, ...parts: string[]) {
+    const joined = [base.fsPath, ...parts].join('/');
+    return { fsPath: joined, path: joined, scheme: base.scheme ?? 'file' };
+  },
+};
+
+export const ViewColumn = {
+  Beside: 2,
 };
 
 export class Disposable {

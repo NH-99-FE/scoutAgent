@@ -20,6 +20,7 @@ import { ExtensionSessionCoordinator, type ScoutSessionEvent } from './host/sess
 import { readSessionFileInfo } from './core/session-file.ts';
 import { isPathInsideOrEqual, resolveSessionCwdPolicy } from './core/session-cwd.ts';
 import { matchesTaskSearch } from './host/protocol/task-search.ts';
+import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 
 // ---------- 接口 ----------
 
@@ -152,7 +153,7 @@ export class ScoutController implements vscode.Disposable {
   private readonly sessionManager: ExtensionSessionCoordinator;
   private readonly disposables: vscode.Disposable[] = [];
 
-  private webview?: vscode.Webview;
+  private readonly webviews = new Map<ScoutWebviewSurface, Set<vscode.Webview>>();
   private unsubscribeSession?: () => void;
   private disposePromise?: Promise<void>;
   private busyState: ScoutBusyState = IDLE_BUSY_STATE;
@@ -186,21 +187,31 @@ export class ScoutController implements vscode.Disposable {
 
   // ---------- 公开 API ----------
 
-  bindWebview(webview: vscode.Webview): void {
-    this.webview = webview;
-    webview.onDidReceiveMessage(
+  bindWebview(webview: vscode.Webview, surface: ScoutWebviewSurface = 'chat'): vscode.Disposable {
+    const webviews = this.webviews.get(surface) ?? new Set<vscode.Webview>();
+    webviews.add(webview);
+    this.webviews.set(surface, webviews);
+
+    const messageDisposable = webview.onDidReceiveMessage(
       (message: WebviewMessage) => {
-        this.handleWebviewMessage(message);
+        this.handleWebviewMessage(message, surface);
       },
       undefined,
       this.disposables,
     );
+    return new vscode.Disposable(() => {
+      messageDisposable.dispose();
+      webviews.delete(webview);
+      if (webviews.size === 0) {
+        this.webviews.delete(surface);
+      }
+    });
   }
 
-  handleWebviewMessage(message: WebviewMessage): void {
+  handleWebviewMessage(message: WebviewMessage, surface: ScoutWebviewSurface = 'chat'): void {
     switch (message.type) {
       case 'ready':
-        this.onReady();
+        void this.onReady(surface);
         break;
       case 'request_state':
         void this.pushState();
@@ -319,6 +330,7 @@ export class ScoutController implements vscode.Disposable {
       }
       for (const d of this.disposables) d.dispose();
       this.disposables.length = 0;
+      this.webviews.clear();
     })();
 
     return this.disposePromise;
@@ -411,13 +423,18 @@ export class ScoutController implements vscode.Disposable {
 
   // ---------- Webview 消息处理 ----------
 
-  private async onReady(): Promise<void> {
-    this.outputChannel.appendLine('[scout] Webview ready');
+  private async onReady(surface: ScoutWebviewSurface): Promise<void> {
+    this.outputChannel.appendLine(`[scout] Webview ready: ${surface}`);
     await this.sessionManager.initialize();
     this.pushConfig();
     await this.pushState();
     this.handleRequestCommands();
-    await this.handleRequestSessions();
+    if (surface === 'chat') {
+      await this.handleRequestSessions();
+    }
+    if (surface === 'tree') {
+      await this.pushTreeData();
+    }
   }
 
   private async handleCompact(message: { customInstructions?: string }): Promise<void> {
@@ -612,7 +629,11 @@ export class ScoutController implements vscode.Disposable {
   // ---------- 通信 ----------
 
   private postMessage(message: ExtensionMessage): void {
-    this.webview?.postMessage(message);
+    for (const webviews of this.webviews.values()) {
+      for (const webview of webviews) {
+        void webview.postMessage(message);
+      }
+    }
   }
 
   private getCommands(): ScoutCommandInfo[] {

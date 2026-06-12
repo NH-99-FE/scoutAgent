@@ -5,6 +5,7 @@
 import * as vscode from 'vscode';
 import { ScoutController } from './scout-controller.ts';
 import { ScoutSidebarProvider } from './sidebar-provider.ts';
+import { ScoutWebviewPanelManager } from './webview-panel-manager.ts';
 
 const activeControllers = new Set<ScoutController>();
 
@@ -12,14 +13,27 @@ export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('Scout Agent');
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
+  const panelManagerRef: { current?: ScoutWebviewPanelManager } = {};
   const controller = new ScoutController({
     extensionUri: context.extensionUri,
     outputChannel,
     cwd,
+    openSettingsPanel: () => {
+      const panelManager = panelManagerRef.current;
+      if (!panelManager) throw new Error('Scout panel manager is not initialized');
+      return panelManager.openSettingsPanel();
+    },
+    openTreePanel: () => {
+      const panelManager = panelManagerRef.current;
+      if (!panelManager) throw new Error('Scout panel manager is not initialized');
+      return panelManager.openTreePanel();
+    },
   });
   activeControllers.add(controller);
 
   const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+  const panelManager = new ScoutWebviewPanelManager(context.extensionUri, isDev, controller);
+  panelManagerRef.current = panelManager;
   const provider = new ScoutSidebarProvider(context.extensionUri, isDev, controller);
 
   context.subscriptions.push(
@@ -30,6 +44,7 @@ export function activate(context: vscode.ExtensionContext) {
       },
     },
     outputChannel,
+    panelManager,
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ScoutSidebarProvider.viewType, provider),
@@ -38,6 +53,10 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('scout-agent.openSidebar', () =>
       vscode.commands.executeCommand('workbench.view.extension.scout-agent'),
     ),
+    vscode.commands.registerCommand('scout-agent.openSettings', () =>
+      panelManager?.openSettingsPanel(),
+    ),
+    vscode.commands.registerCommand('scout-agent.openTree', () => panelManager?.openTreePanel()),
   );
 }
 
