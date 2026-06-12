@@ -93,6 +93,8 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
       return;
     }
 
+    this.closeOtherPanel(spec.surface);
+
     const panel = vscode.window.createWebviewPanel(
       spec.viewType,
       spec.title,
@@ -174,6 +176,11 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
     } else {
       this.tree = undefined;
     }
+  }
+
+  private closeOtherPanel(surface: ScoutPanelSpec['surface']): void {
+    const otherSurface = surface === 'settings' ? 'tree' : 'settings';
+    this.getPanel(this.getState(otherSurface))?.dispose();
   }
 
   private getPanel(state: ScoutPanelState | undefined): vscode.WebviewPanel | undefined {

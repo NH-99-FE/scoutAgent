@@ -31,6 +31,10 @@ import type {
   CustomMessage,
 } from '@scout-agent/agent';
 
+export interface AgentEventMappingOptions {
+  messageId?: string;
+}
+
 // ---------- 内容块转换 ----------
 
 function convertAssistantContent(content: AssistantMessage['content']): ScoutContent[] {
@@ -197,7 +201,10 @@ function convertToolExecutionResult(result: unknown): ScoutToolExecutionResult {
  * 将内部 AgentEvent 映射为可序列化的 ScoutAgentEvent。
  * 对于携带无法序列化的自定义消息类型的事件，返回 null。
  */
-export function mapAgentEventToScout(event: AgentEvent): ScoutAgentEvent | null {
+export function mapAgentEventToScout(
+  event: AgentEvent,
+  options: AgentEventMappingOptions = {},
+): ScoutAgentEvent | null {
   switch (event.type) {
     case 'agent_start':
       return { type: 'agent_start' };
@@ -217,19 +224,28 @@ export function mapAgentEventToScout(event: AgentEvent): ScoutAgentEvent | null 
     case 'message_start': {
       const message = convertMessage(event.message);
       if (!message) return null;
-      return { type: 'message_start', message };
+      if (!options.messageId) {
+        throw new Error('Missing Scout protocol messageId for message_start event');
+      }
+      return { type: 'message_start', messageId: options.messageId, message };
     }
 
     case 'message_update': {
       const message = convertMessage(event.message);
       if (!message) return null;
-      return { type: 'message_update', message };
+      if (!options.messageId) {
+        throw new Error('Missing Scout protocol messageId for message_update event');
+      }
+      return { type: 'message_update', messageId: options.messageId, message };
     }
 
     case 'message_end': {
       const message = convertMessage(event.message);
       if (!message) return null;
-      return { type: 'message_end', message };
+      if (!options.messageId) {
+        throw new Error('Missing Scout protocol messageId for message_end event');
+      }
+      return { type: 'message_end', messageId: options.messageId, message };
     }
 
     case 'tool_execution_start':

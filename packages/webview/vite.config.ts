@@ -12,8 +12,8 @@ export default defineConfig({
     },
   },
   build: {
-    // 输出到 extension 包，作为静态资源被加载
-    outDir: path.resolve(__dirname, '../extension/dist/webview'),
+    // extension package 脚本会复制该目录到 extension/dist/webview
+    outDir: path.resolve(__dirname, 'dist'),
     emptyOutDir: true,
   },
   // VS Code webview 安全限制：不允许 inline script/style

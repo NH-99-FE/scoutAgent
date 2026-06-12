@@ -49,7 +49,8 @@ import {
   type AgentSessionRuntimeDiagnostic,
   type CreateAgentSessionRuntimeFactory,
 } from '../core/agent-session-runtime.ts';
-import { convertMessage, mapAgentEventToScout } from './protocol/agent-event-mapper.ts';
+import { AgentEventCorrelator } from './protocol/agent-event-correlator.ts';
+import { convertMessage } from './protocol/agent-event-mapper.ts';
 import {
   mapSessionTreeToScout,
   resolveVisibleSessionLeafId,
@@ -99,6 +100,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private sessionRuntime?: AgentSessionRuntime;
   private isInitializing = false;
   private disposePromise?: Promise<void>;
+  private readonly agentEventCorrelator = new AgentEventCorrelator();
 
   /** 事件监听器列表（透传 AgentSession 事件） */
   private listeners: ((event: ScoutSessionEvent) => void)[] = [];
@@ -565,7 +567,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       return;
     }
 
-    const scoutEvent = mapAgentEventToScout(event.event);
+    const scoutEvent = this.agentEventCorrelator.map(event.event, {
+      sessionId: this.sessionId,
+    });
     if (scoutEvent) {
       this.emit({ type: 'agent_event', event: scoutEvent });
     }
@@ -577,6 +581,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   protected setAgentSession(agentSession: AgentSession, disposePrevious = true): void {
     // 取消订阅旧的
     this.unsubscribeAgentSession?.();
+    this.agentEventCorrelator.reset();
     if (disposePrevious) {
       this.agentSession?.dispose();
     }
@@ -603,6 +608,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.unsubscribeAgentSession?.();
     this.unsubscribeAgentSession = undefined;
     this.agentSession = undefined;
+    this.agentEventCorrelator.reset();
   }
 
   private logReplacementTeardownError(error: unknown): void {
@@ -784,6 +790,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.unsubscribeAgentSession = undefined;
       this.sessionRuntime = undefined;
       this.agentSession = undefined;
+      this.agentEventCorrelator.reset();
       this.listeners.length = 0;
       for (const d of this.disposables) {
         try {

@@ -46,12 +46,13 @@ function probeDevServer(): Promise<boolean> {
 
 function getHmrHtml(surface: ScoutWebviewSurface): string {
   const url = `${DEV_SERVER_URL}?surface=${encodeURIComponent(surface)}`;
+  const devOrigin = new URL(DEV_SERVER_URL).origin;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${DEV_SERVER_URL}; style-src 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${devOrigin}; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
   <title>${getSurfaceTitle(surface)}</title>
   <style>
     body { margin: 0; padding: 0; overflow: hidden; height: 100vh; }
@@ -59,7 +60,22 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
   </style>
 </head>
 <body>
-  <iframe src="${url}"></iframe>
+  <iframe id="scout-webview-frame" src="${url}"></iframe>
+  <script>
+    (() => {
+      const frame = document.getElementById('scout-webview-frame');
+      const vscode = acquireVsCodeApi();
+      const devOrigin = ${JSON.stringify(devOrigin)};
+      window.addEventListener('message', (event) => {
+        if (event.source === frame.contentWindow) {
+          if (event.origin !== devOrigin) return;
+          vscode.postMessage(event.data);
+          return;
+        }
+        frame.contentWindow?.postMessage(event.data, devOrigin);
+      });
+    })();
+  </script>
 </body>
 </html>`;
 }

@@ -109,6 +109,28 @@ describe('ScoutWebviewPanelManager', () => {
     expect(controller.bindWebview).not.toHaveBeenCalled();
   });
 
+  it('closes the other singleton panel before opening a different surface', async () => {
+    const settingsPanel = makePanel();
+    const treePanel = makePanel();
+    vi.mocked(vscode.window.createWebviewPanel)
+      .mockReturnValueOnce(settingsPanel as never)
+      .mockReturnValueOnce(treePanel as never);
+    const controller = makeController();
+    const settingsBinding = { dispose: vi.fn() };
+    vi.mocked(controller.bindWebview)
+      .mockReturnValueOnce(settingsBinding)
+      .mockReturnValueOnce({ dispose: vi.fn() });
+    const manager = new ScoutWebviewPanelManager(vscode.Uri.file('/ext'), false, controller);
+
+    await manager.openSettingsPanel();
+    await manager.openTreePanel();
+
+    expect(settingsPanel.dispose).toHaveBeenCalledTimes(1);
+    expect(settingsBinding.dispose).toHaveBeenCalledTimes(1);
+    expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(2);
+    expect(controller.bindWebview).toHaveBeenLastCalledWith(treePanel.webview, 'tree');
+  });
+
   it('clears panel bindings when the panel is disposed', async () => {
     const firstPanel = makePanel();
     const secondPanel = makePanel();

@@ -3,7 +3,17 @@ import {
   convertMessage,
   mapAgentEventToScout,
 } from '../../src/host/protocol/agent-event-mapper.ts';
+import { AgentEventCorrelator } from '../../src/host/protocol/agent-event-correlator.ts';
+import type { ScoutAgentEvent } from '@scout-agent/shared';
 import { assistantMessage, userMessage } from '../core/test-utils.ts';
+
+type MessageScoutEvent = Extract<ScoutAgentEvent, { messageId: string }>;
+
+function expectMessageEvent(event: ScoutAgentEvent | null): MessageScoutEvent {
+  expect(event).not.toBeNull();
+  expect(event).toHaveProperty('messageId');
+  return event as MessageScoutEvent;
+}
 
 describe('agent event mapper', () => {
   it('converts assistant content into serializable Scout content', () => {
@@ -126,5 +136,93 @@ describe('agent event mapper', () => {
       type: 'agent_end',
       willRetry: true,
     });
+  });
+
+  it('requires and echoes protocol message ids for visible message events', () => {
+    expect(
+      mapAgentEventToScout(
+        {
+          type: 'message_start',
+          message: userMessage('hello'),
+        },
+        { messageId: 'message-1' },
+      ),
+    ).toMatchObject({
+      type: 'message_start',
+      messageId: 'message-1',
+      message: { role: 'user', content: 'hello' },
+    });
+
+    expect(() =>
+      mapAgentEventToScout({
+        type: 'message_start',
+        message: userMessage('hello'),
+      }),
+    ).toThrow('Missing Scout protocol messageId for message_start event');
+  });
+});
+
+describe('AgentEventCorrelator', () => {
+  it('correlates transient message events before persistence assigns entry ids', () => {
+    const correlator = new AgentEventCorrelator();
+
+    const userStart = expectMessageEvent(
+      correlator.map(
+        { type: 'message_start', message: userMessage('hello') },
+        { sessionId: 'session-1' },
+      ),
+    );
+    const userEnd = expectMessageEvent(
+      correlator.map(
+        { type: 'message_end', message: userMessage('hello') },
+        { sessionId: 'session-1' },
+      ),
+    );
+    const assistantStart = expectMessageEvent(
+      correlator.map(
+        { type: 'message_start', message: assistantMessage('hel') },
+        { sessionId: 'session-1' },
+      ),
+    );
+    const assistantUpdate = expectMessageEvent(
+      correlator.map(
+        { type: 'message_update', message: assistantMessage('hello') } as any,
+        { sessionId: 'session-1' },
+      ),
+    );
+    const assistantEnd = expectMessageEvent(
+      correlator.map(
+        { type: 'message_end', message: assistantMessage('hello!') },
+        { sessionId: 'session-1' },
+      ),
+    );
+
+    expect(userStart.messageId).toBe('session-1:message:1');
+    expect(userEnd.messageId).toBe(userStart.messageId);
+    expect(assistantStart.messageId).toBe('session-1:message:2');
+    expect(assistantUpdate.messageId).toBe(assistantStart.messageId);
+    expect(assistantEnd.messageId).toBe(assistantStart.messageId);
+  });
+
+  it('clears active message state without reusing protocol ids', () => {
+    const correlator = new AgentEventCorrelator();
+    const first = expectMessageEvent(
+      correlator.map(
+        { type: 'message_start', message: assistantMessage('streaming') },
+        { sessionId: 'session-1' },
+      ),
+    );
+
+    correlator.reset();
+
+    const next = expectMessageEvent(
+      correlator.map(
+        { type: 'message_start', message: userMessage('next') },
+        { sessionId: 'session-1' },
+      ),
+    );
+
+    expect(next.messageId).toBe('session-1:message:2');
+    expect(next.messageId).not.toBe(first.messageId);
   });
 });

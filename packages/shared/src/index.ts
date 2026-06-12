@@ -357,9 +357,9 @@ export type ScoutAgentEvent =
   | { type: 'agent_end'; willRetry: boolean }
   | { type: 'turn_start' }
   | { type: 'turn_end' }
-  | { type: 'message_start'; message: ScoutMessage }
-  | { type: 'message_update'; message: ScoutMessage }
-  | { type: 'message_end'; message: ScoutMessage }
+  | { type: 'message_start'; messageId: string; message: ScoutMessage }
+  | { type: 'message_update'; messageId: string; message: ScoutMessage }
+  | { type: 'message_end'; messageId: string; message: ScoutMessage }
   | {
       type: 'tool_execution_start';
       toolCallId: string;

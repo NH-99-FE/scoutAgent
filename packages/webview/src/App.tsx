@@ -1,15 +1,18 @@
 // ============================================================
-// Scout Webview — 临时占位入口
-// 后续功能规划见 packages/webview/README.md
+// Scout Webview — Surface 入口分发
 // ============================================================
 
+import { useWebviewBootstrap } from '@/bridge/use-webview-bootstrap';
+import { ChatApp } from '@/chat/ChatApp';
+import { SettingsApp } from '@/settings/SettingsApp';
+import { TreeApp } from '@/tree/TreeApp';
+
 function App() {
-  return (
-    <main className="app-shell">
-      <h1>Scout Agent</h1>
-      <p>Webview UI is pending implementation.</p>
-    </main>
-  );
+  const surface = useWebviewBootstrap();
+
+  if (surface === 'settings') return <SettingsApp />;
+  if (surface === 'tree') return <TreeApp />;
+  return <ChatApp />;
 }
 
 export default App;
