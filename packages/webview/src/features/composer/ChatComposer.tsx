@@ -84,12 +84,17 @@ export function ChatComposer({ placeholder, onSubmitMessage }: ChatComposerProps
     protocolClient.abort();
   };
 
-  const requestStop = () => {
+  const requestKeyboardStop = () => {
     if (!canStop) return;
     if (isStreaming && showStop && !confirmAbort) {
       setConfirmAbort(true);
       return;
     }
+    setConfirmAbort(false);
+    stop();
+  };
+
+  const requestButtonStop = () => {
     setConfirmAbort(false);
     stop();
   };
@@ -122,7 +127,7 @@ export function ChatComposer({ placeholder, onSubmitMessage }: ChatComposerProps
             value={text}
             onChange={setText}
             onSubmit={submit}
-            onCancel={requestStop}
+            onCancel={requestKeyboardStop}
             isStreaming={isStreaming}
             canRequestAbort={isStreaming && showStop && canStop}
           />
@@ -144,7 +149,7 @@ export function ChatComposer({ placeholder, onSubmitMessage }: ChatComposerProps
                 confirmAbort={confirmAbort}
                 showStop={showStop}
                 showStreamingSendTooltip={isStreaming && hasText}
-                onStop={requestStop}
+                onStop={requestButtonStop}
               />
             </div>
           </div>

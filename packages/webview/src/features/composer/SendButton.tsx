@@ -6,7 +6,6 @@ import type { ReactNode } from 'react';
 import { ArrowUp, CornerDownLeft, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { cn } from '@/lib/utils';
 
 interface SendButtonProps {
   canSubmit: boolean;
@@ -28,27 +27,18 @@ export function SendButton({
   const button = (
     <Button
       aria-label={confirmAbort ? '确认中断' : showStop ? '停止' : '发送'}
-      className={cn(
-        'rounded-full',
-        showStop && !confirmAbort && 'text-destructive',
-        showStop && confirmAbort && 'bg-muted text-foreground hover:bg-muted',
-        !showStop &&
-          'disabled:bg-[#999] disabled:text-white dark:disabled:bg-[#777] dark:disabled:text-[#2f2f2f]',
-        !showStop &&
-          canSubmit &&
-          'bg-[#1f1f1f] text-white hover:bg-[#1f1f1f] dark:bg-[#d4d4d4] dark:text-[#1f1f1f] dark:hover:bg-[#d4d4d4]',
-      )}
+      className="rounded-full"
       disabled={showStop ? !canStop : !canSubmit}
       size="icon-sm"
       type={showStop ? 'button' : 'submit'}
-      variant={showStop ? 'ghost' : 'default'}
+      variant="default"
       onClick={showStop ? onStop : undefined}
     >
       {showStop ? (
         confirmAbort ? (
           <span className="text-[10px] leading-none font-semibold">Esc</span>
         ) : (
-          <Square />
+          <Square className="size-2.5 fill-current stroke-current" strokeWidth={3} />
         )
       ) : (
         <ArrowUp />

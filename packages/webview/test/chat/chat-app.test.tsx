@@ -191,6 +191,21 @@ describe('ChatApp', () => {
     expect(postMessage).toHaveBeenCalledWith({ type: 'abort' });
   });
 
+  it('aborts immediately when clicking the stop button', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+      isStreaming: true,
+      busyState: { kind: 'agent', label: 'Working', cancellable: true },
+    });
+    useConversationStore.getState().actions.applyState(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: '停止' }));
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'abort' });
+    expect(screen.queryByRole('button', { name: '确认中断' })).not.toBeInTheDocument();
+  });
+
   it('shows queued follow-ups and exposes promote/delete actions', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
       queueState: {

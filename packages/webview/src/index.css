@@ -5,7 +5,7 @@
 
 @custom-variant dark (&:is(.dark *, .vscode-dark *, .vscode-high-contrast *));
 
-/* VS Code workbench 语义色。主按钮保持 toolbar/action 中性色，不使用 VS Code 蓝色按钮。 */
+/* VS Code workbench 语义色。主按钮使用前景/背景反色，保持中性且不使用 VS Code 蓝色按钮。 */
 :root {
   --scout-font-family: var(--vscode-font-family, var(--vscode-editor-font-family, sans-serif));
   --scout-monospace-font: var(
@@ -30,7 +30,8 @@
   --scout-fallback-border: #e5e5e5;
   --scout-fallback-input-border: #cecece;
   --scout-fallback-error: #a1260d;
-  --scout-action-foreground: #1f1f1f;
+  --scout-action-background: var(--vscode-foreground, var(--scout-fallback-foreground));
+  --scout-action-foreground: var(--vscode-editor-background, var(--scout-fallback-background));
   color: var(--foreground);
   background: var(--background);
   --background: var(
@@ -51,10 +52,7 @@
     --vscode-menu-foreground,
     var(--vscode-dropdown-foreground, var(--foreground))
   );
-  --primary: var(
-    --vscode-toolbar-activeBackground,
-    var(--vscode-button-secondaryBackground, var(--scout-fallback-active))
-  );
+  --primary: var(--scout-action-background);
   --primary-foreground: var(--scout-action-foreground);
   --secondary: var(--vscode-toolbar-hoverBackground, var(--scout-fallback-hover));
   --secondary-foreground: var(--foreground);
@@ -113,7 +111,8 @@ html.vscode-high-contrast {
   --scout-fallback-border: #3c3c3c;
   --scout-fallback-input-border: #3c3c3c;
   --scout-fallback-error: #f14c4c;
-  --scout-action-foreground: #1f1f1f;
+  --scout-action-background: var(--vscode-foreground, #d4d4d4);
+  --scout-action-foreground: var(--vscode-editor-background, #1f1f1f);
   --ring: transparent;
   --background: var(
     --vscode-sideBar-background,
@@ -133,10 +132,7 @@ html.vscode-high-contrast {
     --vscode-menu-foreground,
     var(--vscode-dropdown-foreground, var(--foreground))
   );
-  --primary: var(
-    --vscode-toolbar-activeBackground,
-    var(--vscode-button-secondaryBackground, #e5e5e5)
-  );
+  --primary: var(--scout-action-background);
   --primary-foreground: var(--scout-action-foreground);
   --secondary: var(--vscode-toolbar-hoverBackground, var(--scout-fallback-hover));
   --secondary-foreground: var(--foreground);
