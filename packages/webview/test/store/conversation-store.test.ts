@@ -107,4 +107,42 @@ describe('conversation store', () => {
       },
     ]);
   });
+
+  it('stores the follow-up queue snapshot from state updates', () => {
+    useConversationStore.getState().actions.applyState({
+      ...makeState([]),
+      queueState: {
+        paused: true,
+        pauseReason: 'aborted',
+        messages: [{ id: 'follow-1', delivery: 'followUp', text: '继续处理', timestamp: 1 }],
+        followUps: [{ id: 'follow-1', text: '继续处理', timestamp: 1 }],
+      },
+    });
+
+    expect(useConversationStore.getState().queueState).toEqual({
+      paused: true,
+      pauseReason: 'aborted',
+      messages: [{ id: 'follow-1', delivery: 'followUp', text: '继续处理', timestamp: 1 }],
+      followUps: [{ id: 'follow-1', text: '继续处理', timestamp: 1 }],
+    });
+  });
+
+  it('applies lightweight queue updates without replacing messages', () => {
+    useConversationStore.getState().actions.applyState({
+      ...makeState([{ role: 'user', content: 'hello', timestamp: 1 }]),
+      queueState: { messages: [], followUps: [], paused: false },
+    });
+
+    useConversationStore.getState().actions.applyQueueState({
+      paused: true,
+      pauseReason: 'aborted',
+      messages: [{ id: 'follow-1', delivery: 'followUp', text: '继续处理', timestamp: 2 }],
+      followUps: [{ id: 'follow-1', text: '继续处理', timestamp: 2 }],
+    });
+
+    expect(useConversationStore.getState().messages).toEqual([
+      { role: 'user', content: 'hello', timestamp: 1 },
+    ]);
+    expect(useConversationStore.getState().queueState.paused).toBe(true);
+  });
 });

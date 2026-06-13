@@ -18,6 +18,9 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
       useTreeStore.getState().actions.applyState(message.state);
       useUiStore.getState().actions.setDiagnostics(message.state.diagnostics ?? []);
       break;
+    case 'queue_update':
+      useConversationStore.getState().actions.applyQueueState(message.queueState);
+      break;
     case 'agent_event':
       useConversationStore.getState().actions.applyAgentEvent(message.event);
       break;

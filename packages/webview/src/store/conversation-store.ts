@@ -8,11 +8,13 @@ import type {
   ScoutBusyState,
   ScoutContextUsage,
   ScoutMessage,
+  ScoutQueueState,
   ScoutWebviewState,
 } from '@scout-agent/shared';
 
 interface ConversationActions {
   applyState: (state: ScoutWebviewState) => void;
+  applyQueueState: (queueState: ScoutQueueState) => void;
   applyAgentEvent: (event: ScoutAgentEvent) => void;
   setContextUsage: (contextUsage: ScoutContextUsage | undefined) => void;
   setBusyState: (busyState: ScoutBusyState, isStreaming?: boolean) => void;
@@ -24,6 +26,7 @@ interface ConversationStore {
   messageKeys: string[];
   isStreaming: boolean;
   busyState: ScoutBusyState;
+  queueState: ScoutQueueState;
   contextUsage: ScoutContextUsage | undefined;
   actions: ConversationActions;
 }
@@ -33,11 +36,18 @@ const IDLE_BUSY_STATE: ScoutBusyState = {
   cancellable: false,
 };
 
+const EMPTY_QUEUE_STATE: ScoutQueueState = {
+  messages: [],
+  followUps: [],
+  paused: false,
+};
+
 const initialState = {
   messages: [] as ScoutMessage[],
   messageKeys: [] as string[],
   isStreaming: false,
   busyState: IDLE_BUSY_STATE,
+  queueState: EMPTY_QUEUE_STATE,
   contextUsage: undefined as ScoutContextUsage | undefined,
 };
 
@@ -76,8 +86,10 @@ export const useConversationStore = create<ConversationStore>((set) => ({
         messageKeys: getStateMessageKeys(state.messages),
         isStreaming: state.isStreaming,
         busyState: state.busyState,
+        queueState: state.queueState ?? EMPTY_QUEUE_STATE,
         contextUsage: state.contextUsage,
       }),
+    applyQueueState: (queueState) => set({ queueState }),
     applyAgentEvent: (event) =>
       set((state) => {
         if (event.type === 'agent_start') {
@@ -120,5 +132,8 @@ export const useConversationMessageCount = () =>
   useConversationStore((state) => state.messages.length);
 export const useIsStreaming = () => useConversationStore((state) => state.isStreaming);
 export const useBusyState = () => useConversationStore((state) => state.busyState);
+export const useQueueState = () => useConversationStore((state) => state.queueState);
+export const useQueuedFollowUps = () =>
+  useConversationStore((state) => state.queueState.followUps);
 export const useContextUsage = () => useConversationStore((state) => state.contextUsage);
 export const useConversationActions = () => useConversationStore((state) => state.actions);

@@ -92,6 +92,40 @@ describe('routeExtensionMessage', () => {
     expect(useTaskStore.getState().query).toBe('hello');
   });
 
+  it('routes queue updates without replacing conversation messages', () => {
+    routeExtensionMessage({
+      type: 'state_update',
+      state: {
+        messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
+        isStreaming: false,
+        busyState: { kind: 'idle', cancellable: false },
+        queueState: { messages: [], followUps: [], paused: false },
+        modelProvider: 'openai',
+        modelId: 'gpt-test',
+        thinkingLevel: 'off',
+        tools: [],
+        activeToolNames: [],
+        commands: [],
+        sessionId: 'session-1',
+        cwd: '/workspace',
+      },
+    });
+    routeExtensionMessage({
+      type: 'queue_update',
+      queueState: {
+        paused: true,
+        pauseReason: 'aborted',
+        messages: [{ id: 'follow-1', delivery: 'followUp', text: '继续处理', timestamp: 2 }],
+        followUps: [{ id: 'follow-1', text: '继续处理', timestamp: 2 }],
+      },
+    });
+
+    expect(useConversationStore.getState().messages).toEqual([
+      { role: 'user', content: 'hello', timestamp: 1 },
+    ]);
+    expect(useConversationStore.getState().queueState.paused).toBe(true);
+  });
+
   it('clears retry busy state when auto retry ends', () => {
     routeExtensionMessage({
       type: 'auto_retry_start',
