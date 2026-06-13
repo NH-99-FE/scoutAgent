@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import type { AgentMessage } from '@scout-agent/agent';
 import {
   createAssistantMessageEventStream,
   getDefaultModel,
@@ -33,6 +34,23 @@ function createSession(tempDir: string): AgentSession {
 
 function attachFakeAgent(session: AgentSession, agent: unknown): void {
   (session as unknown as { agent: unknown }).agent = agent;
+}
+
+function getMessageText(message: AgentMessage): string {
+  const messageWithContent = message as { content?: unknown };
+  const content = messageWithContent.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        typeof part === 'object' &&
+        part !== null &&
+        (part as { type?: unknown }).type === 'text' &&
+        typeof (part as { text?: unknown }).text === 'string',
+    )
+    .map((part) => part.text)
+    .join('\n');
 }
 
 function createConfigManagerWithValues(
@@ -213,6 +231,203 @@ describe('AgentSession', () => {
     await session.compact();
 
     expect(order).toEqual(['unsubscribe', 'abort', 'compact', 'subscribe']);
+  });
+
+  it('pauses queued follow-ups on abort without clearing them', async () => {
+    const session = createSession(tempDir);
+    const queuedMessage = userMessage('queued follow-up');
+    const clearSteeringQueue = vi.fn();
+    const abort = vi.fn();
+    attachFakeAgent(session, {
+      abort,
+      clearSteeringQueue,
+      getFollowUpQueue: vi.fn(() => [
+        {
+          id: 'follow-1',
+          message: queuedMessage,
+          timestamp: 2,
+        },
+      ]),
+    });
+
+    await session.abort();
+
+    expect(clearSteeringQueue).toHaveBeenCalledOnce();
+    expect(abort).toHaveBeenCalledOnce();
+    expect(session.isFollowUpQueuePaused).toBe(true);
+    expect(session.queuedFollowUpPauseReason).toBe('aborted');
+    expect(session.getQueuedFollowUps()).toEqual([
+      { id: 'follow-1', text: 'queued follow-up', timestamp: 2 },
+    ]);
+  });
+
+  it('continues promoted steering while preserving paused follow-ups', async () => {
+    const session = createSession(tempDir);
+    const queuedMessage = userMessage('remaining follow-up');
+    const continueAgent = vi.fn(async () => undefined);
+    attachFakeAgent(session, {
+      abort: vi.fn(),
+      continue: continueAgent,
+      getFollowUpQueue: vi.fn(() => [
+        {
+          id: 'follow-remaining',
+          message: queuedMessage,
+          timestamp: 2,
+        },
+      ]),
+    });
+
+    await session.abort();
+    await session.continue({ preserveFollowUps: true });
+
+    expect(continueAgent).toHaveBeenCalledWith({ preserveFollowUps: true });
+    expect(session.isFollowUpQueuePaused).toBe(true);
+    expect(session.getQueuedFollowUps()).toEqual([
+      { id: 'follow-remaining', text: 'remaining follow-up', timestamp: 2 },
+    ]);
+  });
+
+  it('resumes paused follow-ups after sending a new prompt when the queue is kept', async () => {
+    const session = createSession(tempDir);
+    const queuedFollowUps = [
+      {
+        id: 'follow-old',
+        message: userMessage('old follow-up'),
+        timestamp: 2,
+      },
+    ];
+    const handledTexts: string[] = [];
+    const clearFollowUpQueue = vi.fn();
+    const getUserMessageText = (message: AgentMessage): string | undefined => {
+      if (message.role !== 'user') return undefined;
+      const { content } = message;
+      if (typeof content === 'string') return content;
+      return content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n');
+    };
+    const prompt = vi.fn(async (messages: AgentMessage[]) => {
+      for (const message of messages) {
+        const text = getUserMessageText(message);
+        if (text !== undefined) handledTexts.push(text);
+      }
+
+      if (!session.isFollowUpQueuePaused) {
+        const [nextFollowUp] = queuedFollowUps.splice(0, 1);
+        const text = nextFollowUp ? getUserMessageText(nextFollowUp.message) : undefined;
+        if (text !== undefined) handledTexts.push(text);
+      }
+    });
+    attachFakeAgent(session, {
+      abort: vi.fn(),
+      prompt,
+      clearFollowUpQueue,
+      getFollowUpQueue: vi.fn(() => queuedFollowUps),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    await session.abort();
+    await session.prompt('current prompt');
+
+    expect(clearFollowUpQueue).not.toHaveBeenCalled();
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(handledTexts).toEqual(['current prompt', 'old follow-up']);
+    expect(session.isFollowUpQueuePaused).toBe(false);
+    expect(session.getQueuedFollowUps()).toEqual([]);
+  });
+
+  it('preserves paused follow-ups through pre-prompt compaction before sending the current prompt', async () => {
+    const session = createSession(tempDir);
+    const queuedFollowUps = [
+      {
+        id: 'follow-old',
+        message: userMessage('old follow-up'),
+        timestamp: 2,
+      },
+    ];
+    const handledTexts: string[] = [];
+    const continueAgent = vi.fn(async (options?: { preserveFollowUps?: boolean }) => {
+      if (!options?.preserveFollowUps) {
+        const [nextFollowUp] = queuedFollowUps.splice(0, 1);
+        if (nextFollowUp) handledTexts.push(getMessageText(nextFollowUp.message));
+      }
+    });
+    const prompt = vi.fn(async (messages: AgentMessage[]) => {
+      handledTexts.push(...messages.map((message) => getMessageText(message)));
+      if (!session.isFollowUpQueuePaused) {
+        const [nextFollowUp] = queuedFollowUps.splice(0, 1);
+        if (nextFollowUp) handledTexts.push(getMessageText(nextFollowUp.message));
+      }
+    });
+    attachFakeAgent(session, {
+      abort: vi.fn(),
+      continue: continueAgent,
+      prompt,
+      getFollowUpQueue: vi.fn(() => queuedFollowUps),
+      state: {
+        messages: [userMessage('previous'), assistantMessage('large previous answer')],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (
+      session as unknown as {
+        checkCompaction: (
+          assistant: unknown,
+          skipAbortedCheck?: boolean,
+          policy?: { preserveFollowUps?: boolean },
+        ) => Promise<boolean>;
+      }
+    ).checkCompaction = vi.fn(async () => true);
+
+    await session.abort();
+    await session.prompt('current prompt');
+
+    expect(continueAgent).toHaveBeenCalledWith({ preserveFollowUps: true });
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(handledTexts).toEqual(['current prompt', 'old follow-up']);
+  });
+
+  it('keeps preserveFollowUps across post-agent continuation loops', async () => {
+    const session = createSession(tempDir);
+    const queuedFollowUps = [
+      {
+        id: 'follow-remaining',
+        message: userMessage('remaining follow-up'),
+        timestamp: 2,
+      },
+    ];
+    const continueAgent = vi.fn(async () => undefined);
+    let postLoopCalls = 0;
+    attachFakeAgent(session, {
+      abort: vi.fn(),
+      continue: continueAgent,
+      getFollowUpQueue: vi.fn(() => queuedFollowUps),
+    });
+    (
+      session as unknown as {
+        handlePostAgentEnd: (policy?: { preserveFollowUps?: boolean }) => Promise<boolean>;
+      }
+    ).handlePostAgentEnd = vi.fn(async (policy?: { preserveFollowUps?: boolean }) => {
+      expect(policy).toEqual({ preserveFollowUps: true });
+      postLoopCalls += 1;
+      return postLoopCalls === 1;
+    });
+    (session as unknown as { lastAssistantMessage: unknown }).lastAssistantMessage =
+      assistantMessage('after promoted steering');
+
+    await session.abort();
+    await session.continue({ preserveFollowUps: true });
+
+    expect(continueAgent).toHaveBeenNthCalledWith(1, { preserveFollowUps: true });
+    expect(continueAgent).toHaveBeenNthCalledWith(2, { preserveFollowUps: true });
+    expect(session.getQueuedFollowUps()).toEqual([
+      { id: 'follow-remaining', text: 'remaining follow-up', timestamp: 2 },
+    ]);
   });
 
   it('forwards compaction maxTokens through the real agent streamFn to the provider', async () => {

@@ -27,6 +27,7 @@ import type {
   BeforeToolCallResult,
   CustomMessage,
   PromptTemplate,
+  QueuedAgentMessageDelivery,
   Skill,
   StreamFn,
   ThinkingLevel,
@@ -70,6 +71,12 @@ import type {
 import type { Skill as ScoutSkill } from './skills.ts';
 import { createSyntheticSourceInfo } from './source-info.ts';
 import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
+import {
+  QueuedMessagePolicy,
+  type QueueContinuationPolicy,
+  type QueuedFollowUpMessage,
+  type QueuedRuntimeSnapshot,
+} from './queued-message-policy.ts';
 import type { CoreDisposable, CoreLogger } from './logger.ts';
 import {
   ScoutResourceLoader,
@@ -144,6 +151,7 @@ export type CompactionReason = 'manual' | 'threshold' | 'overflow';
 export type AgentSessionEvent =
   | { type: 'agent_event'; event: AgentSessionAgentEvent }
   | { type: 'state_change' }
+  | { type: 'queue_change' }
   | { type: 'error'; message: string }
   | {
       type: 'auto_retry_start';
@@ -235,7 +243,6 @@ type ToolRegistryEntry = {
 };
 
 const ACTIVE_TOOLS_CUSTOM_TYPE = 'tools-config';
-type QueuedUserMessageDelivery = 'steer' | 'followUp';
 
 interface ActiveToolsState {
   enabledTools: string[];
@@ -243,7 +250,8 @@ interface ActiveToolsState {
 
 interface PromptOptions {
   images?: ImageContent[];
-  streamingBehavior?: QueuedUserMessageDelivery;
+  streamingBehavior?: QueuedAgentMessageDelivery;
+  clearFollowUpQueue?: boolean;
 }
 
 // ---------- AgentSession ----------
@@ -300,6 +308,9 @@ export class AgentSession implements CoreDisposable {
   /** 从 session.buildContext() 缓存内部 AgentMessage；webview 协议转换由 host 负责。 */
   private cachedMessages: SessionAgentMessage[] = [];
   /** Pi 式运行态上下文由 agent.state.messages 持有。 */
+
+  /** Agent 运行队列的宿主态策略：暂停、恢复和可见快照。 */
+  private readonly queuedMessages = new QueuedMessagePolicy();
 
   /** 扩展通过 sendMessage({ deliverAs: 'nextTurn' }) 排入下一次 prompt 的 custom 消息。 */
   private pendingNextTurnMessages: AgentMessage[] = [];
@@ -373,6 +384,14 @@ export class AgentSession implements CoreDisposable {
     return this.cachedLeafId ?? null;
   }
 
+  get isFollowUpQueuePaused(): boolean {
+    return this.queuedMessages.isFollowUpPaused(this.agent);
+  }
+
+  get queuedFollowUpPauseReason(): 'aborted' | undefined {
+    return this.queuedMessages.followUpPauseReason(this.agent);
+  }
+
   get sessionFile(): string | undefined {
     return this.session.getSessionFile();
   }
@@ -383,9 +402,39 @@ export class AgentSession implements CoreDisposable {
 
   // ---------- 运行时操作 ----------
 
+  getQueueSnapshot(): QueuedRuntimeSnapshot {
+    return this.queuedMessages.snapshot(this.agent);
+  }
+
+  getQueuedFollowUps(): QueuedFollowUpMessage[] {
+    return this.queuedMessages.getFollowUps(this.agent);
+  }
+
+  cancelFollowUp(id: string): boolean {
+    const cancelled = this.queuedMessages.cancelFollowUp(this.agent, id);
+    if (cancelled) {
+      this.emit({ type: 'queue_change' });
+    }
+    return cancelled;
+  }
+
+  promoteFollowUp(id: string): boolean {
+    const promoted = this.queuedMessages.promoteFollowUp(this.agent, id);
+    if (promoted) {
+      this.emit({ type: 'queue_change' });
+    }
+    return promoted;
+  }
+
+  clearFollowUpQueue(): void {
+    if (!this.queuedMessages.clearFollowUps(this.agent)) return;
+    this.emit({ type: 'queue_change' });
+  }
+
   async prompt(text: string, options?: PromptOptions): Promise<void> {
     await this.runPrompt(text, options?.images, 'interactive', {
       streamingBehavior: options?.streamingBehavior,
+      clearFollowUpQueue: options?.clearFollowUpQueue,
     });
   }
 
@@ -393,7 +442,7 @@ export class AgentSession implements CoreDisposable {
     text: string,
     images: ImageContent[] | undefined,
     source: 'interactive' | 'rpc' | 'extension',
-    options?: { streamingBehavior?: QueuedUserMessageDelivery },
+    options?: { streamingBehavior?: QueuedAgentMessageDelivery; clearFollowUpQueue?: boolean },
   ): Promise<void> {
     if (!this.agent) return;
 
@@ -418,8 +467,15 @@ export class AgentSession implements CoreDisposable {
       }
 
       if (!this._isStreaming) {
+        const preservePausedFollowUps =
+          !options?.clearFollowUpQueue && this.queuedMessages.isFollowUpPaused(this.agent);
+        if (options?.clearFollowUpQueue) {
+          this.clearFollowUpQueue();
+        }
         await this.flushPendingBashMessages();
-        await this.runPrePromptCompaction();
+        await this.runPrePromptCompaction({ preserveFollowUps: preservePausedFollowUps });
+        // 保留队列发送新消息时，当前 prompt 应先进入 agent loop；旧 follow-up 在该轮停机点续上。
+        this.queuedMessages.resumeFollowUps();
       }
 
       this._isStreaming = true;
@@ -446,7 +502,8 @@ export class AgentSession implements CoreDisposable {
       this.manualCompactionAbortController?.abort();
       this.autoCompactionAbortController?.abort();
       this.branchSummaryAbortController?.abort();
-      this.clearQueuedAgentMessages();
+      this.queuedMessages.pauseFollowUpsAfterAbort(this.agent);
+      this.emit({ type: 'queue_change' });
       this.agent?.abort();
     } catch (error) {
       this.logger.appendLine(
@@ -456,16 +513,25 @@ export class AgentSession implements CoreDisposable {
   }
 
   /** 用户手动续写：沿用 Agent runtime continuation 语义。 */
-  async continue(): Promise<void> {
+  async continue(options?: { preserveFollowUps?: boolean }): Promise<void> {
     if (!this.agent) return;
 
     this.retryAttempt = 0;
 
     try {
+      if (options?.preserveFollowUps) {
+        if (!this.queuedMessages.isFollowUpPaused(this.agent)) {
+          this.queuedMessages.reset();
+        }
+      } else {
+        this.queuedMessages.resumeFollowUps();
+      }
       this._isStreaming = true;
       this.emit({ type: 'state_change' });
-      await this.agent.continue();
-      await this.runPostAgentLoop();
+      await this.agent.continue({
+        preserveFollowUps: options?.preserveFollowUps,
+      });
+      await this.runPostAgentLoop({ preserveFollowUps: options?.preserveFollowUps });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.appendLine(`[scout] Continue error: ${errorMessage}`);
@@ -1064,8 +1130,8 @@ export class AgentSession implements CoreDisposable {
     return this.pendingNextTurnMessages.length > 0 || (this.agent?.hasQueuedMessages() ?? false);
   }
 
-  private hasContinuationPendingMessages(): boolean {
-    return this.agent?.hasQueuedMessages() ?? false;
+  private hasContinuationPendingMessages(policy: QueueContinuationPolicy = {}): boolean {
+    return this.queuedMessages.hasContinuationMessages(this.agent, policy);
   }
 
   getAbortSignal(): AbortSignal | undefined {
@@ -1716,17 +1782,17 @@ export class AgentSession implements CoreDisposable {
     return undefined;
   }
 
-  private async runPrePromptCompaction(): Promise<void> {
+  private async runPrePromptCompaction(policy: QueueContinuationPolicy = {}): Promise<void> {
     if (!this.agent) return;
     const lastAssistant = await this.findLastAssistantMessage();
     if (!lastAssistant) return;
-    const shouldContinue = await this.checkCompaction(lastAssistant, false);
+    const shouldContinue = await this.checkCompaction(lastAssistant, false, policy);
     if (!shouldContinue) return;
 
     this._isStreaming = true;
     this.emit({ type: 'state_change' });
-    await this.agent.continue();
-    await this.runPostAgentLoop();
+    await this.agent.continue(policy);
+    await this.runPostAgentLoop(policy);
   }
 
   private createUserMessage(text: string, images?: ImageContent[]): AgentMessage {
@@ -1754,20 +1820,14 @@ export class AgentSession implements CoreDisposable {
     };
   }
 
-  private queueAgentMessage(message: AgentMessage, deliverAs: 'steer' | 'followUp'): void {
-    if (!this.agent) return;
-    if (deliverAs === 'followUp') {
-      this.agent.followUp(message);
-    } else {
-      this.agent.steer(message);
-    }
-    this.emit({ type: 'state_change' });
+  private queueAgentMessage(message: AgentMessage, deliverAs: QueuedAgentMessageDelivery): void {
+    this.queuedMessages.queue(this.agent, message, deliverAs);
+    this.emit({ type: 'queue_change' });
   }
 
   private clearQueuedAgentMessages(): void {
-    if (!this.agent?.hasQueuedMessages()) return;
-    this.agent.clearAllQueues();
-    this.emit({ type: 'state_change' });
+    if (!this.queuedMessages.clearAll(this.agent)) return;
+    this.emit({ type: 'queue_change' });
   }
 
   private async appendCustomMessageWithLifecycle(message: CustomMessage): Promise<void> {
@@ -1788,6 +1848,7 @@ export class AgentSession implements CoreDisposable {
     this.retryAttempt = 0;
 
     try {
+      this.queuedMessages.resumeFollowUps();
       this._isStreaming = true;
       this.emit({ type: 'state_change' });
       const messages = await this.prepareAgentStartMessages(message, undefined);
@@ -1844,6 +1905,7 @@ export class AgentSession implements CoreDisposable {
 
     this.unsubscribeAgent?.();
     this.agent?.abort();
+    this.queuedMessages.reset();
     this.agent = this.createAgent({
       messages: context.messages,
       model,
@@ -2020,6 +2082,10 @@ export class AgentSession implements CoreDisposable {
     this.emit({ type: 'agent_event', event: enrichedEvent });
 
     const type = (enrichedEvent as { type: string }).type;
+
+    if (type === 'queue_update') {
+      this.emit({ type: 'queue_change' });
+    }
 
     if (type === 'message_start') {
       const msg = (enrichedEvent as { message?: AgentMessage }).message;
@@ -2263,6 +2329,7 @@ export class AgentSession implements CoreDisposable {
   private async checkCompaction(
     assistantMessage: AssistantMessage,
     skipAbortedCheck = true,
+    policy: QueueContinuationPolicy = {},
   ): Promise<boolean> {
     if (!this.agent) return false;
     const settings = this.configManager.getCompactionSettings();
@@ -2307,7 +2374,7 @@ export class AgentSession implements CoreDisposable {
     }
 
     if (shouldCompact(contextTokens, contextWindow, settings)) {
-      return await this.runAutoCompaction('threshold');
+      return await this.runAutoCompaction('threshold', false, policy);
     }
     return false;
   }
@@ -2320,7 +2387,7 @@ export class AgentSession implements CoreDisposable {
    *   3. 若 retry 成功 → 发出 auto_retry_end(success=true)，再做 compaction 检查
    *   4. 无 retry → 直接做 compaction 检查
    */
-  private async handlePostAgentEnd(): Promise<boolean> {
+  private async handlePostAgentEnd(policy: QueueContinuationPolicy = {}): Promise<boolean> {
     const assistant = this.lastAssistantMessage;
     this.lastAssistantMessage = undefined;
 
@@ -2347,7 +2414,7 @@ export class AgentSession implements CoreDisposable {
       this.overflowRecoveryAttempted = true;
       // 保留持久 session history，只清理本次自动恢复 runtime context 中的 overflow assistant error。
       await this.removeLastRuntimeAssistantMessage();
-      return await this.runAutoCompaction('overflow', true);
+      return await this.runAutoCompaction('overflow', true, policy);
     }
 
     // Auto Retry
@@ -2367,10 +2434,10 @@ export class AgentSession implements CoreDisposable {
     }
 
     // 阈值压缩检查（非 retry 触发时执行）
-    return await this.checkCompaction(assistant);
+    return await this.checkCompaction(assistant, true, policy);
   }
 
-  private async runPostAgentLoop(): Promise<void> {
+  private async runPostAgentLoop(policy: QueueContinuationPolicy = {}): Promise<void> {
     if (!this.lastAssistantMessage) {
       this._isStreaming = false;
       this.emit({ type: 'state_change' });
@@ -2382,12 +2449,12 @@ export class AgentSession implements CoreDisposable {
     this.emit({ type: 'state_change' });
 
     try {
-      while (await this.handlePostAgentEnd()) {
+      while (await this.handlePostAgentEnd(policy)) {
         if (!this.agent) return;
         try {
           this._isStreaming = true;
           this.emit({ type: 'state_change' });
-          await this.agent.continue();
+          await this.agent.continue(policy);
         } catch (error) {
           this.logger.appendLine(
             `[scout] Continue error: ${error instanceof Error ? error.message : String(error)}`,
@@ -2407,7 +2474,11 @@ export class AgentSession implements CoreDisposable {
     }
   }
 
-  private async runAutoCompaction(reason: CompactionReason, willRetry = false): Promise<boolean> {
+  private async runAutoCompaction(
+    reason: CompactionReason,
+    willRetry = false,
+    policy: QueueContinuationPolicy = {},
+  ): Promise<boolean> {
     if (!this.agent) return false;
     const abortController = new AbortController();
     this.autoCompactionAbortController = abortController;
@@ -2437,7 +2508,7 @@ export class AgentSession implements CoreDisposable {
         this.logger.appendLine('[scout] Retrying after overflow compaction');
         return true;
       }
-      return this.hasContinuationPendingMessages();
+      return this.hasContinuationPendingMessages(policy);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const aborted = abortController.signal.aborted;

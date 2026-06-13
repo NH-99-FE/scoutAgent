@@ -223,10 +223,13 @@ export class ScoutController implements vscode.Disposable {
         void this.handleRequestContextUsage();
         break;
       case 'user_message':
-        this.sessionManager.prompt(message.text, {
-          deliverAs: message.deliverAs,
-          images: message.images,
-        });
+        void this.handleUserMessage(message);
+        break;
+      case 'cancel_follow_up':
+        this.sessionManager.cancelFollowUp(message.id);
+        break;
+      case 'promote_follow_up':
+        void this.handlePromoteFollowUp(message);
         break;
       case 'abort':
         this.sessionManager.abort();
@@ -238,7 +241,9 @@ export class ScoutController implements vscode.Disposable {
         void this.handleCompact(message);
         break;
       case 'continue_session':
-        this.sessionManager.continue();
+        this.sessionManager.continue({
+          preserveFollowUpQueue: message.preserveFollowUpQueue,
+        });
         break;
       case 'request_commands':
         this.handleRequestCommands();
@@ -416,6 +421,10 @@ export class ScoutController implements vscode.Disposable {
       void this.pushState();
     }
 
+    if (event.type === 'queue_change') {
+      this.pushQueueState();
+    }
+
     if (event.type === 'tree_change') {
       void this.pushTreeData();
     }
@@ -551,6 +560,29 @@ export class ScoutController implements vscode.Disposable {
     this.postMessage({ type: 'commands_data', commands: this.getCommands() });
   }
 
+  private async handleUserMessage(
+    message: Extract<WebviewMessage, { type: 'user_message' }>,
+  ): Promise<void> {
+    await this.sessionManager.prompt(message.text, {
+      deliverAs: message.deliverAs,
+      images: message.images,
+      clearFollowUpQueue: message.clearFollowUpQueue,
+    });
+    await this.pushState();
+  }
+
+  private async handlePromoteFollowUp(
+    message: Extract<WebviewMessage, { type: 'promote_follow_up' }>,
+  ): Promise<void> {
+    const promoted = this.sessionManager.promoteFollowUp(message.id);
+    if (promoted && message.resume) {
+      await this.sessionManager.continue({
+        preserveFollowUpQueue: message.preserveFollowUpQueue,
+      });
+      return;
+    }
+  }
+
   private async handleSetSessionName(message: { name: string }): Promise<void> {
     try {
       await this.sessionManager.setSessionName(message.name);
@@ -593,6 +625,10 @@ export class ScoutController implements vscode.Disposable {
     this.postMessage({ type: 'state_update', state: await this.buildState() });
   }
 
+  private pushQueueState(): void {
+    this.postMessage({ type: 'queue_update', queueState: this.sessionManager.getQueueState() });
+  }
+
   private pushConfig(): void {
     this.postMessage({ type: 'config_update', config: this.configManager.getScoutConfig() });
   }
@@ -607,6 +643,7 @@ export class ScoutController implements vscode.Disposable {
       messages: this.sessionManager.getScoutMessages(),
       isStreaming: this.sessionManager.isStreaming,
       busyState: this.getBusyState(),
+      queueState: this.sessionManager.getQueueState(),
       modelProvider: this.sessionManager.model?.provider ?? '',
       modelId: this.sessionManager.model?.id ?? '',
       thinkingLevel: this.sessionManager.thinkingLevel,

@@ -10,6 +10,7 @@ import type {
   ScoutCommandInfo,
   ScoutImageContent,
   ScoutMessage,
+  ScoutQueueState,
   ScoutSessionStats,
   ScoutSessionTreeNode,
   ThinkingLevel,
@@ -382,7 +383,11 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   async prompt(
     text: string,
-    options?: { deliverAs?: 'steer' | 'followUp'; images?: ScoutImageContent[] },
+    options?: {
+      deliverAs?: 'steer' | 'followUp';
+      images?: ScoutImageContent[];
+      clearFollowUpQueue?: boolean;
+    },
   ): Promise<void> {
     if (!this.agentSession) {
       await this.initialize();
@@ -404,7 +409,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       }
       return;
     }
-    await this.agentSession.prompt(text, { images: options?.images });
+    await this.agentSession.prompt(text, {
+      images: options?.images,
+      clearFollowUpQueue: options?.clearFollowUpQueue,
+    });
   }
 
   async abort(): Promise<void> {
@@ -412,8 +420,35 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   }
 
   /** 用户手动续写，委托给 AgentSession.continue() */
-  async continue(): Promise<void> {
-    await this.agentSession?.continue();
+  async continue(options?: { preserveFollowUpQueue?: boolean }): Promise<void> {
+    await this.agentSession?.continue({
+      preserveFollowUps: options?.preserveFollowUpQueue,
+    });
+  }
+
+  getQueueState(): ScoutQueueState {
+    if (!this.agentSession) {
+      return { messages: [], followUps: [], paused: false };
+    }
+    const snapshot = this.agentSession.getQueueSnapshot();
+    return {
+      messages: snapshot.messages,
+      followUps: snapshot.followUps,
+      paused: snapshot.followUpPaused,
+      pauseReason: snapshot.followUpPauseReason,
+    };
+  }
+
+  cancelFollowUp(id: string): boolean {
+    return this.agentSession?.cancelFollowUp(id) ?? false;
+  }
+
+  promoteFollowUp(id: string): boolean {
+    return this.agentSession?.promoteFollowUp(id) ?? false;
+  }
+
+  clearFollowUpQueue(): void {
+    this.agentSession?.clearFollowUpQueue();
   }
 
   async setModel(modelId: string, provider?: string): Promise<void> {

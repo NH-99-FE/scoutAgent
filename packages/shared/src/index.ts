@@ -132,6 +132,14 @@ export type WebviewMessage =
       text: string;
       images?: ScoutImageContent[];
       deliverAs?: 'steer' | 'followUp';
+      clearFollowUpQueue?: boolean;
+    }
+  | { type: 'cancel_follow_up'; id: string }
+  | {
+      type: 'promote_follow_up';
+      id: string;
+      resume?: boolean;
+      preserveFollowUpQueue?: boolean;
     }
   | { type: 'abort' }
   | { type: 'abort_retry' }
@@ -155,7 +163,7 @@ export type WebviewMessage =
     }
   | { type: 'set_label'; entryId: string; label?: string }
   | { type: 'set_session_name'; name: string }
-  | { type: 'continue_session' }
+  | { type: 'continue_session'; preserveFollowUpQueue?: boolean }
   | { type: 'request_commands' }
   | { type: 'request_file_mentions'; query: string; limit?: number }
   | { type: 'request_tasks'; limit?: number }
@@ -282,10 +290,33 @@ export interface ScoutBusyState {
   reason?: string;
 }
 
+export interface ScoutQueuedFollowUp {
+  id: string;
+  text: string;
+  timestamp: number;
+}
+
+export type ScoutQueuedMessageDelivery = 'steer' | 'followUp';
+
+export interface ScoutQueuedMessage {
+  id: string;
+  delivery: ScoutQueuedMessageDelivery;
+  text: string;
+  timestamp: number;
+}
+
+export interface ScoutQueueState {
+  messages: ScoutQueuedMessage[];
+  followUps: ScoutQueuedFollowUp[];
+  paused: boolean;
+  pauseReason?: 'aborted';
+}
+
 export interface ScoutWebviewState {
   messages: ScoutMessage[];
   isStreaming: boolean;
   busyState: ScoutBusyState;
+  queueState?: ScoutQueueState;
   modelProvider: string;
   modelId: string;
   thinkingLevel: ThinkingLevel;
@@ -437,6 +468,7 @@ export interface ScoutNotificationMessage {
 
 export type ExtensionMessage =
   | { type: 'state_update'; state: ScoutWebviewState }
+  | { type: 'queue_update'; queueState: ScoutQueueState }
   | { type: 'agent_event'; event: ScoutAgentEvent }
   | { type: 'config_update'; config: ScoutConfig }
   | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
