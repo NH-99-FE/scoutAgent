@@ -9,6 +9,33 @@ import * as vscode from 'vscode';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 
 const DEV_SERVER_URL = 'http://localhost:5173';
+const THEME_VARIABLES = [
+  '--vscode-sideBar-background',
+  '--vscode-editor-background',
+  '--vscode-foreground',
+  '--vscode-editorWidget-background',
+  '--vscode-editorWidget-foreground',
+  '--vscode-menu-background',
+  '--vscode-menu-foreground',
+  '--vscode-dropdown-background',
+  '--vscode-dropdown-foreground',
+  '--vscode-toolbar-hoverBackground',
+  '--vscode-toolbar-activeBackground',
+  '--vscode-list-hoverBackground',
+  '--vscode-descriptionForeground',
+  '--vscode-contrastBorder',
+  '--vscode-widget-border',
+  '--vscode-panel-border',
+  '--vscode-input-border',
+  '--vscode-input-placeholderForeground',
+  '--vscode-focusBorder',
+  '--vscode-errorForeground',
+  '--vscode-charts-blue',
+  '--vscode-charts-green',
+  '--vscode-charts-yellow',
+  '--vscode-charts-orange',
+  '--vscode-charts-red',
+];
 
 export function configureScoutWebview(extensionUri: vscode.Uri, webview: vscode.Webview): void {
   const localRoot = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
@@ -60,12 +87,51 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
   </style>
 </head>
 <body>
-  <iframe id="scout-webview-frame" src="${url}"></iframe>
+  <iframe id="scout-webview-frame"></iframe>
   <script>
     (() => {
       const frame = document.getElementById('scout-webview-frame');
       const vscode = acquireVsCodeApi();
       const devOrigin = ${JSON.stringify(devOrigin)};
+      const devUrl = ${JSON.stringify(url)};
+      const getTheme = () => {
+        const className = [
+          document.documentElement.className,
+          document.body.className,
+        ].join(' ');
+        if (className.includes('vscode-high-contrast')) return 'high-contrast';
+        if (className.includes('vscode-dark')) return 'dark';
+        return 'light';
+      };
+      const getThemeVariables = () => {
+        const styles = getComputedStyle(document.documentElement);
+        return ${JSON.stringify(THEME_VARIABLES)}.reduce((variables, name) => {
+          const value = styles.getPropertyValue(name).trim();
+          if (value) variables[name] = value;
+          return variables;
+        }, {});
+      };
+      const getFrameUrl = () => {
+        const nextUrl = new URL(devUrl);
+        nextUrl.searchParams.set('theme', getTheme());
+        return nextUrl.toString();
+      };
+      const postTheme = () => {
+        frame.contentWindow?.postMessage(
+          { type: 'scout_theme_update', theme: getTheme(), variables: getThemeVariables() },
+          devOrigin,
+        );
+      };
+      frame.src = getFrameUrl();
+      frame.addEventListener('load', postTheme);
+      new MutationObserver(postTheme).observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
+      new MutationObserver(postTheme).observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class'],
+      });
       window.addEventListener('message', (event) => {
         if (event.source === frame.contentWindow) {
           if (event.origin !== devOrigin) return;

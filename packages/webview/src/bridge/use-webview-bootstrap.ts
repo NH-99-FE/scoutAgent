@@ -6,6 +6,7 @@ import { useEffect } from 'react';
 import { protocolClient } from './protocol-client';
 import { getWebviewSurface, type WebviewSurface } from './surface';
 import { startExtensionMessageRouter } from './extension-message-router';
+import { startWebviewThemeSync } from './theme';
 import { useUiStore } from '@/store/ui-store';
 
 export function useWebviewBootstrap(): WebviewSurface {
@@ -13,6 +14,7 @@ export function useWebviewBootstrap(): WebviewSurface {
 
   useEffect(() => {
     useUiStore.getState().actions.setSurface(surface);
+    const stopThemeSync = startWebviewThemeSync();
     const stopRouter = startExtensionMessageRouter();
     protocolClient.ready();
 
@@ -28,7 +30,10 @@ export function useWebviewBootstrap(): WebviewSurface {
       protocolClient.requestTree();
     }
 
-    return stopRouter;
+    return () => {
+      stopRouter();
+      stopThemeSync();
+    };
   }, [surface]);
 
   return surface;

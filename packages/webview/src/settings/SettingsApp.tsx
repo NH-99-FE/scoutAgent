@@ -32,7 +32,7 @@ export function SettingsApp() {
 
       <section className="grid gap-4 px-4 py-4">
         <div className="flex items-center gap-3">
-          <div className="border-border bg-muted/30 flex size-9 items-center justify-center rounded-md border">
+          <div className="border-border bg-card flex size-9 items-center justify-center rounded-md border">
             <SlidersHorizontal className="size-4" />
           </div>
           <div className="min-w-0">
