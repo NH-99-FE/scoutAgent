@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useWebviewBootstrap } from '@/bridge/use-webview-bootstrap';
-import { ChatApp } from '@/chat/ChatApp';
+import { ChatApp } from '@/surfaces/chat/ChatApp';
 import { SettingsApp } from '@/settings/SettingsApp';
 import { TreeApp } from '@/tree/TreeApp';
 
