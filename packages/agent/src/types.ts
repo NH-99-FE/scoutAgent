@@ -312,6 +312,24 @@ export interface CustomAgentMessages {
  */
 export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 
+/** Agent 内部运行队列的投递语义。 */
+export type QueuedAgentMessageDelivery = 'steer' | 'followUp';
+
+/** 带稳定 id 的运行态排队消息。 */
+export interface QueuedAgentMessage {
+  id: string;
+  delivery: QueuedAgentMessageDelivery;
+  message: AgentMessage;
+  timestamp: number;
+}
+
+/** 当前 Agent 运行队列的完整快照。 */
+export interface AgentQueueSnapshot {
+  steer: QueuedAgentMessage[];
+  followUp: QueuedAgentMessage[];
+  all: QueuedAgentMessage[];
+}
+
 /**
  * 公共 Agent 状态。
  *
@@ -428,6 +446,8 @@ export type AgentEvent =
   // 仅在流式传输期间为 assistant 消息发出
   | { type: 'message_update'; message: AgentMessage; assistantMessageEvent: AssistantMessageEvent }
   | { type: 'message_end'; message: AgentMessage }
+  // 队列状态 — steer/follow-up 入队、排出、删除、迁移时发出完整快照
+  | { type: 'queue_update'; queues: AgentQueueSnapshot }
   // 工具执行生命周期
   | {
       type: 'tool_execution_start';

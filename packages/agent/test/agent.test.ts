@@ -575,6 +575,166 @@ describe('Agent', () => {
     expect(responseCount).toBe(2);
   });
 
+  it('manages visible follow-up queue entries by id', () => {
+    const agent = new Agent();
+    const firstMessage: AgentMessage = {
+      role: 'user',
+      content: [{ type: 'text', text: 'Queued follow-up 1' }],
+      timestamp: Date.now(),
+    };
+    const secondMessage: AgentMessage = {
+      role: 'user',
+      content: [{ type: 'text', text: 'Queued follow-up 2' }],
+      timestamp: Date.now() + 1,
+    };
+
+    const firstId = agent.followUp(firstMessage);
+    const secondId = agent.followUp(secondMessage);
+
+    expect(agent.getFollowUpQueue().map((entry) => entry.id)).toEqual([firstId, secondId]);
+    expect(agent.getFollowUpQueue()[0]?.message).toBe(firstMessage);
+
+    expect(agent.cancelFollowUp(firstId)).toBe(true);
+    expect(agent.getFollowUpQueue().map((entry) => entry.id)).toEqual([secondId]);
+
+    expect(agent.promoteFollowUp(secondId)).toBe(true);
+    expect(agent.getFollowUpQueue()).toEqual([]);
+    expect(agent.hasQueuedMessages()).toBe(true);
+  });
+
+  it('can continue promoted steering while preserving remaining follow-ups', async () => {
+    let responseCount = 0;
+    const agent = new Agent({
+      streamFn: () => {
+        const stream = new MockAssistantStream();
+        responseCount++;
+        queueMicrotask(() => {
+          stream.push({
+            type: 'done',
+            reason: 'stop',
+            message: createAssistantMessage(`Processed ${responseCount}`),
+          });
+        });
+        return stream;
+      },
+    });
+
+    agent.state.messages = [
+      {
+        role: 'user',
+        content: [{ type: 'text', text: 'Initial' }],
+        timestamp: Date.now() - 10,
+      },
+      createAssistantMessage('Interrupted response'),
+    ];
+
+    const promotedId = agent.followUp({
+      role: 'user',
+      content: [{ type: 'text', text: 'Promote this' }],
+      timestamp: Date.now(),
+    });
+    const remainingId = agent.followUp({
+      role: 'user',
+      content: [{ type: 'text', text: 'Keep this queued' }],
+      timestamp: Date.now() + 1,
+    });
+
+    expect(agent.promoteFollowUp(promotedId)).toBe(true);
+    await expect(agent.continue({ preserveFollowUps: true })).resolves.toBeUndefined();
+
+    expect(responseCount).toBe(1);
+    expect(agent.getFollowUpQueue().map((entry) => entry.id)).toEqual([remainingId]);
+    expect(
+      agent.state.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          Array.isArray(message.content) &&
+          message.content.some((part) => part.type === 'text' && part.text === 'Promote this'),
+      ),
+    ).toBe(true);
+    expect(
+      agent.state.messages.some(
+        (message) =>
+          message.role === 'user' &&
+          Array.isArray(message.content) &&
+          message.content.some((part) => part.type === 'text' && part.text === 'Keep this queued'),
+      ),
+    ).toBe(false);
+  });
+
+  it('emits queue updates when continue drains queued messages from an assistant leaf', async () => {
+    const createAgentWithAssistantLeaf = () => {
+      const agent = new Agent({
+        streamFn: () => {
+          const stream = new MockAssistantStream();
+          queueMicrotask(() => {
+            stream.push({
+              type: 'done',
+              reason: 'stop',
+              message: createAssistantMessage('Processed queued message'),
+            });
+          });
+          return stream;
+        },
+      });
+      agent.state.messages = [
+        {
+          role: 'user',
+          content: [{ type: 'text', text: 'Initial' }],
+          timestamp: Date.now() - 10,
+        },
+        createAssistantMessage('Assistant leaf'),
+      ];
+      return agent;
+    };
+
+    const steeringAgent = createAgentWithAssistantLeaf();
+    const promotedId = steeringAgent.followUp({
+      role: 'user',
+      content: [{ type: 'text', text: 'Promote this' }],
+      timestamp: Date.now(),
+    });
+    steeringAgent.followUp({
+      role: 'user',
+      content: [{ type: 'text', text: 'Keep queued' }],
+      timestamp: Date.now() + 1,
+    });
+    steeringAgent.promoteFollowUp(promotedId);
+    const steeringQueueUpdates: Array<{ steer: number; followUp: number }> = [];
+    steeringAgent.subscribe((event) => {
+      if (event.type === 'queue_update') {
+        steeringQueueUpdates.push({
+          steer: event.queues.steer.length,
+          followUp: event.queues.followUp.length,
+        });
+      }
+    });
+
+    await steeringAgent.continue({ preserveFollowUps: true });
+
+    expect(steeringQueueUpdates[0]).toEqual({ steer: 0, followUp: 1 });
+
+    const followUpAgent = createAgentWithAssistantLeaf();
+    followUpAgent.followUp({
+      role: 'user',
+      content: [{ type: 'text', text: 'Run follow-up' }],
+      timestamp: Date.now(),
+    });
+    const followUpQueueUpdates: Array<{ steer: number; followUp: number }> = [];
+    followUpAgent.subscribe((event) => {
+      if (event.type === 'queue_update') {
+        followUpQueueUpdates.push({
+          steer: event.queues.steer.length,
+          followUp: event.queues.followUp.length,
+        });
+      }
+    });
+
+    await followUpAgent.continue();
+
+    expect(followUpQueueUpdates[0]).toEqual({ steer: 0, followUp: 0 });
+  });
+
   it('forwards sessionId to streamFn options', async () => {
     let receivedSessionId: string | undefined;
     const agent = new Agent({
