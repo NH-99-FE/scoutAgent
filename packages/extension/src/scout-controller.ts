@@ -16,7 +16,11 @@ import type {
   WebviewMessage,
 } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
-import { ExtensionSessionCoordinator, type ScoutSessionEvent } from './host/session-coordinator.ts';
+import {
+  ExtensionSessionCoordinator,
+  type ScoutSessionEvent,
+  type UserSessionOperationToken,
+} from './host/session-coordinator.ts';
 import { readSessionFileInfo } from './core/session-file.ts';
 import { isPathInsideOrEqual, resolveSessionCwdPolicy } from './core/session-cwd.ts';
 import { matchesTaskSearch } from './host/protocol/task-search.ts';
@@ -125,6 +129,14 @@ const BUILTIN_WEBVIEW_COMMANDS: ScoutCommandInfo[] = [
   },
 ];
 
+interface RestoreSessionByPathResult {
+  type: 'restore_session_result';
+  requestId: string;
+  success: boolean;
+  error?: string;
+  stale?: boolean;
+}
+
 const FILE_MENTION_SKIP_NAMES = new Set([
   '.git',
   '.hg',
@@ -224,6 +236,9 @@ export class ScoutController implements vscode.Disposable {
         break;
       case 'user_message':
         void this.handleUserMessage(message);
+        break;
+      case 'new_session_message':
+        void this.handleNewSessionMessage(message);
         break;
       case 'cancel_follow_up':
         this.sessionManager.cancelFollowUp(message.id);
@@ -571,6 +586,83 @@ export class ScoutController implements vscode.Disposable {
     await this.pushState();
   }
 
+  private async handleNewSessionMessage(
+    message: Extract<WebviewMessage, { type: 'new_session_message' }>,
+  ): Promise<void> {
+    const operation = this.sessionManager.beginUserSessionOperation(
+      'new_session_message',
+      message.requestId,
+    );
+    let turnPromise: Promise<void> | undefined;
+
+    try {
+      const operationResult = await this.sessionManager.newUserSession(operation, {
+        withSession: async (ctx) => {
+          if (!operation.isLatest()) return;
+          const content =
+            message.images && message.images.length > 0
+              ? [{ type: 'text' as const, text: message.text }, ...message.images]
+              : message.text;
+          const started = await ctx.startUserMessage(content);
+          turnPromise = started.turn;
+        },
+      });
+      this.watchNewSessionInitialTurn(operation, turnPromise);
+      if (operationResult.status === 'stale') {
+        return;
+      }
+      if (operationResult.status === 'failed') {
+        this.postMessage({
+          type: 'new_session_result',
+          requestId: message.requestId,
+          success: false,
+          error: operationResult.error,
+        });
+        return;
+      }
+      const result = operationResult.value;
+      if (result.cancelled) {
+        this.postMessage({
+          type: 'new_session_result',
+          requestId: message.requestId,
+          success: false,
+          error: 'cancelled',
+        });
+        return;
+      }
+      await this.pushState();
+      this.postMessage({ type: 'new_session_result', requestId: message.requestId, success: true });
+    } catch (error) {
+      this.postMessage({
+        type: 'new_session_result',
+        requestId: message.requestId,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private watchNewSessionInitialTurn(
+    operation: UserSessionOperationToken,
+    turnPromise: Promise<void> | undefined,
+  ): void {
+    if (!turnPromise) return;
+    void turnPromise
+      .then(async () => {
+        if (!operation.isLatest()) return;
+        await this.pushState();
+        await this.handleRequestTasks({ limit: 12 });
+      })
+      .catch((error) => {
+        if (!operation.isLatest()) return;
+        this.postMessage({
+          type: 'notification',
+          level: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }
+
   private async handlePromoteFollowUp(
     message: Extract<WebviewMessage, { type: 'promote_follow_up' }>,
   ): Promise<void> {
@@ -844,24 +936,33 @@ export class ScoutController implements vscode.Disposable {
   }
 
   private async handleOpenTask(message: {
+    requestId: string;
     taskId: string;
     sessionPath: string;
     cwdOverride?: string;
   }): Promise<void> {
+    const operation = this.sessionManager.beginUserSessionOperation('open_task', message.requestId);
     try {
       const result = await this.restoreSessionByPath({
+        requestId: message.requestId,
         sessionId: message.taskId,
         sessionPath: message.sessionPath,
         cwdOverride: message.cwdOverride,
+        operation,
       });
+      if (result.stale) return;
       this.postMessage({
         type: 'open_task_result',
+        requestId: message.requestId,
+        sessionPath: message.sessionPath,
         success: result.success,
         error: result.error,
       });
     } catch (error) {
       this.postMessage({
         type: 'open_task_result',
+        requestId: message.requestId,
+        sessionPath: message.sessionPath,
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -869,16 +970,23 @@ export class ScoutController implements vscode.Disposable {
   }
 
   private async handleRestoreSession(message: {
+    requestId: string;
     sessionId: string;
     sessionPath: string;
     cwdOverride?: string;
   }): Promise<void> {
+    const operation = this.sessionManager.beginUserSessionOperation(
+      'restore_session',
+      message.requestId,
+    );
     try {
-      const result = await this.restoreSessionByPath(message);
+      const result = await this.restoreSessionByPath({ ...message, operation });
+      if (result.stale) return;
       this.postMessage(result);
     } catch (error) {
       this.postMessage({
         type: 'restore_session_result',
+        requestId: message.requestId,
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -969,32 +1077,81 @@ export class ScoutController implements vscode.Disposable {
   }
 
   private async restoreSessionByPath(message: {
+    requestId: string;
     sessionId: string;
     sessionPath: string;
     cwdOverride?: string;
-  }): Promise<{ type: 'restore_session_result'; success: boolean; error?: string }> {
+    operation?: UserSessionOperationToken;
+  }): Promise<RestoreSessionByPathResult> {
     const sessions = await this.listAvailableSessions();
+    if (message.operation && !message.operation.isLatest()) {
+      return {
+        type: 'restore_session_result',
+        requestId: message.requestId,
+        success: false,
+        stale: true,
+      };
+    }
+
     const target = this.findSessionByPath(sessions, message);
     if (!target) {
       return {
         type: 'restore_session_result',
+        requestId: message.requestId,
         success: false,
         error: `Session not found: ${message.sessionId}`,
       };
     }
 
     const cwd = message.cwdOverride ?? (await this.resolveSessionCwd(target.cwd));
+    if (message.operation && !message.operation.isLatest()) {
+      return {
+        type: 'restore_session_result',
+        requestId: message.requestId,
+        success: false,
+        stale: true,
+      };
+    }
     if (!cwd) {
-      return { type: 'restore_session_result', success: false, error: 'cancelled' };
+      return {
+        type: 'restore_session_result',
+        requestId: message.requestId,
+        success: false,
+        error: 'cancelled',
+      };
     }
 
-    const result = await this.sessionManager.restore(target, { cwdOverride: cwd });
+    const operationResult = message.operation
+      ? await this.sessionManager.restoreUserSession(message.operation, target, { cwdOverride: cwd })
+      : {
+          status: 'completed' as const,
+          value: await this.sessionManager.restore(target, { cwdOverride: cwd }),
+        };
+    if (operationResult.status === 'stale') {
+      return {
+        type: 'restore_session_result',
+        requestId: message.requestId,
+        success: false,
+        stale: true,
+      };
+    }
+    if (operationResult.status === 'failed') {
+      return {
+        type: 'restore_session_result',
+        requestId: message.requestId,
+        success: false,
+        error: operationResult.error,
+      };
+    }
+
+    const result = operationResult.value;
     if (!result.cancelled) {
       await this.pushState();
       await this.pushTreeData();
     }
     return {
       type: 'restore_session_result',
+      requestId: message.requestId,
       success: !result.cancelled,
       error: result.cancelled ? 'cancelled' : undefined,
     };

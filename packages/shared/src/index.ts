@@ -134,6 +134,12 @@ export type WebviewMessage =
       deliverAs?: 'steer' | 'followUp';
       clearFollowUpQueue?: boolean;
     }
+  | {
+      type: 'new_session_message';
+      requestId: string;
+      text: string;
+      images?: ScoutImageContent[];
+    }
   | { type: 'cancel_follow_up'; id: string }
   | {
       type: 'promote_follow_up';
@@ -168,9 +174,21 @@ export type WebviewMessage =
   | { type: 'request_file_mentions'; query: string; limit?: number }
   | { type: 'request_tasks'; limit?: number }
   | { type: 'search_tasks'; query: string; limit?: number; requestId?: string }
-  | { type: 'open_task'; taskId: string; sessionPath: string; cwdOverride?: string }
+  | {
+      type: 'open_task';
+      requestId: string;
+      taskId: string;
+      sessionPath: string;
+      cwdOverride?: string;
+    }
   | { type: 'request_sessions' }
-  | { type: 'restore_session'; sessionId: string; sessionPath: string; cwdOverride?: string }
+  | {
+      type: 'restore_session';
+      requestId: string;
+      sessionId: string;
+      sessionPath: string;
+      cwdOverride?: string;
+    }
   | { type: 'pick_import_session' }
   | { type: 'import_session'; sessionPath: string; cwdOverride?: string }
   | { type: 'delete_session'; sessionId: string; sessionPath: string }
@@ -492,8 +510,15 @@ export type ExtensionMessage =
   | { type: 'sessions_data'; sessions: ScoutSessionListItem[] }
   | { type: 'open_settings_panel_result'; success: boolean; error?: string }
   | { type: 'open_tree_panel_result'; success: boolean; error?: string }
-  | { type: 'open_task_result'; success: boolean; error?: string }
-  | { type: 'restore_session_result'; success: boolean; error?: string }
+  | { type: 'new_session_result'; requestId: string; success: boolean; error?: string }
+  | {
+      type: 'open_task_result';
+      requestId: string;
+      sessionPath: string;
+      success: boolean;
+      error?: string;
+    }
+  | { type: 'restore_session_result'; requestId: string; success: boolean; error?: string }
   | { type: 'import_session_result'; success: boolean; error?: string }
   | { type: 'export_session_result'; success: boolean; path?: string; error?: string }
   | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }

@@ -56,6 +56,12 @@ import {
   mapSessionTreeToScout,
   resolveVisibleSessionLeafId,
 } from './protocol/session-tree-mapper.ts';
+import {
+  SessionOperationBroker,
+  type SessionOperationResult,
+  type SessionOperationToken,
+  type SessionUserOperationKind,
+} from './session-operation-broker.ts';
 
 // ---------- 配置接口 ----------
 
@@ -75,6 +81,9 @@ type ExtensionSessionCoordinatorReplacementResult = AgentSessionReplacementResul
 type ExtensionSessionCoordinatorSessionReplacementOptions = SessionReplacementOptions & {
   cwdOverride?: string;
 };
+
+export type UserSessionOperationToken = SessionOperationToken;
+export type UserSessionOperationResult<T> = SessionOperationResult<T>;
 
 type InitialRuntimeReason = 'startup' | 'new';
 
@@ -101,6 +110,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private sessionRuntime?: AgentSessionRuntime;
   private isInitializing = false;
   private disposePromise?: Promise<void>;
+  private readonly sessionOperationBroker = new SessionOperationBroker();
   private readonly agentEventCorrelator = new AgentEventCorrelator();
 
   /** 事件监听器列表（透传 AgentSession 事件） */
@@ -198,15 +208,21 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   // ---------- 核心生命周期 ----------
 
   async initialize(): Promise<void> {
-    if (this.isInitializing || this.sessionRuntime) return;
-    await this.createInitialRuntime('startup');
+    await this.runSessionReplacement(async () => {
+      if (this.sessionRuntime) return;
+      await this.createInitialRuntime('startup');
+    });
   }
 
   private async createInitialRuntime(
     reason: InitialRuntimeReason,
     options?: NewSessionReplacementOptions,
+    operationToken?: UserSessionOperationToken,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
-    if (this.isInitializing || this.sessionRuntime) return { cancelled: false };
+    if (this.sessionRuntime) return { cancelled: false };
+    if (this.isInitializing) {
+      throw new Error('Session initialization is already running outside the replacement queue');
+    }
     this.isInitializing = true;
     let createdSession: Session | undefined;
 
@@ -245,7 +261,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       if (options?.withSession) {
         await options.withSession(runtime.session.createReplacedSessionContext());
       }
-      this.emit({ type: 'state_change' });
+      this.emitSessionStateChange(operationToken);
 
       this.outputChannel.appendLine(
         reason === 'startup'
@@ -267,10 +283,90 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     }
   }
 
+  private async runSessionReplacement<T>(operation: () => Promise<T>): Promise<T> {
+    return await this.sessionOperationBroker.runExclusive(operation);
+  }
+
+  beginUserSessionOperation(
+    kind: SessionUserOperationKind,
+    requestId: string,
+  ): UserSessionOperationToken {
+    return this.sessionOperationBroker.beginUserOperation(kind, requestId);
+  }
+
+  async restoreUserSession(
+    token: UserSessionOperationToken,
+    sessionMeta: JsonlSessionMetadata,
+    options?: ExtensionSessionCoordinatorSessionReplacementOptions,
+  ): Promise<UserSessionOperationResult<ExtensionSessionCoordinatorReplacementResult>> {
+    return await this.sessionOperationBroker.runUserOperation(token, async (currentToken) => {
+      return await this.restoreUnlocked(
+        sessionMeta,
+        this.guardSessionReplacementOptions(options, currentToken),
+        currentToken,
+      );
+    });
+  }
+
+  async newUserSession(
+    token: UserSessionOperationToken,
+    options?: NewSessionReplacementOptions,
+  ): Promise<UserSessionOperationResult<ExtensionSessionCoordinatorReplacementResult>> {
+    return await this.sessionOperationBroker.runUserOperation(token, async (currentToken) => {
+      return await this.newSessionUnlocked(
+        this.guardNewSessionOptions(options, currentToken),
+        currentToken,
+      );
+    });
+  }
+
+  private guardSessionReplacementOptions(
+    options: ExtensionSessionCoordinatorSessionReplacementOptions | undefined,
+    token: UserSessionOperationToken,
+  ): ExtensionSessionCoordinatorSessionReplacementOptions | undefined {
+    if (!options?.withSession) return options;
+    const { withSession } = options;
+    return {
+      ...options,
+      withSession: async (ctx) => {
+        if (!token.isLatest()) return;
+        await withSession(ctx);
+      },
+    };
+  }
+
+  private guardNewSessionOptions(
+    options: NewSessionReplacementOptions | undefined,
+    token: UserSessionOperationToken,
+  ): NewSessionReplacementOptions | undefined {
+    if (!options?.withSession) return options;
+    const { withSession } = options;
+    return {
+      ...options,
+      withSession: async (ctx) => {
+        if (!token.isLatest()) return;
+        await withSession(ctx);
+      },
+    };
+  }
+
+  private emitSessionStateChange(operationToken?: UserSessionOperationToken): void {
+    if (operationToken && !operationToken.isLatest()) return;
+    this.emit({ type: 'state_change' });
+  }
+
   /** 从 JSONL 文件恢复 session */
   async restore(
     sessionMeta: JsonlSessionMetadata,
     options?: ExtensionSessionCoordinatorSessionReplacementOptions,
+  ): Promise<ExtensionSessionCoordinatorReplacementResult> {
+    return await this.runSessionReplacement(async () => this.restoreUnlocked(sessionMeta, options));
+  }
+
+  private async restoreUnlocked(
+    sessionMeta: JsonlSessionMetadata,
+    options?: ExtensionSessionCoordinatorSessionReplacementOptions,
+    operationToken?: UserSessionOperationToken,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     if (!this.sessionRuntime) {
       const session = CoreSessionManager.open(
@@ -289,7 +385,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.sessionRuntime = runtime;
       this.cwd = runtime.cwd;
       runtime.appendDiagnostics(await this.rebindAgentSession(runtime.session));
-      this.emit({ type: 'state_change' });
+      this.emitSessionStateChange(operationToken);
       this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
       if (options?.withSession) {
         await options.withSession(runtime.session.createReplacedSessionContext());
@@ -305,7 +401,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       return { cancelled: true };
     }
     this.cwd = this.sessionRuntime.cwd;
-    this.emit({ type: 'state_change' });
+    this.emitSessionStateChange(operationToken);
     this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
     return result;
   }
@@ -314,37 +410,51 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     sessionPath: string,
     options?: ExtensionSessionCoordinatorSessionReplacementOptions,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
-    const sourceInfo = readSessionFileInfo(sessionPath);
-    const targetCwd = options?.cwdOverride ?? sourceInfo.cwd ?? this.cwd;
+    return await this.runSessionReplacement(async () => {
+      const sourceInfo = readSessionFileInfo(sessionPath);
+      const targetCwd = options?.cwdOverride ?? sourceInfo.cwd ?? this.cwd;
 
-    if (!this.sessionRuntime) {
-      await this.initialize();
-    }
-    if (!this.sessionRuntime) {
-      throw new Error('No active runtime to import session into');
-    }
+      if (!this.sessionRuntime) {
+        const result = await this.createInitialRuntime('startup');
+        if (result.cancelled) {
+          throw new Error('No active runtime to import session into');
+        }
+      }
+      if (!this.sessionRuntime) {
+        throw new Error('No active runtime to import session into');
+      }
 
-    const result = await this.sessionRuntime.importFromJsonl(sourceInfo.path, {
-      ...options,
-      cwdOverride: targetCwd,
-    });
-    if (result.cancelled) {
+      const result = await this.sessionRuntime.importFromJsonl(sourceInfo.path, {
+        ...options,
+        cwdOverride: targetCwd,
+      });
+      if (result.cancelled) {
+        this.outputChannel.appendLine(
+          `[scout] Session import cancelled by extension: ${sourceInfo.path}`,
+        );
+        return result;
+      }
+      this.cwd = this.sessionRuntime.cwd;
+      this.emit({ type: 'state_change' });
       this.outputChannel.appendLine(
-        `[scout] Session import cancelled by extension: ${sourceInfo.path}`,
+        `[scout] Session imported: ${sourceInfo.id ?? sourceInfo.path}`,
       );
       return result;
-    }
-    this.cwd = this.sessionRuntime.cwd;
-    this.emit({ type: 'state_change' });
-    this.outputChannel.appendLine(`[scout] Session imported: ${sourceInfo.id ?? sourceInfo.path}`);
-    return result;
+    });
   }
 
   async newSession(
     options?: NewSessionReplacementOptions,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
+    return await this.runSessionReplacement(async () => this.newSessionUnlocked(options));
+  }
+
+  private async newSessionUnlocked(
+    options?: NewSessionReplacementOptions,
+    operationToken?: UserSessionOperationToken,
+  ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     if (!this.sessionRuntime) {
-      return await this.createInitialRuntime('new', options);
+      return await this.createInitialRuntime('new', options, operationToken);
     }
 
     const result = await this.sessionRuntime.newSession(options);
@@ -352,7 +462,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.outputChannel.appendLine('[scout] New session cancelled by extension');
       return { cancelled: true };
     }
-    this.emit({ type: 'state_change' });
+    this.emitSessionStateChange(operationToken);
     return result;
   }
 
@@ -476,17 +586,18 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   }
 
   async reload(): Promise<ExtensionSessionCoordinatorReplacementResult> {
-    this.configManager.reload();
+    return await this.runSessionReplacement(async () => {
+      this.configManager.reload();
 
-    if (!this.sessionRuntime) {
-      await this.initialize();
-      return { cancelled: false };
-    }
+      if (!this.sessionRuntime) {
+        return await this.createInitialRuntime('startup');
+      }
 
-    const result = await this.sessionRuntime.reload();
-    this.emit({ type: 'state_change' });
-    this.outputChannel.appendLine('[scout] Extensions and resources reloaded');
-    return result;
+      const result = await this.sessionRuntime.reload();
+      this.emit({ type: 'state_change' });
+      this.outputChannel.appendLine('[scout] Extensions and resources reloaded');
+      return result;
+    });
   }
 
   async abortRetry(): Promise<void> {
@@ -498,27 +609,29 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     position: 'before' | 'at',
     options?: SessionReplacementOptions,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
-    if (!this.agentSession || !this.sessionRuntime) {
-      this.emit({ type: 'error', message: 'No active session to fork from' });
-      return { cancelled: true };
-    }
-
-    try {
-      const result = await this.sessionRuntime?.fork(entryId, position, options);
-      if (result?.cancelled) {
-        this.outputChannel.appendLine(
-          `[scout] Fork cancelled by extension: ${entryId} (${position})`,
-        );
+    return await this.runSessionReplacement(async () => {
+      if (!this.agentSession || !this.sessionRuntime) {
+        this.emit({ type: 'error', message: 'No active session to fork from' });
         return { cancelled: true };
       }
-      this.emit({ type: 'state_change' });
-      return result ?? { cancelled: false };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.outputChannel.appendLine(`[scout] Fork failed: ${errorMessage}`);
-      this.emit({ type: 'error', message: `Fork failed: ${errorMessage}` });
-      return { cancelled: true };
-    }
+
+      try {
+        const result = await this.sessionRuntime?.fork(entryId, position, options);
+        if (result?.cancelled) {
+          this.outputChannel.appendLine(
+            `[scout] Fork cancelled by extension: ${entryId} (${position})`,
+          );
+          return { cancelled: true };
+        }
+        this.emit({ type: 'state_change' });
+        return result ?? { cancelled: false };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.outputChannel.appendLine(`[scout] Fork failed: ${errorMessage}`);
+        this.emit({ type: 'error', message: `Fork failed: ${errorMessage}` });
+        return { cancelled: true };
+      }
+    });
   }
 
   // ---------- Tree / Navigation / Label 委托 ----------
