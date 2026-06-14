@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { resetProtocolRequests } from '@/bridge/request-tracker';
@@ -12,6 +12,7 @@ import type {
   ScoutBusyState,
   ScoutImageContent,
   ScoutMessage,
+  ScoutTaskItem,
   ScoutWebviewState,
 } from '@scout-agent/shared';
 
@@ -21,6 +22,35 @@ const TEST_IMAGE: ScoutImageContent = {
   data: 'aW1hZ2U=',
   mimeType: 'image/png',
 };
+const intersectionObservers: MockIntersectionObserver[] = [];
+
+class MockIntersectionObserver {
+  readonly root: Element | Document | null = null;
+  readonly rootMargin: string = '';
+  readonly thresholds: ReadonlyArray<number> = [];
+  readonly observe = vi.fn();
+  readonly unobserve = vi.fn();
+  readonly disconnect = vi.fn();
+  readonly takeRecords = vi.fn(() => [] as IntersectionObserverEntry[]);
+  private readonly callback: IntersectionObserverCallback;
+
+  constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+    this.callback = callback;
+    this.root = options?.root ?? null;
+    this.rootMargin = options?.rootMargin ?? '';
+    this.thresholds = Array.isArray(options?.threshold)
+      ? options.threshold
+      : [options?.threshold ?? 0];
+    intersectionObservers.push(this);
+  }
+
+  trigger(isIntersecting = true): void {
+    this.callback(
+      [{ isIntersecting } as IntersectionObserverEntry],
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
 
 function makeState(
   messages: ScoutMessage[],
@@ -49,6 +79,44 @@ function makeState(
   };
 }
 
+function getLatestSearchTaskMessage() {
+  const messages = postMessage.mock.calls
+    .map(([message]) => message)
+    .filter((message) => message.type === 'request_task_history');
+  return messages.at(-1) as
+    | {
+        type: 'request_task_history';
+        query: string;
+        requestId: string;
+        limit?: number;
+        offset?: number;
+        purpose?: string;
+      }
+    | undefined;
+}
+
+function routeTaskHistoryResult(
+  requestId: string,
+  tasks: ScoutTaskItem[],
+  overrides: Partial<{
+    query: string;
+    offset: number;
+    hasMore: boolean;
+    nextOffset: number;
+  }> = {},
+): void {
+  routeExtensionMessage({
+    type: 'task_history_data',
+    query: overrides.query ?? '',
+    requestId,
+    purpose: 'panel',
+    tasks,
+    offset: overrides.offset ?? 0,
+    hasMore: overrides.hasMore ?? false,
+    nextOffset: overrides.nextOffset ?? tasks.length,
+  });
+}
+
 describe('ChatApp', () => {
   beforeAll(() => {
     Object.defineProperty(globalThis, 'acquireVsCodeApi', {
@@ -59,9 +127,14 @@ describe('ChatApp', () => {
         postMessage,
       }),
     });
+    Object.defineProperty(globalThis, 'IntersectionObserver', {
+      configurable: true,
+      value: MockIntersectionObserver,
+    });
   });
 
   beforeEach(() => {
+    intersectionObservers.length = 0;
     postMessage.mockClear();
   });
 
@@ -174,17 +247,15 @@ describe('ChatApp', () => {
   });
 
   it('opens a task with the session path as operation target', () => {
-    useTaskStore.getState().actions.setTasks({
-      tasks: [
-        {
-          id: 'task-1',
-          sessionId: 'session-1',
-          sessionPath: '/sessions/session-1.jsonl',
-          title: '检查未提交更改',
-          createdAt: '2026-06-13T00:00:00.000Z',
-        },
-      ],
-    });
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
 
     render(<ChatApp />);
     fireEvent.click(screen.getByRole('button', { name: /检查未提交更改/ }));
@@ -199,17 +270,15 @@ describe('ChatApp', () => {
   });
 
   it('opens a task while a new session message is pending without applying stale creation results', () => {
-    useTaskStore.getState().actions.setTasks({
-      tasks: [
-        {
-          id: 'task-2',
-          sessionId: 'session-2',
-          sessionPath: '/sessions/session-2.jsonl',
-          title: '会话二',
-          createdAt: '2026-06-13T00:00:00.000Z',
-        },
-      ],
-    });
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-2',
+        sessionId: 'session-2',
+        sessionPath: '/sessions/session-2.jsonl',
+        title: '会话二',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
 
     render(<ChatApp />);
     fireEvent.change(screen.getByLabelText('随心输入'), {
@@ -271,15 +340,15 @@ describe('ChatApp', () => {
   });
 
   it('expands the task list when viewing all tasks', () => {
-    useTaskStore.getState().actions.setTasks({
-      tasks: Array.from({ length: 4 }, (_, index) => ({
+    useTaskStore.getState().actions.setRecentTasks(
+      Array.from({ length: 4 }, (_, index) => ({
         id: `task-${index + 1}`,
         sessionId: `session-${index + 1}`,
         sessionPath: `/sessions/session-${index + 1}.jsonl`,
         title: `历史任务 ${index + 1}`,
         createdAt: '2026-06-13T00:00:00.000Z',
       })),
-    });
+    );
 
     render(<ChatApp />);
 
@@ -287,7 +356,392 @@ describe('ChatApp', () => {
     fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
 
     expect(screen.getByText('历史任务 4')).toBeInTheDocument();
-    expect(postMessage).toHaveBeenCalledWith({ type: 'request_tasks', limit: 50 });
+    expect(screen.getByLabelText('搜索历史任务')).toBeInTheDocument();
+    expect(screen.queryByText('本地任务')).not.toBeInTheDocument();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'request_task_history',
+      query: '',
+      requestId: expect.any(String),
+      purpose: 'panel',
+      limit: 20,
+      offset: 0,
+    });
+  });
+
+  it('opens task history from the home header action', () => {
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
+
+    expect(screen.getByLabelText('搜索历史任务')).toBeInTheDocument();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'request_task_history',
+      query: '',
+      requestId: expect.any(String),
+      purpose: 'panel',
+      limit: 20,
+      offset: 0,
+    });
+  });
+
+  it('does not mark the current detail session in the home task history panel', () => {
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+        isCurrent: true,
+      },
+      {
+        id: 'task-2',
+        sessionId: 'session-2',
+        sessionPath: '/sessions/session-2.jsonl',
+        title: '另一个历史任务',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
+
+    expect(screen.getByRole('button', { name: /检查未提交更改/ })).not.toHaveAttribute(
+      'aria-current',
+    );
+  });
+
+  it('opens task history from the conversation header action', async () => {
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+        isCurrent: true,
+      },
+      {
+        id: 'task-2',
+        sessionId: 'session-2',
+        sessionPath: '/sessions/session-2.jsonl',
+        title: '另一个历史任务',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+    useConversationStore
+      .getState()
+      .actions.applyState(makeState([{ role: 'user', content: 'hello', timestamp: 1 }]));
+    useSessionStore
+      .getState()
+      .actions.applyState(makeState([{ role: 'user', content: 'hello', timestamp: 1 }]));
+
+    render(<ChatApp />);
+    expect(screen.queryByRole('button', { name: '继续会话' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
+
+    expect(screen.getByLabelText('搜索历史任务')).toBeInTheDocument();
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'request_task_history',
+      query: '',
+      requestId: expect.any(String),
+      purpose: 'panel',
+      limit: 20,
+      offset: 0,
+    });
+    postMessage.mockClear();
+
+    const currentTask = screen.getByRole('button', { name: /检查未提交更改/ });
+    expect(currentTask).toHaveAttribute('aria-current', 'page');
+    expect(currentTask).not.toBeDisabled();
+    fireEvent.click(currentTask);
+    await waitFor(() => {
+      expect(screen.queryByLabelText('搜索历史任务')).not.toBeInTheDocument();
+    });
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'open_task' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
+    postMessage.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /另一个历史任务/ }));
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('搜索历史任务')).not.toBeInTheDocument();
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'open_task',
+      requestId: expect.any(String),
+      taskId: 'task-2',
+      sessionPath: '/sessions/session-2.jsonl',
+      cwdOverride: undefined,
+    });
+  });
+
+  it('collapses the expanded task panel when clicking outside it', async () => {
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
+    expect(screen.getByLabelText('搜索历史任务')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收起/ })).not.toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('搜索历史任务')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /查看全部/ })).toBeInTheDocument();
+    });
+  });
+
+  it('requests backend task search from the expanded task panel', () => {
+    vi.useFakeTimers();
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+      {
+        id: 'task-2',
+        sessionId: 'session-2',
+        sessionPath: '/sessions/session-2.jsonl',
+        title: '修复 ChatComposer effect 报错',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
+    postMessage.mockClear();
+
+    fireEvent.change(screen.getByLabelText('搜索历史任务'), {
+      target: { value: 'ChatComposer' },
+    });
+
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('搜索历史任务')).toHaveValue('ChatComposer');
+    expect(screen.getByText('检查未提交更改')).toBeInTheDocument();
+    expect(screen.getByText('修复 ChatComposer effect 报错')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    const searchMessage = getLatestSearchTaskMessage();
+    expect(searchMessage).toEqual({
+      type: 'request_task_history',
+      query: 'ChatComposer',
+      requestId: expect.any(String),
+      purpose: 'panel',
+      limit: 20,
+      offset: 0,
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('ignores stale task history results for an older request', () => {
+    vi.useFakeTimers();
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
+    const initialSearch = getLatestSearchTaskMessage();
+    postMessage.mockClear();
+
+    fireEvent.change(screen.getByLabelText('搜索历史任务'), {
+      target: { value: '第二次' },
+    });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    const currentSearch = getLatestSearchTaskMessage();
+
+    act(() => {
+      routeTaskHistoryResult(
+        initialSearch?.requestId ?? 'stale',
+        [
+          {
+            id: 'task-1',
+            sessionId: 'session-1',
+            sessionPath: '/sessions/session-1.jsonl',
+            title: '第一次搜索结果',
+            createdAt: '2026-06-13T00:00:00.000Z',
+          },
+        ],
+        { query: '', offset: 0, nextOffset: 1 },
+      );
+    });
+
+    expect(screen.queryByText('第一次搜索结果')).not.toBeInTheDocument();
+
+    act(() => {
+      routeTaskHistoryResult(
+        currentSearch?.requestId ?? 'current',
+        [
+          {
+            id: 'task-2',
+            sessionId: 'session-2',
+            sessionPath: '/sessions/session-2.jsonl',
+            title: '第二次搜索结果',
+            createdAt: '2026-06-13T00:00:00.000Z',
+          },
+        ],
+        { query: '第二次', offset: 0, nextOffset: 1 },
+      );
+    });
+
+    expect(screen.getByText('第二次搜索结果')).toBeInTheDocument();
+    expect(screen.queryByText('第一次搜索结果')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('keeps task history separate from recent task updates while searching', () => {
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '初始任务',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
+    const historySearch = getLatestSearchTaskMessage();
+    fireEvent.change(screen.getByLabelText('搜索历史任务'), {
+      target: { value: '目标' },
+    });
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'task_history_data',
+        query: '',
+        requestId: 'recent-1',
+        purpose: 'recent',
+        tasks: [
+          {
+            id: 'task-old',
+            sessionId: 'session-old',
+            sessionPath: '/sessions/session-old.jsonl',
+            title: '旧的全量结果',
+            createdAt: '2026-06-13T00:00:00.000Z',
+          },
+        ],
+        offset: 0,
+        hasMore: false,
+        nextOffset: 1,
+      });
+      routeTaskHistoryResult(historySearch?.requestId ?? 'history', [
+        {
+          id: 'task-new',
+          sessionId: 'session-new',
+          sessionPath: '/sessions/session-new.jsonl',
+          title: '目标搜索结果',
+          createdAt: '2026-06-13T00:00:00.000Z',
+        },
+      ]);
+    });
+
+    expect(screen.getByText('目标搜索结果')).toBeInTheDocument();
+    expect(screen.queryByText('旧的全量结果')).not.toBeInTheDocument();
+  });
+
+  it('loads the next task history page when the sentinel intersects', async () => {
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '第一页任务',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
+    const initialSearch = getLatestSearchTaskMessage();
+
+    act(() => {
+      routeTaskHistoryResult(
+        initialSearch?.requestId ?? 'history-1',
+        [
+          {
+            id: 'task-1',
+            sessionId: 'session-1',
+            sessionPath: '/sessions/session-1.jsonl',
+            title: '第一页任务',
+            createdAt: '2026-06-13T00:00:00.000Z',
+          },
+        ],
+        { hasMore: true, nextOffset: 20 },
+      );
+    });
+
+    await waitFor(() => {
+      expect(intersectionObservers.length).toBeGreaterThan(0);
+    });
+
+    postMessage.mockClear();
+    act(() => {
+      intersectionObservers.at(-1)?.trigger();
+    });
+
+    const nextSearch = getLatestSearchTaskMessage();
+    expect(nextSearch).toEqual({
+      type: 'request_task_history',
+      query: '',
+      requestId: expect.any(String),
+      purpose: 'panel',
+      limit: 20,
+      offset: 20,
+    });
+
+    act(() => {
+      routeTaskHistoryResult(
+        nextSearch?.requestId ?? 'history-2',
+        [
+          {
+            id: 'task-2',
+            sessionId: 'session-2',
+            sessionPath: '/sessions/session-2.jsonl',
+            title: '第二页任务',
+            createdAt: '2026-06-13T00:00:00.000Z',
+          },
+        ],
+        { offset: 20, hasMore: false, nextOffset: 21 },
+      );
+    });
+
+    expect(screen.getByText('第一页任务')).toBeInTheDocument();
+    expect(screen.getByText('第二页任务')).toBeInTheDocument();
   });
 
   it('sends follow-up messages with Enter while streaming', () => {
@@ -448,17 +902,15 @@ describe('ChatApp', () => {
         sessionFile: '/sessions/session-1.jsonl',
       }),
     });
-    useTaskStore.getState().actions.setTasks({
-      tasks: [
-        {
-          id: 'task-2',
-          sessionId: 'session-2',
-          sessionPath: '/sessions/session-2.jsonl',
-          title: '会话二',
-          createdAt: '2026-06-13T00:00:00.000Z',
-        },
-      ],
-    });
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-2',
+        sessionId: 'session-2',
+        sessionPath: '/sessions/session-2.jsonl',
+        title: '会话二',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
 
     render(<ChatApp />);
     fireEvent.change(screen.getByLabelText('要求后续变更'), {

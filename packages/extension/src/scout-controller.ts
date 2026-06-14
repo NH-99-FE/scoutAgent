@@ -23,7 +23,11 @@ import {
 } from './host/session-coordinator.ts';
 import { readSessionFileInfo } from './core/session-file.ts';
 import { isPathInsideOrEqual, resolveSessionCwdPolicy } from './core/session-cwd.ts';
-import { matchesTaskSearch } from './host/protocol/task-search.ts';
+import {
+  matchesTaskSearch,
+  normalizeTaskSearchLimit,
+  normalizeTaskSearchOffset,
+} from './host/protocol/task-search.ts';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 
 // ---------- 接口 ----------
@@ -320,11 +324,8 @@ export class ScoutController implements vscode.Disposable {
       case 'request_file_mentions':
         void this.handleRequestFileMentions(message);
         break;
-      case 'request_tasks':
-        void this.handleRequestTasks(message);
-        break;
-      case 'search_tasks':
-        void this.handleSearchTasks(message);
+      case 'request_task_history':
+        void this.handleRequestTaskHistory(message);
         break;
       case 'open_task':
         void this.handleOpenTask(message);
@@ -651,7 +652,14 @@ export class ScoutController implements vscode.Disposable {
       .then(async () => {
         if (!operation.isLatest()) return;
         await this.pushState();
-        await this.handleRequestTasks({ limit: 12 });
+        await this.handleRequestTaskHistory({
+          type: 'request_task_history',
+          query: '',
+          requestId: 'recent-after-turn',
+          limit: 3,
+          offset: 0,
+          purpose: 'recent',
+        });
       })
       .catch((error) => {
         if (!operation.isLatest()) return;
@@ -896,41 +904,38 @@ export class ScoutController implements vscode.Disposable {
     }
   }
 
-  private async handleRequestTasks(message: { limit?: number }): Promise<void> {
+  private async handleRequestTaskHistory(
+    message: Extract<WebviewMessage, { type: 'request_task_history' }>,
+  ): Promise<void> {
+    const limit = normalizeTaskSearchLimit(message.limit);
+    const offset = normalizeTaskSearchOffset(message.offset);
     try {
-      const tasks = this.sessionsToTasks(await this.listAvailableSessions(), message.limit);
-      this.postMessage({ type: 'tasks_data', tasks });
-    } catch (error) {
-      this.postMessage({ type: 'tasks_data', tasks: [] });
-      this.outputChannel.appendLine(
-        `[scout] List tasks failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-
-  private async handleSearchTasks(message: {
-    query: string;
-    limit?: number;
-    requestId?: string;
-  }): Promise<void> {
-    try {
-      const sessions = await this.listAvailableSessions();
+      const sessions = await this.listTaskSessions(message.scope);
       const filtered = sessions.filter((session) => matchesTaskSearch(session, message.query));
+      const page = filtered.slice(offset, offset + limit);
       this.postMessage({
-        type: 'tasks_data',
-        tasks: this.sessionsToTasks(filtered, message.limit),
+        type: 'task_history_data',
         query: message.query,
         requestId: message.requestId,
+        purpose: message.purpose,
+        tasks: this.sessionsToTasks(page),
+        offset,
+        hasMore: offset + limit < filtered.length,
+        nextOffset: offset + page.length,
       });
     } catch (error) {
       this.postMessage({
-        type: 'tasks_data',
-        tasks: [],
+        type: 'task_history_data',
         query: message.query,
         requestId: message.requestId,
+        purpose: message.purpose,
+        tasks: [],
+        offset,
+        hasMore: false,
+        nextOffset: offset,
       });
       this.outputChannel.appendLine(
-        `[scout] Search tasks failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[scout] List task history failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -1057,12 +1062,17 @@ export class ScoutController implements vscode.Disposable {
     return this.sessionManager.listSessions({ all: true });
   }
 
+  private async listTaskSessions(scope: 'workspace' | 'all' = 'workspace') {
+    return scope === 'all' ? this.listAvailableSessions() : this.sessionManager.listSessions();
+  }
+
   private sessionsToTasks(
     sessions: Awaited<ReturnType<ExtensionSessionCoordinator['listSessions']>>,
-    limit = 50,
+    limit?: number,
   ): ScoutTaskItem[] {
-    const cappedLimit = Math.max(1, Math.min(limit, 200));
-    return sessions.slice(0, cappedLimit).map((session) => ({
+    const visibleSessions =
+      limit === undefined ? sessions : sessions.slice(0, Math.max(1, Math.min(limit, 200)));
+    return visibleSessions.map((session) => ({
       id: session.path,
       sessionId: session.id,
       sessionPath: session.path,
@@ -1122,7 +1132,9 @@ export class ScoutController implements vscode.Disposable {
     }
 
     const operationResult = message.operation
-      ? await this.sessionManager.restoreUserSession(message.operation, target, { cwdOverride: cwd })
+      ? await this.sessionManager.restoreUserSession(message.operation, target, {
+          cwdOverride: cwd,
+        })
       : {
           status: 'completed' as const,
           value: await this.sessionManager.restore(target, { cwdOverride: cwd }),

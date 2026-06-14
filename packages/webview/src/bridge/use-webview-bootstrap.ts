@@ -19,7 +19,7 @@ export function useWebviewBootstrap(): WebviewSurface {
     protocolClient.ready();
 
     if (surface === 'chat') {
-      protocolClient.requestTasks(12);
+      protocolClient.requestTasks(3);
       protocolClient.requestSessions();
     }
     if (surface === 'settings') {

@@ -94,6 +94,149 @@ describe('ScoutController webview surfaces', () => {
     controller.dispose();
   });
 
+  it('lists recent tasks and paged task history from the current workspace scope', async () => {
+    const controller = makeController();
+    const chat = makeWebview();
+    const listSessions = vi.fn(async () =>
+      Array.from({ length: 45 }, (_, index) => ({
+        id: `session-${index + 1}`,
+        path: `/workspace/.scout/sessions/session-${index + 1}.jsonl`,
+        cwd: '/workspace',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        modifiedAt: '2026-01-01T00:00:00.000Z',
+        name: `当前路径任务 ${index + 1}`,
+        firstMessage: 'hello',
+        allMessagesText: `hello body ${index + 1}`,
+        messageCount: 1,
+      })),
+    );
+    (controller as unknown as { sessionManager: unknown }).sessionManager = {
+      listSessions,
+      sessionFile: '/workspace/.scout/sessions/current.jsonl',
+      disposeAsync: vi.fn(async () => undefined),
+    };
+
+    controller.bindWebview(chat as never, 'chat');
+    controller.handleWebviewMessage({
+      type: 'request_task_history',
+      query: '',
+      requestId: 'recent-1',
+      limit: 3,
+      offset: 0,
+      purpose: 'recent',
+    });
+    await flushPromises();
+    controller.handleWebviewMessage({
+      type: 'request_task_history',
+      query: '',
+      requestId: 'history-1',
+      offset: 20,
+      purpose: 'panel',
+    });
+    await flushPromises();
+
+    expect(listSessions.mock.calls[0]).toEqual([]);
+    expect(listSessions.mock.calls[1]).toEqual([]);
+    const taskHistoryMessages = chat.postMessage.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.type === 'task_history_data') as Array<{
+      requestId: string;
+      purpose?: string;
+      tasks: Array<{ sessionId: string }>;
+      offset: number;
+      hasMore: boolean;
+      nextOffset: number;
+    }>;
+    const tasksMessage = taskHistoryMessages.find((message) => message.purpose === 'recent');
+    const historyMessage = taskHistoryMessages.find((message) => message.purpose === 'panel');
+
+    expect(tasksMessage?.requestId).toBe('recent-1');
+    expect(tasksMessage?.tasks).toHaveLength(3);
+    expect(historyMessage?.requestId).toBe('history-1');
+    expect(historyMessage?.tasks).toHaveLength(20);
+    expect(historyMessage?.tasks[0]?.sessionId).toBe('session-21');
+    expect(historyMessage?.offset).toBe(20);
+    expect(historyMessage?.hasMore).toBe(true);
+    expect(historyMessage?.nextOffset).toBe(40);
+
+    controller.dispose();
+  });
+
+  it('searches task history against displayed task titles only', async () => {
+    const controller = makeController();
+    const chat = makeWebview();
+    const listSessions = vi.fn(async () => [
+      {
+        id: 'session-1',
+        path: '/workspace/.scout/sessions/session-1.jsonl',
+        cwd: '/workspace',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        modifiedAt: '2026-01-01T00:00:00.000Z',
+        name: 'Visible title',
+        firstMessage: 'hello',
+        allMessagesText: 'hello assistant response hidden-search-token',
+        messageCount: 2,
+      },
+      {
+        id: 'session-2',
+        path: '/workspace/.scout/sessions/session-2.jsonl',
+        cwd: '/workspace',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        modifiedAt: '2026-01-01T00:00:00.000Z',
+        name: 'Other title',
+        firstMessage: 'hello',
+        allMessagesText: 'hello unrelated response',
+        messageCount: 2,
+      },
+    ]);
+    (controller as unknown as { sessionManager: unknown }).sessionManager = {
+      listSessions,
+      sessionFile: '/workspace/.scout/sessions/current.jsonl',
+      disposeAsync: vi.fn(async () => undefined),
+    };
+
+    controller.bindWebview(chat as never, 'chat');
+    controller.handleWebviewMessage({
+      type: 'request_task_history',
+      query: 'visible',
+      requestId: 'history-search',
+      offset: 0,
+    });
+    await flushPromises();
+
+    const historyMessage = chat.postMessage.mock.calls.find(
+      ([message]) => message.type === 'task_history_data',
+    )?.[0] as {
+      requestId: string;
+      tasks: Array<{ sessionId: string }>;
+      hasMore: boolean;
+      nextOffset: number;
+    };
+
+    expect(historyMessage.requestId).toBe('history-search');
+    expect(historyMessage.tasks).toHaveLength(1);
+    expect(historyMessage.tasks[0]?.sessionId).toBe('session-1');
+    expect(historyMessage.hasMore).toBe(false);
+    expect(historyMessage.nextOffset).toBe(1);
+
+    chat.postMessage.mockClear();
+    controller.handleWebviewMessage({
+      type: 'request_task_history',
+      query: 'hidden-search-token',
+      requestId: 'history-body-search',
+      offset: 0,
+    });
+    await flushPromises();
+
+    const bodySearchMessage = chat.postMessage.mock.calls.find(
+      ([message]) => message.type === 'task_history_data',
+    )?.[0] as { requestId: string; tasks: unknown[] };
+    expect(bodySearchMessage.requestId).toBe('history-body-search');
+    expect(bodySearchMessage.tasks).toHaveLength(0);
+
+    controller.dispose();
+  });
+
   it('completes a new session request after the prompt is accepted without waiting for the turn', async () => {
     const controller = makeController();
     const chat = makeWebview();
@@ -169,13 +312,20 @@ describe('ScoutController webview surfaces', () => {
       success: true,
     });
     expect(chat.postMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'tasks_data' }),
+      expect.objectContaining({ type: 'task_history_data', purpose: 'recent' }),
     );
 
     finishTurn.resolve();
     await flushPromises(10);
 
-    expect(chat.postMessage).toHaveBeenCalledWith({ type: 'tasks_data', tasks: [] });
+    expect(chat.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'task_history_data',
+        requestId: 'recent-after-turn',
+        purpose: 'recent',
+        tasks: [],
+      }),
+    );
 
     controller.dispose();
   });

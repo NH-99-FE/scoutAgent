@@ -28,11 +28,13 @@ export function ChatApp() {
   const isOpeningTask =
     openingTaskSessionPath !== undefined && openingTaskSessionPath !== sessionFile;
   const shouldShowHome =
-    isOpeningTask ||
-    chatView === 'home' ||
-    (chatView === 'auto' && !hasConversation);
+    isOpeningTask || chatView === 'home' || (chatView === 'auto' && !hasConversation);
 
   const openTask = (task: ScoutTaskItem) => {
+    if (task.isCurrent) {
+      uiActions.setChatView('detail');
+      return;
+    }
     uiActions.beginOpenTask(task.sessionPath);
     protocolClient.openTask(task);
   };
@@ -56,6 +58,7 @@ export function ChatApp() {
     <ChatWorkspace
       onBack={() => uiActions.setChatView('home')}
       onNewSession={startFreshNewSession}
+      onOpenTask={openTask}
     />
   );
 }

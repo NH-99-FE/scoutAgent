@@ -26,6 +26,10 @@ export function resetProtocolRequests(): void {
   pendingRequestIds.clear();
 }
 
-function createRequestId(): string {
+export function createProtocolRequestId(): string {
   return `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+}
+
+function createRequestId(): string {
+  return createProtocolRequestId();
 }

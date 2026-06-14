@@ -39,12 +39,19 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
     case 'sessions_data':
       useSessionStore.getState().actions.setSessions(message.sessions);
       break;
-    case 'tasks_data':
-      useTaskStore.getState().actions.setTasks({
-        tasks: message.tasks,
-        query: message.query,
-        requestId: message.requestId,
-      });
+    case 'task_history_data':
+      if (message.purpose === 'recent') {
+        useTaskStore.getState().actions.setRecentTasks(message.tasks);
+      } else {
+        useTaskStore.getState().actions.applyHistoryResult({
+          query: message.query,
+          requestId: message.requestId,
+          tasks: message.tasks,
+          offset: message.offset,
+          hasMore: message.hasMore,
+          nextOffset: message.nextOffset,
+        });
+      }
       break;
     case 'tree_data':
       useTreeStore.getState().actions.setTreeData(message.tree, message.leafId);

@@ -5,10 +5,15 @@
 import type {
   ScoutImageContent,
   ScoutTaskItem,
+  ScoutTaskHistoryPurpose,
   ThinkingLevel,
   WebviewMessage,
 } from '@scout-agent/shared';
-import { beginProtocolRequest, discardProtocolRequest } from './request-tracker';
+import {
+  beginProtocolRequest,
+  createProtocolRequestId,
+  discardProtocolRequest,
+} from './request-tracker';
 import { getVsCodeApi } from './vscode-api';
 
 interface UserMessageOptions {
@@ -24,8 +29,39 @@ interface PromoteFollowUpOptions extends ContinueSessionOptions {
   resume?: boolean;
 }
 
+interface RequestTaskHistoryOptions {
+  query?: string;
+  requestId?: string;
+  limit?: number;
+  offset?: number;
+  scope?: 'workspace' | 'all';
+  purpose?: ScoutTaskHistoryPurpose;
+}
+
 export function sendWebviewMessage(message: WebviewMessage): void {
   getVsCodeApi().postMessage(message);
+}
+
+function requestTaskHistory({
+  query = '',
+  requestId,
+  limit,
+  offset,
+  scope,
+  purpose = 'panel',
+}: RequestTaskHistoryOptions): string {
+  const nextRequestId = requestId ?? createProtocolRequestId();
+  const message: WebviewMessage = {
+    type: 'request_task_history',
+    query,
+    requestId: nextRequestId,
+    purpose,
+  };
+  if (limit !== undefined) message.limit = limit;
+  if (offset !== undefined) message.offset = offset;
+  if (scope !== undefined) message.scope = scope;
+  sendWebviewMessage(message);
+  return nextRequestId;
 }
 
 export const protocolClient = {
@@ -33,9 +69,14 @@ export const protocolClient = {
   requestState: () => sendWebviewMessage({ type: 'request_state' }),
   requestConfig: () => sendWebviewMessage({ type: 'request_config' }),
   requestTree: () => sendWebviewMessage({ type: 'request_tree' }),
-  requestTasks: (limit?: number) => sendWebviewMessage({ type: 'request_tasks', limit }),
-  searchTasks: (query: string, limit?: number, requestId?: string) =>
-    sendWebviewMessage({ type: 'search_tasks', query, limit, requestId }),
+  requestTasks: (limit?: number): string =>
+    requestTaskHistory({
+      query: '',
+      limit,
+      offset: 0,
+      purpose: 'recent',
+    }),
+  requestTaskHistory,
   requestSessions: () => sendWebviewMessage({ type: 'request_sessions' }),
   openSettingsPanel: () => sendWebviewMessage({ type: 'open_settings_panel' }),
   openTreePanel: () => sendWebviewMessage({ type: 'open_tree_panel' }),

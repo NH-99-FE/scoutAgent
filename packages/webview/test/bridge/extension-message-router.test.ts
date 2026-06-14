@@ -84,9 +84,10 @@ describe('routeExtensionMessage', () => {
       ],
     });
     routeExtensionMessage({
-      type: 'tasks_data',
-      query: 'hello',
-      requestId: 'request-1',
+      type: 'task_history_data',
+      query: '',
+      requestId: 'recent-1',
+      purpose: 'recent',
       tasks: [
         {
           id: 'task-1',
@@ -96,11 +97,38 @@ describe('routeExtensionMessage', () => {
           createdAt: '2026-01-01T00:00:00.000Z',
         },
       ],
+      offset: 0,
+      hasMore: false,
+      nextOffset: 1,
+    });
+    useTaskStore.getState().actions.beginHistorySearch({
+      query: '',
+      requestId: 'history-1',
+      offset: 0,
+    });
+    routeExtensionMessage({
+      type: 'task_history_data',
+      query: '',
+      requestId: 'history-1',
+      purpose: 'panel',
+      tasks: [
+        {
+          id: 'task-2',
+          sessionId: 'session-2',
+          sessionPath: '/session-2.jsonl',
+          title: 'history',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      ],
+      offset: 0,
+      hasMore: false,
+      nextOffset: 1,
     });
 
     expect(useTreeStore.getState().leafId).toBe('leaf-1');
-    expect(useTaskStore.getState().tasks).toHaveLength(1);
-    expect(useTaskStore.getState().query).toBe('hello');
+    expect(useTaskStore.getState().recentTasks).toHaveLength(1);
+    expect(useTaskStore.getState().historyTasks).toHaveLength(1);
+    expect(useTaskStore.getState().historyTasks[0]?.title).toBe('history');
   });
 
   it('routes queue updates without replacing conversation messages', () => {

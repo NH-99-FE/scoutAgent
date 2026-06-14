@@ -5,53 +5,112 @@
 import { create } from 'zustand';
 import type { ScoutTaskItem } from '@scout-agent/shared';
 
-interface TaskResultInput {
-  tasks: ScoutTaskItem[];
-  query?: string;
-  requestId?: string;
-}
-
 interface TaskActions {
-  setTasks: (input: TaskResultInput) => void;
-  setPendingSearch: (query: string, requestId: string) => void;
+  setRecentTasks: (tasks: ScoutTaskItem[]) => void;
+  beginHistorySearch: (input: BeginHistorySearchInput) => void;
+  applyHistoryResult: (input: HistoryResultInput) => void;
+  setHistoryQuery: (query: string) => void;
+  resetHistory: () => void;
   reset: () => void;
 }
 
-interface TaskStore {
-  tasks: ScoutTaskItem[];
+interface BeginHistorySearchInput {
   query: string;
-  requestId: string | undefined;
-  pending: boolean;
+  requestId: string;
+  offset: number;
+  seedTasks?: ScoutTaskItem[];
+}
+
+interface HistoryResultInput {
+  query: string;
+  requestId: string;
+  tasks: ScoutTaskItem[];
+  offset: number;
+  hasMore: boolean;
+  nextOffset: number;
+}
+
+interface TaskStore {
+  recentTasks: ScoutTaskItem[];
+  historyTasks: ScoutTaskItem[];
+  historyQuery: string;
+  historyPending: boolean;
+  historyLoadingMore: boolean;
+  historyRequestId: string | undefined;
+  historyHasMore: boolean;
+  historyNextOffset: number;
   actions: TaskActions;
 }
 
 const initialState = {
-  tasks: [] as ScoutTaskItem[],
-  query: '',
-  requestId: undefined as string | undefined,
-  pending: false,
+  recentTasks: [] as ScoutTaskItem[],
+  historyTasks: [] as ScoutTaskItem[],
+  historyQuery: '',
+  historyPending: false,
+  historyLoadingMore: false,
+  historyRequestId: undefined as string | undefined,
+  historyHasMore: false,
+  historyNextOffset: 0,
 };
 
-export const useTaskStore = create<TaskStore>((set, get) => ({
+export const useTaskStore = create<TaskStore>((set) => ({
   ...initialState,
   actions: {
-    setTasks: ({ tasks, query, requestId }) => {
-      const current = get();
-      if (requestId && current.requestId && requestId !== current.requestId) return;
+    setRecentTasks: (recentTasks) => set({ recentTasks }),
+    beginHistorySearch: ({ query, requestId, offset, seedTasks }) =>
+      set((state) => ({
+        historyTasks: offset > 0 ? state.historyTasks : (seedTasks ?? []),
+        historyQuery: query,
+        historyPending: offset === 0,
+        historyLoadingMore: offset > 0,
+        historyRequestId: requestId,
+        historyHasMore: false,
+        historyNextOffset: offset,
+      })),
+    applyHistoryResult: ({ query, requestId, tasks, offset, hasMore, nextOffset }) =>
+      set((state) => {
+        if (state.historyRequestId !== requestId) return state;
+        return {
+          historyTasks: offset > 0 ? appendUniqueTasks(state.historyTasks, tasks) : tasks,
+          historyQuery: query,
+          historyPending: false,
+          historyLoadingMore: false,
+          historyRequestId: undefined,
+          historyHasMore: hasMore,
+          historyNextOffset: nextOffset,
+        };
+      }),
+    setHistoryQuery: (historyQuery) => set({ historyQuery }),
+    resetHistory: () =>
       set({
-        tasks,
-        query: query ?? current.query,
-        requestId,
-        pending: false,
-      });
-    },
-    setPendingSearch: (query, requestId) => set({ query, requestId, pending: true }),
+        historyTasks: [],
+        historyQuery: '',
+        historyPending: false,
+        historyLoadingMore: false,
+        historyRequestId: undefined,
+        historyHasMore: false,
+        historyNextOffset: 0,
+      }),
     reset: () => set(initialState),
   },
 }));
 
-export const useTasks = () => useTaskStore((state) => state.tasks);
-export const useTaskCount = () => useTaskStore((state) => state.tasks.length);
-export const useTaskQuery = () => useTaskStore((state) => state.query);
-export const useTaskPending = () => useTaskStore((state) => state.pending);
+function appendUniqueTasks(current: ScoutTaskItem[], incoming: ScoutTaskItem[]): ScoutTaskItem[] {
+  const seen = new Set(current.map((task) => task.sessionPath));
+  const next = [...current];
+  for (const task of incoming) {
+    if (seen.has(task.sessionPath)) continue;
+    seen.add(task.sessionPath);
+    next.push(task);
+  }
+  return next;
+}
+
+export const useRecentTasks = () => useTaskStore((state) => state.recentTasks);
+export const useHistoryTasks = () => useTaskStore((state) => state.historyTasks);
+export const useTaskHistoryQuery = () => useTaskStore((state) => state.historyQuery);
+export const useTaskHistoryPending = () => useTaskStore((state) => state.historyPending);
+export const useTaskHistoryLoadingMore = () => useTaskStore((state) => state.historyLoadingMore);
+export const useTaskHistoryHasMore = () => useTaskStore((state) => state.historyHasMore);
+export const useTaskHistoryNextOffset = () => useTaskStore((state) => state.historyNextOffset);
 export const useTaskActions = () => useTaskStore((state) => state.actions);

@@ -602,7 +602,6 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
     const stats = await stat(filePath);
     let messageCount = 0;
     let firstMessage = '';
-    const allMessages: string[] = [];
     let name: string | undefined;
 
     for (const entry of entries) {
@@ -615,17 +614,15 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
       if (entry.type !== 'message') continue;
       messageCount++;
 
+      if (firstMessage) continue;
       const message = (entry as SessionMessageEntry).message;
       if (!isMessageWithContent(message)) continue;
-      if (message.role !== 'user' && message.role !== 'assistant') continue;
+      if (message.role !== 'user') continue;
 
       const textContent = extractTextContent(message);
       if (!textContent) continue;
 
-      allMessages.push(textContent);
-      if (!firstMessage && message.role === 'user') {
-        firstMessage = textContent;
-      }
+      firstMessage = textContent;
     }
 
     const cwd =
@@ -644,7 +641,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
       modified,
       messageCount,
       firstMessage: firstMessage || '(no messages)',
-      allMessagesText: allMessages.join(' '),
+      allMessagesText: '',
     };
   } catch {
     return null;

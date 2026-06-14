@@ -120,6 +120,8 @@ export interface ScoutTaskItem {
   isCurrent?: boolean;
 }
 
+export type ScoutTaskHistoryPurpose = 'recent' | 'panel';
+
 // ---------- Webview → Extension ----------
 
 export type WebviewMessage =
@@ -172,8 +174,15 @@ export type WebviewMessage =
   | { type: 'continue_session'; preserveFollowUpQueue?: boolean }
   | { type: 'request_commands' }
   | { type: 'request_file_mentions'; query: string; limit?: number }
-  | { type: 'request_tasks'; limit?: number }
-  | { type: 'search_tasks'; query: string; limit?: number; requestId?: string }
+  | {
+      type: 'request_task_history';
+      query: string;
+      requestId: string;
+      limit?: number;
+      offset?: number;
+      scope?: 'workspace' | 'all';
+      purpose?: ScoutTaskHistoryPurpose;
+    }
   | {
       type: 'open_task';
       requestId: string;
@@ -506,7 +515,16 @@ export type ExtensionMessage =
   | { type: 'tree_data'; tree: ScoutSessionTreeNode[]; leafId: string | null }
   | { type: 'commands_data'; commands: ScoutCommandInfo[] }
   | { type: 'file_mentions_data'; query: string; items: ScoutFileMentionItem[] }
-  | { type: 'tasks_data'; tasks: ScoutTaskItem[]; query?: string; requestId?: string }
+  | {
+      type: 'task_history_data';
+      query: string;
+      requestId: string;
+      purpose?: ScoutTaskHistoryPurpose;
+      tasks: ScoutTaskItem[];
+      offset: number;
+      hasMore: boolean;
+      nextOffset: number;
+    }
   | { type: 'sessions_data'; sessions: ScoutSessionListItem[] }
   | { type: 'open_settings_panel_result'; success: boolean; error?: string }
   | { type: 'open_tree_panel_result'; success: boolean; error?: string }
