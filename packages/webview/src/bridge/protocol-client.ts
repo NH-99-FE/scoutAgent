@@ -2,11 +2,18 @@
 // Protocol Client — Webview → Extension 消息发送
 // ============================================================
 
-import type { ScoutTaskItem, ThinkingLevel, WebviewMessage } from '@scout-agent/shared';
+import type {
+  ScoutImageContent,
+  ScoutTaskItem,
+  ThinkingLevel,
+  WebviewMessage,
+} from '@scout-agent/shared';
+import { beginProtocolRequest, discardProtocolRequest } from './request-tracker';
 import { getVsCodeApi } from './vscode-api';
 
 interface UserMessageOptions {
   clearFollowUpQueue?: boolean;
+  images?: ScoutImageContent[];
 }
 
 interface ContinueSessionOptions {
@@ -32,17 +39,33 @@ export const protocolClient = {
   requestSessions: () => sendWebviewMessage({ type: 'request_sessions' }),
   openSettingsPanel: () => sendWebviewMessage({ type: 'open_settings_panel' }),
   openTreePanel: () => sendWebviewMessage({ type: 'open_tree_panel' }),
-  openTask: (task: ScoutTaskItem) =>
+  openTask: (task: ScoutTaskItem) => {
+    discardProtocolRequest('new_session_message');
+    const requestId = beginProtocolRequest('open_task');
     sendWebviewMessage({
       type: 'open_task',
+      requestId,
       taskId: task.id,
       sessionPath: task.sessionPath,
       cwdOverride: task.cwd,
-    }),
+    });
+  },
   userMessage: (text: string, deliverAs?: 'steer' | 'followUp', options?: UserMessageOptions) => {
     const message: WebviewMessage = { type: 'user_message', text, deliverAs };
+    if (options?.images && options.images.length > 0) {
+      message.images = options.images;
+    }
     if (options?.clearFollowUpQueue) {
       message.clearFollowUpQueue = true;
+    }
+    sendWebviewMessage(message);
+  },
+  newSessionMessage: (text: string, images?: ScoutImageContent[]) => {
+    discardProtocolRequest('open_task');
+    const requestId = beginProtocolRequest('new_session_message');
+    const message: WebviewMessage = { type: 'new_session_message', requestId, text };
+    if (images && images.length > 0) {
+      message.images = images;
     }
     sendWebviewMessage(message);
   },

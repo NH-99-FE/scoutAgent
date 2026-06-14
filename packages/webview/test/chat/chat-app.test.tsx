@@ -1,16 +1,35 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { routeExtensionMessage } from '@/bridge/extension-message-router';
+import { resetProtocolRequests } from '@/bridge/request-tracker';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
+import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
-import type { ScoutBusyState, ScoutMessage, ScoutWebviewState } from '@scout-agent/shared';
+import { useUiStore } from '@/store/ui-store';
+import type {
+  ScoutBusyState,
+  ScoutImageContent,
+  ScoutMessage,
+  ScoutWebviewState,
+} from '@scout-agent/shared';
 
 const postMessage = vi.fn();
+const TEST_IMAGE: ScoutImageContent = {
+  type: 'image',
+  data: 'aW1hZ2U=',
+  mimeType: 'image/png',
+};
 
 function makeState(
   messages: ScoutMessage[],
-  overrides: Partial<Pick<ScoutWebviewState, 'isStreaming' | 'busyState' | 'queueState'>> = {},
+  overrides: Partial<
+    Pick<
+      ScoutWebviewState,
+      'isStreaming' | 'busyState' | 'queueState' | 'sessionId' | 'sessionName' | 'sessionFile'
+    >
+  > = {},
 ): ScoutWebviewState {
   return {
     messages,
@@ -23,8 +42,9 @@ function makeState(
     tools: [],
     activeToolNames: [],
     commands: [],
-    sessionId: 'session-1',
-    sessionName: '检查未提交更改',
+    sessionId: overrides.sessionId ?? 'session-1',
+    sessionName: overrides.sessionName ?? '检查未提交更改',
+    sessionFile: overrides.sessionFile,
     cwd: '/workspace',
   };
 }
@@ -47,12 +67,15 @@ describe('ChatApp', () => {
 
   afterEach(() => {
     cleanup();
+    useComposerStore.getState().actions.reset();
     useConversationStore.getState().actions.reset();
     useSessionStore.getState().actions.reset();
     useTaskStore.getState().actions.reset();
+    useUiStore.getState().actions.reset();
+    resetProtocolRequests();
   });
 
-  it('renders the task home and sends composer text', () => {
+  it('renders the task home and starts a new session with composer text', () => {
     render(<ChatApp />);
 
     fireEvent.change(screen.getByLabelText('随心输入'), {
@@ -61,10 +84,93 @@ describe('ChatApp', () => {
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
 
     expect(postMessage).toHaveBeenCalledWith({
-      type: 'user_message',
+      type: 'new_session_message',
+      requestId: expect.any(String),
       text: '中文回答',
-      deliverAs: undefined,
     });
+    expect(screen.getByLabelText('随心输入')).toHaveValue('中文回答');
+  });
+
+  it('prevents duplicate new session submits while creation is pending', () => {
+    render(<ChatApp />);
+
+    fireEvent.change(screen.getByLabelText('随心输入'), {
+      target: { value: '只创建一次' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
+
+    const newSessionMessages = postMessage.mock.calls.filter(
+      ([message]) => message.type === 'new_session_message',
+    );
+    expect(newSessionMessages).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '发送中' })).toBeDisabled();
+  });
+
+  it('starts a new session with composer images', () => {
+    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
+
+    render(<ChatApp />);
+    fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'new_session_message',
+      requestId: expect.any(String),
+      text: '',
+      images: [TEST_IMAGE],
+    });
+  });
+
+  it('clears the home draft and shows the new session after creation succeeds', () => {
+    render(<ChatApp />);
+
+    fireEvent.change(screen.getByLabelText('随心输入'), {
+      target: { value: '开始新的任务' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState([], {
+          sessionId: 'session-new',
+          sessionName: '新会话',
+          sessionFile: '/sessions/session-new.jsonl',
+        }),
+      });
+      const newSessionMessage = postMessage.mock.calls.find(
+        ([message]) => message.type === 'new_session_message',
+      )?.[0] as { requestId: string };
+      routeExtensionMessage({
+        type: 'new_session_result',
+        requestId: newSessionMessage.requestId,
+        success: true,
+      });
+      routeExtensionMessage({
+        type: 'agent_event',
+        event: {
+          type: 'message_start',
+          messageId: 'session-new:message:1',
+          message: { role: 'user', content: '开始新的任务', timestamp: 1 },
+        },
+      });
+    });
+
+    expect(screen.getByText('开始新的任务')).toBeInTheDocument();
+    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
+  });
+
+  it('keeps the home draft when clicking new session on the task home', () => {
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('随心输入'), {
+      target: { value: '准备开始的新任务' },
+    });
+    postMessage.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }));
+
+    expect(screen.getByLabelText('随心输入')).toHaveValue('准备开始的新任务');
+    expect(postMessage).not.toHaveBeenCalledWith({ type: 'clear_conversation' });
   });
 
   it('opens a task with the session path as operation target', () => {
@@ -85,10 +191,83 @@ describe('ChatApp', () => {
 
     expect(postMessage).toHaveBeenCalledWith({
       type: 'open_task',
+      requestId: expect.any(String),
       taskId: 'task-1',
       sessionPath: '/sessions/session-1.jsonl',
       cwdOverride: undefined,
     });
+  });
+
+  it('opens a task while a new session message is pending without applying stale creation results', () => {
+    useTaskStore.getState().actions.setTasks({
+      tasks: [
+        {
+          id: 'task-2',
+          sessionId: 'session-2',
+          sessionPath: '/sessions/session-2.jsonl',
+          title: '会话二',
+          createdAt: '2026-06-13T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('随心输入'), {
+      target: { value: '还在创建的新会话' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
+    expect(screen.getByRole('button', { name: '发送中' })).toBeDisabled();
+
+    const newSessionMessage = postMessage.mock.calls.find(
+      ([message]) => message.type === 'new_session_message',
+    )?.[0] as { requestId: string };
+
+    fireEvent.click(screen.getByRole('button', { name: /会话二/ }));
+
+    const openTaskMessage = postMessage.mock.calls.find(
+      ([message]) => message.type === 'open_task',
+    )?.[0] as { requestId: string };
+    expect(openTaskMessage).toEqual({
+      type: 'open_task',
+      requestId: expect.any(String),
+      taskId: 'task-2',
+      sessionPath: '/sessions/session-2.jsonl',
+      cwdOverride: undefined,
+    });
+    expect(screen.getByText('任务')).toBeInTheDocument();
+    expect(screen.getByLabelText('随心输入')).toHaveValue('还在创建的新会话');
+    expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'new_session_result',
+        requestId: newSessionMessage.requestId,
+        success: true,
+      });
+    });
+
+    expect(screen.getByText('任务')).toBeInTheDocument();
+    expect(screen.getByLabelText('随心输入')).toHaveValue('还在创建的新会话');
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'open_task_result',
+        requestId: openTaskMessage.requestId,
+        sessionPath: '/sessions/session-2.jsonl',
+        success: true,
+      });
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState([{ role: 'user', content: '任务里的消息', timestamp: 1 }], {
+          sessionId: 'session-2',
+          sessionName: '会话二',
+          sessionFile: '/sessions/session-2.jsonl',
+        }),
+      });
+    });
+
+    expect(screen.getByText('任务里的消息')).toBeInTheDocument();
+    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
   });
 
   it('expands the task list when viewing all tasks', () => {
@@ -129,6 +308,26 @@ describe('ChatApp', () => {
       type: 'user_message',
       text: '现在改方向',
       deliverAs: 'followUp',
+    });
+  });
+
+  it('sends current session messages with composer images', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyState(state);
+    useSessionStore.getState().actions.applyState(state);
+    useComposerStore.getState().actions.addImages('session-1', [TEST_IMAGE]);
+
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: '看这张图' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'user_message',
+      text: '看这张图',
+      deliverAs: undefined,
+      images: [TEST_IMAGE],
     });
   });
 
@@ -189,6 +388,110 @@ describe('ChatApp', () => {
 
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Escape' });
     expect(postMessage).toHaveBeenCalledWith({ type: 'abort' });
+  });
+
+  it('keeps composer drafts isolated by session id', () => {
+    const sessionOne = makeState([{ role: 'user', content: 'one', timestamp: 1 }], {
+      sessionId: 'session-1',
+      sessionName: '会话一',
+    });
+    const sessionTwo = makeState([{ role: 'user', content: 'two', timestamp: 1 }], {
+      sessionId: 'session-2',
+      sessionName: '会话二',
+    });
+    useConversationStore.getState().actions.applyState(sessionOne);
+    useSessionStore.getState().actions.applyState(sessionOne);
+
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: 'session one draft' },
+    });
+
+    act(() => {
+      useConversationStore.getState().actions.applyState(sessionTwo);
+      useSessionStore.getState().actions.applyState(sessionTwo);
+    });
+
+    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: 'session two draft' },
+    });
+
+    act(() => {
+      useConversationStore.getState().actions.applyState(sessionOne);
+      useSessionStore.getState().actions.applyState(sessionOne);
+    });
+
+    expect(screen.getByLabelText('要求后续变更')).toHaveValue('session one draft');
+  });
+
+  it('does not reuse the conversation draft on the task home composer', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyState(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: 'conversation draft' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+
+    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+  });
+
+  it('stays on the task home until the opened task state is current', () => {
+    routeExtensionMessage({
+      type: 'state_update',
+      state: makeState([{ role: 'user', content: 'old conversation', timestamp: 1 }], {
+        sessionId: 'session-1',
+        sessionName: '会话一',
+        sessionFile: '/sessions/session-1.jsonl',
+      }),
+    });
+    useTaskStore.getState().actions.setTasks({
+      tasks: [
+        {
+          id: 'task-2',
+          sessionId: 'session-2',
+          sessionPath: '/sessions/session-2.jsonl',
+          title: '会话二',
+          createdAt: '2026-06-13T00:00:00.000Z',
+        },
+      ],
+    });
+
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: 'old draft' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    postMessage.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /会话二/ }));
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'open_task',
+      requestId: expect.any(String),
+      taskId: 'task-2',
+      sessionPath: '/sessions/session-2.jsonl',
+      cwdOverride: undefined,
+    });
+    expect(screen.getByText('任务')).toBeInTheDocument();
+    expect(screen.queryByText('old conversation')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState([{ role: 'user', content: 'new conversation', timestamp: 1 }], {
+          sessionId: 'session-2',
+          sessionName: '会话二',
+          sessionFile: '/sessions/session-2.jsonl',
+        }),
+      });
+    });
+
+    expect(screen.getByText('new conversation')).toBeInTheDocument();
+    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
   });
 
   it('aborts immediately when clicking the stop button', () => {
@@ -392,9 +695,29 @@ describe('ChatApp', () => {
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
-    fireEvent.click(screen.getByRole('button', { name: /检查未提交更改/ }));
+    const title = screen.getByRole('heading', { name: '检查未提交更改' });
+    expect(title).toHaveClass('truncate');
+    expect(screen.queryByRole('button', { name: /检查未提交更改/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
 
     expect(screen.getByText('任务')).toBeInTheDocument();
+    expect(postMessage).not.toHaveBeenCalledWith({ type: 'clear_conversation' });
+  });
+
+  it('opens the new session composer from the conversation header', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyState(state);
+    useSessionStore.getState().actions.applyState(state);
+    useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, '旧首页草稿');
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: '新会话' }));
+
+    expect(screen.getByText('任务')).toBeInTheDocument();
+    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+    expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'clear_conversation' });
   });
 });

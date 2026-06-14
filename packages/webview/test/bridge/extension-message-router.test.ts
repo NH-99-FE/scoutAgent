@@ -1,20 +1,31 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
+import { beginProtocolRequest, resetProtocolRequests } from '@/bridge/request-tracker';
 import { useConfigStore } from '@/store/config-store';
+import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
+import type { ScoutImageContent } from '@scout-agent/shared';
+
+const TEST_IMAGE: ScoutImageContent = {
+  type: 'image',
+  data: 'aW1hZ2U=',
+  mimeType: 'image/png',
+};
 
 describe('routeExtensionMessage', () => {
   afterEach(() => {
     useConfigStore.getState().actions.reset();
+    useComposerStore.getState().actions.reset();
     useConversationStore.getState().actions.reset();
     useSessionStore.getState().actions.reset();
     useTaskStore.getState().actions.reset();
     useTreeStore.getState().actions.reset();
     useUiStore.getState().actions.reset();
+    resetProtocolRequests();
   });
 
   it('routes state and config updates into domain stores', () => {
@@ -180,5 +191,96 @@ describe('routeExtensionMessage', () => {
       reason: 'overflow',
     });
     expect(useConversationStore.getState().isStreaming).toBe(true);
+  });
+
+  it('routes new session results into chat navigation and home draft state', () => {
+    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
+    useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
+    const requestId = beginProtocolRequest('new_session_message');
+    useUiStore.getState().actions.beginNewSessionRequest();
+
+    routeExtensionMessage({ type: 'new_session_result', requestId, success: true });
+
+    expect(useUiStore.getState().chatView).toBe('detail');
+    expect(useUiStore.getState().newSessionPending).toBe(false);
+    expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toBeUndefined();
+    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBeUndefined();
+  });
+
+  it('keeps the home draft when new session creation fails', () => {
+    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
+    useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
+    const requestId = beginProtocolRequest('new_session_message');
+    useUiStore.getState().actions.beginNewSessionRequest();
+
+    routeExtensionMessage({
+      type: 'new_session_result',
+      requestId,
+      success: false,
+      error: 'failed',
+    });
+
+    expect(useUiStore.getState().chatView).toBe('home');
+    expect(useUiStore.getState().newSessionPending).toBe(false);
+    expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toEqual([
+      TEST_IMAGE,
+    ]);
+    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('draft');
+  });
+
+  it('ignores stale new session results', () => {
+    useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
+    beginProtocolRequest('new_session_message');
+    useUiStore.getState().actions.beginNewSessionRequest();
+
+    routeExtensionMessage({ type: 'new_session_result', requestId: 'request-1', success: true });
+
+    expect(useUiStore.getState().chatView).toBe('auto');
+    expect(useUiStore.getState().newSessionPending).toBe(true);
+    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('draft');
+  });
+
+  it('keeps task navigation pending until the matching state update arrives', () => {
+    const staleRequestId = beginProtocolRequest('open_task');
+    useUiStore.getState().actions.beginOpenTask('/sessions/one.jsonl');
+    const currentRequestId = beginProtocolRequest('open_task');
+    useUiStore.getState().actions.beginOpenTask('/sessions/two.jsonl');
+
+    routeExtensionMessage({
+      type: 'open_task_result',
+      requestId: staleRequestId,
+      sessionPath: '/sessions/one.jsonl',
+      success: true,
+    });
+    routeExtensionMessage({
+      type: 'open_task_result',
+      requestId: currentRequestId,
+      sessionPath: '/sessions/two.jsonl',
+      success: true,
+    });
+
+    expect(useUiStore.getState().chatView).toBe('home');
+    expect(useUiStore.getState().openingTaskSessionPath).toBe('/sessions/two.jsonl');
+
+    routeExtensionMessage({
+      type: 'state_update',
+      state: {
+        messages: [{ role: 'user', content: 'two', timestamp: 1 }],
+        isStreaming: false,
+        busyState: { kind: 'idle', cancellable: false },
+        modelProvider: 'openai',
+        modelId: 'gpt-test',
+        thinkingLevel: 'off',
+        tools: [],
+        activeToolNames: [],
+        commands: [],
+        sessionId: 'session-2',
+        sessionFile: '/sessions/two.jsonl',
+        cwd: '/workspace',
+      },
+    });
+
+    expect(useUiStore.getState().chatView).toBe('detail');
+    expect(useUiStore.getState().openingTaskSessionPath).toBeUndefined();
   });
 });

@@ -4,11 +4,13 @@
 
 import type { ExtensionMessage } from '@scout-agent/shared';
 import { useConfigStore } from '@/store/config-store';
+import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
+import { completeProtocolRequest } from './request-tracker';
 
 export function routeExtensionMessage(message: ExtensionMessage): void {
   switch (message.type) {
@@ -16,6 +18,7 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
       useConversationStore.getState().actions.applyState(message.state);
       useSessionStore.getState().actions.applyState(message.state);
       useTreeStore.getState().actions.applyState(message.state);
+      useUiStore.getState().actions.resolveOpenTask(message.state.sessionFile);
       useUiStore.getState().actions.setDiagnostics(message.state.diagnostics ?? []);
       break;
     case 'queue_update':
@@ -110,7 +113,35 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
     case 'file_mentions_data':
     case 'open_settings_panel_result':
     case 'open_tree_panel_result':
+      break;
     case 'open_task_result':
+      if (!completeProtocolRequest('open_task', message.requestId)) {
+        break;
+      }
+      if (!message.success) {
+        useUiStore.getState().actions.completeOpenTask(message.success);
+        useUiStore.getState().actions.setNotification({
+          type: 'notification',
+          level: 'error',
+          message: message.error ?? 'Open task failed',
+        });
+      }
+      break;
+    case 'new_session_result':
+      if (!completeProtocolRequest('new_session_message', message.requestId)) {
+        break;
+      }
+      useUiStore.getState().actions.completeNewSessionRequest(message.success);
+      if (message.success) {
+        useComposerStore.getState().actions.clearDraft(HOME_COMPOSER_SESSION_ID);
+      } else {
+        useUiStore.getState().actions.setNotification({
+          type: 'notification',
+          level: 'error',
+          message: message.error ?? 'New session failed',
+        });
+      }
+      break;
     case 'restore_session_result':
     case 'import_session_result':
     case 'export_session_result':

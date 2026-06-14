@@ -6,7 +6,15 @@ import { create } from 'zustand';
 import type { ScoutDiagnostic, ScoutNotificationMessage } from '@scout-agent/shared';
 import type { WebviewSurface } from '@/bridge/surface';
 
+export type ChatView = 'auto' | 'home' | 'detail';
+
 interface UiActions {
+  beginOpenTask: (sessionPath: string) => void;
+  completeOpenTask: (success: boolean) => void;
+  beginNewSessionRequest: () => void;
+  completeNewSessionRequest: (success: boolean) => void;
+  resolveOpenTask: (sessionFile: string | undefined) => void;
+  setChatView: (view: ChatView) => void;
   setSurface: (surface: WebviewSurface) => void;
   setNotification: (notification: ScoutNotificationMessage | undefined) => void;
   setDiagnostics: (diagnostics: ScoutDiagnostic[]) => void;
@@ -14,6 +22,9 @@ interface UiActions {
 }
 
 interface UiStore {
+  chatView: ChatView;
+  newSessionPending: boolean;
+  openingTaskSessionPath: string | undefined;
   surface: WebviewSurface;
   notification: ScoutNotificationMessage | undefined;
   diagnostics: ScoutDiagnostic[];
@@ -21,6 +32,9 @@ interface UiStore {
 }
 
 const initialState = {
+  chatView: 'auto' as ChatView,
+  newSessionPending: false,
+  openingTaskSessionPath: undefined as string | undefined,
   surface: 'chat' as WebviewSurface,
   notification: undefined as ScoutNotificationMessage | undefined,
   diagnostics: [] as ScoutDiagnostic[],
@@ -29,6 +43,42 @@ const initialState = {
 export const useUiStore = create<UiStore>((set) => ({
   ...initialState,
   actions: {
+    beginOpenTask: (sessionPath) =>
+      set({
+        chatView: 'home',
+        newSessionPending: false,
+        openingTaskSessionPath: sessionPath,
+      }),
+    completeOpenTask: (success) => {
+      if (!success) {
+        set({
+          chatView: 'home',
+          openingTaskSessionPath: undefined,
+        });
+      }
+    },
+    beginNewSessionRequest: () =>
+      set({
+        newSessionPending: true,
+        openingTaskSessionPath: undefined,
+      }),
+    completeNewSessionRequest: (success) => {
+      set({
+        chatView: success ? 'detail' : 'home',
+        newSessionPending: false,
+      });
+    },
+    resolveOpenTask: (sessionFile) =>
+      set((state) => {
+        if (!state.openingTaskSessionPath || state.openingTaskSessionPath !== sessionFile) {
+          return {};
+        }
+        return {
+          chatView: 'detail',
+          openingTaskSessionPath: undefined,
+        };
+      }),
+    setChatView: (view) => set({ chatView: view }),
     setSurface: (surface) => set({ surface }),
     setNotification: (notification) => set({ notification }),
     setDiagnostics: (diagnostics) => set({ diagnostics }),
@@ -36,6 +86,11 @@ export const useUiStore = create<UiStore>((set) => ({
   },
 }));
 
+export const useChatView = () => useUiStore((state) => state.chatView);
+export const useNewSessionPending = () =>
+  useUiStore((state) => state.newSessionPending);
+export const useOpeningTaskSessionPath = () =>
+  useUiStore((state) => state.openingTaskSessionPath);
 export const useSurface = () => useUiStore((state) => state.surface);
 export const useNotification = () => useUiStore((state) => state.notification);
 export const useDiagnostics = () => useUiStore((state) => state.diagnostics);

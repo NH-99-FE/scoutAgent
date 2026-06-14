@@ -56,6 +56,7 @@ export const useSessions = () => useSessionStore((state) => state.sessions);
 export const useSessionCount = () => useSessionStore((state) => state.sessions.length);
 export const useSessionName = () => useSessionStore((state) => state.sessionName);
 export const useSessionId = () => useSessionStore((state) => state.sessionId);
+export const useSessionFile = () => useSessionStore((state) => state.sessionFile);
 export const useSessionCwd = () => useSessionStore((state) => state.cwd);
 export const useCurrentModelLabel = () =>
   useSessionStore((state) => [state.modelProvider, state.modelId].filter(Boolean).join(' / '));
