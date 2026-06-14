@@ -36,6 +36,16 @@ function attachFakeAgent(session: AgentSession, agent: unknown): void {
   (session as unknown as { agent: unknown }).agent = agent;
 }
 
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 function getMessageText(message: AgentMessage): string {
   const messageWithContent = message as { content?: unknown };
   const content = messageWithContent.content;
@@ -676,6 +686,59 @@ describe('AgentSession', () => {
         content: 'follow me',
       }),
     );
+  });
+
+  it('starts a user message once the prompt is accepted without waiting for the full turn', async () => {
+    const session = createSession(tempDir);
+    const releaseTurn = createDeferred();
+    let turnCompleted = false;
+    const handleAgentEvent = (event: unknown) =>
+      (
+        session as unknown as { handleAgentEvent: (event: unknown) => Promise<void> }
+      ).handleAgentEvent(event);
+    const prompt = vi.fn(async (messages: AgentMessage[]) => {
+      for (const message of messages) {
+        await handleAgentEvent({ type: 'message_start', message });
+        await handleAgentEvent({ type: 'message_end', message });
+      }
+      await releaseTurn.promise;
+      const assistant = assistantMessage('accepted turn complete');
+      await handleAgentEvent({ type: 'message_start', message: assistant });
+      await handleAgentEvent({ type: 'message_end', message: assistant });
+      await handleAgentEvent({ type: 'turn_end', message: assistant, toolResults: [] });
+      await handleAgentEvent({ type: 'agent_end', messages: [assistant] });
+    });
+    attachFakeAgent(session, {
+      prompt,
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    const started = await session.startUserMessage('new session prompt');
+    void started.turn.then(() => {
+      turnCompleted = true;
+    });
+
+    expect(prompt).toHaveBeenCalledOnce();
+    expect(
+      session.sessionManager
+        .getEntries()
+        .some(
+          (entry) =>
+            entry.type === 'message' &&
+            getMessageText((entry as { message: AgentMessage }).message) === 'new session prompt',
+        ),
+    ).toBe(true);
+    expect(turnCompleted).toBe(false);
+
+    releaseTurn.resolve();
+    await started.turn;
+
+    expect(turnCompleted).toBe(true);
   });
 
   it('queues streaming prompts through the requested runtime agent queue', async () => {

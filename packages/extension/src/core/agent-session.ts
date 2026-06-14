@@ -61,6 +61,7 @@ import type {
   SendUserMessageOptions,
   SourceInfo,
   SlashCommandInfo,
+  StartedUserMessage,
   RegisteredCommand,
   ResolvedCommand,
   SessionShutdownEvent,
@@ -144,6 +145,18 @@ export type AgentSessionAgentEvent = AgentEvent & { willRetry?: boolean };
 export interface SessionAgentMessage {
   message: AgentMessage;
   entryId?: string;
+}
+
+interface PromptAcceptance {
+  messages: Set<AgentMessage>;
+  reject: (reason?: unknown) => void;
+  resolve: () => void;
+  settled: boolean;
+}
+
+interface StartedPromptRun {
+  accepted: Promise<void>;
+  turn: Promise<void>;
 }
 
 export type CompactionReason = 'manual' | 'threshold' | 'overflow';
@@ -311,6 +324,8 @@ export class AgentSession implements CoreDisposable {
 
   /** Agent 运行队列的宿主态策略：暂停、恢复和可见快照。 */
   private readonly queuedMessages = new QueuedMessagePolicy();
+  /** 等待 prompt 初始消息完成持久化的启动请求。 */
+  private readonly promptAcceptances: PromptAcceptance[] = [];
 
   /** 扩展通过 sendMessage({ deliverAs: 'nextTurn' }) 排入下一次 prompt 的 custom 消息。 */
   private pendingNextTurnMessages: AgentMessage[] = [];
@@ -444,54 +459,114 @@ export class AgentSession implements CoreDisposable {
     source: 'interactive' | 'rpc' | 'extension',
     options?: { streamingBehavior?: QueuedAgentMessageDelivery; clearFollowUpQueue?: boolean },
   ): Promise<void> {
-    if (!this.agent) return;
+    try {
+      const started = await this.startPromptRun(text, images, source, options);
+      if (!started) return;
+      await started.accepted;
+      await started.turn;
+    } catch (error) {
+      this.handlePromptError('Prompt', error);
+    }
+  }
+
+  private async startPromptRun(
+    text: string,
+    images: ImageContent[] | undefined,
+    source: 'interactive' | 'rpc' | 'extension',
+    options?: { streamingBehavior?: QueuedAgentMessageDelivery; clearFollowUpQueue?: boolean },
+  ): Promise<StartedPromptRun | undefined> {
+    if (!this.agent) return undefined;
 
     this.retryAttempt = 0;
 
-    try {
-      if (await this.tryExecuteExtensionCommand(text)) return;
-      const preparedInput = await this.preparePromptInput(text, images, source);
-      if (!preparedInput) return;
+    if (await this.tryExecuteExtensionCommand(text)) {
+      return {
+        accepted: Promise.resolve(),
+        turn: Promise.resolve(),
+      };
+    }
+    const preparedInput = await this.preparePromptInput(text, images, source);
+    if (!preparedInput) return undefined;
 
-      if (this._isStreaming) {
-        if (!options?.streamingBehavior) {
-          throw new Error(
-            'Agent is already processing. Specify streamingBehavior ("steer" or "followUp") to queue the message.',
-          );
-        }
-        this.queueAgentMessage(
-          this.createUserMessage(preparedInput.text, preparedInput.images),
-          options.streamingBehavior,
+    if (this._isStreaming) {
+      if (!options?.streamingBehavior) {
+        throw new Error(
+          'Agent is already processing. Specify streamingBehavior ("steer" or "followUp") to queue the message.',
         );
-        return;
       }
-
-      if (!this._isStreaming) {
-        const preservePausedFollowUps =
-          !options?.clearFollowUpQueue && this.queuedMessages.isFollowUpPaused(this.agent);
-        if (options?.clearFollowUpQueue) {
-          this.clearFollowUpQueue();
-        }
-        await this.flushPendingBashMessages();
-        await this.runPrePromptCompaction({ preserveFollowUps: preservePausedFollowUps });
-        // 保留队列发送新消息时，当前 prompt 应先进入 agent loop；旧 follow-up 在该轮停机点续上。
-        this.queuedMessages.resumeFollowUps();
-      }
-
-      this._isStreaming = true;
-      this.emit({ type: 'state_change' });
-      const messages = await this.prepareAgentStartMessages(
-        preparedInput.text,
-        preparedInput.images,
+      this.queueAgentMessage(
+        this.createUserMessage(preparedInput.text, preparedInput.images),
+        options.streamingBehavior,
       );
+      return {
+        accepted: Promise.resolve(),
+        turn: Promise.resolve(),
+      };
+    }
+
+    const preservePausedFollowUps =
+      !options?.clearFollowUpQueue && this.queuedMessages.isFollowUpPaused(this.agent);
+    if (options?.clearFollowUpQueue) {
+      this.clearFollowUpQueue();
+    }
+    await this.flushPendingBashMessages();
+    await this.runPrePromptCompaction({ preserveFollowUps: preservePausedFollowUps });
+    // 保留队列发送新消息时，当前 prompt 应先进入 agent loop；旧 follow-up 在该轮停机点续上。
+    this.queuedMessages.resumeFollowUps();
+
+    this._isStreaming = true;
+    this.emit({ type: 'state_change' });
+    try {
+      const userMessage = this.createUserMessage(preparedInput.text, preparedInput.images);
+      const messages = await this.prepareAgentStartMessages(
+        userMessage,
+        preparedInput.images,
+        preparedInput.text,
+      );
+      return this.startPreparedPromptRun(messages, [userMessage]);
+    } catch (error) {
+      this._isStreaming = false;
+      this.emit({ type: 'state_change' });
+      throw error;
+    }
+  }
+
+  private startPreparedPromptRun(
+    messages: AgentMessage[],
+    acceptedMessages: AgentMessage[],
+  ): StartedPromptRun {
+    const acceptance = this.registerPromptAcceptance(acceptedMessages);
+    const turn = this.runStartedPrompt(messages).finally(() => {
+      this.rejectPromptAcceptance(
+        acceptance.record,
+        new Error('Prompt ended before the initial user message was accepted'),
+      );
+    });
+    return {
+      accepted: acceptance.promise,
+      turn,
+    };
+  }
+
+  private async runStartedPrompt(messages: AgentMessage[]): Promise<void> {
+    if (!this.agent) {
+      this._isStreaming = false;
+      this.emit({ type: 'state_change' });
+      return;
+    }
+    try {
       await this.agent.prompt(messages);
       await this.runPostAgentLoop();
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.appendLine(`[scout] Prompt error: ${errorMessage}`);
-      this._isStreaming = false;
-      this.emit({ type: 'error', message: errorMessage });
+      this.handlePromptError('Prompt', error);
     }
+  }
+
+  private handlePromptError(context: string, error: unknown): void {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    this.logger.appendLine(`[scout] ${context} error: ${errorMessage}`);
+    this._isStreaming = false;
+    this.emit({ type: 'error', message: errorMessage });
   }
 
   async abort(): Promise<void> {
@@ -946,6 +1021,22 @@ export class AgentSession implements CoreDisposable {
       return;
     }
     throw new Error('sendUserMessage while streaming requires deliverAs: "steer" or "followUp"');
+  }
+
+  async startUserMessage(
+    content: string | (TextContent | ImageContent)[],
+  ): Promise<StartedUserMessage> {
+    if (!this.agent) return { turn: Promise.resolve() };
+
+    const { text, images } = this.normalizeUserMessageContent(content);
+    if (this._isStreaming) {
+      throw new Error('startUserMessage requires an idle replacement session');
+    }
+
+    const started = await this.startPromptRun(text, images, 'extension');
+    if (!started) return { turn: Promise.resolve() };
+    await started.accepted;
+    return { turn: started.turn };
   }
 
   async sendMessage<TDetails = unknown>(
@@ -1405,7 +1496,66 @@ export class AgentSession implements CoreDisposable {
     ) as ReplacedSessionContext;
     context.sendMessage = (message, options) => this.sendMessage(message, options);
     context.sendUserMessage = (content, options) => this.sendUserMessage(content, options);
+    context.startUserMessage = (content) => this.startUserMessage(content);
     return context;
+  }
+
+  private registerPromptAcceptance(messages: AgentMessage[]): {
+    promise: Promise<void>;
+    record: PromptAcceptance;
+  } {
+    let resolve!: () => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<void>((promiseResolve, promiseReject) => {
+      resolve = promiseResolve;
+      reject = promiseReject;
+    });
+    const record: PromptAcceptance = {
+      messages: new Set(messages),
+      reject,
+      resolve,
+      settled: false,
+    };
+    if (record.messages.size === 0) {
+      this.resolvePromptAcceptance(record);
+      return { promise, record };
+    }
+    this.promptAcceptances.push(record);
+    return { promise, record };
+  }
+
+  private acceptPromptMessage(message: AgentMessage): void {
+    for (const acceptance of [...this.promptAcceptances]) {
+      if (!acceptance.messages.delete(message) || acceptance.messages.size > 0) continue;
+      this.resolvePromptAcceptance(acceptance);
+    }
+  }
+
+  private resolvePromptAcceptance(acceptance: PromptAcceptance): void {
+    if (acceptance.settled) return;
+    acceptance.settled = true;
+    this.removePromptAcceptance(acceptance);
+    acceptance.resolve();
+  }
+
+  private rejectPromptAcceptance(acceptance: PromptAcceptance, reason: unknown): void {
+    if (acceptance.settled) return;
+    acceptance.settled = true;
+    this.removePromptAcceptance(acceptance);
+    acceptance.reject(reason);
+  }
+
+  private removePromptAcceptance(acceptance: PromptAcceptance): void {
+    const index = this.promptAcceptances.indexOf(acceptance);
+    if (index !== -1) {
+      this.promptAcceptances.splice(index, 1);
+    }
+  }
+
+  private rejectAllPromptAcceptances(reason: unknown): void {
+    for (const acceptance of [...this.promptAcceptances]) {
+      this.rejectPromptAcceptance(acceptance, reason);
+    }
   }
 
   // ---------- 事件订阅 ----------
@@ -1421,6 +1571,7 @@ export class AgentSession implements CoreDisposable {
   // ---------- 生命周期 ----------
 
   dispose(): void {
+    this.rejectAllPromptAcceptances(new Error('Agent session disposed before prompt acceptance'));
     this.extensionRunner?.invalidate();
     this.unsubscribeAgent?.();
     this.unsubscribeAgent = undefined;
@@ -1636,10 +1787,13 @@ export class AgentSession implements CoreDisposable {
   }
 
   private async prepareAgentStartMessages(
-    input: string | CustomMessage,
+    input: string | AgentMessage,
     images: ImageContent[] | undefined,
+    promptTextOverride?: string,
   ): Promise<AgentMessage[]> {
-    const promptText = typeof input === 'string' ? input : input.content;
+    const promptText =
+      promptTextOverride ??
+      (typeof input === 'string' ? input : 'content' in input ? input.content : '');
     const baseMessages =
       typeof input === 'string' ? [this.createUserMessage(input, images)] : [input];
     const queuedNextTurnMessages = this.pendingNextTurnMessages.splice(0);
@@ -2102,6 +2256,7 @@ export class AgentSession implements CoreDisposable {
       const message = (enrichedEvent as { message?: AgentMessage }).message;
       if (message) {
         await this.persistAgentMessage(message);
+        this.acceptPromptMessage(message);
       }
       if (message?.role === 'assistant') {
         this.lastAssistantMessage = message as AssistantMessage;

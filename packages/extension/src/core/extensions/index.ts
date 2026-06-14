@@ -64,6 +64,7 @@ export type {
   SendMessagePayload,
   SendMessageInput,
   SendUserMessageOptions,
+  StartedUserMessage,
   SlashCommandInfo,
   SlashCommandSource,
   AutocompleteItem,

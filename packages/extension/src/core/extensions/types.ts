@@ -543,6 +543,10 @@ export interface SendUserMessageOptions {
   deliverAs?: 'steer' | 'followUp';
 }
 
+export interface StartedUserMessage {
+  turn: Promise<void>;
+}
+
 export interface SendMessageOptions {
   triggerTurn?: boolean;
   deliverAs?: 'steer' | 'followUp' | 'nextTurn';
@@ -603,6 +607,7 @@ export interface ReplacedSessionContext extends ScoutExtensionCommandContext {
     content: string | (TextContent | ImageContent)[],
     options?: SendUserMessageOptions,
   ): Promise<void>;
+  startUserMessage(content: string | (TextContent | ImageContent)[]): Promise<StartedUserMessage>;
 }
 
 // ---------- 扩展运行时 ----------
