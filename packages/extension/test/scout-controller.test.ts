@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ScoutController } from '../src/scout-controller.ts';
 import * as vscode from 'vscode';
+import type { ScoutProtocolService, WebviewRequestPayload } from '@scout-agent/shared';
+import type { JsonlSessionMetadata } from '../src/core/session/index.ts';
+import { SessionIndex } from '../src/host/session-index.ts';
+import type { ScoutProtocolHostServices } from '../src/host/protocol/scout-protocol-host-services.ts';
+import { SessionProtocolService } from '../src/host/protocol/services/session-service.ts';
+import { TaskProtocolService } from '../src/host/protocol/services/task-service.ts';
 
 function createDeferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -46,8 +52,78 @@ function makeController(): ScoutController {
   });
 }
 
+function installTaskProtocolService(
+  controller: ScoutController,
+  listSessions: () => Promise<JsonlSessionMetadata[]>,
+): void {
+  getProtocolHostServices(controller).task = new TaskProtocolService({
+    sessionIndex: new SessionIndex({
+      listWorkspace: listSessions,
+      listAll: listSessions,
+    }),
+    getActiveSessionFile: () => '/workspace/.scout/sessions/current.jsonl',
+    logError: vi.fn(),
+  });
+}
+
+function installSessionProtocolService(
+  controller: ScoutController,
+  service: SessionProtocolService,
+): void {
+  getProtocolHostServices(controller).session = service;
+}
+
+function getProtocolHostServices(controller: ScoutController): ScoutProtocolHostServices {
+  return (controller as unknown as { protocolHostServices: ScoutProtocolHostServices })
+    .protocolHostServices;
+}
+
+function protocolRequest(payload: WebviewRequestPayload, requestId = `request:${payload.type}`) {
+  const route = resolveRoute(payload);
+  return {
+    type: 'protocol_request' as const,
+    requestId,
+    service: route.service,
+    method: route.method,
+    payload,
+  };
+}
+
+function resolveRoute(
+  payload: WebviewRequestPayload,
+): { service: ScoutProtocolService; method: string } {
+  switch (payload.type) {
+    case 'ready':
+      return { service: 'lifecycle', method: 'ready' };
+    case 'request_state':
+    case 'request_context_usage':
+      return { service: 'state', method: payload.type };
+    case 'request_config':
+    case 'select_model':
+    case 'select_thinking':
+    case 'set_active_tools':
+    case 'reload_resources':
+      return { service: 'config', method: payload.type };
+    case 'request_task_history':
+      return { service: 'task', method: 'search' };
+    case 'fork_session':
+    case 'request_tree':
+    case 'navigate_tree':
+    case 'set_label':
+      return { service: 'tree', method: payload.type };
+    case 'request_file_mentions':
+      return { service: 'mention', method: 'search' };
+    case 'open_settings_panel':
+    case 'open_tree_panel':
+    case 'request_commands':
+      return { service: 'ui', method: payload.type };
+    default:
+      return { service: 'session', method: payload.type };
+  }
+}
+
 describe('ScoutController webview surfaces', () => {
-  it('broadcasts extension messages to every bound webview surface', () => {
+  it('directs request-scoped messages to the source webview surface', () => {
     const controller = makeController();
     const chat = makeWebview();
     const tree = makeWebview();
@@ -57,22 +133,18 @@ describe('ScoutController webview surfaces', () => {
     controller.bindWebview(tree as never, 'tree');
     controller.bindWebview(settings as never, 'settings');
 
-    controller.handleWebviewMessage({ type: 'request_config' }, 'chat');
+    controller.handleWebviewMessage(protocolRequest({ type: 'request_config' }), 'chat');
 
     expect(chat.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'config_update' }),
     );
-    expect(tree.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'config_update' }),
-    );
-    expect(settings.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'config_update' }),
-    );
+    expect(tree.postMessage).not.toHaveBeenCalled();
+    expect(settings.postMessage).not.toHaveBeenCalled();
 
     controller.dispose();
   });
 
-  it('stops broadcasting to a webview after its binding is disposed', () => {
+  it('stops sending to a webview after its binding is disposed', () => {
     const controller = makeController();
     const chat = makeWebview();
     const tree = makeWebview();
@@ -83,7 +155,7 @@ describe('ScoutController webview surfaces', () => {
     const treeBinding = controller.bindWebview(tree as never, 'tree');
 
     treeBinding.dispose();
-    controller.handleWebviewMessage({ type: 'request_config' }, 'chat');
+    controller.handleWebviewMessage(protocolRequest({ type: 'request_config' }), 'chat');
 
     expect(chat.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'config_update' }),
@@ -110,37 +182,42 @@ describe('ScoutController webview surfaces', () => {
         messageCount: 1,
       })),
     );
-    (controller as unknown as { sessionManager: unknown }).sessionManager = {
-      listSessions,
-      sessionFile: '/workspace/.scout/sessions/current.jsonl',
-      disposeAsync: vi.fn(async () => undefined),
-    };
+    installTaskProtocolService(controller, listSessions);
 
     controller.bindWebview(chat as never, 'chat');
-    controller.handleWebviewMessage({
-      type: 'request_task_history',
-      query: '',
-      requestId: 'recent-1',
-      limit: 3,
-      offset: 0,
-      purpose: 'recent',
-    });
+    controller.handleWebviewMessage(
+      protocolRequest(
+        {
+          type: 'request_task_history',
+          query: '',
+          limit: 3,
+          offset: 0,
+          purpose: 'recent',
+        },
+        'recent-1',
+      ),
+    );
     await flushPromises();
-    controller.handleWebviewMessage({
-      type: 'request_task_history',
-      query: '',
-      requestId: 'history-1',
-      offset: 20,
-      purpose: 'panel',
-    });
+    controller.handleWebviewMessage(
+      protocolRequest(
+        {
+          type: 'request_task_history',
+          query: '',
+          offset: 20,
+          purpose: 'panel',
+        },
+        'history-1',
+      ),
+    );
     await flushPromises();
 
+    expect(listSessions).toHaveBeenCalledTimes(1);
     expect(listSessions.mock.calls[0]).toEqual([]);
-    expect(listSessions.mock.calls[1]).toEqual([]);
     const taskHistoryMessages = chat.postMessage.mock.calls
       .map(([message]) => message)
-      .filter((message) => message.type === 'task_history_data') as Array<{
-      requestId: string;
+      .filter((message) => message.type === 'protocol_response')
+      .map((message) => message.payload)
+      .filter((payload) => payload?.type === 'task_history_data') as Array<{
       purpose?: string;
       tasks: Array<{ sessionId: string }>;
       offset: number;
@@ -150,9 +227,7 @@ describe('ScoutController webview surfaces', () => {
     const tasksMessage = taskHistoryMessages.find((message) => message.purpose === 'recent');
     const historyMessage = taskHistoryMessages.find((message) => message.purpose === 'panel');
 
-    expect(tasksMessage?.requestId).toBe('recent-1');
     expect(tasksMessage?.tasks).toHaveLength(3);
-    expect(historyMessage?.requestId).toBe('history-1');
     expect(historyMessage?.tasks).toHaveLength(20);
     expect(historyMessage?.tasks[0]?.sessionId).toBe('session-21');
     expect(historyMessage?.offset).toBe(20);
@@ -189,49 +264,52 @@ describe('ScoutController webview surfaces', () => {
         messageCount: 2,
       },
     ]);
-    (controller as unknown as { sessionManager: unknown }).sessionManager = {
-      listSessions,
-      sessionFile: '/workspace/.scout/sessions/current.jsonl',
-      disposeAsync: vi.fn(async () => undefined),
-    };
+    installTaskProtocolService(controller, listSessions);
 
     controller.bindWebview(chat as never, 'chat');
-    controller.handleWebviewMessage({
-      type: 'request_task_history',
-      query: 'visible',
-      requestId: 'history-search',
-      offset: 0,
-    });
-    await flushPromises();
+    controller.handleWebviewMessage(
+      protocolRequest(
+        {
+          type: 'request_task_history',
+          query: 'visible',
+          offset: 0,
+        },
+        'history-search',
+      ),
+    );
+    await flushPromises(10);
 
     const historyMessage = chat.postMessage.mock.calls.find(
-      ([message]) => message.type === 'task_history_data',
-    )?.[0] as {
-      requestId: string;
+      ([message]) =>
+        message.type === 'protocol_response' && message.payload?.type === 'task_history_data',
+    )?.[0].payload as {
       tasks: Array<{ sessionId: string }>;
       hasMore: boolean;
       nextOffset: number;
     };
 
-    expect(historyMessage.requestId).toBe('history-search');
     expect(historyMessage.tasks).toHaveLength(1);
     expect(historyMessage.tasks[0]?.sessionId).toBe('session-1');
     expect(historyMessage.hasMore).toBe(false);
     expect(historyMessage.nextOffset).toBe(1);
 
     chat.postMessage.mockClear();
-    controller.handleWebviewMessage({
-      type: 'request_task_history',
-      query: 'hidden-search-token',
-      requestId: 'history-body-search',
-      offset: 0,
-    });
-    await flushPromises();
+    controller.handleWebviewMessage(
+      protocolRequest(
+        {
+          type: 'request_task_history',
+          query: 'hidden-search-token',
+          offset: 0,
+        },
+        'history-body-search',
+      ),
+    );
+    await flushPromises(10);
 
     const bodySearchMessage = chat.postMessage.mock.calls.find(
-      ([message]) => message.type === 'task_history_data',
-    )?.[0] as { requestId: string; tasks: unknown[] };
-    expect(bodySearchMessage.requestId).toBe('history-body-search');
+      ([message]) =>
+        message.type === 'protocol_response' && message.payload?.type === 'task_history_data',
+    )?.[0].payload as { tasks: unknown[] };
     expect(bodySearchMessage.tasks).toHaveLength(0);
 
     controller.dispose();
@@ -244,6 +322,7 @@ describe('ScoutController webview surfaces', () => {
     const finishTurn = createDeferred();
     const operation = {
       id: 'request-1',
+      sequence: 1,
       kind: 'new_session_message',
       isLatest: vi.fn(() => true),
     };
@@ -289,14 +368,39 @@ describe('ScoutController webview surfaces', () => {
       leafId: null,
       modelFallbackMessage: undefined,
     };
-    (controller as unknown as { sessionManager: unknown }).sessionManager = sessionManager;
+    installSessionProtocolService(
+      controller,
+      new SessionProtocolService({
+        cwd: '/workspace',
+        sessionManager: sessionManager as never,
+        sessionIndex: new SessionIndex({
+          listWorkspace: vi.fn(async () => []),
+          listAll: vi.fn(async () => []),
+        }),
+        pushState: vi.fn(async () => undefined),
+        pushTreeData: vi.fn(async () => undefined),
+        requestRecentTasks: vi.fn(async () => {
+          await chat.postMessage({
+            type: 'task_history_data',
+            query: '',
+            purpose: 'recent',
+            tasks: [],
+            offset: 0,
+            hasMore: false,
+            nextOffset: 0,
+          });
+        }),
+        postMessage: (message) => {
+          void chat.postMessage(message);
+        },
+        logError: vi.fn(),
+      }),
+    );
 
     controller.bindWebview(chat as never, 'chat');
-    controller.handleWebviewMessage({
-      type: 'new_session_message',
-      requestId: 'request-1',
-      text: 'hello',
-    });
+    controller.handleWebviewMessage(
+      protocolRequest({ type: 'new_session_message', text: 'hello' }, 'request-1'),
+    );
     await flushPromises();
 
     expect(chat.postMessage).not.toHaveBeenCalledWith(
@@ -304,24 +408,23 @@ describe('ScoutController webview surfaces', () => {
     );
 
     acceptPrompt.resolve();
-    await flushPromises(10);
+    await flushPromises(20);
 
     expect(chat.postMessage).toHaveBeenCalledWith({
-      type: 'new_session_result',
+      type: 'protocol_response',
       requestId: 'request-1',
-      success: true,
+      payload: { type: 'new_session_result', success: true },
     });
     expect(chat.postMessage).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'task_history_data', purpose: 'recent' }),
     );
 
     finishTurn.resolve();
-    await flushPromises(10);
+    await flushPromises(30);
 
     expect(chat.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'task_history_data',
-        requestId: 'recent-after-turn',
         purpose: 'recent',
         tasks: [],
       }),

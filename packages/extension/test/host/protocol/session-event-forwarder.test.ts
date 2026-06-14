@@ -1,0 +1,126 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { ScoutSessionEvent } from '../../../src/host/session-coordinator.ts';
+import { SessionEventForwarder } from '../../../src/host/protocol/session-event-forwarder.ts';
+
+function makeForwarder(options: { isStreaming?: () => boolean } = {}) {
+  const postMessage = vi.fn();
+  const pushState = vi.fn(async () => undefined);
+  const pushQueueState = vi.fn();
+  const pushTreeData = vi.fn(async () => undefined);
+  const forwarder = new SessionEventForwarder({
+    isStreaming: options.isStreaming ?? (() => false),
+    postMessage,
+    pushState,
+    pushQueueState,
+    pushTreeData,
+  });
+  return { forwarder, postMessage, pushState, pushQueueState, pushTreeData };
+}
+
+describe('SessionEventForwarder', () => {
+  it('tracks agent busy state and falls back to streaming state while idle', () => {
+    let streaming = true;
+    const { forwarder, postMessage } = makeForwarder({
+      isStreaming: () => streaming,
+    });
+
+    expect(forwarder.getBusyState()).toEqual({
+      kind: 'agent',
+      label: 'Working',
+      cancellable: true,
+    });
+
+    forwarder.handle({
+      type: 'agent_event',
+      event: { type: 'agent_start' },
+    } as unknown as ScoutSessionEvent);
+    streaming = false;
+
+    expect(forwarder.getBusyState()).toEqual({
+      kind: 'agent',
+      label: 'Working',
+      cancellable: true,
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'agent_event',
+      event: { type: 'agent_start' },
+    });
+
+    forwarder.handle({
+      type: 'agent_event',
+      event: { type: 'agent_end', willRetry: false },
+    } as unknown as ScoutSessionEvent);
+
+    expect(forwarder.getBusyState()).toEqual({ kind: 'idle', cancellable: false });
+  });
+
+  it('maps retry and compaction events to webview messages and busy state', () => {
+    const { forwarder, postMessage } = makeForwarder();
+
+    forwarder.handle({
+      type: 'auto_retry_start',
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 100,
+      errorMessage: 'rate limit',
+    } as unknown as ScoutSessionEvent);
+
+    expect(forwarder.getBusyState()).toEqual({
+      kind: 'retry',
+      label: 'Retrying',
+      cancellable: true,
+      attempt: 2,
+      maxAttempts: 3,
+      reason: 'rate limit',
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'auto_retry_start',
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 100,
+      errorMessage: 'rate limit',
+    });
+
+    forwarder.handle({
+      type: 'compaction_end',
+      reason: 'overflow',
+      result: { type: 'skipped' },
+      aborted: false,
+      willRetry: true,
+      errorMessage: undefined,
+    } as unknown as ScoutSessionEvent);
+
+    expect(forwarder.getBusyState()).toEqual({
+      kind: 'retry',
+      label: 'Retrying',
+      cancellable: true,
+      reason: 'overflow',
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'compaction_end',
+      reason: 'overflow',
+      result: { type: 'skipped' },
+      aborted: false,
+      willRetry: true,
+      errorMessage: undefined,
+    });
+  });
+
+  it('refreshes derived state for state, queue, tree, and error events', () => {
+    const { forwarder, postMessage, pushState, pushQueueState, pushTreeData } = makeForwarder();
+
+    forwarder.handle({ type: 'state_change' } as ScoutSessionEvent);
+    forwarder.handle({ type: 'queue_change' } as ScoutSessionEvent);
+    forwarder.handle({ type: 'tree_change' } as ScoutSessionEvent);
+    forwarder.handle({ type: 'error', message: 'boom' } as ScoutSessionEvent);
+
+    expect(pushState).toHaveBeenCalledTimes(2);
+    expect(pushQueueState).toHaveBeenCalledTimes(1);
+    expect(pushTreeData).toHaveBeenCalledTimes(1);
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'notification',
+      level: 'error',
+      message: 'boom',
+    });
+  });
+});

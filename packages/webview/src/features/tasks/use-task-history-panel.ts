@@ -38,7 +38,7 @@ export function useTaskHistoryPanel() {
 
   const startSearch = useCallback(
     (searchQuery: string, offset: number, seedTasks?: typeof historyTasks) => {
-      const requestId = protocolClient.requestTaskHistory({
+      const queryToken = protocolClient.requestTaskHistory({
         query: searchQuery,
         limit: TASK_HISTORY_PAGE_SIZE,
         offset,
@@ -46,7 +46,7 @@ export function useTaskHistoryPanel() {
       });
       taskActions.beginHistorySearch({
         query: searchQuery,
-        requestId,
+        queryToken,
         offset,
         seedTasks,
       });

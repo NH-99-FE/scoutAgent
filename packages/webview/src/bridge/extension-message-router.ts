@@ -2,7 +2,7 @@
 // Extension Message Router — Extension → Webview 消息分发
 // ============================================================
 
-import type { ExtensionMessage } from '@scout-agent/shared';
+import type { ExtensionEventMessage, ExtensionMessage } from '@scout-agent/shared';
 import { useConfigStore } from '@/store/config-store';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
@@ -10,9 +10,17 @@ import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
-import { completeProtocolRequest } from './request-tracker';
+import { routeProtocolResponse } from './transport-client';
 
 export function routeExtensionMessage(message: ExtensionMessage): void {
+  if (message.type === 'protocol_response') {
+    routeProtocolResponse(message);
+    return;
+  }
+  routeExtensionEventMessage(message);
+}
+
+export function routeExtensionEventMessage(message: ExtensionEventMessage): void {
   switch (message.type) {
     case 'state_update':
       useConversationStore.getState().actions.applyState(message.state);
@@ -40,18 +48,7 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
       useSessionStore.getState().actions.setSessions(message.sessions);
       break;
     case 'task_history_data':
-      if (message.purpose === 'recent') {
-        useTaskStore.getState().actions.setRecentTasks(message.tasks);
-      } else {
-        useTaskStore.getState().actions.applyHistoryResult({
-          query: message.query,
-          requestId: message.requestId,
-          tasks: message.tasks,
-          offset: message.offset,
-          hasMore: message.hasMore,
-          nextOffset: message.nextOffset,
-        });
-      }
+      routeTaskHistoryData(message, undefined);
       break;
     case 'tree_data':
       useTreeStore.getState().actions.setTreeData(message.tree, message.leafId);
@@ -115,16 +112,7 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
           .actions.setBusyState({ kind: 'idle', cancellable: false }, false);
       }
       break;
-    case 'thinking_level_changed':
-    case 'fork_result':
-    case 'file_mentions_data':
-    case 'open_settings_panel_result':
-    case 'open_tree_panel_result':
-      break;
     case 'open_task_result':
-      if (!completeProtocolRequest('open_task', message.requestId)) {
-        break;
-      }
       if (!message.success) {
         useUiStore.getState().actions.completeOpenTask(message.success);
         useUiStore.getState().actions.setNotification({
@@ -135,9 +123,6 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
       }
       break;
     case 'new_session_result':
-      if (!completeProtocolRequest('new_session_message', message.requestId)) {
-        break;
-      }
       useUiStore.getState().actions.completeNewSessionRequest(message.success);
       if (message.success) {
         useComposerStore.getState().actions.clearDraft(HOME_COMPOSER_SESSION_ID);
@@ -149,6 +134,11 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
         });
       }
       break;
+    case 'thinking_level_changed':
+    case 'fork_result':
+    case 'file_mentions_data':
+    case 'open_settings_panel_result':
+    case 'open_tree_panel_result':
     case 'restore_session_result':
     case 'import_session_result':
     case 'export_session_result':
@@ -158,6 +148,25 @@ export function routeExtensionMessage(message: ExtensionMessage): void {
     case 'delete_session_result':
       break;
   }
+}
+
+export function routeTaskHistoryData(
+  message: Extract<ExtensionEventMessage, { type: 'task_history_data' }>,
+  queryToken: string | undefined,
+): void {
+  if (message.purpose === 'recent') {
+    useTaskStore.getState().actions.setRecentTasks(message.tasks);
+    return;
+  }
+  if (!queryToken) return;
+  useTaskStore.getState().actions.applyHistoryResult({
+    query: message.query,
+    queryToken,
+    tasks: message.tasks,
+    offset: message.offset,
+    hasMore: message.hasMore,
+    nextOffset: message.nextOffset,
+  });
 }
 
 export function startExtensionMessageRouter(): () => void {

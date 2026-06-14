@@ -6,9 +6,14 @@ AI Coding Agent — Chat-driven dev, code gen & edit, context-aware suggest, dia
 
 ```
 packages/
-├── extension/    # VS Code 扩展（esbuild + ESM）
-└── webview/      # 侧边栏 Webview UI（React + Vite + Tailwind）
+├── shared/       # Extension/Webview/package 边界协议契约
+├── ai/           # Provider 与模型能力层
+├── agent/        # Agent loop、harness、session tree、compaction
+├── extension/    # VS Code 扩展宿主、core runtime、协议适配
+└── webview/      # Webview UI（React + Vite + Tailwind）
 ```
+
+Webview 与 Extension 通信边界见 [docs/webview-protocol.md](docs/webview-protocol.md)。
 
 ## 开发
 

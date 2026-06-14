@@ -1,0 +1,145 @@
+import { describe, expect, it } from 'vitest';
+import type { WebviewRequestPayload } from '@scout-agent/shared';
+import { resolveProtocolRoute, type ProtocolRoute } from '@/bridge/protocol-route';
+
+interface ProtocolCase<TPayload extends WebviewRequestPayload> {
+  payload: TPayload;
+  route: ProtocolRoute;
+}
+
+function protocolCase<TPayload extends WebviewRequestPayload>(
+  payload: TPayload,
+  route: ProtocolRoute,
+): ProtocolCase<TPayload> {
+  return { payload, route };
+}
+
+const ROUTE_CASES = [
+  protocolCase({ type: 'ready' }, { service: 'lifecycle', method: 'ready' }),
+  protocolCase({ type: 'request_state' }, { service: 'state', method: 'request_state' }),
+  protocolCase({ type: 'request_config' }, { service: 'config', method: 'request_config' }),
+  protocolCase(
+    { type: 'request_context_usage' },
+    { service: 'state', method: 'request_context_usage' },
+  ),
+  protocolCase(
+    { type: 'user_message', text: 'hello' },
+    { service: 'session', method: 'user_message' },
+  ),
+  protocolCase(
+    { type: 'new_session_message', text: 'hello' },
+    { service: 'session', method: 'new_session_message' },
+  ),
+  protocolCase(
+    { type: 'cancel_follow_up', id: 'follow-up-1' },
+    { service: 'session', method: 'cancel_follow_up' },
+  ),
+  protocolCase(
+    { type: 'promote_follow_up', id: 'follow-up-1', resume: true },
+    { service: 'session', method: 'promote_follow_up' },
+  ),
+  protocolCase({ type: 'abort' }, { service: 'session', method: 'abort' }),
+  protocolCase({ type: 'abort_retry' }, { service: 'session', method: 'abort_retry' }),
+  protocolCase(
+    { type: 'compact', customInstructions: 'short' },
+    { service: 'session', method: 'compact' },
+  ),
+  protocolCase(
+    { type: 'select_model', provider: 'anthropic', modelId: 'claude-test' },
+    { service: 'config', method: 'select_model' },
+  ),
+  protocolCase(
+    { type: 'select_thinking', level: 'off' },
+    { service: 'config', method: 'select_thinking' },
+  ),
+  protocolCase(
+    { type: 'set_active_tools', toolNames: [] },
+    { service: 'config', method: 'set_active_tools' },
+  ),
+  protocolCase(
+    { type: 'clear_conversation' },
+    { service: 'session', method: 'clear_conversation' },
+  ),
+  protocolCase({ type: 'reload_resources' }, { service: 'config', method: 'reload_resources' }),
+  protocolCase({ type: 'open_settings_panel' }, { service: 'ui', method: 'open_settings_panel' }),
+  protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),
+  protocolCase(
+    { type: 'fork_session', entryId: 'entry-1', position: 'at' },
+    { service: 'tree', method: 'fork_session' },
+  ),
+  protocolCase({ type: 'request_tree' }, { service: 'tree', method: 'request_tree' }),
+  protocolCase(
+    { type: 'navigate_tree', targetId: 'entry-1', summarize: false },
+    { service: 'tree', method: 'navigate_tree' },
+  ),
+  protocolCase(
+    { type: 'set_label', entryId: 'entry-1', label: 'Label' },
+    { service: 'tree', method: 'set_label' },
+  ),
+  protocolCase(
+    { type: 'set_session_name', name: 'Session name' },
+    { service: 'session', method: 'set_session_name' },
+  ),
+  protocolCase({ type: 'continue_session' }, { service: 'session', method: 'continue_session' }),
+  protocolCase({ type: 'request_commands' }, { service: 'ui', method: 'request_commands' }),
+  protocolCase(
+    { type: 'request_file_mentions', query: 'src', limit: 10 },
+    { service: 'mention', method: 'search' },
+  ),
+  protocolCase(
+    { type: 'request_task_history', query: '', offset: 0, purpose: 'panel' },
+    { service: 'task', method: 'search' },
+  ),
+  protocolCase(
+    {
+      type: 'open_task',
+      taskId: 'task-1',
+      sessionPath: '/workspace/.scout/sessions/task-1.jsonl',
+    },
+    { service: 'session', method: 'open_task' },
+  ),
+  protocolCase({ type: 'request_sessions' }, { service: 'session', method: 'request_sessions' }),
+  protocolCase(
+    {
+      type: 'restore_session',
+      sessionId: 'session-1',
+      sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+    },
+    { service: 'session', method: 'restore_session' },
+  ),
+  protocolCase(
+    { type: 'pick_import_session' },
+    { service: 'session', method: 'pick_import_session' },
+  ),
+  protocolCase(
+    { type: 'import_session', sessionPath: '/workspace/import.jsonl' },
+    { service: 'session', method: 'import_session' },
+  ),
+  protocolCase(
+    {
+      type: 'delete_session',
+      sessionId: 'session-1',
+      sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+    },
+    { service: 'session', method: 'delete_session' },
+  ),
+  protocolCase(
+    { type: 'export_session', format: 'jsonl' },
+    { service: 'session', method: 'export_session' },
+  ),
+];
+
+type SampledPayloadType = (typeof ROUTE_CASES)[number]['payload']['type'];
+type MissingPayloadType = Exclude<WebviewRequestPayload['type'], SampledPayloadType>;
+
+const exhaustivePayloadCoverage: Record<MissingPayloadType, never> = {};
+
+describe('resolveProtocolRoute', () => {
+  it('maps every webview request payload to an extension service route', () => {
+    expect(exhaustivePayloadCoverage).toEqual({});
+
+    for (const { payload, route } of ROUTE_CASES) {
+      expect(resolveProtocolRoute(payload)).toEqual(route);
+    }
+  });
+});

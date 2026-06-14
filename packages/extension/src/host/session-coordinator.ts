@@ -287,11 +287,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return await this.sessionOperationBroker.runExclusive(operation);
   }
 
-  beginUserSessionOperation(
-    kind: SessionUserOperationKind,
-    requestId: string,
-  ): UserSessionOperationToken {
-    return this.sessionOperationBroker.beginUserOperation(kind, requestId);
+  beginUserSessionOperation(kind: SessionUserOperationKind): UserSessionOperationToken {
+    return this.sessionOperationBroker.beginUserOperation(kind);
   }
 
   async restoreUserSession(

@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { routeExtensionMessage } from '@/bridge/extension-message-router';
-import { resetProtocolRequests } from '@/bridge/request-tracker';
+import { routeExtensionMessage, routeTaskHistoryData } from '@/bridge/extension-message-router';
+import { resetProtocolTransport } from '@/bridge/transport-client';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
@@ -10,6 +10,7 @@ import { useTaskStore } from '@/store/task-store';
 import { useUiStore } from '@/store/ui-store';
 import type {
   ScoutBusyState,
+  ExtensionResponsePayload,
   ScoutImageContent,
   ScoutMessage,
   ScoutTaskItem,
@@ -82,21 +83,28 @@ function makeState(
 function getLatestSearchTaskMessage() {
   const messages = postMessage.mock.calls
     .map(([message]) => message)
-    .filter((message) => message.type === 'request_task_history');
+    .filter(
+      (message) =>
+        message.type === 'protocol_request' &&
+        message.payload?.type === 'request_task_history',
+    );
   return messages.at(-1) as
     | {
-        type: 'request_task_history';
-        query: string;
+        type: 'protocol_request';
+        payload: {
+          type: 'request_task_history';
+          query: string;
+          limit?: number;
+          offset?: number;
+          purpose?: string;
+        };
         requestId: string;
-        limit?: number;
-        offset?: number;
-        purpose?: string;
       }
     | undefined;
 }
 
 function routeTaskHistoryResult(
-  requestId: string,
+  queryToken: string,
   tasks: ScoutTaskItem[],
   overrides: Partial<{
     query: string;
@@ -105,15 +113,59 @@ function routeTaskHistoryResult(
     nextOffset: number;
   }> = {},
 ): void {
-  routeExtensionMessage({
+  routeTaskHistoryData({
     type: 'task_history_data',
     query: overrides.query ?? '',
-    requestId,
     purpose: 'panel',
     tasks,
     offset: overrides.offset ?? 0,
     hasMore: overrides.hasMore ?? false,
     nextOffset: overrides.nextOffset ?? tasks.length,
+  }, queryToken);
+}
+
+function getPostedProtocolRequests(payloadType: string) {
+  return postMessage.mock.calls
+    .map(([message]) => message)
+    .filter(
+      (message) =>
+        message.type === 'protocol_request' && message.payload?.type === payloadType,
+    ) as Array<{ requestId: string; payload: Record<string, unknown> }>;
+}
+
+function getLatestPostedProtocolRequest(payloadType: string) {
+  return getPostedProtocolRequests(payloadType).at(-1);
+}
+
+function expectPostedPayload(payloadType: string, payload: Record<string, unknown>): void {
+  expect(getLatestPostedProtocolRequest(payloadType)?.payload).toEqual(payload);
+}
+
+function getHistoryQueryToken(): string | undefined {
+  return useTaskStore.getState().historyQueryToken;
+}
+
+function routeProtocolResult(
+  request: { requestId: string } | undefined,
+  payload: ExtensionResponsePayload,
+): void {
+  if (!request) return;
+  routeExtensionMessage({
+    type: 'protocol_response',
+    requestId: request.requestId,
+    payload,
+  });
+}
+
+function routeProtocolError(
+  request: { requestId: string } | undefined,
+  message = 'Protocol failed',
+): void {
+  if (!request) return;
+  routeExtensionMessage({
+    type: 'protocol_response',
+    requestId: request.requestId,
+    error: { code: 'handler_failed', message },
   });
 }
 
@@ -145,7 +197,7 @@ describe('ChatApp', () => {
     useSessionStore.getState().actions.reset();
     useTaskStore.getState().actions.reset();
     useUiStore.getState().actions.reset();
-    resetProtocolRequests();
+    resetProtocolTransport();
   });
 
   it('renders the task home and starts a new session with composer text', () => {
@@ -156,9 +208,8 @@ describe('ChatApp', () => {
     });
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('new_session_message', {
       type: 'new_session_message',
-      requestId: expect.any(String),
       text: '中文回答',
     });
     expect(screen.getByLabelText('随心输入')).toHaveValue('中文回答');
@@ -173,11 +224,27 @@ describe('ChatApp', () => {
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
 
-    const newSessionMessages = postMessage.mock.calls.filter(
-      ([message]) => message.type === 'new_session_message',
-    );
+    const newSessionMessages = getPostedProtocolRequests('new_session_message');
     expect(newSessionMessages).toHaveLength(1);
     expect(screen.getByRole('button', { name: '发送中' })).toBeDisabled();
+  });
+
+  it('clears new session pending state when the protocol request fails', () => {
+    render(<ChatApp />);
+
+    fireEvent.change(screen.getByLabelText('随心输入'), {
+      target: { value: '会失败的新会话' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
+    const newSessionMessage = getLatestPostedProtocolRequest('new_session_message');
+
+    act(() => {
+      routeProtocolError(newSessionMessage, 'new session failed');
+    });
+
+    expect(useUiStore.getState().newSessionPending).toBe(false);
+    expect(useUiStore.getState().chatView).toBe('home');
+    expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
   });
 
   it('starts a new session with composer images', () => {
@@ -186,9 +253,8 @@ describe('ChatApp', () => {
     render(<ChatApp />);
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('new_session_message', {
       type: 'new_session_message',
-      requestId: expect.any(String),
       text: '',
       images: [TEST_IMAGE],
     });
@@ -211,12 +277,9 @@ describe('ChatApp', () => {
           sessionFile: '/sessions/session-new.jsonl',
         }),
       });
-      const newSessionMessage = postMessage.mock.calls.find(
-        ([message]) => message.type === 'new_session_message',
-      )?.[0] as { requestId: string };
-      routeExtensionMessage({
+      const newSessionMessage = getLatestPostedProtocolRequest('new_session_message');
+      routeProtocolResult(newSessionMessage, {
         type: 'new_session_result',
-        requestId: newSessionMessage.requestId,
         success: true,
       });
       routeExtensionMessage({
@@ -260,13 +323,35 @@ describe('ChatApp', () => {
     render(<ChatApp />);
     fireEvent.click(screen.getByRole('button', { name: /检查未提交更改/ }));
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('open_task', {
       type: 'open_task',
-      requestId: expect.any(String),
       taskId: 'task-1',
       sessionPath: '/sessions/session-1.jsonl',
       cwdOverride: undefined,
     });
+  });
+
+  it('clears open task pending state when the protocol request fails', () => {
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-1',
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+        title: '检查未提交更改',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: /检查未提交更改/ }));
+    const openTaskMessage = getLatestPostedProtocolRequest('open_task');
+
+    act(() => {
+      routeProtocolError(openTaskMessage, 'open task failed');
+    });
+
+    expect(useUiStore.getState().openingTaskSessionPath).toBeUndefined();
+    expect(useUiStore.getState().chatView).toBe('home');
   });
 
   it('opens a task while a new session message is pending without applying stale creation results', () => {
@@ -287,18 +372,13 @@ describe('ChatApp', () => {
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
     expect(screen.getByRole('button', { name: '发送中' })).toBeDisabled();
 
-    const newSessionMessage = postMessage.mock.calls.find(
-      ([message]) => message.type === 'new_session_message',
-    )?.[0] as { requestId: string };
+    const newSessionMessage = getLatestPostedProtocolRequest('new_session_message');
 
     fireEvent.click(screen.getByRole('button', { name: /会话二/ }));
 
-    const openTaskMessage = postMessage.mock.calls.find(
-      ([message]) => message.type === 'open_task',
-    )?.[0] as { requestId: string };
-    expect(openTaskMessage).toEqual({
+    const openTaskMessage = getLatestPostedProtocolRequest('open_task');
+    expect(openTaskMessage?.payload).toEqual({
       type: 'open_task',
-      requestId: expect.any(String),
       taskId: 'task-2',
       sessionPath: '/sessions/session-2.jsonl',
       cwdOverride: undefined,
@@ -308,9 +388,8 @@ describe('ChatApp', () => {
     expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
 
     act(() => {
-      routeExtensionMessage({
+      routeProtocolResult(newSessionMessage, {
         type: 'new_session_result',
-        requestId: newSessionMessage.requestId,
         success: true,
       });
     });
@@ -319,9 +398,8 @@ describe('ChatApp', () => {
     expect(screen.getByLabelText('随心输入')).toHaveValue('还在创建的新会话');
 
     act(() => {
-      routeExtensionMessage({
+      routeProtocolResult(openTaskMessage, {
         type: 'open_task_result',
-        requestId: openTaskMessage.requestId,
         sessionPath: '/sessions/session-2.jsonl',
         success: true,
       });
@@ -358,10 +436,9 @@ describe('ChatApp', () => {
     expect(screen.getByText('历史任务 4')).toBeInTheDocument();
     expect(screen.getByLabelText('搜索历史任务')).toBeInTheDocument();
     expect(screen.queryByText('本地任务')).not.toBeInTheDocument();
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('request_task_history', {
       type: 'request_task_history',
       query: '',
-      requestId: expect.any(String),
       purpose: 'panel',
       limit: 20,
       offset: 0,
@@ -383,10 +460,9 @@ describe('ChatApp', () => {
     fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
 
     expect(screen.getByLabelText('搜索历史任务')).toBeInTheDocument();
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('request_task_history', {
       type: 'request_task_history',
       query: '',
-      requestId: expect.any(String),
       purpose: 'panel',
       limit: 20,
       offset: 0,
@@ -450,10 +526,9 @@ describe('ChatApp', () => {
     fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
 
     expect(screen.getByLabelText('搜索历史任务')).toBeInTheDocument();
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('request_task_history', {
       type: 'request_task_history',
       query: '',
-      requestId: expect.any(String),
       purpose: 'panel',
       limit: 20,
       offset: 0,
@@ -467,7 +542,7 @@ describe('ChatApp', () => {
     await waitFor(() => {
       expect(screen.queryByLabelText('搜索历史任务')).not.toBeInTheDocument();
     });
-    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'open_task' }));
+    expect(getPostedProtocolRequests('open_task')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
     postMessage.mockClear();
@@ -476,9 +551,8 @@ describe('ChatApp', () => {
     await waitFor(() => {
       expect(screen.queryByLabelText('搜索历史任务')).not.toBeInTheDocument();
     });
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('open_task', {
       type: 'open_task',
-      requestId: expect.any(String),
       taskId: 'task-2',
       sessionPath: '/sessions/session-2.jsonl',
       cwdOverride: undefined,
@@ -546,14 +620,16 @@ describe('ChatApp', () => {
     });
 
     const searchMessage = getLatestSearchTaskMessage();
-    expect(searchMessage).toEqual({
+    expect(searchMessage?.payload).toEqual({
       type: 'request_task_history',
       query: 'ChatComposer',
-      requestId: expect.any(String),
       purpose: 'panel',
       limit: 20,
       offset: 0,
     });
+    expect(postMessage.mock.calls.some(([message]) => message.type === 'protocol_cancel')).toBe(
+      true,
+    );
 
     vi.useRealTimers();
   });
@@ -572,7 +648,7 @@ describe('ChatApp', () => {
 
     render(<ChatApp />);
     fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
-    const initialSearch = getLatestSearchTaskMessage();
+    const initialQueryToken = getHistoryQueryToken();
     postMessage.mockClear();
 
     fireEvent.change(screen.getByLabelText('搜索历史任务'), {
@@ -581,11 +657,11 @@ describe('ChatApp', () => {
     act(() => {
       vi.advanceTimersByTime(200);
     });
-    const currentSearch = getLatestSearchTaskMessage();
+    const currentQueryToken = getHistoryQueryToken();
 
     act(() => {
       routeTaskHistoryResult(
-        initialSearch?.requestId ?? 'stale',
+        initialQueryToken ?? 'stale',
         [
           {
             id: 'task-1',
@@ -603,7 +679,7 @@ describe('ChatApp', () => {
 
     act(() => {
       routeTaskHistoryResult(
-        currentSearch?.requestId ?? 'current',
+        currentQueryToken ?? 'current',
         [
           {
             id: 'task-2',
@@ -635,7 +711,7 @@ describe('ChatApp', () => {
 
     render(<ChatApp />);
     fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
-    const historySearch = getLatestSearchTaskMessage();
+    const historyQueryToken = getHistoryQueryToken();
     fireEvent.change(screen.getByLabelText('搜索历史任务'), {
       target: { value: '目标' },
     });
@@ -644,7 +720,6 @@ describe('ChatApp', () => {
       routeExtensionMessage({
         type: 'task_history_data',
         query: '',
-        requestId: 'recent-1',
         purpose: 'recent',
         tasks: [
           {
@@ -659,7 +734,7 @@ describe('ChatApp', () => {
         hasMore: false,
         nextOffset: 1,
       });
-      routeTaskHistoryResult(historySearch?.requestId ?? 'history', [
+      routeTaskHistoryResult(historyQueryToken ?? 'history', [
         {
           id: 'task-new',
           sessionId: 'session-new',
@@ -687,11 +762,11 @@ describe('ChatApp', () => {
 
     render(<ChatApp />);
     fireEvent.click(screen.getByRole('button', { name: /查看全部/ }));
-    const initialSearch = getLatestSearchTaskMessage();
+    const initialQueryToken = getHistoryQueryToken();
 
     act(() => {
       routeTaskHistoryResult(
-        initialSearch?.requestId ?? 'history-1',
+        initialQueryToken ?? 'history-1',
         [
           {
             id: 'task-1',
@@ -715,10 +790,10 @@ describe('ChatApp', () => {
     });
 
     const nextSearch = getLatestSearchTaskMessage();
-    expect(nextSearch).toEqual({
+    const nextQueryToken = getHistoryQueryToken();
+    expect(nextSearch?.payload).toEqual({
       type: 'request_task_history',
       query: '',
-      requestId: expect.any(String),
       purpose: 'panel',
       limit: 20,
       offset: 20,
@@ -726,7 +801,7 @@ describe('ChatApp', () => {
 
     act(() => {
       routeTaskHistoryResult(
-        nextSearch?.requestId ?? 'history-2',
+        nextQueryToken ?? 'history-2',
         [
           {
             id: 'task-2',
@@ -758,7 +833,7 @@ describe('ChatApp', () => {
     });
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('user_message', {
       type: 'user_message',
       text: '现在改方向',
       deliverAs: 'followUp',
@@ -777,7 +852,7 @@ describe('ChatApp', () => {
     });
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('user_message', {
       type: 'user_message',
       text: '看这张图',
       deliverAs: undefined,
@@ -802,7 +877,7 @@ describe('ChatApp', () => {
       ctrlKey: true,
     });
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('user_message', {
       type: 'user_message',
       text: '立刻引导',
       deliverAs: 'steer',
@@ -837,11 +912,11 @@ describe('ChatApp', () => {
 
     render(<ChatApp />);
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Escape' });
-    expect(postMessage).not.toHaveBeenCalledWith({ type: 'abort' });
+    expect(getPostedProtocolRequests('abort')).toHaveLength(0);
     expect(screen.getByRole('button', { name: '确认中断' })).toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Escape' });
-    expect(postMessage).toHaveBeenCalledWith({ type: 'abort' });
+    expectPostedPayload('abort', { type: 'abort' });
   });
 
   it('keeps composer drafts isolated by session id', () => {
@@ -920,9 +995,8 @@ describe('ChatApp', () => {
     postMessage.mockClear();
     fireEvent.click(screen.getByRole('button', { name: /会话二/ }));
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('open_task', {
       type: 'open_task',
-      requestId: expect.any(String),
       taskId: 'task-2',
       sessionPath: '/sessions/session-2.jsonl',
       cwdOverride: undefined,
@@ -957,7 +1031,7 @@ describe('ChatApp', () => {
     render(<ChatApp />);
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
 
-    expect(postMessage).toHaveBeenCalledWith({ type: 'abort' });
+    expectPostedPayload('abort', { type: 'abort' });
     expect(screen.queryByRole('button', { name: '确认中断' })).not.toBeInTheDocument();
   });
 
@@ -986,7 +1060,7 @@ describe('ChatApp', () => {
 
     postMessage.mockClear();
     fireEvent.click(screen.getAllByRole('button', { name: '引导' })[0]);
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('promote_follow_up', {
       type: 'promote_follow_up',
       id: 'follow-1',
       resume: true,
@@ -994,7 +1068,7 @@ describe('ChatApp', () => {
     });
 
     fireEvent.click(screen.getAllByRole('button', { name: '删除跟进' })[1]);
-    expect(postMessage).toHaveBeenCalledWith({ type: 'cancel_follow_up', id: 'follow-2' });
+    expectPostedPayload('cancel_follow_up', { type: 'cancel_follow_up', id: 'follow-2' });
   });
 
   it('resumes the full paused follow-up queue from the queue header', () => {
@@ -1014,8 +1088,8 @@ describe('ChatApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
 
-    expect(postMessage).toHaveBeenCalledWith({ type: 'continue_session' });
-    expect(postMessage).not.toHaveBeenCalledWith(
+    expectPostedPayload('continue_session', { type: 'continue_session' });
+    expect(getLatestPostedProtocolRequest('continue_session')?.payload).not.toEqual(
       expect.objectContaining({ preserveFollowUpQueue: true }),
     );
   });
@@ -1049,12 +1123,10 @@ describe('ChatApp', () => {
 
     expect(screen.getByText('发送消息？')).toBeInTheDocument();
     expect(screen.getByText(/之前已排队的 7 条消息/)).toBeInTheDocument();
-    expect(postMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'user_message', text: '发送新的消息' }),
-    );
+    expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
 
     fireEvent.click(screen.getByRole('button', { name: '清空队列' }));
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('user_message', {
       type: 'user_message',
       text: '发送新的消息',
       deliverAs: undefined,
@@ -1089,12 +1161,12 @@ describe('ChatApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '发送消息' }));
 
-    expect(postMessage).toHaveBeenCalledWith({
+    expectPostedPayload('user_message', {
       type: 'user_message',
       text: '保留队列发送',
       deliverAs: undefined,
     });
-    expect(postMessage).not.toHaveBeenCalledWith(
+    expect(getLatestPostedProtocolRequest('user_message')?.payload).not.toEqual(
       expect.objectContaining({ clearFollowUpQueue: true }),
     );
     expect(screen.getByLabelText('要求后续变更')).toHaveValue('');

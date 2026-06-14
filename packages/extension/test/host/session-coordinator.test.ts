@@ -267,16 +267,13 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     await Promise.resolve();
     expect(calls).toEqual(['new:block:start']);
 
-    const staleToken = coordinator.beginUserSessionOperation(
-      'new_session_message',
-      'request-stale',
-    );
+    const staleToken = coordinator.beginUserSessionOperation('new_session_message');
     const staleNewSession = coordinator.newUserSession(staleToken, {
       withSession: async () => {
         calls.push('stale:withSession');
       },
     });
-    const latestToken = coordinator.beginUserSessionOperation('open_task', 'request-latest');
+    const latestToken = coordinator.beginUserSessionOperation('open_task');
     const latestRestore = coordinator.restoreUserSession(latestToken, {
       id: 'restored-session',
       path: path.join(tempDir, 'restored-session.jsonl'),
@@ -297,22 +294,17 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
 
     expect(staleResult).toMatchObject({
       status: 'stale',
-      id: 'request-stale',
+      id: 'new_session_message:1',
       kind: 'new_session_message',
     });
     expect(latestResult).toMatchObject({
       status: 'completed',
-      id: 'request-latest',
+      id: 'open_task:2',
       kind: 'open_task',
     });
     expect(fakeRuntime.newSession).toHaveBeenCalledTimes(1);
     expect(fakeRuntime.switchSession).toHaveBeenCalledOnce();
-    expect(calls).toEqual([
-      'new:block:start',
-      'new:block:end',
-      'restore:start',
-      'restore:end',
-    ]);
+    expect(calls).toEqual(['new:block:start', 'new:block:end', 'restore:start', 'restore:end']);
 
     await coordinator.disposeAsync();
   });
@@ -331,7 +323,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       modelFallbackMessage: undefined,
       newSession: vi.fn(async (options?: { withSession?: (ctx: unknown) => Promise<void> }) => {
         calls.push('new:start');
-        coordinator.beginUserSessionOperation('open_task', 'request-latest');
+        coordinator.beginUserSessionOperation('open_task');
         await options?.withSession?.({
           sendUserMessage: async () => {
             calls.push('sendUserMessage');
@@ -345,10 +337,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     };
     (coordinator as unknown as { sessionRuntime: unknown }).sessionRuntime = fakeRuntime;
 
-    const staleToken = coordinator.beginUserSessionOperation(
-      'new_session_message',
-      'request-stale',
-    );
+    const staleToken = coordinator.beginUserSessionOperation('new_session_message');
     const result = await coordinator.newUserSession(staleToken, {
       withSession: async (ctx) => {
         calls.push('withSession');
@@ -358,7 +347,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
 
     expect(result).toMatchObject({
       status: 'stale',
-      id: 'request-stale',
+      id: 'new_session_message:1',
       kind: 'new_session_message',
     });
     expect(calls).toEqual(['new:start', 'new:end']);
@@ -410,12 +399,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     releaseStartup.resolve();
     await Promise.all([initializePromise, newSessionPromise]);
 
-    expect(calls).toEqual([
-      'create:startup',
-      'create:new',
-      'withSession',
-      'sendUserMessage',
-    ]);
+    expect(calls).toEqual(['create:startup', 'create:new', 'withSession', 'sendUserMessage']);
 
     await coordinator.disposeAsync();
   });

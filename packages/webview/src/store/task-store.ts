@@ -16,14 +16,14 @@ interface TaskActions {
 
 interface BeginHistorySearchInput {
   query: string;
-  requestId: string;
+  queryToken: string;
   offset: number;
   seedTasks?: ScoutTaskItem[];
 }
 
 interface HistoryResultInput {
   query: string;
-  requestId: string;
+  queryToken: string;
   tasks: ScoutTaskItem[];
   offset: number;
   hasMore: boolean;
@@ -36,7 +36,7 @@ interface TaskStore {
   historyQuery: string;
   historyPending: boolean;
   historyLoadingMore: boolean;
-  historyRequestId: string | undefined;
+  historyQueryToken: string | undefined;
   historyHasMore: boolean;
   historyNextOffset: number;
   actions: TaskActions;
@@ -48,7 +48,7 @@ const initialState = {
   historyQuery: '',
   historyPending: false,
   historyLoadingMore: false,
-  historyRequestId: undefined as string | undefined,
+  historyQueryToken: undefined as string | undefined,
   historyHasMore: false,
   historyNextOffset: 0,
 };
@@ -57,25 +57,25 @@ export const useTaskStore = create<TaskStore>((set) => ({
   ...initialState,
   actions: {
     setRecentTasks: (recentTasks) => set({ recentTasks }),
-    beginHistorySearch: ({ query, requestId, offset, seedTasks }) =>
+    beginHistorySearch: ({ query, queryToken, offset, seedTasks }) =>
       set((state) => ({
         historyTasks: offset > 0 ? state.historyTasks : (seedTasks ?? []),
         historyQuery: query,
         historyPending: offset === 0,
         historyLoadingMore: offset > 0,
-        historyRequestId: requestId,
+        historyQueryToken: queryToken,
         historyHasMore: false,
         historyNextOffset: offset,
       })),
-    applyHistoryResult: ({ query, requestId, tasks, offset, hasMore, nextOffset }) =>
+    applyHistoryResult: ({ query, queryToken, tasks, offset, hasMore, nextOffset }) =>
       set((state) => {
-        if (state.historyRequestId !== requestId) return state;
+        if (state.historyQueryToken !== queryToken) return state;
         return {
           historyTasks: offset > 0 ? appendUniqueTasks(state.historyTasks, tasks) : tasks,
           historyQuery: query,
           historyPending: false,
           historyLoadingMore: false,
-          historyRequestId: undefined,
+          historyQueryToken: undefined,
           historyHasMore: hasMore,
           historyNextOffset: nextOffset,
         };
@@ -87,7 +87,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
         historyQuery: '',
         historyPending: false,
         historyLoadingMore: false,
-        historyRequestId: undefined,
+        historyQueryToken: undefined,
         historyHasMore: false,
         historyNextOffset: 0,
       }),

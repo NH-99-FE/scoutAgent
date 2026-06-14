@@ -124,7 +124,38 @@ export type ScoutTaskHistoryPurpose = 'recent' | 'panel';
 
 // ---------- Webview → Extension ----------
 
-export type WebviewMessage =
+export type ScoutProtocolService =
+  | 'lifecycle'
+  | 'state'
+  | 'config'
+  | 'session'
+  | 'task'
+  | 'tree'
+  | 'mention'
+  | 'ui';
+
+export interface ScoutProtocolRequest<T = WebviewRequestPayload> {
+  type: 'protocol_request';
+  /**
+   * Transport-only correlation id. 仅用于 webview-extension envelope
+   * 响应匹配与取消，不属于业务 payload。
+   */
+  requestId: string;
+  service: ScoutProtocolService;
+  method: string;
+  payload: T;
+  streaming?: boolean;
+}
+
+export interface ScoutProtocolCancel {
+  type: 'protocol_cancel';
+  /** 取消对应 transport envelope，不取消某个业务实体。 */
+  requestId: string;
+}
+
+export type WebviewMessage = ScoutProtocolRequest | ScoutProtocolCancel;
+
+export type WebviewRequestPayload =
   | { type: 'ready' }
   | { type: 'request_state' }
   | { type: 'request_config' }
@@ -138,7 +169,6 @@ export type WebviewMessage =
     }
   | {
       type: 'new_session_message';
-      requestId: string;
       text: string;
       images?: ScoutImageContent[];
     }
@@ -177,7 +207,6 @@ export type WebviewMessage =
   | {
       type: 'request_task_history';
       query: string;
-      requestId: string;
       limit?: number;
       offset?: number;
       scope?: 'workspace' | 'all';
@@ -185,7 +214,6 @@ export type WebviewMessage =
     }
   | {
       type: 'open_task';
-      requestId: string;
       taskId: string;
       sessionPath: string;
       cwdOverride?: string;
@@ -193,7 +221,6 @@ export type WebviewMessage =
   | { type: 'request_sessions' }
   | {
       type: 'restore_session';
-      requestId: string;
       sessionId: string;
       sessionPath: string;
       cwdOverride?: string;
@@ -494,6 +521,25 @@ export interface ScoutNotificationMessage {
 }
 
 export type ExtensionMessage =
+  | ScoutProtocolResponse
+  | ExtensionEventMessage;
+
+export interface ScoutProtocolResponse<T = ExtensionResponsePayload> {
+  type: 'protocol_response';
+  /** 必须回填请求 envelope 的 requestId，用于 webview transport 关联 callback。 */
+  requestId: string;
+  payload?: T;
+  error?: ScoutProtocolError;
+  done?: boolean;
+  sequence?: number;
+}
+
+export interface ScoutProtocolError {
+  code: string;
+  message: string;
+}
+
+export type ExtensionEventMessage =
   | { type: 'state_update'; state: ScoutWebviewState }
   | { type: 'queue_update'; queueState: ScoutQueueState }
   | { type: 'agent_event'; event: ScoutAgentEvent }
@@ -518,7 +564,6 @@ export type ExtensionMessage =
   | {
       type: 'task_history_data';
       query: string;
-      requestId: string;
       purpose?: ScoutTaskHistoryPurpose;
       tasks: ScoutTaskItem[];
       offset: number;
@@ -528,15 +573,14 @@ export type ExtensionMessage =
   | { type: 'sessions_data'; sessions: ScoutSessionListItem[] }
   | { type: 'open_settings_panel_result'; success: boolean; error?: string }
   | { type: 'open_tree_panel_result'; success: boolean; error?: string }
-  | { type: 'new_session_result'; requestId: string; success: boolean; error?: string }
+  | { type: 'new_session_result'; success: boolean; error?: string }
   | {
       type: 'open_task_result';
-      requestId: string;
       sessionPath: string;
       success: boolean;
       error?: string;
     }
-  | { type: 'restore_session_result'; requestId: string; success: boolean; error?: string }
+  | { type: 'restore_session_result'; success: boolean; error?: string }
   | { type: 'import_session_result'; success: boolean; error?: string }
   | { type: 'export_session_result'; success: boolean; path?: string; error?: string }
   | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }
@@ -544,3 +588,18 @@ export type ExtensionMessage =
   | { type: 'set_session_name_result'; success: boolean; error?: string }
   | { type: 'reload_result'; success: boolean; error?: string }
   | { type: 'delete_session_result'; success: boolean; error?: string };
+
+export type ExtensionResponsePayload =
+  | Extract<ExtensionEventMessage, { type: 'task_history_data' }>
+  | Extract<ExtensionEventMessage, { type: 'new_session_result' }>
+  | Extract<ExtensionEventMessage, { type: 'open_task_result' }>
+  | Extract<ExtensionEventMessage, { type: 'restore_session_result' }>
+  | Extract<ExtensionEventMessage, { type: 'open_settings_panel_result' }>
+  | Extract<ExtensionEventMessage, { type: 'open_tree_panel_result' }>
+  | Extract<ExtensionEventMessage, { type: 'import_session_result' }>
+  | Extract<ExtensionEventMessage, { type: 'export_session_result' }>
+  | Extract<ExtensionEventMessage, { type: 'navigate_tree_result' }>
+  | Extract<ExtensionEventMessage, { type: 'label_result' }>
+  | Extract<ExtensionEventMessage, { type: 'set_session_name_result' }>
+  | Extract<ExtensionEventMessage, { type: 'reload_result' }>
+  | Extract<ExtensionEventMessage, { type: 'delete_session_result' }>;

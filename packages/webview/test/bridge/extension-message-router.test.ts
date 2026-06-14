@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { routeExtensionMessage } from '@/bridge/extension-message-router';
-import { beginProtocolRequest, resetProtocolRequests } from '@/bridge/request-tracker';
+import {
+  routeExtensionMessage,
+  routeTaskHistoryData,
+} from '@/bridge/extension-message-router';
+import { resetProtocolTransport } from '@/bridge/transport-client';
 import { useConfigStore } from '@/store/config-store';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
@@ -25,7 +28,7 @@ describe('routeExtensionMessage', () => {
     useTaskStore.getState().actions.reset();
     useTreeStore.getState().actions.reset();
     useUiStore.getState().actions.reset();
-    resetProtocolRequests();
+    resetProtocolTransport();
   });
 
   it('routes state and config updates into domain stores', () => {
@@ -86,7 +89,6 @@ describe('routeExtensionMessage', () => {
     routeExtensionMessage({
       type: 'task_history_data',
       query: '',
-      requestId: 'recent-1',
       purpose: 'recent',
       tasks: [
         {
@@ -103,13 +105,12 @@ describe('routeExtensionMessage', () => {
     });
     useTaskStore.getState().actions.beginHistorySearch({
       query: '',
-      requestId: 'history-1',
+      queryToken: 'history-1',
       offset: 0,
     });
-    routeExtensionMessage({
+    routeTaskHistoryData({
       type: 'task_history_data',
       query: '',
-      requestId: 'history-1',
       purpose: 'panel',
       tasks: [
         {
@@ -123,7 +124,7 @@ describe('routeExtensionMessage', () => {
       offset: 0,
       hasMore: false,
       nextOffset: 1,
-    });
+    }, 'history-1');
 
     expect(useTreeStore.getState().leafId).toBe('leaf-1');
     expect(useTaskStore.getState().recentTasks).toHaveLength(1);
@@ -224,10 +225,9 @@ describe('routeExtensionMessage', () => {
   it('routes new session results into chat navigation and home draft state', () => {
     useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
-    const requestId = beginProtocolRequest('new_session_message');
     useUiStore.getState().actions.beginNewSessionRequest();
 
-    routeExtensionMessage({ type: 'new_session_result', requestId, success: true });
+    routeExtensionMessage({ type: 'new_session_result', success: true });
 
     expect(useUiStore.getState().chatView).toBe('detail');
     expect(useUiStore.getState().newSessionPending).toBe(false);
@@ -238,12 +238,10 @@ describe('routeExtensionMessage', () => {
   it('keeps the home draft when new session creation fails', () => {
     useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
-    const requestId = beginProtocolRequest('new_session_message');
     useUiStore.getState().actions.beginNewSessionRequest();
 
     routeExtensionMessage({
       type: 'new_session_result',
-      requestId,
       success: false,
       error: 'failed',
     });
@@ -258,10 +256,13 @@ describe('routeExtensionMessage', () => {
 
   it('ignores stale new session results', () => {
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
-    beginProtocolRequest('new_session_message');
     useUiStore.getState().actions.beginNewSessionRequest();
 
-    routeExtensionMessage({ type: 'new_session_result', requestId: 'request-1', success: true });
+    routeExtensionMessage({
+      type: 'protocol_response',
+      requestId: 'stale-request',
+      payload: { type: 'new_session_result', success: true },
+    });
 
     expect(useUiStore.getState().chatView).toBe('auto');
     expect(useUiStore.getState().newSessionPending).toBe(true);
@@ -269,20 +270,16 @@ describe('routeExtensionMessage', () => {
   });
 
   it('keeps task navigation pending until the matching state update arrives', () => {
-    const staleRequestId = beginProtocolRequest('open_task');
     useUiStore.getState().actions.beginOpenTask('/sessions/one.jsonl');
-    const currentRequestId = beginProtocolRequest('open_task');
     useUiStore.getState().actions.beginOpenTask('/sessions/two.jsonl');
 
     routeExtensionMessage({
       type: 'open_task_result',
-      requestId: staleRequestId,
       sessionPath: '/sessions/one.jsonl',
       success: true,
     });
     routeExtensionMessage({
       type: 'open_task_result',
-      requestId: currentRequestId,
       sessionPath: '/sessions/two.jsonl',
       success: true,
     });

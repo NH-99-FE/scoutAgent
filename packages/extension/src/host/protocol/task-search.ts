@@ -29,10 +29,14 @@ export function getTaskSearchText(session: JsonlSessionMetadata): string {
 }
 
 export function matchesTaskSearch(session: JsonlSessionMetadata, query: string): boolean {
-  const queryParts = normalizeTaskSearchText(query).split(' ').filter(Boolean);
+  const queryParts = getTaskSearchCacheKey(query).split(' ').filter(Boolean);
   if (queryParts.length === 0) return true;
   const title = getTaskSearchText(session);
   return queryParts.every((part) => title.includes(part));
+}
+
+export function getTaskSearchCacheKey(query: string): string {
+  return normalizeTaskSearchText(query);
 }
 
 function normalizeTaskSearchText(value: string): string {

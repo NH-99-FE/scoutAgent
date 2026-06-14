@@ -9,6 +9,7 @@ export type SessionUserOperationKind = 'new_session_message' | 'open_task' | 're
 
 export interface SessionOperationToken {
   readonly id: string;
+  readonly sequence: number;
   readonly kind: SessionUserOperationKind;
   isLatest(): boolean;
 }
@@ -28,14 +29,18 @@ function toErrorMessage(error: unknown): string {
 
 export class SessionOperationBroker {
   private queue: Promise<void> = Promise.resolve();
-  private latestUserOperation?: { id: string; kind: SessionUserOperationKind };
+  private nextSequence = 0;
+  private latestUserOperation?: { sequence: number; kind: SessionUserOperationKind };
 
-  beginUserOperation(kind: SessionUserOperationKind, id: string): SessionOperationToken {
-    this.latestUserOperation = { id, kind };
+  beginUserOperation(kind: SessionUserOperationKind): SessionOperationToken {
+    const sequence = ++this.nextSequence;
+    const id = `${kind}:${sequence}`;
+    this.latestUserOperation = { sequence, kind };
     return {
       id,
+      sequence,
       kind,
-      isLatest: () => this.isLatestUserOperation(id, kind),
+      isLatest: () => this.isLatestUserOperation(sequence, kind),
     };
   }
 
@@ -83,7 +88,9 @@ export class SessionOperationBroker {
     });
   }
 
-  private isLatestUserOperation(id: string, kind: SessionUserOperationKind): boolean {
-    return this.latestUserOperation?.id === id && this.latestUserOperation.kind === kind;
+  private isLatestUserOperation(sequence: number, kind: SessionUserOperationKind): boolean {
+    return (
+      this.latestUserOperation?.sequence === sequence && this.latestUserOperation.kind === kind
+    );
   }
 }

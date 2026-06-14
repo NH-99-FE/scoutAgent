@@ -1,20 +1,22 @@
 // ============================================================
-// Protocol Client — Webview → Extension 消息发送
+// Protocol Client — typed Webview → Extension 请求入口
 // ============================================================
 
 import type {
+  ExtensionResponsePayload,
   ScoutImageContent,
-  ScoutTaskItem,
   ScoutTaskHistoryPurpose,
+  ScoutTaskItem,
   ThinkingLevel,
-  WebviewMessage,
+  WebviewRequestPayload,
 } from '@scout-agent/shared';
+import { routeExtensionEventMessage, routeTaskHistoryData } from './extension-message-router';
+import { resolveProtocolRoute } from './protocol-route';
 import {
-  beginProtocolRequest,
-  createProtocolRequestId,
+  cancelProtocolRequest,
   discardProtocolRequest,
-} from './request-tracker';
-import { getVsCodeApi } from './vscode-api';
+  sendProtocolRequest,
+} from './transport-client';
 
 interface UserMessageOptions {
   clearFollowUpQueue?: boolean;
@@ -31,44 +33,88 @@ interface PromoteFollowUpOptions extends ContinueSessionOptions {
 
 interface RequestTaskHistoryOptions {
   query?: string;
-  requestId?: string;
+  queryToken?: string;
   limit?: number;
   offset?: number;
   scope?: 'workspace' | 'all';
   purpose?: ScoutTaskHistoryPurpose;
 }
 
-export function sendWebviewMessage(message: WebviewMessage): void {
-  getVsCodeApi().postMessage(message);
+let pendingNewSessionRequestId: string | undefined;
+let pendingOpenTaskRequestId: string | undefined;
+let pendingPanelTaskHistoryRequestId: string | undefined;
+
+function send(payload: WebviewRequestPayload): string {
+  return sendProtocolRequest(payload, resolveProtocolRoute(payload));
+}
+
+function sendRouted(
+  payload: WebviewRequestPayload,
+  onResponse: (payload: ExtensionResponsePayload) => void,
+  onError?: (message: string, code: string) => void,
+): string {
+  return sendProtocolRequest(payload, {
+    ...resolveProtocolRoute(payload),
+    onResponse,
+    onError: (message, code) => {
+      onError?.(message, code);
+      routeExtensionEventMessage({ type: 'notification', level: 'error', message });
+    },
+  });
 }
 
 function requestTaskHistory({
   query = '',
-  requestId,
+  queryToken,
   limit,
   offset,
   scope,
   purpose = 'panel',
 }: RequestTaskHistoryOptions): string {
-  const nextRequestId = requestId ?? createProtocolRequestId();
-  const message: WebviewMessage = {
+  const nextQueryToken = queryToken ?? createTaskHistoryQueryToken();
+  const effectiveOffset = offset ?? 0;
+  const payload: WebviewRequestPayload = {
     type: 'request_task_history',
     query,
-    requestId: nextRequestId,
     purpose,
   };
-  if (limit !== undefined) message.limit = limit;
-  if (offset !== undefined) message.offset = offset;
-  if (scope !== undefined) message.scope = scope;
-  sendWebviewMessage(message);
-  return nextRequestId;
+  if (limit !== undefined) payload.limit = limit;
+  if (offset !== undefined) payload.offset = offset;
+  if (scope !== undefined) payload.scope = scope;
+  if (purpose === 'panel' && effectiveOffset === 0) {
+    if (pendingPanelTaskHistoryRequestId) {
+      cancelProtocolRequest(pendingPanelTaskHistoryRequestId);
+    }
+    pendingPanelTaskHistoryRequestId = undefined;
+  }
+  const requestId = sendProtocolRequest(payload, {
+    ...resolveProtocolRoute(payload),
+    onResponse: (response) => {
+      if (pendingPanelTaskHistoryRequestId === requestId) {
+        pendingPanelTaskHistoryRequestId = undefined;
+      }
+      if (response.type === 'task_history_data') {
+        routeTaskHistoryData(response, nextQueryToken);
+      }
+    },
+    onError: (message) => {
+      if (pendingPanelTaskHistoryRequestId === requestId) {
+        pendingPanelTaskHistoryRequestId = undefined;
+      }
+      routeExtensionEventMessage({ type: 'notification', level: 'error', message });
+    },
+  });
+  if (purpose === 'panel') {
+    pendingPanelTaskHistoryRequestId = requestId;
+  }
+  return nextQueryToken;
 }
 
 export const protocolClient = {
-  ready: () => sendWebviewMessage({ type: 'ready' }),
-  requestState: () => sendWebviewMessage({ type: 'request_state' }),
-  requestConfig: () => sendWebviewMessage({ type: 'request_config' }),
-  requestTree: () => sendWebviewMessage({ type: 'request_tree' }),
+  ready: () => send({ type: 'ready' }),
+  requestState: () => send({ type: 'request_state' }),
+  requestConfig: () => send({ type: 'request_config' }),
+  requestTree: () => send({ type: 'request_tree' }),
   requestTasks: (limit?: number): string =>
     requestTaskHistory({
       query: '',
@@ -77,66 +123,89 @@ export const protocolClient = {
       purpose: 'recent',
     }),
   requestTaskHistory,
-  requestSessions: () => sendWebviewMessage({ type: 'request_sessions' }),
-  openSettingsPanel: () => sendWebviewMessage({ type: 'open_settings_panel' }),
-  openTreePanel: () => sendWebviewMessage({ type: 'open_tree_panel' }),
+  requestSessions: () => send({ type: 'request_sessions' }),
+  openSettingsPanel: () =>
+    sendRouted({ type: 'open_settings_panel' }, routeExtensionEventMessage),
+  openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, routeExtensionEventMessage),
   openTask: (task: ScoutTaskItem) => {
-    discardProtocolRequest('new_session_message');
-    const requestId = beginProtocolRequest('open_task');
-    sendWebviewMessage({
-      type: 'open_task',
-      requestId,
-      taskId: task.id,
-      sessionPath: task.sessionPath,
-      cwdOverride: task.cwd,
-    });
+    discardProtocolRequest(pendingNewSessionRequestId);
+    pendingNewSessionRequestId = undefined;
+    pendingOpenTaskRequestId = sendRouted(
+      {
+        type: 'open_task',
+        taskId: task.id,
+        sessionPath: task.sessionPath,
+        cwdOverride: task.cwd,
+      },
+      routeExtensionEventMessage,
+      (message) => {
+        routeExtensionEventMessage({
+          type: 'open_task_result',
+          sessionPath: task.sessionPath,
+          success: false,
+          error: message,
+        });
+      },
+    );
   },
   userMessage: (text: string, deliverAs?: 'steer' | 'followUp', options?: UserMessageOptions) => {
-    const message: WebviewMessage = { type: 'user_message', text, deliverAs };
+    const payload: WebviewRequestPayload = { type: 'user_message', text, deliverAs };
     if (options?.images && options.images.length > 0) {
-      message.images = options.images;
+      payload.images = options.images;
     }
     if (options?.clearFollowUpQueue) {
-      message.clearFollowUpQueue = true;
+      payload.clearFollowUpQueue = true;
     }
-    sendWebviewMessage(message);
+    send(payload);
   },
   newSessionMessage: (text: string, images?: ScoutImageContent[]) => {
-    discardProtocolRequest('open_task');
-    const requestId = beginProtocolRequest('new_session_message');
-    const message: WebviewMessage = { type: 'new_session_message', requestId, text };
+    discardProtocolRequest(pendingOpenTaskRequestId);
+    pendingOpenTaskRequestId = undefined;
+    const payload: WebviewRequestPayload = { type: 'new_session_message', text };
     if (images && images.length > 0) {
-      message.images = images;
+      payload.images = images;
     }
-    sendWebviewMessage(message);
+    pendingNewSessionRequestId = sendRouted(payload, routeExtensionEventMessage, (message) => {
+      routeExtensionEventMessage({
+        type: 'new_session_result',
+        success: false,
+        error: message,
+      });
+    });
   },
-  cancelFollowUp: (id: string) => sendWebviewMessage({ type: 'cancel_follow_up', id }),
+  cancelFollowUp: (id: string) => send({ type: 'cancel_follow_up', id }),
   promoteFollowUp: (id: string, options?: PromoteFollowUpOptions) => {
-    const message: WebviewMessage = { type: 'promote_follow_up', id };
+    const payload: WebviewRequestPayload = { type: 'promote_follow_up', id };
     if (options?.resume) {
-      message.resume = true;
+      payload.resume = true;
     }
     if (options?.preserveFollowUpQueue) {
-      message.preserveFollowUpQueue = true;
+      payload.preserveFollowUpQueue = true;
     }
-    sendWebviewMessage(message);
+    send(payload);
   },
-  abort: () => sendWebviewMessage({ type: 'abort' }),
-  abortRetry: () => sendWebviewMessage({ type: 'abort_retry' }),
-  compact: (customInstructions?: string) =>
-    sendWebviewMessage({ type: 'compact', customInstructions }),
+  abort: () => send({ type: 'abort' }),
+  abortRetry: () => send({ type: 'abort_retry' }),
+  compact: (customInstructions?: string) => send({ type: 'compact', customInstructions }),
   continueSession: (options?: ContinueSessionOptions) => {
-    const message: WebviewMessage = { type: 'continue_session' };
+    const payload: WebviewRequestPayload = { type: 'continue_session' };
     if (options?.preserveFollowUpQueue) {
-      message.preserveFollowUpQueue = true;
+      payload.preserveFollowUpQueue = true;
     }
-    sendWebviewMessage(message);
+    send(payload);
   },
-  clearConversation: () => sendWebviewMessage({ type: 'clear_conversation' }),
+  clearConversation: () => send({ type: 'clear_conversation' }),
   selectModel: (provider: string, modelId: string) =>
-    sendWebviewMessage({ type: 'select_model', provider, modelId }),
-  selectThinking: (level: ThinkingLevel) => sendWebviewMessage({ type: 'select_thinking', level }),
-  requestCommands: () => sendWebviewMessage({ type: 'request_commands' }),
+    send({ type: 'select_model', provider, modelId }),
+  selectThinking: (level: ThinkingLevel) => send({ type: 'select_thinking', level }),
+  requestCommands: () => send({ type: 'request_commands' }),
   requestFileMentions: (query: string, limit?: number) =>
-    sendWebviewMessage({ type: 'request_file_mentions', query, limit }),
+    send({ type: 'request_file_mentions', query, limit }),
 };
+
+function createTaskHistoryQueryToken(): string {
+  const random =
+    globalThis.crypto?.randomUUID?.() ??
+    `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+  return `history:${random}`;
+}
