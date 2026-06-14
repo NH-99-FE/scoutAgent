@@ -23,7 +23,7 @@ export function ConversationView({ messages }: ConversationViewProps) {
 
   return (
     <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-4 px-4 py-3">
+      <div className="space-y-3 px-3 py-2">
         {messages.map((message, index) => (
           <MessageItem
             key={message.entryId ?? `${message.role}:${message.timestamp}:${index}`}
@@ -40,7 +40,7 @@ function MessageItem({ message }: { message: ScoutMessage }) {
   if (message.role === 'user') {
     return (
       <article className="flex justify-end">
-        <div className="bg-muted max-w-[86%] rounded-lg px-3 py-2 text-sm leading-6 break-words whitespace-pre-wrap">
+        <div className="bg-muted max-w-[88%] rounded-md px-2.5 py-1.5 text-[13px] leading-5 break-words whitespace-pre-wrap">
           {contentToText(message.content)}
         </div>
       </article>
@@ -71,7 +71,7 @@ function MessageItem({ message }: { message: ScoutMessage }) {
 
   return (
     <article className="group/message">
-      <div className="text-sm leading-6 break-words whitespace-pre-wrap">
+      <div className="wrap-break-words text-[13px] leading-5 whitespace-pre-wrap">
         {message.content.map((content, index) => (
           <ContentBlock key={`${content.type}:${index}`} content={content} />
         ))}
@@ -95,7 +95,7 @@ function ContentBlock({ content }: { content: ScoutContent }) {
   }
   if (content.type === 'toolCall') {
     return (
-      <pre className="bg-muted border-border my-2 overflow-x-auto rounded-md border px-2 py-1 text-xs">
+      <pre className="bg-muted border-border my-1.5 overflow-x-auto rounded-md border px-2 py-1 text-xs">
         {content.name}
       </pre>
     );
@@ -121,19 +121,19 @@ function SystemBlock({
   return (
     <article
       className={cn(
-        'border-border bg-card rounded-lg border px-3 py-2 text-sm',
+        'border-border bg-card rounded-md border px-2.5 py-1.5 text-[13px]',
         tone === 'error' && 'border-destructive/30 bg-destructive/10',
       )}
     >
       <p className="text-muted-foreground text-xs font-medium">{title}</p>
-      <p className="mt-1 leading-6 break-words whitespace-pre-wrap">{text}</p>
+      <p className="mt-1 leading-5 break-words whitespace-pre-wrap">{text}</p>
     </article>
   );
 }
 
 function MessageActions({ text, timestamp }: { text: string; timestamp: number }) {
   return (
-    <div className="text-muted-foreground mt-2 flex items-center gap-1 text-xs">
+    <div className="text-muted-foreground mt-1 flex items-center gap-0.5 text-[11px]">
       <Button
         aria-label="复制"
         size="icon-xs"

@@ -2,9 +2,9 @@
 // Chat Workspace — 会话中页面布局
 // ============================================================
 
-import { ArrowLeft, Edit3, GitBranch, MoreHorizontal, RotateCcw, Settings } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { ArrowLeft, GitBranch, MoreHorizontal, RotateCcw, Settings, SquarePen } from 'lucide-react';
 import { protocolClient } from '@/bridge/protocol-client';
+import { HeaderBar } from '@/components/common/HeaderBar';
 import { IconButton } from '@/components/common/IconButton';
 import { useConversationMessages } from '@/store/conversation-store';
 import { useSessionName } from '@/store/session-store';
@@ -13,44 +13,45 @@ import { ConversationView } from '@/features/conversation/ConversationView';
 
 interface ChatWorkspaceProps {
   onBack: () => void;
+  onNewSession: () => void;
 }
 
-export function ChatWorkspace({ onBack }: ChatWorkspaceProps) {
+export function ChatWorkspace({ onBack, onNewSession }: ChatWorkspaceProps) {
   const messages = useConversationMessages();
   const sessionName = useSessionName();
   const title = sessionName || getConversationTitle(messages) || '当前会话';
 
   return (
     <main className="bg-background text-foreground flex h-screen min-h-screen flex-col overflow-hidden">
-      <header className="border-border/70 flex h-11 shrink-0 items-center justify-between gap-1 border-b px-2">
-        <Button
-          className="min-w-0 flex-1 justify-start px-1.5 text-left"
-          size="sm"
-          type="button"
-          variant="ghost"
-          onClick={onBack}
-        >
-          <ArrowLeft />
-          <span className="truncate">{title}</span>
-        </Button>
-
-        <div className="flex shrink-0 items-center gap-0.5">
-          <IconButton label="更多操作">
-            <MoreHorizontal />
-          </IconButton>
-          <IconButton label="继续会话" onClick={protocolClient.continueSession}>
-            <RotateCcw />
-          </IconButton>
-          <IconButton label="打开设置" onClick={protocolClient.openSettingsPanel}>
-            <Settings />
-          </IconButton>
-          <IconButton label="打开会话树" onClick={protocolClient.openTreePanel}>
-            <GitBranch />
-          </IconButton>
-          <IconButton label="编辑标题">
-            <Edit3 />
-          </IconButton>
-        </div>
+      <header className="border-border/70 h-9 shrink-0 border-b px-2">
+        <HeaderBar
+          className="h-full"
+          title={title}
+          left={
+            <IconButton label="返回" size="icon-xs" onClick={onBack}>
+              <ArrowLeft />
+            </IconButton>
+          }
+          actions={
+            <>
+              <IconButton label="更多操作" size="icon-xs">
+                <MoreHorizontal />
+              </IconButton>
+              <IconButton label="继续会话" size="icon-xs" onClick={protocolClient.continueSession}>
+                <RotateCcw />
+              </IconButton>
+              <IconButton label="打开设置" size="icon-xs" onClick={protocolClient.openSettingsPanel}>
+                <Settings />
+              </IconButton>
+              <IconButton label="打开会话树" size="icon-xs" onClick={protocolClient.openTreePanel}>
+                <GitBranch />
+              </IconButton>
+              <IconButton label="新会话" size="icon-xs" onClick={onNewSession}>
+                <SquarePen />
+              </IconButton>
+            </>
+          }
+        />
       </header>
 
       <ConversationView messages={messages} />

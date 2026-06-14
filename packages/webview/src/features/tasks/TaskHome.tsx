@@ -2,21 +2,29 @@
 // Task Home — 空会话任务入口
 // ============================================================
 
-import { Edit3, History, Settings } from 'lucide-react';
+import { History, Settings, SquarePen } from 'lucide-react';
 import { useState } from 'react';
 import type { ScoutTaskItem } from '@scout-agent/shared';
 import { Button } from '@/components/ui/button';
 import { protocolClient } from '@/bridge/protocol-client';
+import { HeaderBar } from '@/components/common/HeaderBar';
 import { IconButton } from '@/components/common/IconButton';
 import { cn } from '@/lib/utils';
+import { HOME_COMPOSER_SESSION_ID } from '@/store/composer-store';
 import { useTaskCount, useTaskPending, useTasks } from '@/store/task-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
 
 interface TaskHomeProps {
-  onLeaveHome?: () => void;
+  newSessionPending: boolean;
+  onOpenTask: (task: ScoutTaskItem) => void;
+  onBeginNewSessionRequest: () => void;
 }
 
-export function TaskHome({ onLeaveHome }: TaskHomeProps) {
+export function TaskHome({
+  newSessionPending,
+  onOpenTask,
+  onBeginNewSessionRequest,
+}: TaskHomeProps) {
   const [showAllTasks, setShowAllTasks] = useState(false);
   const tasks = useTasks();
   const taskCount = useTaskCount();
@@ -34,33 +42,45 @@ export function TaskHome({ onLeaveHome }: TaskHomeProps) {
 
   return (
     <main className="bg-background text-foreground flex h-screen min-h-screen flex-col overflow-hidden">
-      <header className="shrink-0 px-2.5 pt-3">
-        <div className="flex items-center justify-between gap-2">
-          <h1 className="text-muted-foreground text-sm font-medium">任务</h1>
-          <div className="flex items-center gap-1">
-            <IconButton label="刷新任务" onClick={() => protocolClient.requestTasks(50)}>
-              <History />
-            </IconButton>
-            <IconButton label="打开设置" onClick={protocolClient.openSettingsPanel}>
-              <Settings />
-            </IconButton>
-            <IconButton label="新建会话" onClick={protocolClient.clearConversation}>
-              <Edit3 />
-            </IconButton>
-          </div>
-        </div>
+      <header className="h-9 shrink-0 px-2">
+        <HeaderBar
+          className="h-full gap-2"
+          title="任务"
+          titleClassName="text-muted-foreground"
+          actionsClassName="text-muted-foreground"
+          actions={
+            <>
+              <IconButton
+                label="刷新任务"
+                size="icon-xs"
+                onClick={() => protocolClient.requestTasks(50)}
+              >
+                <History />
+              </IconButton>
+              <IconButton label="打开设置" size="icon-xs" onClick={protocolClient.openSettingsPanel}>
+                <Settings />
+              </IconButton>
+              {/* TODO: 明确首页新会话动作后再接入，当前首页 composer 已承载新会话输入。 */}
+              <IconButton label="新会话" size="icon-xs">
+                <SquarePen />
+              </IconButton>
+            </>
+          }
+        />
+      </header>
 
+      <div className="shrink-0 px-2">
         {!showAllTasks ? (
-          <div className="mt-2 space-y-0.5">
+          <div className="mt-1 space-y-0.5">
             {visibleTasks.map((task) => (
-              <TaskRow key={`${task.sessionPath}:${task.id}`} task={task} onOpen={onLeaveHome} />
+              <TaskRow key={`${task.sessionPath}:${task.id}`} task={task} onOpen={onOpenTask} />
             ))}
           </div>
         ) : null}
 
         <Button
           className={cn(
-            'text-muted-foreground/75 hover:text-muted-foreground mt-1 h-6 px-0 hover:bg-transparent dark:hover:bg-transparent',
+            'text-muted-foreground/75 hover:text-muted-foreground mt-0.5 h-5 px-0 text-[11px] hover:bg-transparent dark:hover:bg-transparent',
             pending && 'opacity-70',
           )}
           size="xs"
@@ -70,18 +90,18 @@ export function TaskHome({ onLeaveHome }: TaskHomeProps) {
         >
           {pending ? '加载中' : showAllTasks ? '收起' : `查看全部（${taskCount} 个）`}
         </Button>
-      </header>
+      </div>
 
       <section
         className={cn(
           'min-h-0 flex-1 px-3',
-          showAllTasks ? 'overflow-y-auto py-1' : 'grid place-items-center',
+          showAllTasks ? 'overflow-y-auto px-2 py-1' : 'grid place-items-center',
         )}
       >
         {showAllTasks ? (
           <div className="space-y-0.5">
             {visibleTasks.map((task) => (
-              <TaskRow key={`${task.sessionPath}:${task.id}`} task={task} onOpen={onLeaveHome} />
+              <TaskRow key={`${task.sessionPath}:${task.id}`} task={task} onOpen={onOpenTask} />
             ))}
           </div>
         ) : (
@@ -95,24 +115,29 @@ export function TaskHome({ onLeaveHome }: TaskHomeProps) {
       </section>
 
       <footer className="shrink-0 px-3 pb-3">
-        <ChatComposer placeholder="随心输入" onSubmitMessage={onLeaveHome} />
+        <ChatComposer
+          draftSessionId={HOME_COMPOSER_SESSION_ID}
+          mode="newSession"
+          placeholder="随心输入"
+          submitDisabled={newSessionPending}
+          onBeginNewSessionRequest={onBeginNewSessionRequest}
+        />
       </footer>
     </main>
   );
 }
 
-function TaskRow({ task, onOpen }: { task: ScoutTaskItem; onOpen?: () => void }) {
+function TaskRow({ task, onOpen }: { task: ScoutTaskItem; onOpen: (task: ScoutTaskItem) => void }) {
   return (
     <button
-      className="hover:bg-muted dark:hover:bg-muted/50 flex w-full items-baseline gap-3 rounded-md px-0.5 py-1 text-left outline-none"
+      className="hover:bg-muted dark:hover:bg-muted/50 flex w-full items-baseline gap-2 rounded-md px-0.5 py-0.5 text-left outline-none"
       type="button"
       onClick={() => {
-        protocolClient.openTask(task);
-        onOpen?.();
+        onOpen(task);
       }}
     >
-      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{task.title}</span>
-      <span className="text-muted-foreground shrink-0 text-xs">{formatRelativeTime(task)}</span>
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{task.title}</span>
+      <span className="text-muted-foreground shrink-0 text-[11px]">{formatRelativeTime(task)}</span>
     </button>
   );
 }

@@ -6,14 +6,17 @@ import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
+type IconButtonSize = 'icon-xs' | 'icon-sm' | 'icon' | 'icon-lg';
+
 interface IconButtonProps {
   label: string;
   children: ReactNode;
   disabled?: boolean;
+  size?: IconButtonSize;
   onClick?: () => void;
 }
 
-export function IconButton({ label, children, disabled, onClick }: IconButtonProps) {
+export function IconButton({ label, children, disabled, size = 'icon-sm', onClick }: IconButtonProps) {
   return (
     <TooltipProvider>
       <Tooltip>
@@ -21,7 +24,7 @@ export function IconButton({ label, children, disabled, onClick }: IconButtonPro
           <Button
             aria-label={label}
             disabled={disabled}
-            size="icon-sm"
+            size={size}
             type="button"
             variant="ghost"
             onClick={onClick}

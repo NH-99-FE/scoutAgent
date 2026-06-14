@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { ReactNode } from 'react';
-import { ArrowUp, CornerDownLeft, Square } from 'lucide-react';
+import { ArrowUp, CornerDownLeft, LoaderCircle, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
@@ -11,42 +11,54 @@ interface SendButtonProps {
   canSubmit: boolean;
   canStop: boolean;
   confirmAbort?: boolean;
+  isPending?: boolean;
   showStop: boolean;
   showStreamingSendTooltip?: boolean;
   onStop: () => void;
+}
+
+interface SendButtonState {
+  disabled: boolean;
+  icon: ReactNode;
+  label: string;
+  showShortcuts: boolean;
+  type: 'button' | 'submit';
+  action: 'stop' | 'submit';
 }
 
 export function SendButton({
   canSubmit,
   canStop,
   confirmAbort = false,
+  isPending = false,
   showStop,
   showStreamingSendTooltip = false,
   onStop,
 }: SendButtonProps) {
+  const state = getSendButtonState({
+    canStop,
+    canSubmit,
+    confirmAbort,
+    isPending,
+    showStop,
+    showStreamingSendTooltip,
+  });
+
   const button = (
     <Button
-      aria-label={confirmAbort ? '确认中断' : showStop ? '停止' : '发送'}
+      aria-label={state.label}
       className="rounded-full"
-      disabled={showStop ? !canStop : !canSubmit}
+      disabled={state.disabled}
       size="icon-sm"
-      type={showStop ? 'button' : 'submit'}
+      type={state.type}
       variant="default"
-      onClick={showStop ? onStop : undefined}
+      onClick={state.action === 'stop' ? onStop : undefined}
     >
-      {showStop ? (
-        confirmAbort ? (
-          <span className="text-[10px] leading-none font-semibold">Esc</span>
-        ) : (
-          <Square className="size-2.5 fill-current stroke-current" strokeWidth={3} />
-        )
-      ) : (
-        <ArrowUp />
-      )}
+      {state.icon}
     </Button>
   );
 
-  if (!showStreamingSendTooltip || showStop) {
+  if (!state.showShortcuts) {
     return button;
   }
 
@@ -61,6 +73,57 @@ export function SendButton({
       </Tooltip>
     </TooltipProvider>
   );
+}
+
+function getSendButtonState({
+  canStop,
+  canSubmit,
+  confirmAbort,
+  isPending,
+  showStop,
+  showStreamingSendTooltip,
+}: {
+  canStop: boolean;
+  canSubmit: boolean;
+  confirmAbort: boolean;
+  isPending: boolean;
+  showStop: boolean;
+  showStreamingSendTooltip: boolean;
+}): SendButtonState {
+  if (isPending) {
+    return {
+      action: 'submit',
+      disabled: true,
+      icon: <LoaderCircle className="animate-spin" />,
+      label: '发送中',
+      showShortcuts: false,
+      type: 'submit',
+    };
+  }
+
+  if (showStop) {
+    return {
+      action: 'stop',
+      disabled: !canStop,
+      icon: confirmAbort ? (
+        <span className="text-[10px] leading-none font-semibold">Esc</span>
+      ) : (
+        <Square className="size-2.5 fill-current stroke-current" strokeWidth={3} />
+      ),
+      label: confirmAbort ? '确认中断' : '停止',
+      showShortcuts: false,
+      type: 'button',
+    };
+  }
+
+  return {
+    action: 'submit',
+    disabled: !canSubmit,
+    icon: <ArrowUp />,
+    label: '发送',
+    showShortcuts: showStreamingSendTooltip,
+    type: 'submit',
+  };
 }
 
 function ShortcutRow({ label, shortcut }: { label: string; shortcut: ReactNode }) {
