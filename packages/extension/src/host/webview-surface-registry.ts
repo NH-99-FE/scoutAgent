@@ -5,12 +5,14 @@
 
 import * as vscode from 'vscode';
 import type { ExtensionMessage, WebviewMessage } from '@scout-agent/shared';
+import { validateWebviewMessage } from './protocol/protocol-guards.ts';
 import type { ScoutWebviewSurface } from './webview-surface.ts';
 
 // ---------- 类型 ----------
 
 export interface WebviewSurfaceRegistryOptions {
   onMessage: (message: WebviewMessage, surface: ScoutWebviewSurface) => void;
+  onInvalidMessage?: (message: string, surface: ScoutWebviewSurface) => void;
 }
 
 interface WebviewBinding {
@@ -22,15 +24,29 @@ interface WebviewBinding {
 
 export class WebviewSurfaceRegistry implements vscode.Disposable {
   private readonly onMessage: (message: WebviewMessage, surface: ScoutWebviewSurface) => void;
+  private readonly onInvalidMessage?: (message: string, surface: ScoutWebviewSurface) => void;
   private readonly bindings = new Map<ScoutWebviewSurface, Set<WebviewBinding>>();
 
   constructor(options: WebviewSurfaceRegistryOptions) {
     this.onMessage = options.onMessage;
+    this.onInvalidMessage = options.onInvalidMessage;
   }
 
   bindWebview(webview: vscode.Webview, surface: ScoutWebviewSurface = 'chat'): vscode.Disposable {
-    const listener = webview.onDidReceiveMessage((message: WebviewMessage) => {
-      this.onMessage(message, surface);
+    const listener = webview.onDidReceiveMessage((message: unknown) => {
+      const result = validateWebviewMessage(message);
+      if (result.ok && result.message) {
+        this.onMessage(result.message, surface);
+        return;
+      }
+      this.onInvalidMessage?.(result.error, surface);
+      if (result.requestId) {
+        void webview.postMessage({
+          type: 'protocol_response',
+          requestId: result.requestId,
+          error: { code: 'invalid_message', message: result.error },
+        });
+      }
     });
     const binding: WebviewBinding = { webview, listener };
     const bindings = this.bindings.get(surface) ?? new Set<WebviewBinding>();

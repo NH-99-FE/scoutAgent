@@ -4,8 +4,7 @@
 
 import type { ExtensionEventMessage, ScoutCommandInfo } from '@scout-agent/shared';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import { registerPayloadHandler, type ProtocolResponder, type UiProtocolHost } from './types.ts';
+import type { ProtocolResponder, UiProtocolHost } from './types.ts';
 
 // ---------- 常量 ----------
 
@@ -101,7 +100,7 @@ const BUILTIN_WEBVIEW_COMMANDS: ScoutCommandInfo[] = [
 
 export interface UiProtocolServiceOptions {
   getExtensionCommands: () => ScoutCommandInfo[];
-  postMessage: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
+  publishEvent: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
 }
@@ -110,7 +109,7 @@ export interface UiProtocolServiceOptions {
 
 export class UiProtocolService implements UiProtocolHost {
   private readonly getExtensionCommands: () => ScoutCommandInfo[];
-  private readonly postMessage: (
+  private readonly publishEvent: (
     message: ExtensionEventMessage,
     surface?: ScoutWebviewSurface,
   ) => void;
@@ -119,13 +118,17 @@ export class UiProtocolService implements UiProtocolHost {
 
   constructor(options: UiProtocolServiceOptions) {
     this.getExtensionCommands = options.getExtensionCommands;
-    this.postMessage = options.postMessage;
+    this.publishEvent = options.publishEvent;
     this.openSettingsPanelCallback = options.openSettingsPanel;
     this.openTreePanelCallback = options.openTreePanel;
   }
 
-  requestCommands(surface?: ScoutWebviewSurface): void {
-    this.postMessage({ type: 'commands_data', commands: this.getCommands() }, surface);
+  requestCommands(respond: ProtocolResponder): void {
+    respond({ type: 'commands_result', commands: this.getCommands() });
+  }
+
+  pushCommands(surface?: ScoutWebviewSurface): void {
+    this.publishEvent({ type: 'commands_update', commands: this.getCommands() }, surface);
   }
 
   async openSettingsPanel(respond: ProtocolResponder): Promise<void> {
@@ -173,34 +176,4 @@ export class UiProtocolService implements UiProtocolHost {
   getCommands(): ScoutCommandInfo[] {
     return [...BUILTIN_WEBVIEW_COMMANDS, ...this.getExtensionCommands()];
   }
-}
-
-export function registerUiService(server: ProtocolServer, host: UiProtocolHost): void {
-  registerPayloadHandler(
-    server,
-    'ui',
-    'request_commands',
-    'request_commands',
-    (_message, context) => {
-      host.requestCommands(context.surface);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'ui',
-    'open_settings_panel',
-    'open_settings_panel',
-    async (_message, context) => {
-      await host.openSettingsPanel(context.respond);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'ui',
-    'open_tree_panel',
-    'open_tree_panel',
-    async (_message, context) => {
-      await host.openTreePanel(context.respond);
-    },
-  );
 }

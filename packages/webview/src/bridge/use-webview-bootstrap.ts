@@ -18,18 +18,6 @@ export function useWebviewBootstrap(): WebviewSurface {
     const stopRouter = startExtensionMessageRouter();
     protocolClient.ready();
 
-    if (surface === 'chat') {
-      protocolClient.requestTasks(3);
-      protocolClient.requestSessions();
-    }
-    if (surface === 'settings') {
-      protocolClient.requestConfig();
-      protocolClient.requestState();
-    }
-    if (surface === 'tree') {
-      protocolClient.requestTree();
-    }
-
     return () => {
       stopRouter();
       stopThemeSync();

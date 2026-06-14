@@ -11,8 +11,7 @@ import type {
 import type { ConfigManager } from '../../../config-manager.ts';
 import type { ExtensionSessionCoordinator } from '../../session-coordinator.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import { registerPayloadHandler, type StateProtocolHost } from './types.ts';
+import type { ProtocolResponder, StateProtocolHost } from './types.ts';
 
 // ---------- 类型 ----------
 
@@ -21,7 +20,7 @@ export interface StateProtocolServiceOptions {
   configManager: ConfigManager;
   getCommands: () => ScoutCommandInfo[];
   getBusyState: () => ScoutBusyState;
-  postMessage: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
+  publishEvent: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
 }
 
 // ---------- Service ----------
@@ -31,7 +30,7 @@ export class StateProtocolService implements StateProtocolHost {
   private readonly configManager: ConfigManager;
   private readonly getCommands: () => ScoutCommandInfo[];
   private readonly getBusyState: () => ScoutBusyState;
-  private readonly postMessage: (
+  private readonly publishEvent: (
     message: ExtensionEventMessage,
     surface?: ScoutWebviewSurface,
   ) => void;
@@ -41,36 +40,38 @@ export class StateProtocolService implements StateProtocolHost {
     this.configManager = options.configManager;
     this.getCommands = options.getCommands;
     this.getBusyState = options.getBusyState;
-    this.postMessage = options.postMessage;
+    this.publishEvent = options.publishEvent;
   }
 
   async pushState(surface?: ScoutWebviewSurface): Promise<void> {
-    this.postMessage({ type: 'state_update', state: await this.buildState() }, surface);
+    this.publishEvent({ type: 'state_update', state: await this.buildState() }, surface);
+  }
+
+  async requestState(respond: ProtocolResponder): Promise<void> {
+    respond({ type: 'state_result', state: await this.buildState() });
   }
 
   pushQueueState(surface?: ScoutWebviewSurface): void {
-    this.postMessage(
+    this.publishEvent(
       { type: 'queue_update', queueState: this.sessionManager.getQueueState() },
       surface,
     );
   }
 
   pushConfig(surface?: ScoutWebviewSurface): void {
-    this.postMessage(
+    this.publishEvent(
       { type: 'config_update', config: this.configManager.getScoutConfig() },
       surface,
     );
   }
 
-  async requestContextUsage(surface?: ScoutWebviewSurface): Promise<void> {
+  async requestContextUsage(respond: ProtocolResponder): Promise<void> {
     const sessionStats = await this.sessionManager.getSessionStats();
-    this.postMessage(
-      {
-        type: 'context_usage_update',
-        contextUsage: sessionStats?.contextUsage,
-      },
-      surface,
-    );
+    respond({ type: 'context_usage_result', contextUsage: sessionStats?.contextUsage });
+  }
+
+  async getState(): Promise<ScoutWebviewState> {
+    return this.buildState();
   }
 
   private async buildState(): Promise<ScoutWebviewState> {
@@ -102,25 +103,4 @@ export class StateProtocolService implements StateProtocolHost {
       modelFallbackMessage: this.sessionManager.modelFallbackMessage,
     };
   }
-}
-
-export function registerStateService(server: ProtocolServer, host: StateProtocolHost): void {
-  registerPayloadHandler(
-    server,
-    'state',
-    'request_state',
-    'request_state',
-    async (_message, context) => {
-      await host.pushState(context.surface);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'state',
-    'request_context_usage',
-    'request_context_usage',
-    async (_message, context) => {
-      await host.requestContextUsage(context.surface);
-    },
-  );
 }

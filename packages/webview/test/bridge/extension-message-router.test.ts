@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { routeExtensionMessage, routeTaskHistoryData } from '@/bridge/extension-message-router';
+import { projectTaskHistoryUpdate } from '@/bridge/extension-event-projector';
+import { routeExtensionMessage } from '@/bridge/extension-message-router';
+import { projectProtocolResponsePayload } from '@/bridge/protocol-response-projector';
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { useConfigStore } from '@/store/config-store';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
@@ -71,7 +73,7 @@ describe('routeExtensionMessage', () => {
 
   it('routes tree and task data into their stores', () => {
     routeExtensionMessage({
-      type: 'tree_data',
+      type: 'tree_update',
       leafId: 'leaf-1',
       tree: [
         {
@@ -84,7 +86,7 @@ describe('routeExtensionMessage', () => {
       ],
     });
     routeExtensionMessage({
-      type: 'task_history_data',
+      type: 'task_history_update',
       query: '',
       purpose: 'recent',
       tasks: [
@@ -105,9 +107,9 @@ describe('routeExtensionMessage', () => {
       queryToken: 'history-1',
       offset: 0,
     });
-    routeTaskHistoryData(
+    projectTaskHistoryUpdate(
       {
-        type: 'task_history_data',
+        type: 'task_history_update',
         query: '',
         purpose: 'panel',
         tasks: [
@@ -227,7 +229,7 @@ describe('routeExtensionMessage', () => {
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
     useUiStore.getState().actions.beginNewSessionRequest();
 
-    routeExtensionMessage({ type: 'new_session_result', success: true });
+    projectProtocolResponsePayload({ type: 'new_session_result', success: true });
 
     expect(useUiStore.getState().chatView).toBe('detail');
     expect(useUiStore.getState().newSessionPending).toBe(false);
@@ -240,7 +242,7 @@ describe('routeExtensionMessage', () => {
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
     useUiStore.getState().actions.beginNewSessionRequest();
 
-    routeExtensionMessage({
+    projectProtocolResponsePayload({
       type: 'new_session_result',
       success: false,
       error: 'failed',
@@ -262,7 +264,7 @@ describe('routeExtensionMessage', () => {
     useComposerStore.getState().actions.clearDraft(HOME_COMPOSER_SESSION_ID);
     useUiStore.getState().actions.beginNewSessionRequest();
 
-    routeExtensionMessage({
+    projectProtocolResponsePayload({
       type: 'new_session_result',
       success: false,
       error: 'failed',
@@ -283,7 +285,7 @@ describe('routeExtensionMessage', () => {
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'new draft');
     useUiStore.getState().actions.beginNewSessionRequest();
 
-    routeExtensionMessage({
+    projectProtocolResponsePayload({
       type: 'new_session_result',
       success: false,
       error: 'failed',
@@ -311,12 +313,12 @@ describe('routeExtensionMessage', () => {
     useUiStore.getState().actions.beginOpenTask('/sessions/one.jsonl');
     useUiStore.getState().actions.beginOpenTask('/sessions/two.jsonl');
 
-    routeExtensionMessage({
+    projectProtocolResponsePayload({
       type: 'open_task_result',
       sessionPath: '/sessions/one.jsonl',
       success: true,
     });
-    routeExtensionMessage({
+    projectProtocolResponsePayload({
       type: 'open_task_result',
       sessionPath: '/sessions/two.jsonl',
       success: true,

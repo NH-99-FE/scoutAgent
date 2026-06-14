@@ -43,7 +43,7 @@ describe('createScoutProtocolHostServices', () => {
     const replacementTask = {
       requestTaskHistory: vi.fn(async (_message, response) => {
         response({
-          type: 'task_history_data',
+          type: 'task_history_result',
           query: 'alpha',
           tasks: [],
           offset: 0,
@@ -61,7 +61,7 @@ describe('createScoutProtocolHostServices', () => {
 
     expect(replacementTask.requestTaskHistory).toHaveBeenCalledTimes(1);
     expect(respond).toHaveBeenCalledWith({
-      type: 'task_history_data',
+      type: 'task_history_result',
       query: 'alpha',
       tasks: [],
       offset: 0,

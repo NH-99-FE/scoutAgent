@@ -8,6 +8,7 @@ import type { ConfigManager } from '../../config-manager.ts';
 import type { ExtensionSessionCoordinator } from '../session-coordinator.ts';
 import type { SessionIndex } from '../session-index.ts';
 import type { ScoutWebviewSurface } from '../webview-surface.ts';
+import { DomainEventPublisher } from './domain-event-publisher.ts';
 import { SessionEventForwarder } from './session-event-forwarder.ts';
 import { type ScoutProtocolServices } from './services/index.ts';
 import { ConfigProtocolService } from './services/config-service.ts';
@@ -41,6 +42,7 @@ export interface ScoutProtocolHostServices {
   tree: TreeProtocolService;
   mention: MentionProtocolService;
   ui: UiProtocolService;
+  eventPublisher: DomainEventPublisher;
   sessionEventForwarder: SessionEventForwarder;
   protocolServices: ScoutProtocolServices;
 }
@@ -51,6 +53,9 @@ export function createScoutProtocolHostServices(
   options: ScoutProtocolHostServicesOptions,
 ): ScoutProtocolHostServices {
   const bundle = {} as ScoutProtocolHostServices;
+  bundle.eventPublisher = new DomainEventPublisher({
+    postMessage: (message, surface) => options.postMessage(message, surface),
+  });
 
   bundle.task = new TaskProtocolService({
     sessionIndex: options.sessionIndex,
@@ -60,13 +65,12 @@ export function createScoutProtocolHostServices(
 
   bundle.mention = new MentionProtocolService({
     cwd: options.cwd,
-    postMessage: options.postMessage,
     logError: options.log,
   });
 
   bundle.ui = new UiProtocolService({
     getExtensionCommands: () => options.sessionManager.getCommands(),
-    postMessage: options.postMessage,
+    publishEvent: (message, surface) => bundle.eventPublisher.publish(message, surface),
     openSettingsPanel: options.openSettingsPanel,
     openTreePanel: options.openTreePanel,
   });
@@ -76,15 +80,15 @@ export function createScoutProtocolHostServices(
     configManager: options.configManager,
     getCommands: () => bundle.ui.getCommands(),
     getBusyState: () => bundle.sessionEventForwarder.getBusyState(),
-    postMessage: options.postMessage,
+    publishEvent: (message, surface) => bundle.eventPublisher.publish(message, surface),
   });
 
   bundle.tree = new TreeProtocolService({
     sessionManager: options.sessionManager,
     sessionIndex: options.sessionIndex,
     pushState: (surface) => bundle.state.pushState(surface),
-    requestSessions: (surface) => bundle.session.requestSessions(surface),
-    postMessage: options.postMessage,
+    requestSessions: (surface) => bundle.session.pushSessionsUpdate(surface),
+    publishEvent: (message, surface) => bundle.eventPublisher.publish(message, surface),
   });
 
   bundle.session = new SessionProtocolService({
@@ -93,43 +97,61 @@ export function createScoutProtocolHostServices(
     sessionIndex: options.sessionIndex,
     pushState: (surface) => bundle.state.pushState(surface),
     pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
-    requestRecentTasks: () =>
-      bundle.task.requestTaskHistory(
-        {
-          type: 'request_task_history',
-          query: '',
-          limit: 3,
-          offset: 0,
-          purpose: 'recent',
-        },
-        (payload) => options.postMessage(payload),
-      ),
-    postMessage: options.postMessage,
+    requestRecentTasks: async () => {
+      const result = await bundle.task.getTaskHistoryResult({
+        type: 'request_task_history',
+        query: '',
+        limit: 3,
+        offset: 0,
+        purpose: 'recent',
+      });
+      bundle.eventPublisher.publishForProtocol('new_session_message', {
+        type: 'task_history_update',
+        query: result.query,
+        purpose: result.purpose,
+        tasks: result.tasks,
+        offset: result.offset,
+        hasMore: result.hasMore,
+        nextOffset: result.nextOffset,
+      });
+    },
+    publishEvent: (message, surface) => bundle.eventPublisher.publish(message, surface),
     logError: options.log,
   });
 
   bundle.config = new ConfigProtocolService({
     sessionManager: options.sessionManager,
+    configManager: options.configManager,
     sessionIndex: options.sessionIndex,
     pushConfig: (surface) => bundle.state.pushConfig(surface),
-    requestCommands: (surface) => bundle.ui.requestCommands(surface),
+    requestCommands: (surface) => bundle.ui.pushCommands(surface),
     pushState: (surface) => bundle.state.pushState(surface),
     pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
   });
 
   bundle.lifecycle = new LifecycleProtocolService({
     sessionManager: options.sessionManager,
-    pushConfig: (surface) => bundle.config.pushConfig(surface),
-    pushState: (surface) => bundle.state.pushState(surface),
-    requestCommands: (surface) => bundle.ui.requestCommands(surface),
-    requestSessions: (surface) => bundle.session.requestSessions(surface),
-    pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
+    getConfig: () => bundle.config.getConfig(),
+    getState: () => bundle.state.getState(),
+    getCommands: () => bundle.ui.getCommands(),
+    getSessions: () => bundle.session.getSessionItems(),
+    getRecentTasks: async () => {
+      const result = await bundle.task.getTaskHistoryResult({
+        type: 'request_task_history',
+        query: '',
+        limit: 3,
+        offset: 0,
+        purpose: 'recent',
+      });
+      return result.tasks;
+    },
+    getTreeResult: () => bundle.tree.getTreeResult(),
     logReady: (surface) => options.log(`[scout] Webview ready: ${surface}`),
   });
 
   bundle.sessionEventForwarder = new SessionEventForwarder({
     isStreaming: () => options.sessionManager.isStreaming,
-    postMessage: (message) => options.postMessage(message),
+    publishEvent: (message) => bundle.eventPublisher.publish(message),
     pushState: () => bundle.state.pushState(),
     pushQueueState: () => bundle.state.pushQueueState(),
     pushTreeData: () => bundle.tree.pushTreeData(),
@@ -137,14 +159,16 @@ export function createScoutProtocolHostServices(
 
   bundle.protocolServices = {
     lifecycle: {
-      ready: (surface) => bundle.lifecycle.ready(surface),
+      ready: (surface, respond) => bundle.lifecycle.ready(surface, respond),
     },
     state: {
       pushState: (surface) => bundle.state.pushState(surface),
-      requestContextUsage: (surface) => bundle.state.requestContextUsage(surface),
+      requestState: (respond) => bundle.state.requestState(respond),
+      requestContextUsage: (respond) => bundle.state.requestContextUsage(respond),
     },
     config: {
       pushConfig: (surface) => bundle.config.pushConfig(surface),
+      requestConfig: (respond) => bundle.config.requestConfig(respond),
       setModel: (message) => bundle.config.setModel(message),
       setThinkingLevel: (message) => bundle.config.setThinkingLevel(message),
       setActiveTools: (message) => bundle.config.setActiveTools(message),
@@ -160,7 +184,7 @@ export function createScoutProtocolHostServices(
       compact: (message) => bundle.session.compact(message),
       continueSession: (message) => bundle.session.continueSession(message),
       clearConversation: () => bundle.session.clearConversation(),
-      requestSessions: (surface) => bundle.session.requestSessions(surface),
+      requestSessions: (respond) => bundle.session.requestSessions(respond),
       openTask: (message, respond) => bundle.session.openTask(message, respond),
       restoreSession: (message, respond) => bundle.session.restoreSession(message, respond),
       pickImportSession: (respond) => bundle.session.pickImportSession(respond),
@@ -173,17 +197,17 @@ export function createScoutProtocolHostServices(
       requestTaskHistory: (message, respond) => bundle.task.requestTaskHistory(message, respond),
     },
     tree: {
-      forkSession: (message, surface) => bundle.tree.forkSession(message, surface),
-      requestTree: (surface) => bundle.tree.requestTree(surface),
+      forkSession: (message, respond) => bundle.tree.forkSession(message, respond),
+      requestTree: (respond) => bundle.tree.requestTree(respond),
       navigateTree: (message, respond) => bundle.tree.navigateTree(message, respond),
       setLabel: (message, respond) => bundle.tree.setLabel(message, respond),
     },
     mention: {
-      requestFileMentions: (message, surface) =>
-        bundle.mention.requestFileMentions(message, surface),
+      requestFileMentions: (message, respond) =>
+        bundle.mention.requestFileMentions(message, respond),
     },
     ui: {
-      requestCommands: (surface) => bundle.ui.requestCommands(surface),
+      requestCommands: (respond) => bundle.ui.requestCommands(respond),
       openSettingsPanel: (respond) => bundle.ui.openSettingsPanel(respond),
       openTreePanel: (respond) => bundle.ui.openTreePanel(respond),
     },

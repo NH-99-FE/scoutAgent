@@ -12,13 +12,7 @@ import type {
 } from '../../session-coordinator.ts';
 import type { SessionIndex } from '../../session-index.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import {
-  registerPayloadHandler,
-  type ProtocolPayload,
-  type ProtocolResponder,
-  type SessionProtocolHost,
-} from './types.ts';
+import { type ProtocolPayload, type ProtocolResponder, type SessionProtocolHost } from './types.ts';
 
 // ---------- 类型 ----------
 
@@ -29,7 +23,7 @@ export interface SessionProtocolServiceOptions {
   pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
   pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
   requestRecentTasks: () => Promise<void>;
-  postMessage: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
+  publishEvent: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
   logError: (message: string) => void;
 }
 
@@ -49,7 +43,7 @@ export class SessionProtocolService implements SessionProtocolHost {
   private readonly pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
   private readonly pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
   private readonly requestRecentTasks: () => Promise<void>;
-  private readonly postMessage: (
+  private readonly publishEvent: (
     message: ExtensionEventMessage,
     surface?: ScoutWebviewSurface,
   ) => void;
@@ -62,7 +56,7 @@ export class SessionProtocolService implements SessionProtocolHost {
     this.pushState = options.pushState;
     this.pushTreeData = options.pushTreeData;
     this.requestRecentTasks = options.requestRecentTasks;
-    this.postMessage = options.postMessage;
+    this.publishEvent = options.publishEvent;
     this.logError = options.logError;
   }
 
@@ -152,7 +146,7 @@ export class SessionProtocolService implements SessionProtocolHost {
     try {
       await this.sessionManager.compact(message.customInstructions);
     } catch (error) {
-      this.postMessage({
+      this.publishEvent({
         type: 'notification',
         level: 'error',
         message: error instanceof Error ? error.message : String(error),
@@ -171,10 +165,18 @@ export class SessionProtocolService implements SessionProtocolHost {
     this.sessionIndex.invalidate();
   }
 
-  async requestSessions(surface?: ScoutWebviewSurface): Promise<void> {
+  async requestSessions(respond: ProtocolResponder): Promise<void> {
+    respond({ type: 'sessions_result', sessions: await this.getSessionItems() });
+  }
+
+  async pushSessionsUpdate(surface?: ScoutWebviewSurface): Promise<void> {
+    this.publishEvent({ type: 'sessions_update', sessions: await this.getSessionItems() }, surface);
+  }
+
+  async getSessionItems(): Promise<ScoutSessionListItem[]> {
     try {
       const sessions = await this.listAvailableSessions();
-      const items: ScoutSessionListItem[] = sessions.map((session) => ({
+      return sessions.map((session) => ({
         id: session.id,
         path: session.path,
         cwd: session.cwd,
@@ -186,12 +188,11 @@ export class SessionProtocolService implements SessionProtocolHost {
         parentSessionPath: session.parentSessionPath,
         isCurrent: session.path === this.sessionManager.sessionFile,
       }));
-      this.postMessage({ type: 'sessions_data', sessions: items }, surface);
     } catch (error) {
-      this.postMessage({ type: 'sessions_data', sessions: [] }, surface);
       this.logError(
         `[scout] List sessions failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      return [];
     }
   }
 
@@ -354,7 +355,7 @@ export class SessionProtocolService implements SessionProtocolHost {
       this.sessionIndex.invalidate();
       respond({ type: 'set_session_name_result', success: true });
       await this.pushState();
-      await this.requestSessions();
+      await this.pushSessionsUpdate();
     } catch (error) {
       respond({
         type: 'set_session_name_result',
@@ -378,7 +379,7 @@ export class SessionProtocolService implements SessionProtocolHost {
       })
       .catch((error) => {
         if (!operation.isLatest()) return;
-        this.postMessage({
+        this.publishEvent({
           type: 'notification',
           level: 'error',
           message: error instanceof Error ? error.message : String(error),
@@ -545,118 +546,4 @@ export class SessionProtocolService implements SessionProtocolHost {
     });
     return selected?.[0]?.fsPath;
   }
-}
-
-export function registerSessionService(server: ProtocolServer, host: SessionProtocolHost): void {
-  registerPayloadHandler(server, 'session', 'user_message', 'user_message', async (message) => {
-    await host.userMessage(message);
-  });
-  registerPayloadHandler(
-    server,
-    'session',
-    'new_session_message',
-    'new_session_message',
-    async (message, context) => {
-      await host.newSessionMessage(message, context.respond);
-    },
-  );
-  registerPayloadHandler(server, 'session', 'cancel_follow_up', 'cancel_follow_up', (message) => {
-    host.cancelFollowUp(message);
-  });
-  registerPayloadHandler(
-    server,
-    'session',
-    'promote_follow_up',
-    'promote_follow_up',
-    async (message) => {
-      await host.promoteFollowUp(message);
-    },
-  );
-  registerPayloadHandler(server, 'session', 'abort', 'abort', () => {
-    host.abort();
-  });
-  registerPayloadHandler(server, 'session', 'abort_retry', 'abort_retry', () => {
-    host.abortRetry();
-  });
-  registerPayloadHandler(server, 'session', 'compact', 'compact', async (message) => {
-    await host.compact(message);
-  });
-  registerPayloadHandler(
-    server,
-    'session',
-    'continue_session',
-    'continue_session',
-    async (message) => {
-      await host.continueSession(message);
-    },
-  );
-  registerPayloadHandler(server, 'session', 'clear_conversation', 'clear_conversation', () => {
-    host.clearConversation();
-  });
-  registerPayloadHandler(
-    server,
-    'session',
-    'request_sessions',
-    'request_sessions',
-    async (_message, context) => {
-      await host.requestSessions(context.surface);
-    },
-  );
-  registerPayloadHandler(server, 'session', 'open_task', 'open_task', async (message, context) => {
-    await host.openTask(message, context.respond);
-  });
-  registerPayloadHandler(
-    server,
-    'session',
-    'restore_session',
-    'restore_session',
-    async (message, context) => {
-      await host.restoreSession(message, context.respond);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'session',
-    'pick_import_session',
-    'pick_import_session',
-    async (_message, context) => {
-      await host.pickImportSession(context.respond);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'session',
-    'import_session',
-    'import_session',
-    async (message, context) => {
-      await host.importSession(message, context.respond);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'session',
-    'delete_session',
-    'delete_session',
-    async (message, context) => {
-      await host.deleteSession(message, context.respond);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'session',
-    'export_session',
-    'export_session',
-    (message, context) => {
-      host.exportSession(message, context.respond);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'session',
-    'set_session_name',
-    'set_session_name',
-    async (message, context) => {
-      await host.setSessionName(message, context.respond);
-    },
-  );
 }

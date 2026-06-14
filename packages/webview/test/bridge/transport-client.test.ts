@@ -5,13 +5,14 @@ import {
   resetProtocolTransport,
   routeProtocolResponse,
   sendProtocolRequest,
+  setDefaultProtocolErrorHandler,
 } from '@/bridge/transport-client';
-import type { ExtensionResponsePayload } from '@scout-agent/shared';
+import type { ScoutProtocolResponsePayload } from '@scout-agent/shared';
 
 const postMessage = vi.fn();
 
-const TASK_HISTORY_RESPONSE: ExtensionResponsePayload = {
-  type: 'task_history_data',
+const TASK_HISTORY_RESPONSE: ScoutProtocolResponsePayload = {
+  type: 'task_history_result',
   query: '',
   purpose: 'panel',
   tasks: [],
@@ -29,7 +30,7 @@ function sendTaskHistoryRequest(onResponse = vi.fn()): string {
     },
     {
       service: 'task',
-      method: 'search',
+      method: 'request_task_history',
       onResponse,
     },
   );
@@ -60,7 +61,7 @@ describe('transport-client', () => {
       type: 'protocol_request',
       requestId,
       service: 'task',
-      method: 'search',
+      method: 'request_task_history',
       payload: {
         type: 'request_task_history',
         query: '',
@@ -117,5 +118,18 @@ describe('transport-client', () => {
 
     expect(postMessage).not.toHaveBeenCalled();
     expect(onResponse).not.toHaveBeenCalled();
+  });
+
+  it('routes protocol errors to the default handler when no pending callback exists', () => {
+    const onError = vi.fn();
+    setDefaultProtocolErrorHandler(onError);
+
+    routeProtocolResponse({
+      type: 'protocol_response',
+      requestId: 'missing-request',
+      error: { code: 'handler_failed', message: 'boom' },
+    });
+
+    expect(onError).toHaveBeenCalledWith('boom', 'handler_failed');
   });
 });

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ScoutProtocolService, WebviewRequestPayload } from '@scout-agent/shared';
+import {
+  SCOUT_PROTOCOL,
+  type ScoutProtocolService,
+  type WebviewRequestPayload,
+} from '@scout-agent/shared';
 import { ProtocolServer } from '../../../src/host/protocol/protocol-server.ts';
 import {
   registerScoutProtocolServices,
@@ -91,11 +95,11 @@ const PAYLOAD_CASES = [
   protocolCase({ type: 'request_commands' }, { service: 'ui', method: 'request_commands' }),
   protocolCase(
     { type: 'request_file_mentions', query: 'src', limit: 10 },
-    { service: 'mention', method: 'search' },
+    { service: 'mention', method: 'request_file_mentions' },
   ),
   protocolCase(
     { type: 'request_task_history', query: '', offset: 0, purpose: 'panel' },
-    { service: 'task', method: 'search' },
+    { service: 'task', method: 'request_task_history' },
   ),
   protocolCase(
     {
@@ -148,10 +152,12 @@ function makeServices(): ScoutProtocolServices {
     },
     state: {
       pushState: vi.fn(async () => undefined),
+      requestState: vi.fn(async () => undefined),
       requestContextUsage: vi.fn(async () => undefined),
     },
     config: {
       pushConfig: vi.fn(),
+      requestConfig: vi.fn(),
       setModel: vi.fn(async () => undefined),
       setThinkingLevel: vi.fn(async () => undefined),
       setActiveTools: vi.fn(),
@@ -201,7 +207,7 @@ function makeServices(): ScoutProtocolServices {
     task: {
       requestTaskHistory: vi.fn(async (message, respond) => {
         respond({
-          type: 'task_history_data',
+          type: 'task_history_result',
           query: message.query,
           purpose: message.purpose,
           tasks: [],
@@ -254,7 +260,7 @@ describe('registerScoutProtocolServices', () => {
           method: route.method,
           payload,
         },
-        'chat',
+        SCOUT_PROTOCOL[payload.type].surfaces?.[0] ?? 'chat',
       );
 
       const errorResponse = postMessage.mock.calls

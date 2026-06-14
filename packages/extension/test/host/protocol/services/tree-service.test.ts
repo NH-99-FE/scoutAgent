@@ -26,23 +26,24 @@ describe('TreeProtocolService', () => {
     await sessionIndex.list('workspace');
     const pushState = vi.fn(async () => undefined);
     const requestSessions = vi.fn(async () => undefined);
-    const postMessage = vi.fn();
+    const publishEvent = vi.fn();
+    const respond = vi.fn();
     const service = new TreeProtocolService({
       sessionManager,
       sessionIndex,
       pushState,
       requestSessions,
-      postMessage,
+      publishEvent,
     });
 
-    await service.forkSession({ type: 'fork_session', entryId: 'entry-1', position: 'at' }, 'tree');
+    await service.forkSession(
+      { type: 'fork_session', entryId: 'entry-1', position: 'at' },
+      respond,
+    );
     await sessionIndex.list('workspace');
 
     expect(sessionManager.fork).toHaveBeenCalledWith('entry-1', 'at');
-    expect(postMessage).toHaveBeenCalledWith(
-      { type: 'fork_result', success: true, error: undefined },
-      'tree',
-    );
+    expect(respond).toHaveBeenCalledWith({ type: 'fork_result', success: true, error: undefined });
     expect(pushState).toHaveBeenCalledTimes(1);
     expect(sessionManager.getTreeData).toHaveBeenCalledTimes(1);
     expect(requestSessions).toHaveBeenCalledTimes(1);
@@ -56,7 +57,7 @@ describe('TreeProtocolService', () => {
       sessionIndex: new SessionIndex({ listWorkspace: vi.fn(), listAll: vi.fn() }),
       pushState: vi.fn(),
       requestSessions: vi.fn(),
-      postMessage: vi.fn(),
+      publishEvent: vi.fn(),
     });
     const respond = vi.fn();
 
@@ -95,7 +96,7 @@ describe('TreeProtocolService', () => {
       sessionIndex: new SessionIndex({ listWorkspace: vi.fn(), listAll: vi.fn() }),
       pushState: vi.fn(),
       requestSessions: vi.fn(),
-      postMessage: vi.fn(),
+      publishEvent: vi.fn(),
     });
     const respond = vi.fn();
 

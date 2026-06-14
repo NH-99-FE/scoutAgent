@@ -16,9 +16,7 @@ import {
   createScoutProtocolHostServices,
   type ScoutProtocolHostServices,
 } from './host/protocol/scout-protocol-host-services.ts';
-import {
-  registerScoutProtocolServices,
-} from './host/protocol/services/index.ts';
+import { registerScoutProtocolServices } from './host/protocol/services/index.ts';
 
 // ---------- 接口 ----------
 
@@ -67,6 +65,8 @@ export class ScoutController implements vscode.Disposable {
     });
     this.webviewRegistry = new WebviewSurfaceRegistry({
       onMessage: (message, surface) => this.handleWebviewMessage(message, surface),
+      onInvalidMessage: (message, surface) =>
+        this.outputChannel.appendLine(`[scout] Invalid webview message (${surface}): ${message}`),
     });
     this.protocolHostServices = createScoutProtocolHostServices({
       cwd: this.cwd,

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ScoutController } from '../src/scout-controller.ts';
 import * as vscode from 'vscode';
-import type { ScoutProtocolService, WebviewRequestPayload } from '@scout-agent/shared';
+import {
+  SCOUT_PROTOCOL,
+  type ScoutProtocolService,
+  type WebviewRequestPayload,
+} from '@scout-agent/shared';
 import type { JsonlSessionMetadata } from '../src/core/session/index.ts';
 import { SessionIndex } from '../src/host/session-index.ts';
 import type { ScoutProtocolHostServices } from '../src/host/protocol/scout-protocol-host-services.ts';
@@ -89,37 +93,12 @@ function protocolRequest(payload: WebviewRequestPayload, requestId = `request:${
   };
 }
 
-function resolveRoute(
-  payload: WebviewRequestPayload,
-): { service: ScoutProtocolService; method: string } {
-  switch (payload.type) {
-    case 'ready':
-      return { service: 'lifecycle', method: 'ready' };
-    case 'request_state':
-    case 'request_context_usage':
-      return { service: 'state', method: payload.type };
-    case 'request_config':
-    case 'select_model':
-    case 'select_thinking':
-    case 'set_active_tools':
-    case 'reload_resources':
-      return { service: 'config', method: payload.type };
-    case 'request_task_history':
-      return { service: 'task', method: 'search' };
-    case 'fork_session':
-    case 'request_tree':
-    case 'navigate_tree':
-    case 'set_label':
-      return { service: 'tree', method: payload.type };
-    case 'request_file_mentions':
-      return { service: 'mention', method: 'search' };
-    case 'open_settings_panel':
-    case 'open_tree_panel':
-    case 'request_commands':
-      return { service: 'ui', method: payload.type };
-    default:
-      return { service: 'session', method: payload.type };
-  }
+function resolveRoute(payload: WebviewRequestPayload): {
+  service: ScoutProtocolService;
+  method: string;
+} {
+  const route = SCOUT_PROTOCOL[payload.type];
+  return { service: route.service, method: route.method };
 }
 
 describe('ScoutController webview surfaces', () => {
@@ -136,7 +115,10 @@ describe('ScoutController webview surfaces', () => {
     controller.handleWebviewMessage(protocolRequest({ type: 'request_config' }), 'chat');
 
     expect(chat.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'config_update' }),
+      expect.objectContaining({
+        type: 'protocol_response',
+        payload: expect.objectContaining({ type: 'config_result' }),
+      }),
     );
     expect(tree.postMessage).not.toHaveBeenCalled();
     expect(settings.postMessage).not.toHaveBeenCalled();
@@ -158,7 +140,10 @@ describe('ScoutController webview surfaces', () => {
     controller.handleWebviewMessage(protocolRequest({ type: 'request_config' }), 'chat');
 
     expect(chat.postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'config_update' }),
+      expect.objectContaining({
+        type: 'protocol_response',
+        payload: expect.objectContaining({ type: 'config_result' }),
+      }),
     );
     expect(tree.postMessage).not.toHaveBeenCalled();
     expect(treeMessageDisposable.dispose).toHaveBeenCalledTimes(1);
@@ -217,7 +202,7 @@ describe('ScoutController webview surfaces', () => {
       .map(([message]) => message)
       .filter((message) => message.type === 'protocol_response')
       .map((message) => message.payload)
-      .filter((payload) => payload?.type === 'task_history_data') as Array<{
+      .filter((payload) => payload?.type === 'task_history_result') as Array<{
       purpose?: string;
       tasks: Array<{ sessionId: string }>;
       offset: number;
@@ -281,7 +266,7 @@ describe('ScoutController webview surfaces', () => {
 
     const historyMessage = chat.postMessage.mock.calls.find(
       ([message]) =>
-        message.type === 'protocol_response' && message.payload?.type === 'task_history_data',
+        message.type === 'protocol_response' && message.payload?.type === 'task_history_result',
     )?.[0].payload as {
       tasks: Array<{ sessionId: string }>;
       hasMore: boolean;
@@ -308,7 +293,7 @@ describe('ScoutController webview surfaces', () => {
 
     const bodySearchMessage = chat.postMessage.mock.calls.find(
       ([message]) =>
-        message.type === 'protocol_response' && message.payload?.type === 'task_history_data',
+        message.type === 'protocol_response' && message.payload?.type === 'task_history_result',
     )?.[0].payload as { tasks: unknown[] };
     expect(bodySearchMessage.tasks).toHaveLength(0);
 
@@ -381,7 +366,7 @@ describe('ScoutController webview surfaces', () => {
         pushTreeData: vi.fn(async () => undefined),
         requestRecentTasks: vi.fn(async () => {
           await chat.postMessage({
-            type: 'task_history_data',
+            type: 'task_history_update',
             query: '',
             purpose: 'recent',
             tasks: [],
@@ -390,7 +375,7 @@ describe('ScoutController webview surfaces', () => {
             nextOffset: 0,
           });
         }),
-        postMessage: (message) => {
+        publishEvent: (message) => {
           void chat.postMessage(message);
         },
         logError: vi.fn(),
@@ -416,7 +401,7 @@ describe('ScoutController webview surfaces', () => {
       payload: { type: 'new_session_result', success: true },
     });
     expect(chat.postMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'task_history_data', purpose: 'recent' }),
+      expect.objectContaining({ type: 'task_history_update', purpose: 'recent' }),
     );
 
     finishTurn.resolve();
@@ -424,7 +409,7 @@ describe('ScoutController webview surfaces', () => {
 
     expect(chat.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: 'task_history_data',
+        type: 'task_history_update',
         purpose: 'recent',
         tasks: [],
       }),

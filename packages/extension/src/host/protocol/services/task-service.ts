@@ -2,7 +2,7 @@
 // Task protocol service — 历史任务查询请求
 // ============================================================
 
-import type { ScoutTaskItem } from '@scout-agent/shared';
+import type { ScoutTaskHistoryResult, ScoutTaskItem } from '@scout-agent/shared';
 import type { JsonlSessionMetadata } from '../../../core/session/index.ts';
 import { SessionIndex, type SessionIndexScope } from '../../session-index.ts';
 import {
@@ -11,13 +11,7 @@ import {
   normalizeTaskSearchLimit,
   normalizeTaskSearchOffset,
 } from '../task-search.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import {
-  registerPayloadHandler,
-  type ProtocolPayload,
-  type ProtocolResponder,
-  type TaskProtocolHost,
-} from './types.ts';
+import { type ProtocolPayload, type ProtocolResponder, type TaskProtocolHost } from './types.ts';
 
 // ---------- 类型 ----------
 
@@ -44,6 +38,12 @@ export class TaskProtocolService implements TaskProtocolHost {
     message: ProtocolPayload<'request_task_history'>,
     respond: ProtocolResponder,
   ): Promise<void> {
+    respond(await this.getTaskHistoryResult(message));
+  }
+
+  async getTaskHistoryResult(
+    message: ProtocolPayload<'request_task_history'>,
+  ): Promise<ScoutTaskHistoryResult> {
     const limit = normalizeTaskSearchLimit(message.limit);
     const offset = normalizeTaskSearchOffset(message.offset);
     try {
@@ -53,28 +53,29 @@ export class TaskProtocolService implements TaskProtocolHost {
         matchesTaskSearch(session, message.query),
       );
       const page = filtered.slice(offset, offset + limit);
-      respond({
-        type: 'task_history_data',
+      return {
+        type: 'task_history_result',
         query: message.query,
         purpose: message.purpose,
         tasks: this.sessionsToTasks(page),
         offset,
         hasMore: offset + limit < filtered.length,
         nextOffset: offset + page.length,
-      });
+      };
     } catch (error) {
-      respond({
-        type: 'task_history_data',
+      const result: ScoutTaskHistoryResult = {
+        type: 'task_history_result',
         query: message.query,
         purpose: message.purpose,
         tasks: [],
         offset,
         hasMore: false,
         nextOffset: offset,
-      });
+      };
       this.logError(
         `[scout] List task history failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+      return result;
     }
   }
 
@@ -95,16 +96,4 @@ export class TaskProtocolService implements TaskProtocolHost {
       isCurrent: session.path === activeSessionFile,
     }));
   }
-}
-
-export function registerTaskService(server: ProtocolServer, host: TaskProtocolHost): void {
-  registerPayloadHandler(
-    server,
-    'task',
-    'search',
-    'request_task_history',
-    async (message, context) => {
-      await host.requestTaskHistory(message, context.respond);
-    },
-  );
 }

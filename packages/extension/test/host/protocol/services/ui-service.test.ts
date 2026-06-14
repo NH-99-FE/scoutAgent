@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { UiProtocolService } from '../../../../src/host/protocol/services/ui-service.ts';
 
 describe('UiProtocolService', () => {
-  it('posts builtin and extension commands to the requested surface', () => {
-    const postMessage = vi.fn();
+  it('responds with builtin and extension commands', () => {
+    const publishEvent = vi.fn();
+    const respond = vi.fn();
     const service = new UiProtocolService({
       getExtensionCommands: () => [
         {
@@ -18,21 +19,19 @@ describe('UiProtocolService', () => {
           },
         },
       ],
-      postMessage,
+      publishEvent,
     });
 
-    service.requestCommands('tree');
+    service.requestCommands(respond);
 
-    expect(postMessage).toHaveBeenCalledWith(
-      {
-        type: 'commands_data',
-        commands: expect.arrayContaining([
-          expect.objectContaining({ name: 'settings', source: 'builtin' }),
-          expect.objectContaining({ name: 'custom', source: 'extension' }),
-        ]),
-      },
-      'tree',
-    );
+    expect(respond).toHaveBeenCalledWith({
+      type: 'commands_result',
+      commands: expect.arrayContaining([
+        expect.objectContaining({ name: 'settings', source: 'builtin' }),
+        expect.objectContaining({ name: 'custom', source: 'extension' }),
+      ]),
+    });
+    expect(publishEvent).not.toHaveBeenCalled();
   });
 
   it('responds when opening registered panels succeeds', async () => {
@@ -40,7 +39,7 @@ describe('UiProtocolService', () => {
     const openTreePanel = vi.fn(async () => undefined);
     const service = new UiProtocolService({
       getExtensionCommands: () => [],
-      postMessage: vi.fn(),
+      publishEvent: vi.fn(),
       openSettingsPanel,
       openTreePanel,
     });
@@ -64,7 +63,7 @@ describe('UiProtocolService', () => {
   it('returns an error when a panel is not registered', async () => {
     const service = new UiProtocolService({
       getExtensionCommands: () => [],
-      postMessage: vi.fn(),
+      publishEvent: vi.fn(),
     });
     const respond = vi.fn();
 

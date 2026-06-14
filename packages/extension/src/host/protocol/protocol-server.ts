@@ -6,12 +6,13 @@
 import type {
   ExtensionEventMessage,
   ExtensionMessage,
-  ExtensionResponsePayload,
+  ScoutProtocolResponsePayload,
   ScoutProtocolRequest,
-  ScoutProtocolService,
   WebviewRequestPayload,
 } from '@scout-agent/shared';
 import type { ScoutWebviewSurface } from '../webview-surface.ts';
+import { ProtocolBus } from './protocol-bus.ts';
+import type { ProtocolHandlerRoute } from './protocol-bus.ts';
 import {
   ProtocolRequestRegistry,
   type ProtocolRequestCleanup,
@@ -20,11 +21,7 @@ import {
 
 // ---------- 类型 ----------
 
-export interface ProtocolHandlerRoute {
-  service: ScoutProtocolService;
-  method: string;
-  payloadType?: WebviewRequestPayload['type'];
-}
+export type { ProtocolHandlerRoute } from './protocol-bus.ts';
 
 export interface ProtocolPostOptions {
   broadcast?: boolean;
@@ -40,7 +37,7 @@ export interface ProtocolHandlerContext {
   payload: WebviewRequestPayload;
   surface: ScoutWebviewSurface;
   signal: AbortSignal;
-  respond: (payload: ExtensionResponsePayload, options?: ProtocolResponseOptions) => void;
+  respond: (payload?: ScoutProtocolResponsePayload, options?: ProtocolResponseOptions) => void;
   error: (code: string, message: string) => void;
   post: (message: ExtensionEventMessage, options?: ProtocolPostOptions) => void;
   onCleanup: (cleanup: ProtocolRequestCleanup) => void;
@@ -56,8 +53,7 @@ export interface ProtocolServerOptions {
 // ---------- Server ----------
 
 export class ProtocolServer {
-  private readonly handlers = new Map<string, ProtocolHandler>();
-  private readonly routes = new Map<string, ProtocolHandlerRoute>();
+  private readonly bus = new ProtocolBus();
   private readonly registry = new ProtocolRequestRegistry();
   private readonly postMessage: (message: ExtensionMessage, surface?: ScoutWebviewSurface) => void;
 
@@ -66,35 +62,18 @@ export class ProtocolServer {
   }
 
   register(route: ProtocolHandlerRoute, handler: ProtocolHandler): void {
-    const key = this.getRouteKey(route.service, route.method);
-    if (this.handlers.has(key)) {
-      throw new Error(`Protocol handler already registered: ${route.service}.${route.method}`);
-    }
-    this.routes.set(key, route);
-    this.handlers.set(key, handler);
+    this.bus.register(route, handler);
   }
 
   async handleRequest(request: ScoutProtocolRequest, surface: ScoutWebviewSurface): Promise<void> {
     const handle = this.registry.begin(request, surface);
-    const routeKey = this.getRouteKey(request.service, request.method);
-    const route = this.routes.get(routeKey);
-    const handler = this.handlers.get(routeKey);
     const context = this.createContext(request, surface, handle);
 
     try {
-      if (!handler || !route) {
-        context.error('method_not_found', `Unknown protocol method: ${routeKey}`);
-        return;
+      await this.bus.dispatch(context);
+      if (!request.streaming && !handle.isClosed() && !handle.hasResponded()) {
+        context.respond();
       }
-      if (route.payloadType && request.payload.type !== route.payloadType) {
-        context.error(
-          'invalid_payload',
-          `Protocol payload mismatch: ${routeKey} received ${request.payload.type}, expected ${route.payloadType}`,
-        );
-        return;
-      }
-
-      await handler(context);
     } catch (error) {
       context.error('handler_failed', error instanceof Error ? error.message : String(error));
     } finally {
@@ -127,14 +106,17 @@ export class ProtocolServer {
         const message: ExtensionMessage = {
           type: 'protocol_response',
           requestId: request.requestId,
-          payload,
         };
+        if (payload !== undefined) {
+          message.payload = payload;
+        }
         if (options?.done !== undefined) {
           message.done = options.done;
         }
         if (request.streaming) {
           message.sequence = handle.nextSequence();
         }
+        handle.markResponded();
         this.postMessage(message, surface);
         if (request.streaming && options?.done !== false) {
           this.registry.finish(request.requestId);
@@ -145,6 +127,7 @@ export class ProtocolServer {
       },
       error: (code, message) => {
         if (handle.isClosed()) return;
+        handle.markResponded();
         this.postMessage(
           {
             type: 'protocol_response',
@@ -162,9 +145,5 @@ export class ProtocolServer {
       onCleanup: (cleanup) => handle.registerCleanup(cleanup),
       isCanceled: () => handle.isCanceled(),
     };
-  }
-
-  private getRouteKey(service: ScoutProtocolService, method: string): string {
-    return `${service}.${method}`;
   }
 }

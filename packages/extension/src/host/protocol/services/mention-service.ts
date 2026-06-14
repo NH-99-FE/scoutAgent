@@ -3,10 +3,9 @@
 // ============================================================
 
 import * as vscode from 'vscode';
-import type { ExtensionEventMessage, ScoutFileMentionItem } from '@scout-agent/shared';
-import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import { registerPayloadHandler, type MentionProtocolHost, type ProtocolPayload } from './types.ts';
+import type { ScoutFileMentionItem } from '@scout-agent/shared';
+import type { MentionProtocolHost, ProtocolPayload } from './types.ts';
+import type { ProtocolResponder } from './types.ts';
 
 // ---------- 常量 ----------
 
@@ -24,7 +23,6 @@ const FILE_MENTION_SKIP_NAMES = new Set([
 
 export interface MentionProtocolServiceOptions {
   cwd: string;
-  postMessage: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
   logError: (message: string) => void;
 }
 
@@ -32,27 +30,22 @@ export interface MentionProtocolServiceOptions {
 
 export class MentionProtocolService implements MentionProtocolHost {
   private readonly cwd: string;
-  private readonly postMessage: (
-    message: ExtensionEventMessage,
-    surface?: ScoutWebviewSurface,
-  ) => void;
   private readonly logError: (message: string) => void;
 
   constructor(options: MentionProtocolServiceOptions) {
     this.cwd = options.cwd;
-    this.postMessage = options.postMessage;
     this.logError = options.logError;
   }
 
   async requestFileMentions(
     message: ProtocolPayload<'request_file_mentions'>,
-    surface?: ScoutWebviewSurface,
+    respond: ProtocolResponder,
   ): Promise<void> {
     try {
       const items = await this.collectFileMentionItems(message.query, message.limit);
-      this.postMessage({ type: 'file_mentions_data', query: message.query, items }, surface);
+      respond({ type: 'file_mentions_result', query: message.query, items });
     } catch (error) {
-      this.postMessage({ type: 'file_mentions_data', query: message.query, items: [] }, surface);
+      respond({ type: 'file_mentions_result', query: message.query, items: [] });
       this.logError(
         `[scout] File mentions failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -113,18 +106,6 @@ export class MentionProtocolService implements MentionProtocolHost {
     }
     return items;
   }
-}
-
-export function registerMentionService(server: ProtocolServer, host: MentionProtocolHost): void {
-  registerPayloadHandler(
-    server,
-    'mention',
-    'search',
-    'request_file_mentions',
-    async (message, context) => {
-      await host.requestFileMentions(message, context.surface);
-    },
-  );
 }
 
 function getPathDescription(relativePath: string): string | undefined {

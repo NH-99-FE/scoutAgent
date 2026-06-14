@@ -2,7 +2,9 @@
 // Webview Surface — 识别当前 Webview 容器
 // ============================================================
 
-export type WebviewSurface = 'chat' | 'settings' | 'tree';
+import type { ScoutWebviewSurface } from '@scout-agent/shared';
+
+export type WebviewSurface = ScoutWebviewSurface;
 
 declare global {
   interface Window {

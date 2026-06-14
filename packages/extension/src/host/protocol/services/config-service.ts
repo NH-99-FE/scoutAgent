@@ -3,20 +3,16 @@
 // ============================================================
 
 import type { ExtensionSessionCoordinator } from '../../session-coordinator.ts';
+import type { ConfigManager } from '../../../config-manager.ts';
 import type { SessionIndex } from '../../session-index.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import {
-  registerPayloadHandler,
-  type ConfigProtocolHost,
-  type ProtocolPayload,
-  type ProtocolResponder,
-} from './types.ts';
+import { type ConfigProtocolHost, type ProtocolPayload, type ProtocolResponder } from './types.ts';
 
 // ---------- 类型 ----------
 
 export interface ConfigProtocolServiceOptions {
   sessionManager: ExtensionSessionCoordinator;
+  configManager: ConfigManager;
   sessionIndex: SessionIndex;
   pushConfig: (surface?: ScoutWebviewSurface) => void;
   requestCommands: (surface?: ScoutWebviewSurface) => void;
@@ -28,6 +24,7 @@ export interface ConfigProtocolServiceOptions {
 
 export class ConfigProtocolService implements ConfigProtocolHost {
   private readonly sessionManager: ExtensionSessionCoordinator;
+  private readonly configManager: ConfigManager;
   private readonly sessionIndex: SessionIndex;
   private readonly pushConfigCallback: (surface?: ScoutWebviewSurface) => void;
   private readonly requestCommandsCallback: (surface?: ScoutWebviewSurface) => void;
@@ -36,6 +33,7 @@ export class ConfigProtocolService implements ConfigProtocolHost {
 
   constructor(options: ConfigProtocolServiceOptions) {
     this.sessionManager = options.sessionManager;
+    this.configManager = options.configManager;
     this.sessionIndex = options.sessionIndex;
     this.pushConfigCallback = options.pushConfig;
     this.requestCommandsCallback = options.requestCommands;
@@ -45,6 +43,14 @@ export class ConfigProtocolService implements ConfigProtocolHost {
 
   pushConfig(surface?: ScoutWebviewSurface): void {
     this.pushConfigCallback(surface);
+  }
+
+  requestConfig(respond: ProtocolResponder): void {
+    respond({ type: 'config_result', config: this.getConfig() });
+  }
+
+  getConfig() {
+    return this.configManager.getScoutConfig();
   }
 
   async setModel(message: ProtocolPayload<'select_model'>): Promise<void> {
@@ -82,40 +88,4 @@ export class ConfigProtocolService implements ConfigProtocolHost {
       });
     }
   }
-}
-
-export function registerConfigService(server: ProtocolServer, host: ConfigProtocolHost): void {
-  registerPayloadHandler(
-    server,
-    'config',
-    'request_config',
-    'request_config',
-    (_message, context) => {
-      host.pushConfig(context.surface);
-    },
-  );
-  registerPayloadHandler(server, 'config', 'select_model', 'select_model', async (message) => {
-    await host.setModel(message);
-  });
-  registerPayloadHandler(
-    server,
-    'config',
-    'select_thinking',
-    'select_thinking',
-    async (message) => {
-      await host.setThinkingLevel(message);
-    },
-  );
-  registerPayloadHandler(server, 'config', 'set_active_tools', 'set_active_tools', (message) => {
-    host.setActiveTools(message);
-  });
-  registerPayloadHandler(
-    server,
-    'config',
-    'reload_resources',
-    'reload_resources',
-    async (_message, context) => {
-      await host.reloadResources(context.respond);
-    },
-  );
 }

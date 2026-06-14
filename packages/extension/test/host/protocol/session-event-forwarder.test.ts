@@ -3,24 +3,24 @@ import type { ScoutSessionEvent } from '../../../src/host/session-coordinator.ts
 import { SessionEventForwarder } from '../../../src/host/protocol/session-event-forwarder.ts';
 
 function makeForwarder(options: { isStreaming?: () => boolean } = {}) {
-  const postMessage = vi.fn();
+  const publishEvent = vi.fn();
   const pushState = vi.fn(async () => undefined);
   const pushQueueState = vi.fn();
   const pushTreeData = vi.fn(async () => undefined);
   const forwarder = new SessionEventForwarder({
     isStreaming: options.isStreaming ?? (() => false),
-    postMessage,
+    publishEvent,
     pushState,
     pushQueueState,
     pushTreeData,
   });
-  return { forwarder, postMessage, pushState, pushQueueState, pushTreeData };
+  return { forwarder, publishEvent, pushState, pushQueueState, pushTreeData };
 }
 
 describe('SessionEventForwarder', () => {
   it('tracks agent busy state and falls back to streaming state while idle', () => {
     let streaming = true;
-    const { forwarder, postMessage } = makeForwarder({
+    const { forwarder, publishEvent } = makeForwarder({
       isStreaming: () => streaming,
     });
 
@@ -41,7 +41,7 @@ describe('SessionEventForwarder', () => {
       label: 'Working',
       cancellable: true,
     });
-    expect(postMessage).toHaveBeenCalledWith({
+    expect(publishEvent).toHaveBeenCalledWith({
       type: 'agent_event',
       event: { type: 'agent_start' },
     });
@@ -55,7 +55,7 @@ describe('SessionEventForwarder', () => {
   });
 
   it('maps retry and compaction events to webview messages and busy state', () => {
-    const { forwarder, postMessage } = makeForwarder();
+    const { forwarder, publishEvent } = makeForwarder();
 
     forwarder.handle({
       type: 'auto_retry_start',
@@ -73,7 +73,7 @@ describe('SessionEventForwarder', () => {
       maxAttempts: 3,
       reason: 'rate limit',
     });
-    expect(postMessage).toHaveBeenCalledWith({
+    expect(publishEvent).toHaveBeenCalledWith({
       type: 'auto_retry_start',
       attempt: 2,
       maxAttempts: 3,
@@ -96,7 +96,7 @@ describe('SessionEventForwarder', () => {
       cancellable: true,
       reason: 'overflow',
     });
-    expect(postMessage).toHaveBeenCalledWith({
+    expect(publishEvent).toHaveBeenCalledWith({
       type: 'compaction_end',
       reason: 'overflow',
       result: { type: 'skipped' },
@@ -107,7 +107,7 @@ describe('SessionEventForwarder', () => {
   });
 
   it('refreshes derived state for state, queue, tree, and error events', () => {
-    const { forwarder, postMessage, pushState, pushQueueState, pushTreeData } = makeForwarder();
+    const { forwarder, publishEvent, pushState, pushQueueState, pushTreeData } = makeForwarder();
 
     forwarder.handle({ type: 'state_change' } as ScoutSessionEvent);
     forwarder.handle({ type: 'queue_change' } as ScoutSessionEvent);
@@ -117,7 +117,7 @@ describe('SessionEventForwarder', () => {
     expect(pushState).toHaveBeenCalledTimes(2);
     expect(pushQueueState).toHaveBeenCalledTimes(1);
     expect(pushTreeData).toHaveBeenCalledTimes(1);
-    expect(postMessage).toHaveBeenCalledWith({
+    expect(publishEvent).toHaveBeenCalledWith({
       type: 'notification',
       level: 'error',
       message: 'boom',

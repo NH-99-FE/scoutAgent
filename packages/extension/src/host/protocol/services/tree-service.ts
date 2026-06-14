@@ -2,17 +2,11 @@
 // Tree protocol service — 会话树查询、导航与标签请求
 // ============================================================
 
-import type { ExtensionEventMessage } from '@scout-agent/shared';
+import type { ExtensionEventMessage, ScoutTreeResult } from '@scout-agent/shared';
 import type { ExtensionSessionCoordinator } from '../../session-coordinator.ts';
 import type { SessionIndex } from '../../session-index.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import {
-  registerPayloadHandler,
-  type ProtocolPayload,
-  type ProtocolResponder,
-  type TreeProtocolHost,
-} from './types.ts';
+import { type ProtocolPayload, type ProtocolResponder, type TreeProtocolHost } from './types.ts';
 
 // ---------- 类型 ----------
 
@@ -21,7 +15,7 @@ export interface TreeProtocolServiceOptions {
   sessionIndex: SessionIndex;
   pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
   requestSessions: (surface?: ScoutWebviewSurface) => Promise<void>;
-  postMessage: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
+  publishEvent: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
 }
 
 // ---------- Service ----------
@@ -31,7 +25,7 @@ export class TreeProtocolService implements TreeProtocolHost {
   private readonly sessionIndex: SessionIndex;
   private readonly pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
   private readonly requestSessions: (surface?: ScoutWebviewSurface) => Promise<void>;
-  private readonly postMessage: (
+  private readonly publishEvent: (
     message: ExtensionEventMessage,
     surface?: ScoutWebviewSurface,
   ) => void;
@@ -41,23 +35,20 @@ export class TreeProtocolService implements TreeProtocolHost {
     this.sessionIndex = options.sessionIndex;
     this.pushState = options.pushState;
     this.requestSessions = options.requestSessions;
-    this.postMessage = options.postMessage;
+    this.publishEvent = options.publishEvent;
   }
 
   async forkSession(
     message: ProtocolPayload<'fork_session'>,
-    surface?: ScoutWebviewSurface,
+    respond: ProtocolResponder,
   ): Promise<void> {
     try {
       const result = await this.sessionManager.fork(message.entryId, message.position);
-      this.postMessage(
-        {
-          type: 'fork_result',
-          success: !result.cancelled,
-          error: result.cancelled ? 'cancelled' : undefined,
-        },
-        surface,
-      );
+      respond({
+        type: 'fork_result',
+        success: !result.cancelled,
+        error: result.cancelled ? 'cancelled' : undefined,
+      });
       if (!result.cancelled) {
         this.sessionIndex.invalidate();
         await this.pushState();
@@ -65,19 +56,16 @@ export class TreeProtocolService implements TreeProtocolHost {
         await this.requestSessions();
       }
     } catch (error) {
-      this.postMessage(
-        {
-          type: 'fork_result',
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        },
-        surface,
-      );
+      respond({
+        type: 'fork_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
-  async requestTree(surface?: ScoutWebviewSurface): Promise<void> {
-    await this.pushTreeData(surface);
+  async requestTree(respond: ProtocolResponder): Promise<void> {
+    respond(await this.getTreeResult());
   }
 
   async navigateTree(
@@ -119,40 +107,12 @@ export class TreeProtocolService implements TreeProtocolHost {
   }
 
   async pushTreeData(surface?: ScoutWebviewSurface): Promise<void> {
-    const { tree, leafId } = await this.sessionManager.getTreeData();
-    this.postMessage({ type: 'tree_data', tree, leafId }, surface);
+    const result = await this.getTreeResult();
+    this.publishEvent({ type: 'tree_update', tree: result.tree, leafId: result.leafId }, surface);
   }
-}
 
-export function registerTreeService(server: ProtocolServer, host: TreeProtocolHost): void {
-  registerPayloadHandler(
-    server,
-    'tree',
-    'fork_session',
-    'fork_session',
-    async (message, context) => {
-      await host.forkSession(message, context.surface);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'tree',
-    'request_tree',
-    'request_tree',
-    async (_message, context) => {
-      await host.requestTree(context.surface);
-    },
-  );
-  registerPayloadHandler(
-    server,
-    'tree',
-    'navigate_tree',
-    'navigate_tree',
-    async (message, context) => {
-      await host.navigateTree(message, context.respond);
-    },
-  );
-  registerPayloadHandler(server, 'tree', 'set_label', 'set_label', async (message, context) => {
-    await host.setLabel(message, context.respond);
-  });
+  async getTreeResult(): Promise<ScoutTreeResult> {
+    const { tree, leafId } = await this.sessionManager.getTreeData();
+    return { type: 'tree_result', tree, leafId };
+  }
 }

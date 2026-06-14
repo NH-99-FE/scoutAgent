@@ -42,7 +42,7 @@ describe('TaskProtocolService', () => {
     );
 
     expect(respond).toHaveBeenCalledWith({
-      type: 'task_history_data',
+      type: 'task_history_result',
       query: '',
       purpose: 'panel',
       tasks: [
@@ -108,7 +108,7 @@ describe('TaskProtocolService', () => {
     );
 
     expect(respond).toHaveBeenCalledWith({
-      type: 'task_history_data',
+      type: 'task_history_result',
       query: 'alpha',
       purpose: 'recent',
       tasks: [],

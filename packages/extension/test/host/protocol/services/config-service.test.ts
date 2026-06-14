@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ConfigManager } from '../../../../src/config-manager.ts';
 import type { JsonlSessionMetadata } from '../../../../src/core/session/index.ts';
 import type { ExtensionSessionCoordinator } from '../../../../src/host/session-coordinator.ts';
 import { SessionIndex } from '../../../../src/host/session-index.ts';
@@ -28,6 +29,17 @@ function makeSessionManager(overrides: Record<string, unknown> = {}): ExtensionS
   } as unknown as ExtensionSessionCoordinator;
 }
 
+function makeConfigManager(): ConfigManager {
+  return {
+    getScoutConfig: vi.fn(() => ({
+      models: [],
+      defaultModelProvider: 'openai',
+      defaultModelId: 'gpt-test',
+      branchSummary: { reserveTokens: 100, skipPrompt: false },
+    })),
+  } as unknown as ConfigManager;
+}
+
 function makeService(
   options: {
     sessionManager?: ExtensionSessionCoordinator;
@@ -45,6 +57,7 @@ function makeService(
   });
   const service = new ConfigProtocolService({
     sessionManager: options.sessionManager ?? makeSessionManager(),
+    configManager: makeConfigManager(),
     sessionIndex,
     pushConfig: options.pushConfig ?? vi.fn(),
     requestCommands: options.requestCommands ?? vi.fn(),

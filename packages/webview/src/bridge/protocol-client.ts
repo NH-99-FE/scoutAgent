@@ -3,19 +3,24 @@
 // ============================================================
 
 import type {
-  ExtensionResponsePayload,
+  ScoutProtocolResponsePayload,
   ScoutImageContent,
   ScoutTaskHistoryPurpose,
   ScoutTaskItem,
   ThinkingLevel,
   WebviewRequestPayload,
 } from '@scout-agent/shared';
-import { routeExtensionEventMessage, routeTaskHistoryData } from './extension-message-router';
+import { projectExtensionEvent } from './extension-event-projector';
 import { resolveProtocolRoute } from './protocol-route';
+import {
+  projectProtocolResponsePayload,
+  projectTaskHistoryResult,
+} from './protocol-response-projector';
 import {
   cancelProtocolRequest,
   discardProtocolRequest,
   sendProtocolRequest,
+  setDefaultProtocolErrorHandler,
 } from './transport-client';
 
 interface UserMessageOptions {
@@ -45,23 +50,35 @@ let pendingOpenTaskRequestId: string | undefined;
 let pendingPanelTaskHistoryRequestId: string | undefined;
 
 function send(payload: WebviewRequestPayload): string {
-  return sendProtocolRequest(payload, resolveProtocolRoute(payload));
+  return sendProtocolRequest(payload, {
+    ...resolveProtocolRoute(payload),
+    onError: reportProtocolError,
+  });
 }
 
 function sendRouted(
   payload: WebviewRequestPayload,
-  onResponse: (payload: ExtensionResponsePayload) => void,
+  onResponse: (payload: ScoutProtocolResponsePayload) => void,
   onError?: (message: string, code: string) => void,
 ): string {
   return sendProtocolRequest(payload, {
     ...resolveProtocolRoute(payload),
     onResponse,
     onError: (message, code) => {
-      onError?.(message, code);
-      routeExtensionEventMessage({ type: 'notification', level: 'error', message });
+      if (onError) {
+        onError(message, code);
+      } else {
+        reportProtocolError(message);
+      }
     },
   });
 }
+
+function reportProtocolError(message: string): void {
+  projectExtensionEvent({ type: 'notification', level: 'error', message });
+}
+
+setDefaultProtocolErrorHandler(reportProtocolError);
 
 function requestTaskHistory({
   query = '',
@@ -93,15 +110,15 @@ function requestTaskHistory({
       if (pendingPanelTaskHistoryRequestId === requestId) {
         pendingPanelTaskHistoryRequestId = undefined;
       }
-      if (response.type === 'task_history_data') {
-        routeTaskHistoryData(response, nextQueryToken);
+      if (response.type === 'task_history_result') {
+        projectTaskHistoryResult(response, nextQueryToken);
       }
     },
     onError: (message) => {
       if (pendingPanelTaskHistoryRequestId === requestId) {
         pendingPanelTaskHistoryRequestId = undefined;
       }
-      routeExtensionEventMessage({ type: 'notification', level: 'error', message });
+      projectExtensionEvent({ type: 'notification', level: 'error', message });
     },
   });
   if (purpose === 'panel') {
@@ -111,10 +128,10 @@ function requestTaskHistory({
 }
 
 export const protocolClient = {
-  ready: () => send({ type: 'ready' }),
-  requestState: () => send({ type: 'request_state' }),
-  requestConfig: () => send({ type: 'request_config' }),
-  requestTree: () => send({ type: 'request_tree' }),
+  ready: () => sendRouted({ type: 'ready' }, projectProtocolResponsePayload),
+  requestState: () => sendRouted({ type: 'request_state' }, projectProtocolResponsePayload),
+  requestConfig: () => sendRouted({ type: 'request_config' }, projectProtocolResponsePayload),
+  requestTree: () => sendRouted({ type: 'request_tree' }, projectProtocolResponsePayload),
   requestTasks: (limit?: number): string =>
     requestTaskHistory({
       query: '',
@@ -123,10 +140,10 @@ export const protocolClient = {
       purpose: 'recent',
     }),
   requestTaskHistory,
-  requestSessions: () => send({ type: 'request_sessions' }),
+  requestSessions: () => sendRouted({ type: 'request_sessions' }, projectProtocolResponsePayload),
   openSettingsPanel: () =>
-    sendRouted({ type: 'open_settings_panel' }, routeExtensionEventMessage),
-  openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, routeExtensionEventMessage),
+    sendRouted({ type: 'open_settings_panel' }, projectProtocolResponsePayload),
+  openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, projectProtocolResponsePayload),
   openTask: (task: ScoutTaskItem) => {
     discardProtocolRequest(pendingNewSessionRequestId);
     pendingNewSessionRequestId = undefined;
@@ -137,9 +154,9 @@ export const protocolClient = {
         sessionPath: task.sessionPath,
         cwdOverride: task.cwd,
       },
-      routeExtensionEventMessage,
+      projectProtocolResponsePayload,
       (message) => {
-        routeExtensionEventMessage({
+        projectProtocolResponsePayload({
           type: 'open_task_result',
           sessionPath: task.sessionPath,
           success: false,
@@ -165,8 +182,8 @@ export const protocolClient = {
     if (images && images.length > 0) {
       payload.images = images;
     }
-    pendingNewSessionRequestId = sendRouted(payload, routeExtensionEventMessage, (message) => {
-      routeExtensionEventMessage({
+    pendingNewSessionRequestId = sendRouted(payload, projectProtocolResponsePayload, (message) => {
+      projectProtocolResponsePayload({
         type: 'new_session_result',
         success: false,
         error: message,
@@ -198,14 +215,13 @@ export const protocolClient = {
   selectModel: (provider: string, modelId: string) =>
     send({ type: 'select_model', provider, modelId }),
   selectThinking: (level: ThinkingLevel) => send({ type: 'select_thinking', level }),
-  requestCommands: () => send({ type: 'request_commands' }),
+  requestCommands: () => sendRouted({ type: 'request_commands' }, projectProtocolResponsePayload),
   requestFileMentions: (query: string, limit?: number) =>
-    send({ type: 'request_file_mentions', query, limit }),
+    sendRouted({ type: 'request_file_mentions', query, limit }, projectProtocolResponsePayload),
 };
 
 function createTaskHistoryQueryToken(): string {
   const random =
-    globalThis.crypto?.randomUUID?.() ??
-    `${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random().toString(36).slice(2)}`;
   return `history:${random}`;
 }

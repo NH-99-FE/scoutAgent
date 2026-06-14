@@ -84,11 +84,11 @@ const ROUTE_CASES = [
   protocolCase({ type: 'request_commands' }, { service: 'ui', method: 'request_commands' }),
   protocolCase(
     { type: 'request_file_mentions', query: 'src', limit: 10 },
-    { service: 'mention', method: 'search' },
+    { service: 'mention', method: 'request_file_mentions' },
   ),
   protocolCase(
     { type: 'request_task_history', query: '', offset: 0, purpose: 'panel' },
-    { service: 'task', method: 'search' },
+    { service: 'task', method: 'request_task_history' },
   ),
   protocolCase(
     {

@@ -7,7 +7,7 @@ import type {
 import { SessionIndex } from '../../../../src/host/session-index.ts';
 import { SessionProtocolService } from '../../../../src/host/protocol/services/session-service.ts';
 
-type TestPostMessage = (message: unknown, surface?: unknown) => void;
+type TestPublishEvent = (message: unknown, surface?: unknown) => void;
 
 function makeSession(overrides: Partial<JsonlSessionMetadata> = {}): JsonlSessionMetadata {
   return {
@@ -67,11 +67,11 @@ function makeService(
     pushState?: () => Promise<void>;
     pushTreeData?: () => Promise<void>;
     requestRecentTasks?: () => Promise<void>;
-    postMessage?: TestPostMessage;
+    publishEvent?: TestPublishEvent;
     logError?: (message: string) => void;
   } = {},
 ) {
-  const postMessage: TestPostMessage = options.postMessage ?? vi.fn();
+  const publishEvent: TestPublishEvent = options.publishEvent ?? vi.fn();
   const logError: (message: string) => void = options.logError ?? vi.fn();
   const sessionIndex = new SessionIndex({
     listWorkspace: vi.fn(async () => options.sessions ?? []),
@@ -84,35 +84,31 @@ function makeService(
     pushState: options.pushState ?? vi.fn(async () => undefined),
     pushTreeData: options.pushTreeData ?? vi.fn(async () => undefined),
     requestRecentTasks: options.requestRecentTasks ?? vi.fn(async () => undefined),
-    postMessage: (message, surface) => postMessage(message, surface),
+    publishEvent: (message, surface) => publishEvent(message, surface),
     logError: (message) => logError(message),
   });
   return { service, sessionIndex };
 }
 
 describe('SessionProtocolService', () => {
-  it('posts session list data and marks the active session', async () => {
-    const postMessage = vi.fn();
+  it('responds with session list data and marks the active session', async () => {
+    const respond = vi.fn();
     const { service } = makeService({
       sessions: [
         makeSession({ id: 'session-1', path: '/workspace/.scout/sessions/session-1.jsonl' }),
         makeSession({ id: 'session-2', path: '/workspace/.scout/sessions/session-2.jsonl' }),
       ],
-      postMessage,
     });
 
-    await service.requestSessions('chat');
+    await service.requestSessions(respond);
 
-    expect(postMessage).toHaveBeenCalledWith(
-      {
-        type: 'sessions_data',
-        sessions: [
-          expect.objectContaining({ id: 'session-1', isCurrent: true }),
-          expect.objectContaining({ id: 'session-2', isCurrent: false }),
-        ],
-      },
-      'chat',
-    );
+    expect(respond).toHaveBeenCalledWith({
+      type: 'sessions_result',
+      sessions: [
+        expect.objectContaining({ id: 'session-1', isCurrent: true }),
+        expect.objectContaining({ id: 'session-2', isCurrent: false }),
+      ],
+    });
   });
 
   it('opens a task through restoreUserSession and refreshes state and tree', async () => {

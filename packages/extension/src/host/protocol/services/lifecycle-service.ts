@@ -2,20 +2,29 @@
 // Lifecycle protocol service — Webview 生命周期请求
 // ============================================================
 
+import type {
+  ScoutBootstrapResult,
+  ScoutCommandInfo,
+  ScoutConfig,
+  ScoutSessionListItem,
+  ScoutTaskItem,
+  ScoutTreeResult,
+  ScoutWebviewState,
+} from '@scout-agent/shared';
 import type { ExtensionSessionCoordinator } from '../../session-coordinator.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolServer } from '../protocol-server.ts';
-import { registerPayloadHandler, type LifecycleProtocolHost } from './types.ts';
+import { type LifecycleProtocolHost, type ProtocolResponder } from './types.ts';
 
 // ---------- 类型 ----------
 
 export interface LifecycleProtocolServiceOptions {
   sessionManager: ExtensionSessionCoordinator;
-  pushConfig: (surface?: ScoutWebviewSurface) => void;
-  pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
-  requestCommands: (surface?: ScoutWebviewSurface) => void;
-  requestSessions: (surface?: ScoutWebviewSurface) => Promise<void>;
-  pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
+  getConfig: () => ScoutConfig;
+  getState: () => Promise<ScoutWebviewState>;
+  getCommands: () => ScoutCommandInfo[];
+  getSessions: () => Promise<ScoutSessionListItem[]>;
+  getRecentTasks: () => Promise<ScoutTaskItem[]>;
+  getTreeResult: () => Promise<ScoutTreeResult>;
   logReady: (surface: ScoutWebviewSurface) => void;
 }
 
@@ -23,43 +32,43 @@ export interface LifecycleProtocolServiceOptions {
 
 export class LifecycleProtocolService implements LifecycleProtocolHost {
   private readonly sessionManager: ExtensionSessionCoordinator;
-  private readonly pushConfig: (surface?: ScoutWebviewSurface) => void;
-  private readonly pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
-  private readonly requestCommands: (surface?: ScoutWebviewSurface) => void;
-  private readonly requestSessions: (surface?: ScoutWebviewSurface) => Promise<void>;
-  private readonly pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
+  private readonly getConfig: () => ScoutConfig;
+  private readonly getState: () => Promise<ScoutWebviewState>;
+  private readonly getCommands: () => ScoutCommandInfo[];
+  private readonly getSessions: () => Promise<ScoutSessionListItem[]>;
+  private readonly getRecentTasks: () => Promise<ScoutTaskItem[]>;
+  private readonly getTreeResult: () => Promise<ScoutTreeResult>;
   private readonly logReady: (surface: ScoutWebviewSurface) => void;
 
   constructor(options: LifecycleProtocolServiceOptions) {
     this.sessionManager = options.sessionManager;
-    this.pushConfig = options.pushConfig;
-    this.pushState = options.pushState;
-    this.requestCommands = options.requestCommands;
-    this.requestSessions = options.requestSessions;
-    this.pushTreeData = options.pushTreeData;
+    this.getConfig = options.getConfig;
+    this.getState = options.getState;
+    this.getCommands = options.getCommands;
+    this.getSessions = options.getSessions;
+    this.getRecentTasks = options.getRecentTasks;
+    this.getTreeResult = options.getTreeResult;
     this.logReady = options.logReady;
   }
 
-  async ready(surface: ScoutWebviewSurface): Promise<void> {
+  async ready(surface: ScoutWebviewSurface, respond: ProtocolResponder): Promise<void> {
     this.logReady(surface);
     await this.sessionManager.initialize();
-    this.pushConfig();
-    await this.pushState();
-    this.requestCommands();
+    const result: ScoutBootstrapResult = {
+      type: 'bootstrap_result',
+      surface,
+      config: this.getConfig(),
+      state: await this.getState(),
+      commands: this.getCommands(),
+    };
     if (surface === 'chat') {
-      await this.requestSessions();
+      result.sessions = await this.getSessions();
+      result.recentTasks = await this.getRecentTasks();
     }
     if (surface === 'tree') {
-      await this.pushTreeData(surface);
+      const tree = await this.getTreeResult();
+      result.tree = { nodes: tree.tree, leafId: tree.leafId };
     }
+    respond(result);
   }
-}
-
-export function registerLifecycleService(
-  server: ProtocolServer,
-  host: LifecycleProtocolHost,
-): void {
-  registerPayloadHandler(server, 'lifecycle', 'ready', 'ready', async (_message, context) => {
-    await host.ready(context.surface);
-  });
 }

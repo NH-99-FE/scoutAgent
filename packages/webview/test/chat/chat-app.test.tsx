@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { routeExtensionMessage, routeTaskHistoryData } from '@/bridge/extension-message-router';
+import { routeExtensionMessage } from '@/bridge/extension-message-router';
+import { projectTaskHistoryResult as routeTaskHistoryResponse } from '@/bridge/protocol-response-projector';
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
@@ -10,9 +11,9 @@ import { useTaskStore } from '@/store/task-store';
 import { useUiStore } from '@/store/ui-store';
 import type {
   ScoutBusyState,
-  ExtensionResponsePayload,
   ScoutImageContent,
   ScoutMessage,
+  ScoutProtocolResponsePayload,
   ScoutTaskItem,
   ScoutWebviewState,
 } from '@scout-agent/shared';
@@ -112,9 +113,9 @@ function routeTaskHistoryResult(
     nextOffset: number;
   }> = {},
 ): void {
-  routeTaskHistoryData(
+  routeTaskHistoryResponse(
     {
-      type: 'task_history_data',
+      type: 'task_history_result',
       query: overrides.query ?? '',
       purpose: 'panel',
       tasks,
@@ -148,7 +149,7 @@ function getHistoryQueryToken(): string | undefined {
 
 function routeProtocolResult(
   request: { requestId: string } | undefined,
-  payload: ExtensionResponsePayload,
+  payload: ScoutProtocolResponsePayload,
 ): void {
   if (!request) return;
   routeExtensionMessage({
@@ -736,7 +737,7 @@ describe('ChatApp', () => {
 
     act(() => {
       routeExtensionMessage({
-        type: 'task_history_data',
+        type: 'task_history_update',
         query: '',
         purpose: 'recent',
         tasks: [

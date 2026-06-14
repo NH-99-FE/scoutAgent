@@ -3,7 +3,7 @@
 // ============================================================
 
 import type {
-  ExtensionResponsePayload,
+  ScoutProtocolResponsePayload,
   ScoutProtocolRequest,
   ScoutProtocolResponse,
   ScoutProtocolService,
@@ -17,12 +17,12 @@ interface SendProtocolRequestOptions {
   service: ScoutProtocolService;
   method: string;
   streaming?: boolean;
-  onResponse?: (payload: ExtensionResponsePayload) => void;
+  onResponse?: (payload: ScoutProtocolResponsePayload) => void;
   onError?: (message: string, code: string) => void;
 }
 
 interface PendingProtocolRequest {
-  onResponse?: (payload: ExtensionResponsePayload) => void;
+  onResponse?: (payload: ScoutProtocolResponsePayload) => void;
   onError?: (message: string, code: string) => void;
 }
 
@@ -30,6 +30,13 @@ interface PendingProtocolRequest {
 
 const pendingRequests = new Map<string, PendingProtocolRequest>();
 const activeRequests = new Set<string>();
+let defaultErrorHandler: ((message: string, code: string) => void) | undefined;
+
+export function setDefaultProtocolErrorHandler(
+  handler: ((message: string, code: string) => void) | undefined,
+): void {
+  defaultErrorHandler = handler;
+}
 
 // ---------- 发送 ----------
 
@@ -80,17 +87,17 @@ export function routeProtocolResponse(message: ScoutProtocolResponse): void {
     activeRequests.delete(message.requestId);
   }
   const pending = pendingRequests.get(message.requestId);
-  if (!pending) return;
 
   if (message.done !== false) {
     pendingRequests.delete(message.requestId);
   }
 
   if (message.error) {
-    pending.onError?.(message.error.message, message.error.code);
+    const onError = pending?.onError ?? defaultErrorHandler;
+    onError?.(message.error.message, message.error.code);
     return;
   }
-  if (message.payload) {
+  if (message.payload && pending) {
     pending.onResponse?.(message.payload);
   }
 }
@@ -98,6 +105,7 @@ export function routeProtocolResponse(message: ScoutProtocolResponse): void {
 export function resetProtocolTransport(): void {
   pendingRequests.clear();
   activeRequests.clear();
+  defaultErrorHandler = undefined;
 }
 
 function createProtocolRequestId(): string {

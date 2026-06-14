@@ -8,6 +8,10 @@
 
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
+// ---------- Webview surfaces ----------
+
+export type ScoutWebviewSurface = 'chat' | 'settings' | 'tree';
+
 // ---------- Source / Tool info ----------
 
 export type SourceScope = 'user' | 'project' | 'temporary';
@@ -134,6 +138,17 @@ export type ScoutProtocolService =
   | 'mention'
   | 'ui';
 
+export type ScoutProtocolKind = 'lifecycle' | 'query' | 'command';
+
+export interface ScoutProtocolRoute {
+  kind: ScoutProtocolKind;
+  service: ScoutProtocolService;
+  method: string;
+  response?: ScoutProtocolResponsePayloadType;
+  emits?: readonly ScoutDomainEventType[];
+  surfaces?: readonly ScoutWebviewSurface[];
+}
+
 export interface ScoutProtocolRequest<T = WebviewRequestPayload> {
   type: 'protocol_request';
   /**
@@ -229,6 +244,267 @@ export type WebviewRequestPayload =
   | { type: 'import_session'; sessionPath: string; cwdOverride?: string }
   | { type: 'delete_session'; sessionId: string; sessionPath: string }
   | { type: 'export_session'; format: 'jsonl'; outputPath?: string };
+
+export const SCOUT_PROTOCOL = {
+  ready: {
+    kind: 'lifecycle',
+    service: 'lifecycle',
+    method: 'ready',
+    response: 'bootstrap_result',
+    surfaces: ['chat', 'settings', 'tree'],
+  },
+  request_state: {
+    kind: 'query',
+    service: 'state',
+    method: 'request_state',
+    response: 'state_result',
+    surfaces: ['chat', 'settings', 'tree'],
+  },
+  request_config: {
+    kind: 'query',
+    service: 'config',
+    method: 'request_config',
+    response: 'config_result',
+    surfaces: ['chat', 'settings', 'tree'],
+  },
+  request_context_usage: {
+    kind: 'query',
+    service: 'state',
+    method: 'request_context_usage',
+    response: 'context_usage_result',
+    surfaces: ['chat'],
+  },
+  user_message: {
+    kind: 'command',
+    service: 'session',
+    method: 'user_message',
+    emits: [
+      'state_update',
+      'queue_update',
+      'agent_event',
+      'context_usage_update',
+      'tree_update',
+      'task_history_update',
+    ],
+    surfaces: ['chat'],
+  },
+  new_session_message: {
+    kind: 'command',
+    service: 'session',
+    method: 'new_session_message',
+    response: 'new_session_result',
+    emits: ['state_update', 'tree_update', 'task_history_update', 'sessions_update'],
+    surfaces: ['chat'],
+  },
+  cancel_follow_up: {
+    kind: 'command',
+    service: 'session',
+    method: 'cancel_follow_up',
+    emits: ['queue_update'],
+    surfaces: ['chat'],
+  },
+  promote_follow_up: {
+    kind: 'command',
+    service: 'session',
+    method: 'promote_follow_up',
+    emits: ['state_update', 'queue_update', 'agent_event', 'tree_update'],
+    surfaces: ['chat'],
+  },
+  abort: {
+    kind: 'command',
+    service: 'session',
+    method: 'abort',
+    emits: ['state_update', 'queue_update'],
+    surfaces: ['chat'],
+  },
+  abort_retry: {
+    kind: 'command',
+    service: 'session',
+    method: 'abort_retry',
+    emits: ['state_update'],
+    surfaces: ['chat'],
+  },
+  compact: {
+    kind: 'command',
+    service: 'session',
+    method: 'compact',
+    emits: ['compaction_start', 'compaction_end', 'state_update', 'tree_update'],
+    surfaces: ['chat'],
+  },
+  select_model: {
+    kind: 'command',
+    service: 'config',
+    method: 'select_model',
+    emits: ['state_update', 'config_update'],
+    surfaces: ['chat', 'settings'],
+  },
+  select_thinking: {
+    kind: 'command',
+    service: 'config',
+    method: 'select_thinking',
+    emits: ['state_update', 'thinking_level_changed'],
+    surfaces: ['chat', 'settings'],
+  },
+  set_active_tools: {
+    kind: 'command',
+    service: 'config',
+    method: 'set_active_tools',
+    emits: ['state_update', 'config_update'],
+    surfaces: ['chat', 'settings'],
+  },
+  clear_conversation: {
+    kind: 'command',
+    service: 'session',
+    method: 'clear_conversation',
+    emits: ['state_update', 'tree_update'],
+    surfaces: ['chat'],
+  },
+  reload_resources: {
+    kind: 'command',
+    service: 'config',
+    method: 'reload_resources',
+    response: 'reload_result',
+    emits: ['config_update', 'commands_update', 'state_update', 'tree_update'],
+    surfaces: ['chat', 'settings'],
+  },
+  open_settings_panel: {
+    kind: 'command',
+    service: 'ui',
+    method: 'open_settings_panel',
+    response: 'open_settings_panel_result',
+    surfaces: ['chat', 'tree'],
+  },
+  open_tree_panel: {
+    kind: 'command',
+    service: 'ui',
+    method: 'open_tree_panel',
+    response: 'open_tree_panel_result',
+    surfaces: ['chat', 'settings'],
+  },
+  fork_session: {
+    kind: 'command',
+    service: 'tree',
+    method: 'fork_session',
+    response: 'fork_result',
+    emits: ['state_update', 'tree_update', 'sessions_update'],
+    surfaces: ['tree'],
+  },
+  request_tree: {
+    kind: 'query',
+    service: 'tree',
+    method: 'request_tree',
+    response: 'tree_result',
+    surfaces: ['chat', 'tree'],
+  },
+  navigate_tree: {
+    kind: 'command',
+    service: 'tree',
+    method: 'navigate_tree',
+    response: 'navigate_tree_result',
+    emits: ['state_update', 'tree_update'],
+    surfaces: ['tree'],
+  },
+  set_label: {
+    kind: 'command',
+    service: 'tree',
+    method: 'set_label',
+    response: 'label_result',
+    emits: ['tree_update'],
+    surfaces: ['tree'],
+  },
+  set_session_name: {
+    kind: 'command',
+    service: 'session',
+    method: 'set_session_name',
+    response: 'set_session_name_result',
+    emits: ['sessions_update', 'state_update'],
+    surfaces: ['chat', 'tree'],
+  },
+  continue_session: {
+    kind: 'command',
+    service: 'session',
+    method: 'continue_session',
+    emits: ['state_update', 'queue_update', 'agent_event', 'tree_update'],
+    surfaces: ['chat'],
+  },
+  request_commands: {
+    kind: 'query',
+    service: 'ui',
+    method: 'request_commands',
+    response: 'commands_result',
+    surfaces: ['chat', 'settings'],
+  },
+  request_file_mentions: {
+    kind: 'query',
+    service: 'mention',
+    method: 'request_file_mentions',
+    response: 'file_mentions_result',
+    surfaces: ['chat'],
+  },
+  request_task_history: {
+    kind: 'query',
+    service: 'task',
+    method: 'request_task_history',
+    response: 'task_history_result',
+    surfaces: ['chat'],
+  },
+  open_task: {
+    kind: 'command',
+    service: 'session',
+    method: 'open_task',
+    response: 'open_task_result',
+    emits: ['state_update', 'tree_update', 'sessions_update'],
+    surfaces: ['chat'],
+  },
+  request_sessions: {
+    kind: 'query',
+    service: 'session',
+    method: 'request_sessions',
+    response: 'sessions_result',
+    surfaces: ['chat', 'tree'],
+  },
+  restore_session: {
+    kind: 'command',
+    service: 'session',
+    method: 'restore_session',
+    response: 'restore_session_result',
+    emits: ['state_update', 'tree_update', 'sessions_update'],
+    surfaces: ['chat', 'tree'],
+  },
+  pick_import_session: {
+    kind: 'command',
+    service: 'session',
+    method: 'pick_import_session',
+    response: 'import_session_result',
+    emits: ['state_update', 'tree_update', 'sessions_update'],
+    surfaces: ['chat'],
+  },
+  import_session: {
+    kind: 'command',
+    service: 'session',
+    method: 'import_session',
+    response: 'import_session_result',
+    emits: ['state_update', 'tree_update', 'sessions_update'],
+    surfaces: ['chat'],
+  },
+  delete_session: {
+    kind: 'command',
+    service: 'session',
+    method: 'delete_session',
+    response: 'delete_session_result',
+    emits: ['sessions_update'],
+    surfaces: ['chat'],
+  },
+  export_session: {
+    kind: 'command',
+    service: 'session',
+    method: 'export_session',
+    response: 'export_session_result',
+    surfaces: ['chat'],
+  },
+} as const satisfies Record<WebviewRequestPayload['type'], ScoutProtocolRoute>;
+
+export type ScoutProtocolPayloadType = WebviewRequestPayload['type'];
 
 // ---------- 消息内容块 ----------
 
@@ -432,6 +708,105 @@ export interface ScoutToolExecutionResult {
   details?: unknown;
 }
 
+// ---------- Request-scoped protocol results ----------
+
+export interface ScoutBootstrapResult {
+  type: 'bootstrap_result';
+  surface: ScoutWebviewSurface;
+  config: ScoutConfig;
+  state: ScoutWebviewState;
+  commands: ScoutCommandInfo[];
+  sessions?: ScoutSessionListItem[];
+  recentTasks?: ScoutTaskItem[];
+  tree?: {
+    nodes: ScoutSessionTreeNode[];
+    leafId: string | null;
+  };
+}
+
+export interface ScoutStateResult {
+  type: 'state_result';
+  state: ScoutWebviewState;
+}
+
+export interface ScoutConfigResult {
+  type: 'config_result';
+  config: ScoutConfig;
+}
+
+export interface ScoutContextUsageResult {
+  type: 'context_usage_result';
+  contextUsage?: ScoutContextUsage;
+}
+
+export interface ScoutCommandsResult {
+  type: 'commands_result';
+  commands: ScoutCommandInfo[];
+}
+
+export interface ScoutTreeResult {
+  type: 'tree_result';
+  tree: ScoutSessionTreeNode[];
+  leafId: string | null;
+}
+
+export interface ScoutSessionsResult {
+  type: 'sessions_result';
+  sessions: ScoutSessionListItem[];
+}
+
+export interface ScoutFileMentionsResult {
+  type: 'file_mentions_result';
+  query: string;
+  items: ScoutFileMentionItem[];
+}
+
+export interface ScoutTaskHistoryResult {
+  type: 'task_history_result';
+  query: string;
+  purpose?: ScoutTaskHistoryPurpose;
+  tasks: ScoutTaskItem[];
+  offset: number;
+  hasMore: boolean;
+  nextOffset: number;
+}
+
+export interface ScoutCommandResult {
+  type:
+    | 'fork_result'
+    | 'new_session_result'
+    | 'open_task_result'
+    | 'open_settings_panel_result'
+    | 'open_tree_panel_result'
+    | 'restore_session_result'
+    | 'import_session_result'
+    | 'export_session_result'
+    | 'navigate_tree_result'
+    | 'label_result'
+    | 'set_session_name_result'
+    | 'reload_result'
+    | 'delete_session_result';
+  success: boolean;
+  error?: string;
+  sessionPath?: string;
+  path?: string;
+  editorText?: string;
+}
+
+export type ScoutProtocolResponsePayload =
+  | ScoutBootstrapResult
+  | ScoutStateResult
+  | ScoutConfigResult
+  | ScoutContextUsageResult
+  | ScoutCommandsResult
+  | ScoutTreeResult
+  | ScoutSessionsResult
+  | ScoutFileMentionsResult
+  | ScoutTaskHistoryResult
+  | ScoutCommandResult;
+
+export type ScoutProtocolResponsePayloadType = ScoutProtocolResponsePayload['type'];
+
 /**
  * Agent 事件在 postMessage 通道上的序列化形式。
  * 结构与内部 AgentEvent 对齐，消息类型替换为可序列化的 ScoutMessage。
@@ -520,11 +895,9 @@ export interface ScoutNotificationMessage {
   message: string;
 }
 
-export type ExtensionMessage =
-  | ScoutProtocolResponse
-  | ExtensionEventMessage;
+export type ExtensionMessage = ScoutProtocolResponse | ExtensionEventMessage;
 
-export interface ScoutProtocolResponse<T = ExtensionResponsePayload> {
+export interface ScoutProtocolResponse<T = ScoutProtocolResponsePayload> {
   type: 'protocol_response';
   /** 必须回填请求 envelope 的 requestId，用于 webview transport 关联 callback。 */
   requestId: string;
@@ -544,6 +917,7 @@ export type ExtensionEventMessage =
   | { type: 'queue_update'; queueState: ScoutQueueState }
   | { type: 'agent_event'; event: ScoutAgentEvent }
   | { type: 'config_update'; config: ScoutConfig }
+  | { type: 'commands_update'; commands: ScoutCommandInfo[] }
   | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
   | ScoutNotificationMessage
   | {
@@ -557,12 +931,9 @@ export type ExtensionEventMessage =
   | ScoutCompactionStartEvent
   | ScoutCompactionEndEvent
   | ScoutThinkingLevelChangedEvent
-  | { type: 'fork_result'; success: boolean; error?: string }
-  | { type: 'tree_data'; tree: ScoutSessionTreeNode[]; leafId: string | null }
-  | { type: 'commands_data'; commands: ScoutCommandInfo[] }
-  | { type: 'file_mentions_data'; query: string; items: ScoutFileMentionItem[] }
+  | { type: 'tree_update'; tree: ScoutSessionTreeNode[]; leafId: string | null }
   | {
-      type: 'task_history_data';
+      type: 'task_history_update';
       query: string;
       purpose?: ScoutTaskHistoryPurpose;
       tasks: ScoutTaskItem[];
@@ -570,36 +941,6 @@ export type ExtensionEventMessage =
       hasMore: boolean;
       nextOffset: number;
     }
-  | { type: 'sessions_data'; sessions: ScoutSessionListItem[] }
-  | { type: 'open_settings_panel_result'; success: boolean; error?: string }
-  | { type: 'open_tree_panel_result'; success: boolean; error?: string }
-  | { type: 'new_session_result'; success: boolean; error?: string }
-  | {
-      type: 'open_task_result';
-      sessionPath: string;
-      success: boolean;
-      error?: string;
-    }
-  | { type: 'restore_session_result'; success: boolean; error?: string }
-  | { type: 'import_session_result'; success: boolean; error?: string }
-  | { type: 'export_session_result'; success: boolean; path?: string; error?: string }
-  | { type: 'navigate_tree_result'; success: boolean; error?: string; editorText?: string }
-  | { type: 'label_result'; success: boolean; error?: string }
-  | { type: 'set_session_name_result'; success: boolean; error?: string }
-  | { type: 'reload_result'; success: boolean; error?: string }
-  | { type: 'delete_session_result'; success: boolean; error?: string };
+  | { type: 'sessions_update'; sessions: ScoutSessionListItem[] };
 
-export type ExtensionResponsePayload =
-  | Extract<ExtensionEventMessage, { type: 'task_history_data' }>
-  | Extract<ExtensionEventMessage, { type: 'new_session_result' }>
-  | Extract<ExtensionEventMessage, { type: 'open_task_result' }>
-  | Extract<ExtensionEventMessage, { type: 'restore_session_result' }>
-  | Extract<ExtensionEventMessage, { type: 'open_settings_panel_result' }>
-  | Extract<ExtensionEventMessage, { type: 'open_tree_panel_result' }>
-  | Extract<ExtensionEventMessage, { type: 'import_session_result' }>
-  | Extract<ExtensionEventMessage, { type: 'export_session_result' }>
-  | Extract<ExtensionEventMessage, { type: 'navigate_tree_result' }>
-  | Extract<ExtensionEventMessage, { type: 'label_result' }>
-  | Extract<ExtensionEventMessage, { type: 'set_session_name_result' }>
-  | Extract<ExtensionEventMessage, { type: 'reload_result' }>
-  | Extract<ExtensionEventMessage, { type: 'delete_session_result' }>;
+export type ScoutDomainEventType = ExtensionEventMessage['type'];

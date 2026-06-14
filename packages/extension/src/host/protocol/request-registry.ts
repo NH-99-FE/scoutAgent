@@ -16,6 +16,8 @@ export interface ProtocolRequestHandle {
   signal: AbortSignal;
   isCanceled: () => boolean;
   isClosed: () => boolean;
+  hasResponded: () => boolean;
+  markResponded: () => void;
   nextSequence: () => number;
   registerCleanup: (cleanup: ProtocolRequestCleanup) => void;
 }
@@ -27,6 +29,7 @@ interface ProtocolRequestState {
   cleanups: Set<ProtocolRequestCleanup>;
   canceled: boolean;
   closed: boolean;
+  responded: boolean;
   sequence: number;
 }
 
@@ -45,6 +48,7 @@ export class ProtocolRequestRegistry {
       cleanups: new Set(),
       canceled: false,
       closed: false,
+      responded: false,
       sequence: 0,
     };
     this.active.set(request.requestId, state);
@@ -55,6 +59,10 @@ export class ProtocolRequestRegistry {
       signal: state.abortController.signal,
       isCanceled: () => state.canceled,
       isClosed: () => state.closed,
+      hasResponded: () => state.responded,
+      markResponded: () => {
+        state.responded = true;
+      },
       nextSequence: () => {
         state.sequence += 1;
         return state.sequence;

@@ -41,7 +41,7 @@ function makeConfigManager(config = { provider: 'openai' }): ConfigManager {
 
 describe('StateProtocolService', () => {
   it('posts a complete webview state snapshot to the requested surface', async () => {
-    const postMessage = vi.fn();
+    const publishEvent = vi.fn();
     const service = new StateProtocolService({
       sessionManager: makeSessionManager(),
       configManager: makeConfigManager(),
@@ -59,12 +59,12 @@ describe('StateProtocolService', () => {
         },
       ],
       getBusyState: () => ({ kind: 'agent', label: 'Working', cancellable: true }),
-      postMessage,
+      publishEvent,
     });
 
     await service.pushState('chat');
 
-    expect(postMessage).toHaveBeenCalledWith(
+    expect(publishEvent).toHaveBeenCalledWith(
       {
         type: 'state_update',
         state: expect.objectContaining({
@@ -91,41 +91,39 @@ describe('StateProtocolService', () => {
     );
   });
 
-  it('posts queue, config, and context usage updates without rebuilding full state', async () => {
+  it('posts queue and config updates while context usage requests return a result', async () => {
     const sessionManager = makeSessionManager();
     const configManager = makeConfigManager({ provider: 'anthropic' });
-    const postMessage = vi.fn();
+    const publishEvent = vi.fn();
     const service = new StateProtocolService({
       sessionManager,
       configManager,
       getCommands: () => [],
       getBusyState: () => ({ kind: 'idle', cancellable: false }),
-      postMessage,
+      publishEvent,
     });
+    const respond = vi.fn();
 
     service.pushQueueState('tree');
     service.pushConfig('chat');
-    await service.requestContextUsage('chat');
+    await service.requestContextUsage(respond);
 
-    expect(postMessage).toHaveBeenCalledWith(
+    expect(publishEvent).toHaveBeenCalledWith(
       { type: 'queue_update', queueState: { pending: [], activeId: undefined } },
       'tree',
     );
-    expect(postMessage).toHaveBeenCalledWith(
+    expect(publishEvent).toHaveBeenCalledWith(
       { type: 'config_update', config: { provider: 'anthropic' } },
       'chat',
     );
-    expect(postMessage).toHaveBeenCalledWith(
-      {
-        type: 'context_usage_update',
-        contextUsage: {
-          usedTokens: 100,
-          maxTokens: 200,
-          percentage: 50,
-        },
+    expect(respond).toHaveBeenCalledWith({
+      type: 'context_usage_result',
+      contextUsage: {
+        usedTokens: 100,
+        maxTokens: 200,
+        percentage: 50,
       },
-      'chat',
-    );
+    });
     expect(sessionManager.getSessionName).not.toHaveBeenCalled();
   });
 });

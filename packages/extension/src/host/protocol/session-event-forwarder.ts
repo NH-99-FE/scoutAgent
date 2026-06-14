@@ -10,7 +10,7 @@ import type { ScoutSessionEvent } from '../session-coordinator.ts';
 
 export interface SessionEventForwarderOptions {
   isStreaming: () => boolean;
-  postMessage: (message: ExtensionEventMessage) => void;
+  publishEvent: (message: ExtensionEventMessage) => void;
   pushState: () => Promise<void>;
   pushQueueState: () => void;
   pushTreeData: () => Promise<void>;
@@ -27,7 +27,7 @@ const IDLE_BUSY_STATE: ScoutBusyState = {
 
 export class SessionEventForwarder {
   private readonly isStreaming: () => boolean;
-  private readonly postMessage: (message: ExtensionEventMessage) => void;
+  private readonly publishEvent: (message: ExtensionEventMessage) => void;
   private readonly pushState: () => Promise<void>;
   private readonly pushQueueState: () => void;
   private readonly pushTreeData: () => Promise<void>;
@@ -35,7 +35,7 @@ export class SessionEventForwarder {
 
   constructor(options: SessionEventForwarderOptions) {
     this.isStreaming = options.isStreaming;
-    this.postMessage = options.postMessage;
+    this.publishEvent = options.publishEvent;
     this.pushState = options.pushState;
     this.pushQueueState = options.pushQueueState;
     this.pushTreeData = options.pushTreeData;
@@ -49,7 +49,7 @@ export class SessionEventForwarder {
       if (event.event.type === 'agent_end' && !event.event.willRetry) {
         this.busyState = IDLE_BUSY_STATE;
       }
-      this.postMessage({ type: 'agent_event', event: event.event });
+      this.publishEvent({ type: 'agent_event', event: event.event });
     }
 
     if (event.type === 'auto_retry_start') {
@@ -61,7 +61,7 @@ export class SessionEventForwarder {
         maxAttempts: event.maxAttempts,
         reason: event.errorMessage,
       };
-      this.postMessage({
+      this.publishEvent({
         type: 'auto_retry_start',
         attempt: event.attempt,
         maxAttempts: event.maxAttempts,
@@ -71,7 +71,7 @@ export class SessionEventForwarder {
     }
     if (event.type === 'auto_retry_end') {
       this.busyState = IDLE_BUSY_STATE;
-      this.postMessage({
+      this.publishEvent({
         type: 'auto_retry_end',
         success: event.success,
         attempt: event.attempt,
@@ -86,13 +86,13 @@ export class SessionEventForwarder {
         cancellable: true,
         reason: event.reason,
       };
-      this.postMessage({ type: 'compaction_start', reason: event.reason });
+      this.publishEvent({ type: 'compaction_start', reason: event.reason });
     }
     if (event.type === 'compaction_end') {
       this.busyState = event.willRetry
         ? { kind: 'retry', label: 'Retrying', cancellable: true, reason: event.reason }
         : IDLE_BUSY_STATE;
-      this.postMessage({
+      this.publishEvent({
         type: 'compaction_end',
         reason: event.reason,
         result: event.result,
@@ -103,12 +103,12 @@ export class SessionEventForwarder {
     }
 
     if (event.type === 'thinking_level_changed') {
-      this.postMessage({ type: 'thinking_level_changed', level: event.level });
+      this.publishEvent({ type: 'thinking_level_changed', level: event.level });
     }
 
     if (event.type === 'state_change' || event.type === 'error') {
       if (event.type === 'error') {
-        this.postMessage({ type: 'notification', level: 'error', message: event.message });
+        this.publishEvent({ type: 'notification', level: 'error', message: event.message });
       }
       void this.pushState();
     }

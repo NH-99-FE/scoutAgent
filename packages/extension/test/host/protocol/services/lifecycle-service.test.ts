@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ScoutConfig, ScoutWebviewState } from '@scout-agent/shared';
 import type { ExtensionSessionCoordinator } from '../../../../src/host/session-coordinator.ts';
 import { LifecycleProtocolService } from '../../../../src/host/protocol/services/lifecycle-service.ts';
 
@@ -8,48 +9,94 @@ function makeSessionManager(): ExtensionSessionCoordinator {
   } as unknown as ExtensionSessionCoordinator;
 }
 
+function makeConfig(): ScoutConfig {
+  return {
+    models: [],
+    defaultModelProvider: 'openai',
+    defaultModelId: 'gpt-test',
+    branchSummary: { reserveTokens: 100, skipPrompt: false },
+  };
+}
+
+function makeState(): ScoutWebviewState {
+  return {
+    messages: [],
+    isStreaming: false,
+    busyState: { kind: 'idle', cancellable: false },
+    modelProvider: 'openai',
+    modelId: 'gpt-test',
+    thinkingLevel: 'off',
+    tools: [],
+    activeToolNames: [],
+    commands: [],
+  };
+}
+
 describe('LifecycleProtocolService', () => {
-  it('initializes chat webviews and pushes chat-specific session data', async () => {
-    const calls: string[] = [];
+  it('responds to chat ready with a single bootstrap result', async () => {
     const sessionManager = makeSessionManager();
+    const respond = vi.fn();
     const service = new LifecycleProtocolService({
       sessionManager,
-      pushConfig: vi.fn(() => calls.push('config')),
-      pushState: vi.fn(async () => {
-        calls.push('state');
-      }),
-      requestCommands: vi.fn(() => calls.push('commands')),
-      requestSessions: vi.fn(async () => {
-        calls.push('sessions');
-      }),
-      pushTreeData: vi.fn(async () => {
-        calls.push('tree');
-      }),
-      logReady: vi.fn((surface) => calls.push(`ready:${surface}`)),
-    });
-
-    await service.ready('chat');
-
-    expect(sessionManager.initialize).toHaveBeenCalledTimes(1);
-    expect(calls).toEqual(['ready:chat', 'config', 'state', 'commands', 'sessions']);
-  });
-
-  it('initializes tree webviews and pushes tree data for that surface', async () => {
-    const requestSessions = vi.fn(async () => undefined);
-    const pushTreeData = vi.fn(async () => undefined);
-    const service = new LifecycleProtocolService({
-      sessionManager: makeSessionManager(),
-      pushConfig: vi.fn(),
-      pushState: vi.fn(async () => undefined),
-      requestCommands: vi.fn(),
-      requestSessions,
-      pushTreeData,
+      getConfig: makeConfig,
+      getState: vi.fn(async () => makeState()),
+      getCommands: () => [],
+      getSessions: vi.fn(async () => [{ id: 'session-1', path: '/session.jsonl', createdAt: '1' }]),
+      getRecentTasks: vi.fn(async () => [
+        {
+          id: 'task-1',
+          sessionId: 'session-1',
+          sessionPath: '/session.jsonl',
+          title: 'Task',
+          createdAt: '1',
+        },
+      ]),
+      getTreeResult: vi.fn(async () => ({ type: 'tree_result' as const, tree: [], leafId: null })),
       logReady: vi.fn(),
     });
 
-    await service.ready('tree');
+    await service.ready('chat', respond);
 
-    expect(requestSessions).not.toHaveBeenCalled();
-    expect(pushTreeData).toHaveBeenCalledWith('tree');
+    expect(sessionManager.initialize).toHaveBeenCalledTimes(1);
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'bootstrap_result',
+        surface: 'chat',
+        sessions: [expect.objectContaining({ id: 'session-1' })],
+        recentTasks: [expect.objectContaining({ id: 'task-1' })],
+      }),
+    );
+  });
+
+  it('responds to tree ready with tree data but no chat-only lists', async () => {
+    const getSessions = vi.fn(async () => []);
+    const getRecentTasks = vi.fn(async () => []);
+    const respond = vi.fn();
+    const service = new LifecycleProtocolService({
+      sessionManager: makeSessionManager(),
+      getConfig: makeConfig,
+      getState: vi.fn(async () => makeState()),
+      getCommands: () => [],
+      getSessions,
+      getRecentTasks,
+      getTreeResult: vi.fn(async () => ({
+        type: 'tree_result' as const,
+        tree: [],
+        leafId: 'leaf-1',
+      })),
+      logReady: vi.fn(),
+    });
+
+    await service.ready('tree', respond);
+
+    expect(getSessions).not.toHaveBeenCalled();
+    expect(getRecentTasks).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'bootstrap_result',
+        surface: 'tree',
+        tree: { nodes: [], leafId: 'leaf-1' },
+      }),
+    );
   });
 });
