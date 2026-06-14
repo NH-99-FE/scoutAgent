@@ -733,6 +733,11 @@ describe('AgentSession', () => {
             getMessageText((entry as { message: AgentMessage }).message) === 'new session prompt',
         ),
     ).toBe(true);
+    expect(
+      session
+        .getSessionMessages()
+        .some(({ message }) => getMessageText(message) === 'new session prompt'),
+    ).toBe(true);
     expect(turnCompleted).toBe(false);
 
     releaseTurn.resolve();

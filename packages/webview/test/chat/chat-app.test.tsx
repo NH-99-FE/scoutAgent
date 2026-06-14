@@ -85,8 +85,7 @@ function getLatestSearchTaskMessage() {
     .map(([message]) => message)
     .filter(
       (message) =>
-        message.type === 'protocol_request' &&
-        message.payload?.type === 'request_task_history',
+        message.type === 'protocol_request' && message.payload?.type === 'request_task_history',
     );
   return messages.at(-1) as
     | {
@@ -113,23 +112,25 @@ function routeTaskHistoryResult(
     nextOffset: number;
   }> = {},
 ): void {
-  routeTaskHistoryData({
-    type: 'task_history_data',
-    query: overrides.query ?? '',
-    purpose: 'panel',
-    tasks,
-    offset: overrides.offset ?? 0,
-    hasMore: overrides.hasMore ?? false,
-    nextOffset: overrides.nextOffset ?? tasks.length,
-  }, queryToken);
+  routeTaskHistoryData(
+    {
+      type: 'task_history_data',
+      query: overrides.query ?? '',
+      purpose: 'panel',
+      tasks,
+      offset: overrides.offset ?? 0,
+      hasMore: overrides.hasMore ?? false,
+      nextOffset: overrides.nextOffset ?? tasks.length,
+    },
+    queryToken,
+  );
 }
 
 function getPostedProtocolRequests(payloadType: string) {
   return postMessage.mock.calls
     .map(([message]) => message)
     .filter(
-      (message) =>
-        message.type === 'protocol_request' && message.payload?.type === payloadType,
+      (message) => message.type === 'protocol_request' && message.payload?.type === payloadType,
     ) as Array<{ requestId: string; payload: Record<string, unknown> }>;
 }
 
@@ -212,7 +213,22 @@ describe('ChatApp', () => {
       type: 'new_session_message',
       text: '中文回答',
     });
-    expect(screen.getByLabelText('随心输入')).toHaveValue('中文回答');
+    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+  });
+
+  it('starts a new session from the task home send button', () => {
+    render(<ChatApp />);
+
+    fireEvent.change(screen.getByLabelText('随心输入'), {
+      target: { value: '按钮发送' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    expectPostedPayload('new_session_message', {
+      type: 'new_session_message',
+      text: '按钮发送',
+    });
+    expect(screen.getByLabelText('随心输入')).toHaveValue('');
   });
 
   it('prevents duplicate new session submits while creation is pending', () => {
@@ -237,6 +253,7 @@ describe('ChatApp', () => {
     });
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
     const newSessionMessage = getLatestPostedProtocolRequest('new_session_message');
+    expect(screen.getByLabelText('随心输入')).toHaveValue('');
 
     act(() => {
       routeProtocolError(newSessionMessage, 'new session failed');
@@ -244,6 +261,7 @@ describe('ChatApp', () => {
 
     expect(useUiStore.getState().newSessionPending).toBe(false);
     expect(useUiStore.getState().chatView).toBe('home');
+    expect(screen.getByLabelText('随心输入')).toHaveValue('会失败的新会话');
     expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
   });
 

@@ -5,10 +5,18 @@
 import { create } from 'zustand';
 import type { ScoutImageContent } from '@scout-agent/shared';
 
+interface ComposerDraft {
+  images?: ScoutImageContent[];
+  text: string;
+}
+
 interface ComposerActions {
   addImages: (sessionId: string, images: ScoutImageContent[]) => void;
   removeImage: (sessionId: string, index: number) => void;
   setText: (sessionId: string, text: string) => void;
+  stagePendingDraft: (sessionId: string, draft: ComposerDraft) => void;
+  restorePendingDraft: (sessionId: string) => void;
+  discardPendingDraft: (sessionId: string) => void;
   clearDraft: (sessionId: string) => void;
   clearText: (sessionId: string) => void;
   reset: () => void;
@@ -16,6 +24,7 @@ interface ComposerActions {
 
 interface ComposerStore {
   imagesBySessionId: Record<string, ScoutImageContent[]>;
+  pendingDraftBySessionId: Record<string, ComposerDraft>;
   textBySessionId: Record<string, string>;
   actions: ComposerActions;
 }
@@ -26,6 +35,7 @@ export const HOME_COMPOSER_SESSION_ID = '__task_home__';
 
 const initialState = {
   imagesBySessionId: {} as Record<string, ScoutImageContent[]>,
+  pendingDraftBySessionId: {} as Record<string, ComposerDraft>,
   textBySessionId: {} as Record<string, string>,
 };
 
@@ -72,6 +82,60 @@ export const useComposerStore = create<ComposerStore>((set) => ({
             [key]: text,
           },
         };
+      }),
+    stagePendingDraft: (sessionId, draft) =>
+      set((state) => {
+        const key = getComposerSessionId(sessionId);
+        return {
+          pendingDraftBySessionId: {
+            ...state.pendingDraftBySessionId,
+            [key]: {
+              text: draft.text,
+              images: draft.images ? [...draft.images] : undefined,
+            },
+          },
+        };
+      }),
+    restorePendingDraft: (sessionId) =>
+      set((state) => {
+        const key = getComposerSessionId(sessionId);
+        const pendingDraft = state.pendingDraftBySessionId[key];
+        if (!pendingDraft) return state;
+
+        const nextPendingDrafts = { ...state.pendingDraftBySessionId };
+        delete nextPendingDrafts[key];
+
+        const currentText = state.textBySessionId[key] ?? '';
+        const currentImages = state.imagesBySessionId[key] ?? [];
+        if (currentText.length > 0 || currentImages.length > 0) {
+          return { pendingDraftBySessionId: nextPendingDrafts };
+        }
+
+        const nextImagesBySessionId = { ...state.imagesBySessionId };
+        const nextTextBySessionId = { ...state.textBySessionId };
+        if (pendingDraft.images && pendingDraft.images.length > 0) {
+          nextImagesBySessionId[key] = [...pendingDraft.images];
+        } else {
+          delete nextImagesBySessionId[key];
+        }
+        if (pendingDraft.text) {
+          nextTextBySessionId[key] = pendingDraft.text;
+        } else {
+          delete nextTextBySessionId[key];
+        }
+        return {
+          imagesBySessionId: nextImagesBySessionId,
+          pendingDraftBySessionId: nextPendingDrafts,
+          textBySessionId: nextTextBySessionId,
+        };
+      }),
+    discardPendingDraft: (sessionId) =>
+      set((state) => {
+        const key = getComposerSessionId(sessionId);
+        if (state.pendingDraftBySessionId[key] === undefined) return state;
+        const nextPendingDrafts = { ...state.pendingDraftBySessionId };
+        delete nextPendingDrafts[key];
+        return { pendingDraftBySessionId: nextPendingDrafts };
       }),
     clearDraft: (sessionId) =>
       set((state) => {

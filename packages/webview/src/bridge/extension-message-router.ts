@@ -125,8 +125,10 @@ export function routeExtensionEventMessage(message: ExtensionEventMessage): void
     case 'new_session_result':
       useUiStore.getState().actions.completeNewSessionRequest(message.success);
       if (message.success) {
+        useComposerStore.getState().actions.discardPendingDraft(HOME_COMPOSER_SESSION_ID);
         useComposerStore.getState().actions.clearDraft(HOME_COMPOSER_SESSION_ID);
       } else {
+        useComposerStore.getState().actions.restorePendingDraft(HOME_COMPOSER_SESSION_ID);
         useUiStore.getState().actions.setNotification({
           type: 'notification',
           level: 'error',

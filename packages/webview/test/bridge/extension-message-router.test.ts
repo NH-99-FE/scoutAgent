@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-  routeExtensionMessage,
-  routeTaskHistoryData,
-} from '@/bridge/extension-message-router';
+import { routeExtensionMessage, routeTaskHistoryData } from '@/bridge/extension-message-router';
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { useConfigStore } from '@/store/config-store';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
@@ -108,23 +105,26 @@ describe('routeExtensionMessage', () => {
       queryToken: 'history-1',
       offset: 0,
     });
-    routeTaskHistoryData({
-      type: 'task_history_data',
-      query: '',
-      purpose: 'panel',
-      tasks: [
-        {
-          id: 'task-2',
-          sessionId: 'session-2',
-          sessionPath: '/session-2.jsonl',
-          title: 'history',
-          createdAt: '2026-01-01T00:00:00.000Z',
-        },
-      ],
-      offset: 0,
-      hasMore: false,
-      nextOffset: 1,
-    }, 'history-1');
+    routeTaskHistoryData(
+      {
+        type: 'task_history_data',
+        query: '',
+        purpose: 'panel',
+        tasks: [
+          {
+            id: 'task-2',
+            sessionId: 'session-2',
+            sessionPath: '/session-2.jsonl',
+            title: 'history',
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+        offset: 0,
+        hasMore: false,
+        nextOffset: 1,
+      },
+      'history-1',
+    );
 
     expect(useTreeStore.getState().leafId).toBe('leaf-1');
     expect(useTaskStore.getState().recentTasks).toHaveLength(1);
@@ -252,6 +252,44 @@ describe('routeExtensionMessage', () => {
       TEST_IMAGE,
     ]);
     expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('draft');
+  });
+
+  it('restores an optimistically cleared home draft when new session creation fails', () => {
+    useComposerStore.getState().actions.stagePendingDraft(HOME_COMPOSER_SESSION_ID, {
+      text: 'pending draft',
+      images: [TEST_IMAGE],
+    });
+    useComposerStore.getState().actions.clearDraft(HOME_COMPOSER_SESSION_ID);
+    useUiStore.getState().actions.beginNewSessionRequest();
+
+    routeExtensionMessage({
+      type: 'new_session_result',
+      success: false,
+      error: 'failed',
+    });
+
+    expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toEqual([
+      TEST_IMAGE,
+    ]);
+    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe(
+      'pending draft',
+    );
+  });
+
+  it('does not overwrite a newer home draft when a pending new session fails', () => {
+    useComposerStore
+      .getState()
+      .actions.stagePendingDraft(HOME_COMPOSER_SESSION_ID, { text: 'old draft' });
+    useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'new draft');
+    useUiStore.getState().actions.beginNewSessionRequest();
+
+    routeExtensionMessage({
+      type: 'new_session_result',
+      success: false,
+      error: 'failed',
+    });
+
+    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('new draft');
   });
 
   it('ignores stale new session results', () => {

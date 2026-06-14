@@ -2256,6 +2256,7 @@ export class AgentSession implements CoreDisposable {
       const message = (enrichedEvent as { message?: AgentMessage }).message;
       if (message) {
         await this.persistAgentMessage(message);
+        await this.rebuildCachedMessages();
         this.acceptPromptMessage(message);
       }
       if (message?.role === 'assistant') {

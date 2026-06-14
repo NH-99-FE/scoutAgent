@@ -156,7 +156,9 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     if (props.mode === 'newSession') {
       submitBlockedRef.current = true;
       props.onBeginNewSessionRequest();
+      composerActions.stagePendingDraft(sessionId, payload);
       protocolClient.newSessionMessage(payload.text, payload.images);
+      composerActions.clearDraft(sessionId);
       setPendingSubmit(null);
       return;
     }

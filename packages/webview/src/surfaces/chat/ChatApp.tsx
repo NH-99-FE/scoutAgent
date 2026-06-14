@@ -35,6 +35,7 @@ export function ChatApp() {
       uiActions.setChatView('detail');
       return;
     }
+    composerActions.restorePendingDraft(HOME_COMPOSER_SESSION_ID);
     uiActions.beginOpenTask(task.sessionPath);
     protocolClient.openTask(task);
   };

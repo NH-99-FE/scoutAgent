@@ -65,6 +65,31 @@ describe('createAgentSessionServices', () => {
     );
   });
 
+  it('creates an empty extension runner so replacement contexts work without extensions', async () => {
+    const session = CoreSessionManager.inMemory(cwd);
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      configManager: createConfigManager(cwd),
+      session,
+    });
+
+    expect(services.extensionRunner.getRegisteredCommands()).toEqual([]);
+
+    const result = await createAgentSessionFromServices({
+      services,
+      session,
+      logger: { appendLine: () => undefined },
+      sessionStartEvent: { type: 'session_start', reason: 'new' },
+    });
+
+    await result.session.bindExtensions();
+    expect(result.session.createReplacedSessionContext().startUserMessage).toEqual(
+      expect.any(Function),
+    );
+    result.session.dispose();
+  });
+
   it('does not emit session lifecycle during session creation', async () => {
     const discoveredSkillDir = path.join(tempDir, 'discovered-skill');
     fs.mkdirSync(discoveredSkillDir, { recursive: true });

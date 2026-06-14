@@ -26,7 +26,7 @@ export interface AgentSessionServices {
   configManager: ScoutCoreConfig;
   resourceLoader: ScoutResourceLoader;
   resources: LoadedScoutResources;
-  extensionRunner?: ScoutExtensionRunner;
+  extensionRunner: ScoutExtensionRunner;
   diagnostics: AgentSessionRuntimeDiagnostic[];
 }
 
@@ -66,16 +66,13 @@ export async function createAgentSessionServices(
     });
   }
 
-  const extensionRunner =
-    extensionResult.extensions.length > 0
-      ? new ScoutExtensionRunner(
-          extensionResult.extensions,
-          extensionResult.runtime,
-          options.cwd,
-          options.session,
-          options.configManager,
-        )
-      : undefined;
+  const extensionRunner = new ScoutExtensionRunner(
+    extensionResult.extensions,
+    extensionResult.runtime,
+    options.cwd,
+    options.session,
+    options.configManager,
+  );
 
   const resourceLoader = new ScoutResourceLoader({
     cwd: options.cwd,
