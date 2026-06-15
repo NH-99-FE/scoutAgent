@@ -4,8 +4,8 @@
 
 import { useWebviewBootstrap } from '@/bridge/use-webview-bootstrap';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
-import { SettingsApp } from '@/settings/SettingsApp';
-import { TreeApp } from '@/tree/TreeApp';
+import { SettingsApp } from '@/surfaces/settings/SettingsApp';
+import { TreeApp } from '@/surfaces/tree/TreeApp';
 
 function App() {
   const surface = useWebviewBootstrap();
