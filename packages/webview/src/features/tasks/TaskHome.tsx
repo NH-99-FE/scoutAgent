@@ -8,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { protocolClient } from '@/bridge/protocol-client';
 import { HeaderBar } from '@/components/common/HeaderBar';
 import { IconButton } from '@/components/common/IconButton';
-import { cn } from '@/lib/utils';
 import { HOME_COMPOSER_SESSION_ID } from '@/store/composer-store';
 import { useRecentTasks } from '@/store/task-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
@@ -46,7 +45,7 @@ export function TaskHome({
     <main className="bg-background text-foreground flex h-screen min-h-screen flex-col overflow-hidden">
       <header className="h-auto shrink-0 px-2">
         <HeaderBar
-          className="h-full gap-2"
+          className="h-full gap-2 pl-1.5"
           title="任务"
           titleClassName="text-muted-foreground"
           actionsClassName="text-muted-foreground"
@@ -82,7 +81,7 @@ export function TaskHome({
 
         {!taskHistoryRendered ? (
           <Button
-            className="text-muted-foreground/75 hover:text-muted-foreground mt-1 h-5 px-0 text-[11px] hover:bg-transparent dark:hover:bg-transparent"
+            className="text-muted-foreground/75 hover:text-muted-foreground mt-1 ml-1.5 h-5 px-0 text-[11px] hover:bg-transparent dark:hover:bg-transparent"
             size="xs"
             type="button"
             variant="ghost"
@@ -94,10 +93,9 @@ export function TaskHome({
       </div>
 
       <section
-        className={cn(
-          'min-h-0 flex-1 px-3',
-          taskHistoryRendered ? 'overflow-hidden px-2 py-1' : 'grid place-items-center',
-        )}
+        className={
+          taskHistoryRendered ? 'min-h-0 flex-1 overflow-hidden px-2 py-1' : 'min-h-0 flex-1 px-3'
+        }
       >
         {taskHistoryRendered ? (
           <div
@@ -116,14 +114,7 @@ export function TaskHome({
               onOpenTask={onOpenTask}
             />
           </div>
-        ) : (
-          <div
-            aria-hidden="true"
-            className="border-muted-foreground/25 text-muted-foreground/50 grid size-12 place-items-center rounded-full border"
-          >
-            <span className="text-sm font-semibold">S</span>
-          </div>
-        )}
+        ) : null}
       </section>
 
       <footer className="shrink-0 px-3 pb-3">

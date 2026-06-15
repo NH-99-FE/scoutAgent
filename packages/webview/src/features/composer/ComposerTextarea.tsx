@@ -41,7 +41,7 @@ export function ComposerTextarea({
   return (
     <Textarea
       aria-label={placeholder}
-      className="max-h-40 min-h-12 resize-none border-0 bg-transparent px-1 py-1 text-sm shadow-none dark:bg-transparent"
+      className="placeholder:text-muted-foreground/60 max-h-40 min-h-12 resize-none border-0 bg-transparent px-1 py-1 text-sm shadow-none dark:bg-transparent"
       placeholder={placeholder}
       value={value}
       onChange={(event) => onChange(event.target.value)}

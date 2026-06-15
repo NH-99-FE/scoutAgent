@@ -11,9 +11,11 @@ import { cn } from '@/lib/utils';
 
 interface ConversationViewProps {
   messages: ScoutMessage[];
+  className?: string;
+  contentClassName?: string;
 }
 
-export function ConversationView({ messages }: ConversationViewProps) {
+export function ConversationView({ messages, className, contentClassName }: ConversationViewProps) {
   const endRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -22,8 +24,8 @@ export function ConversationView({ messages }: ConversationViewProps) {
   }, [messages]);
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div className="space-y-3 px-3 py-2">
+    <ScrollArea className={cn('min-h-0 flex-1', className)} type="always">
+      <div className={cn('space-y-3 px-3 py-2', contentClassName)}>
         {messages.map((message, index) => (
           <MessageItem
             key={message.entryId ?? `${message.role}:${message.timestamp}:${index}`}
