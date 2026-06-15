@@ -48,7 +48,14 @@ export function startWebviewThemeSync(): () => void {
   };
 
   window.addEventListener('message', handler);
+  requestThemeVariables();
   return () => window.removeEventListener('message', handler);
+}
+
+function requestThemeVariables(): void {
+  if (!getThemeFromQuery()) return;
+  if (window.parent === window) return;
+  window.parent.postMessage({ type: 'scout_theme_ready' }, '*');
 }
 
 function applyInitialTheme(): void {
@@ -68,7 +75,7 @@ function applyTheme(theme: ScoutThemeKind, variables?: Record<string, string>): 
     element.classList.remove(...THEME_CLASSES);
     element.classList.add(themeClass);
   }
-  applyThemeVariables(variables);
+  if (variables) applyThemeVariables(variables);
 }
 
 function applyThemeVariables(variables: Record<string, string> | undefined): void {

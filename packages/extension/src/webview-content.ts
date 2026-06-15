@@ -104,9 +104,12 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
         return 'light';
       };
       const getThemeVariables = () => {
-        const styles = getComputedStyle(document.documentElement);
+        const rootStyles = getComputedStyle(document.documentElement);
+        const bodyStyles = getComputedStyle(document.body);
         return ${JSON.stringify(THEME_VARIABLES)}.reduce((variables, name) => {
-          const value = styles.getPropertyValue(name).trim();
+          const value =
+            rootStyles.getPropertyValue(name).trim() ||
+            bodyStyles.getPropertyValue(name).trim();
           if (value) variables[name] = value;
           return variables;
         }, {});
@@ -135,6 +138,10 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
       window.addEventListener('message', (event) => {
         if (event.source === frame.contentWindow) {
           if (event.origin !== devOrigin) return;
+          if (event.data?.type === 'scout_theme_ready') {
+            postTheme();
+            return;
+          }
           vscode.postMessage(event.data);
           return;
         }
