@@ -11,7 +11,6 @@ import { useComposerActions, useComposerImages, useComposerText } from '@/store/
 import { useBusyState, useIsStreaming, useQueueState } from '@/store/conversation-store';
 import { useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
-import { cn } from '@/lib/utils';
 import { ApprovalModeMenu } from './ApprovalModeMenu';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
 import { FollowUpQueuePanel } from './FollowUpQueuePanel';
@@ -128,7 +127,6 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const canStop = isCurrentSessionMode && busy.cancellable;
   const showStop = (isStreaming || canStop) && !hasDraft;
   const hasPausedFollowUps = queueState.paused && queueState.followUps.length > 0;
-  const hasQueuedFollowUps = queueState.followUps.length > 0;
 
   useEffect(() => {
     if (!confirmAbort) return undefined;
@@ -239,10 +237,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
       <div>
         {isCurrentSessionMode ? <FollowUpQueuePanel /> : null}
         <form
-          className={cn(
-            'border-border bg-background rounded-2xl border px-2 py-2 shadow-sm',
-            hasQueuedFollowUps && 'rounded-t-none',
-          )}
+          className="border-border bg-background rounded-2xl border px-2 py-2 shadow-sm"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
