@@ -2,11 +2,27 @@
 // Chat Workspace — 会话中页面布局
 // ============================================================
 
-import { ArrowLeft, GitBranch, History, MoreHorizontal, Settings, SquarePen } from 'lucide-react';
+import {
+  ArrowLeft,
+  Download,
+  GitBranch,
+  History,
+  MoreHorizontal,
+  Pencil,
+  Settings,
+  SquarePen,
+} from 'lucide-react';
 import type { ScoutTaskItem } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { HeaderBar } from '@/components/common/HeaderBar';
 import { IconButton } from '@/components/common/IconButton';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useConversationMessages } from '@/store/conversation-store';
 import { useSessionName } from '@/store/session-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
@@ -53,16 +69,17 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         <HeaderBar
           className="h-full"
           title={title}
+          actionsClassName="text-muted-foreground"
           left={
-            <IconButton label="返回" size="icon-xs" onClick={onBack}>
-              <ArrowLeft />
-            </IconButton>
+            <span className="text-muted-foreground">
+              <IconButton label="返回" size="icon-xs" onClick={onBack}>
+                <ArrowLeft />
+              </IconButton>
+            </span>
           }
           actions={
             <>
-              <IconButton label="更多操作" size="icon-xs">
-                <MoreHorizontal />
-              </IconButton>
+              <ConversationMoreMenu />
               <IconButton label="历史任务" size="icon-xs" onClick={openTaskHistory}>
                 <History />
               </IconButton>
@@ -72,9 +89,6 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
                 onClick={protocolClient.openSettingsPanel}
               >
                 <Settings />
-              </IconButton>
-              <IconButton label="打开会话树" size="icon-xs" onClick={protocolClient.openTreePanel}>
-                <GitBranch />
               </IconButton>
               <IconButton label="新会话" size="icon-xs" onClick={onNewSession}>
                 <SquarePen />
@@ -110,6 +124,39 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         <ChatComposer placeholder="要求后续变更" />
       </footer>
     </main>
+  );
+}
+
+function ConversationMoreMenu() {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label="更多操作"
+          className="text-current"
+          size="icon-xs"
+          type="button"
+          variant="ghost"
+        >
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="center" className="w-35">
+        <DropdownMenuItem disabled className="text-[12px]">
+          <Pencil />
+          <span>重命名对话</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-[12px]" onSelect={protocolClient.openTreePanel}>
+          <GitBranch />
+          <span>查看会话树</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled className="text-[12px]">
+          <Download />
+          <span>导出会话</span>
+          <span className="text-muted-foreground ml-auto text-[11px]">Beta</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
