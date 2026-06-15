@@ -49,7 +49,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
 
   return (
     <main className="bg-background text-foreground relative flex h-screen min-h-screen flex-col overflow-hidden">
-      <header className="border-border/70 h-9 shrink-0 border-b px-2">
+      <header className="h-auto shrink-0 px-2">
         <HeaderBar
           className="h-full"
           title={title}

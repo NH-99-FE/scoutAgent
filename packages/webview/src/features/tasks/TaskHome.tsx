@@ -44,7 +44,7 @@ export function TaskHome({
 
   return (
     <main className="bg-background text-foreground flex h-screen min-h-screen flex-col overflow-hidden">
-      <header className="h-9 shrink-0 px-2">
+      <header className="h-auto shrink-0 px-2">
         <HeaderBar
           className="h-full gap-2"
           title="任务"
