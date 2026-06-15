@@ -25,9 +25,11 @@ flowchart LR
 
 - `packages/shared/src/index.ts` 只定义跨边界消息契约，不保存业务状态，不引入 extension/webview 内部类型。
 - `packages/webview/src/bridge/protocol-client.ts` 是业务组件调用入口，组件只表达用户意图。
-- `packages/webview/src/bridge/protocol-route.ts` 负责把 payload type 映射到 `service/method`，用完整 `Record` 防止新增协议时漏 route。
+- `packages/shared/src/index.ts` 的 `SCOUT_PROTOCOL` 是 payload type 到 `service/method` 的权威路由表，用完整 `Record` 防止新增协议时漏 route。
+- `packages/webview/src/bridge/protocol-route.ts` 只负责从 shared `SCOUT_PROTOCOL` 读取路由，不维护第二套路由事实。
 - `packages/webview/src/bridge/transport-client.ts` 负责生成 `requestId`、发送 envelope、按 `requestId` 分发响应、发取消消息。
 - `packages/extension/src/host/protocol/protocol-server.ts` 负责按 `service/method` 分发 handler、回填同一个 `requestId`、处理 cancel。
+- `packages/extension/src/host/protocol/protocol-bus.ts` 负责校验 `service/method` 与 shared 路由声明一致，并按 `surfaces` 白名单拒绝错误 surface 的请求。
 - `packages/extension/src/host/protocol/request-registry.ts` 只追踪协议请求生命周期、cleanup 和 streaming sequence。
 - `packages/extension/src/host/protocol/services/*` 负责协议 payload 到 host/core 能力的适配；不要把 VS Code postMessage envelope 继续下沉。
 
@@ -60,8 +62,8 @@ Webview 发出的消息分两层：
 
 ## 新增协议 Checklist
 
-1. 在 `packages/shared/src/index.ts` 增加新的 `WebviewRequestPayload` 或 `ExtensionEventMessage` 类型。
-2. 在 `packages/webview/src/bridge/protocol-route.ts` 为新的 payload type 增加 `service/method`。
+1. 在 `packages/shared/src/index.ts` 增加新的 `WebviewRequestPayload`、response/event 类型，并同步 `SCOUT_PROTOCOL` 的 `service/method`、`response`、`emits`、`surfaces`。
+2. 确认 `packages/webview/src/bridge/protocol-route.ts` 能从 `SCOUT_PROTOCOL` 解析新 payload，不要在 Webview 维护第二套路由表。
 3. 在 `packages/extension/src/host/protocol/services/*` 注册对应 handler，必要时新增 service host 方法。
 4. 如果请求需要单次响应，在 webview `protocol-client` 使用 `sendRouted` 或 `sendProtocolRequest` 的 `onResponse`。
 5. 如果请求需要取消或长生命周期，使用 transport 的 `requestId` 和 Extension `ProtocolRequestRegistry`，不要把 id 放进业务 payload。

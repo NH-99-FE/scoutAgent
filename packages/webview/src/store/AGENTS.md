@@ -5,6 +5,7 @@
 - zustand 仅用于**跨业务模块共享**、**需要被多个组件/页面复用**的状态。
 - 单个组件可自洽的 UI 状态，优先使用 `useState`、`useReducer`、`useMemo`。
 - 能通过 props、Context 清晰传递的状态，不要为了“省传参”直接升级为全局 store。
+- 协议投影层可以通过 `useXStore.getState().actions` 写入 store；store 模块顶层不得注册 postMessage listener、发送协议请求或持有 VS Code API。
 
 ### 2. Store 设计原则
 
