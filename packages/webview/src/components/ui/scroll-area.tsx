@@ -3,24 +3,46 @@ import { ScrollArea as ScrollAreaPrimitive } from 'radix-ui';
 
 import { cn } from '@/lib/utils';
 
+interface ScrollAreaProps extends React.ComponentProps<typeof ScrollAreaPrimitive.Root> {
+  scrollbars?: 'vertical' | 'horizontal' | 'both';
+  viewportClassName?: string;
+  viewportProps?: React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Viewport>;
+  viewportRef?: React.Ref<HTMLDivElement>;
+}
+
 function ScrollArea({
   className,
   children,
+  scrollbars = 'vertical',
+  viewportClassName,
+  viewportProps,
+  viewportRef,
   ...props
-}: React.ComponentProps<typeof ScrollAreaPrimitive.Root>) {
+}: ScrollAreaProps) {
+  const { className: viewportPropsClassName, ...resolvedViewportProps } = viewportProps ?? {};
+  const showVerticalScrollbar = scrollbars === 'vertical' || scrollbars === 'both';
+  const showHorizontalScrollbar = scrollbars === 'horizontal' || scrollbars === 'both';
+
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn('relative', className)}
+      className={cn('relative min-w-0 overflow-hidden', className)}
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
+        {...resolvedViewportProps}
+        ref={viewportRef}
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none"
+        className={cn(
+          'size-full min-w-0 overflow-x-hidden rounded-[inherit] transition-[color,box-shadow] outline-none',
+          viewportClassName,
+          viewportPropsClassName,
+        )}
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
-      <ScrollBar />
+      {showVerticalScrollbar ? <ScrollBar orientation="vertical" /> : null}
+      {showHorizontalScrollbar ? <ScrollBar orientation="horizontal" /> : null}
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   );

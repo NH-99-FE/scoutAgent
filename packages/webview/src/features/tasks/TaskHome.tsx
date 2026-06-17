@@ -42,8 +42,8 @@ export function TaskHome({
   const visibleTasks = taskHistoryRendered ? tasks : recentTasks.slice(0, 3);
 
   return (
-    <main className="bg-background text-foreground flex h-screen min-h-screen flex-col overflow-hidden">
-      <header className="h-auto shrink-0 px-2">
+    <main className="bg-background text-foreground flex h-screen min-h-screen min-w-0 max-w-full flex-col overflow-hidden">
+      <header className="h-auto min-w-0 max-w-full shrink-0 px-2">
         <HeaderBar
           className="h-full gap-2 pl-1.5"
           title="任务"
@@ -70,7 +70,7 @@ export function TaskHome({
         />
       </header>
 
-      <div className="shrink-0 px-2">
+      <div className="min-w-0 max-w-full shrink-0 px-2">
         {!taskHistoryRendered ? (
           <div className="mt-1 space-y-0.5">
             {visibleTasks.map((task) => (
@@ -94,7 +94,9 @@ export function TaskHome({
 
       <section
         className={
-          taskHistoryRendered ? 'min-h-0 flex-1 overflow-hidden px-2 py-1' : 'min-h-0 flex-1 px-3'
+          taskHistoryRendered
+            ? 'min-h-0 min-w-0 flex-1 overflow-hidden px-2 py-1'
+            : 'min-h-0 min-w-0 flex-1 px-3'
         }
       >
         {taskHistoryRendered ? (
@@ -117,7 +119,7 @@ export function TaskHome({
         ) : null}
       </section>
 
-      <footer className="shrink-0 px-3 pb-3">
+      <footer className="min-w-0 max-w-full shrink-0 px-3 pb-3">
         <ChatComposer
           draftSessionId={HOME_COMPOSER_SESSION_ID}
           mode="newSession"

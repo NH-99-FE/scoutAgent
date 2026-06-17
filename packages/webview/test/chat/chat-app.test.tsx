@@ -535,7 +535,7 @@ describe('ChatApp', () => {
     ]);
     useConversationStore
       .getState()
-      .actions.applyState(makeState([{ role: 'user', content: 'hello', timestamp: 1 }]));
+      .actions.applyStateSnapshot(makeState([{ role: 'user', content: 'hello', timestamp: 1 }]));
     useSessionStore
       .getState()
       .actions.applyState(makeState([{ role: 'user', content: 'hello', timestamp: 1 }]));
@@ -843,7 +843,7 @@ describe('ChatApp', () => {
       isStreaming: true,
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -859,9 +859,90 @@ describe('ChatApp', () => {
     });
   });
 
+  it('shows retry runtime status inline in the conversation', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+      isStreaming: true,
+      busyState: {
+        kind: 'retry',
+        label: 'Retrying',
+        cancellable: true,
+        attempt: 2,
+        maxAttempts: 3,
+        reason: 'rate limit',
+      },
+    });
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+
+    expect(screen.getByText('正在重试 2/3')).toBeInTheDocument();
+    expect(screen.getByText('rate limit')).toBeInTheDocument();
+  });
+
+  it('does not surface internal agent busy labels in the header loading action', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+      isStreaming: true,
+      busyState: { kind: 'agent', label: 'Working', cancellable: true },
+    });
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+
+    expect(screen.getByRole('button', { name: '正在回复' })).toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
+  });
+
+  it('projects runtime status events to the header and conversation body', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    expect(screen.queryByRole('button', { name: '正在回复' })).not.toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'agent_event',
+        event: { type: 'agent_start' },
+      });
+    });
+    expect(screen.getByRole('button', { name: '正在回复' })).toBeInTheDocument();
+    expect(screen.queryByText('Working')).not.toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'auto_retry_start',
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 100,
+        errorMessage: 'rate limit',
+      });
+    });
+    expect(screen.getByText('正在重试 2/3')).toBeInTheDocument();
+    expect(screen.getByText('rate limit')).toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({ type: 'compaction_start', reason: 'overflow' });
+    });
+    expect(screen.getByText('正在压缩上下文')).toBeInTheDocument();
+    expect(screen.getByText('上下文溢出恢复')).toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'compaction_end',
+        reason: 'overflow',
+        aborted: false,
+        willRetry: false,
+      });
+    });
+    expect(screen.queryByText('正在压缩上下文')).not.toBeInTheDocument();
+  });
+
   it('sends current session messages with composer images', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
     useComposerStore.getState().actions.addImages('session-1', [TEST_IMAGE]);
 
@@ -884,7 +965,7 @@ describe('ChatApp', () => {
       isStreaming: true,
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -908,7 +989,7 @@ describe('ChatApp', () => {
       isStreaming: true,
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -926,7 +1007,7 @@ describe('ChatApp', () => {
       isStreaming: true,
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -947,7 +1028,7 @@ describe('ChatApp', () => {
       sessionId: 'session-2',
       sessionName: '会话二',
     });
-    useConversationStore.getState().actions.applyState(sessionOne);
+    useConversationStore.getState().actions.applyStateSnapshot(sessionOne);
     useSessionStore.getState().actions.applyState(sessionOne);
 
     render(<ChatApp />);
@@ -956,7 +1037,7 @@ describe('ChatApp', () => {
     });
 
     act(() => {
-      useConversationStore.getState().actions.applyState(sessionTwo);
+      useConversationStore.getState().actions.applyStateSnapshot(sessionTwo);
       useSessionStore.getState().actions.applyState(sessionTwo);
     });
 
@@ -966,7 +1047,7 @@ describe('ChatApp', () => {
     });
 
     act(() => {
-      useConversationStore.getState().actions.applyState(sessionOne);
+      useConversationStore.getState().actions.applyStateSnapshot(sessionOne);
       useSessionStore.getState().actions.applyState(sessionOne);
     });
 
@@ -975,7 +1056,7 @@ describe('ChatApp', () => {
 
   it('does not reuse the conversation draft on the task home composer', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1044,7 +1125,7 @@ describe('ChatApp', () => {
       isStreaming: true,
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1069,7 +1150,7 @@ describe('ChatApp', () => {
         ],
       },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1099,7 +1180,7 @@ describe('ChatApp', () => {
         followUps: [{ id: 'follow-1', text: '继续排队', timestamp: 2 }],
       },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1131,7 +1212,7 @@ describe('ChatApp', () => {
         })),
       },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1168,7 +1249,7 @@ describe('ChatApp', () => {
         ],
       },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1200,7 +1281,7 @@ describe('ChatApp', () => {
         followUps: [{ id: 'follow-1', text: '等一下处理', timestamp: 1 }],
       },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1223,7 +1304,7 @@ describe('ChatApp', () => {
       isStreaming: true,
       busyState: { kind: 'agent', label: 'Working', cancellable: false },
     });
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1234,7 +1315,7 @@ describe('ChatApp', () => {
 
   it('switches from an active conversation back to the task home locally', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
 
     render(<ChatApp />);
@@ -1250,7 +1331,7 @@ describe('ChatApp', () => {
 
   it('opens the new session composer from the conversation header', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
-    useConversationStore.getState().actions.applyState(state);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, '旧首页草稿');
 

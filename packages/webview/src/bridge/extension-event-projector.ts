@@ -2,7 +2,7 @@
 // Extension event projector — Extension broadcast event 到 UI store 的投影
 // ============================================================
 
-import type { ExtensionEventMessage } from '@scout-agent/shared';
+import type { ExtensionEventMessage, ScoutRuntimeExtensionEvent } from '@scout-agent/shared';
 import { useConfigStore } from '@/store/config-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useSessionStore } from '@/store/session-store';
@@ -11,9 +11,14 @@ import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
 
 export function projectExtensionEvent(message: ExtensionEventMessage): void {
+  if (isRuntimeExtensionEvent(message)) {
+    projectRuntimeEvent(message);
+    return;
+  }
+
   switch (message.type) {
     case 'state_update':
-      useConversationStore.getState().actions.applyState(message.state);
+      useConversationStore.getState().actions.applyStateSnapshot(message.state);
       useSessionStore.getState().actions.applyState(message.state);
       useTreeStore.getState().actions.applyState(message.state);
       useUiStore.getState().actions.resolveOpenTask(message.state.sessionFile);
@@ -21,9 +26,6 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
       break;
     case 'queue_update':
       useConversationStore.getState().actions.applyQueueState(message.queueState);
-      break;
-    case 'agent_event':
-      useConversationStore.getState().actions.applyAgentEvent(message.event);
       break;
     case 'config_update':
       useConfigStore.getState().actions.setConfig(message.config);
@@ -46,55 +48,27 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
     case 'notification':
       useUiStore.getState().actions.setNotification(message);
       break;
-    case 'auto_retry_start':
-      useConversationStore.getState().actions.setBusyState(
-        {
-          kind: 'retry',
-          label: 'Retrying',
-          cancellable: true,
-          attempt: message.attempt,
-          maxAttempts: message.maxAttempts,
-          reason: message.errorMessage,
-        },
-        true,
-      );
-      break;
-    case 'compaction_start':
-      useConversationStore.getState().actions.setBusyState(
-        {
-          kind: 'compaction',
-          label: 'Compacting',
-          cancellable: true,
-          reason: message.reason,
-        },
-        true,
-      );
-      break;
-    case 'auto_retry_end':
-      useConversationStore
-        .getState()
-        .actions.setBusyState({ kind: 'idle', cancellable: false }, false);
-      break;
-    case 'compaction_end':
-      if (message.willRetry) {
-        useConversationStore.getState().actions.setBusyState(
-          {
-            kind: 'retry',
-            label: 'Retrying',
-            cancellable: true,
-            reason: message.reason,
-          },
-          true,
-        );
-      } else {
-        useConversationStore
-          .getState()
-          .actions.setBusyState({ kind: 'idle', cancellable: false }, false);
-      }
-      break;
     case 'thinking_level_changed':
       break;
   }
+}
+
+function isRuntimeExtensionEvent(
+  message: ExtensionEventMessage,
+): message is ScoutRuntimeExtensionEvent {
+  return (
+    message.type === 'agent_event' ||
+    message.type === 'auto_retry_start' ||
+    message.type === 'auto_retry_end' ||
+    message.type === 'compaction_start' ||
+    message.type === 'compaction_end'
+  );
+}
+
+function projectRuntimeEvent(message: ScoutRuntimeExtensionEvent): void {
+  useConversationStore
+    .getState()
+    .actions.applyRuntimeEvent(message.type === 'agent_event' ? message.event : message);
 }
 
 export function projectTaskHistoryUpdate(

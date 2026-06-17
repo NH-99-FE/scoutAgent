@@ -20,9 +20,14 @@ export function ModelStatusMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button className="text-muted-foreground" size="sm" type="button" variant="ghost">
+        <Button
+          className="text-muted-foreground max-w-36 min-w-0 shrink"
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
           <Zap />
-          <span>{formatModelLabel(model)}</span>
+          <span className="min-w-0 truncate">{formatModelLabel(model)}</span>
           <ChevronDown data-icon="inline-end" />
         </Button>
       </DropdownMenuTrigger>

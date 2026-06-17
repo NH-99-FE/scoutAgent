@@ -275,6 +275,122 @@ body,
   will-change: opacity, transform;
 }
 
+.scout-conversation-viewport > div {
+  display: block !important;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0 !important;
+}
+
+.scout-conversation-content,
+.scout-assistant-turn,
+.scout-assistant-content,
+.scout-assistant-content-segment,
+.scout-markdown-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.scout-user-message {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 77%;
+  min-inline-size: 0;
+  max-inline-size: 77%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-assistant-turn,
+.scout-assistant-turn * {
+  min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.scout-assistant-content,
+.scout-assistant-content-segment,
+.scout-markdown-content {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-markdown-content {
+  width: 100%;
+  max-width: 100%;
+  inline-size: 100%;
+}
+
+.scout-markdown-content * {
+  min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.scout-markdown-content :where(p, li, blockquote, h1, h2, h3, h4, h5, h6, a, strong, em, span),
+.scout-markdown-content :where(th, td),
+.scout-markdown-content :where(:not(pre) > code) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-markdown-table-wrapper,
+.scout-markdown-table {
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
+
+.scout-markdown-table {
+  table-layout: fixed;
+}
+
+.scout-markdown-table-cell {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-markdown-table-cell > * {
+  max-inline-size: 100%;
+}
+
+.scout-markdown-code-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.scout-markdown-code-scroll [data-slot='scroll-area-viewport'] > div {
+  display: block !important;
+  width: max-content;
+  min-width: 100%;
+  max-width: none !important;
+}
+
+.scout-markdown-code-scroll pre,
+.scout-markdown-code-scroll pre * {
+  max-width: none;
+  max-inline-size: none;
+}
+
+.scout-markdown-content :where(pre) {
+  overflow: visible;
+}
+
+.scout-markdown-content :where(pre, pre *) {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
 .task-history-panel-shell[data-state='open'] {
   animation: scout-task-history-panel-enter 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }

@@ -54,6 +54,56 @@ describe('SessionEventForwarder', () => {
     expect(forwarder.getBusyState()).toEqual({ kind: 'idle', cancellable: false });
   });
 
+  it('keeps retry busy after an agent end that will retry', () => {
+    const { forwarder, publishEvent } = makeForwarder();
+
+    forwarder.handle({
+      type: 'agent_event',
+      event: { type: 'agent_start' },
+    } as unknown as ScoutSessionEvent);
+    forwarder.handle({
+      type: 'agent_event',
+      event: { type: 'agent_end', willRetry: true },
+    } as unknown as ScoutSessionEvent);
+
+    expect(forwarder.getBusyState()).toEqual({
+      kind: 'retry',
+      label: 'Retrying',
+      cancellable: true,
+    });
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'agent_event',
+      event: { type: 'agent_end', willRetry: true },
+    });
+  });
+
+  it('does not clear active agent busy when retry end arrives after the next agent start', () => {
+    const { forwarder } = makeForwarder();
+
+    forwarder.handle({
+      type: 'auto_retry_start',
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 100,
+      errorMessage: 'rate limit',
+    } as unknown as ScoutSessionEvent);
+    forwarder.handle({
+      type: 'agent_event',
+      event: { type: 'agent_start' },
+    } as unknown as ScoutSessionEvent);
+    forwarder.handle({
+      type: 'auto_retry_end',
+      success: true,
+      attempt: 2,
+    } as unknown as ScoutSessionEvent);
+
+    expect(forwarder.getBusyState()).toEqual({
+      kind: 'agent',
+      label: 'Working',
+      cancellable: true,
+    });
+  });
+
   it('maps retry and compaction events to webview messages and busy state', () => {
     const { forwarder, publishEvent } = makeForwarder();
 

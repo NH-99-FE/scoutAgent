@@ -23,6 +23,62 @@ const IDLE_BUSY_STATE: ScoutBusyState = {
   cancellable: false,
 };
 
+const AGENT_BUSY_STATE: ScoutBusyState = {
+  kind: 'agent',
+  label: 'Working',
+  cancellable: true,
+};
+
+function createRetryBusyState(
+  details: Partial<
+    Pick<Extract<ScoutBusyState, { kind: 'retry' }>, 'attempt' | 'maxAttempts' | 'reason'>
+  > = {},
+): ScoutBusyState {
+  return {
+    kind: 'retry',
+    label: 'Retrying',
+    cancellable: true,
+    ...details,
+  };
+}
+
+function reduceBusyState(current: ScoutBusyState, event: ScoutSessionEvent): ScoutBusyState {
+  if (event.type === 'agent_event') {
+    if (event.event.type === 'agent_start') return AGENT_BUSY_STATE;
+    if (event.event.type === 'agent_end') {
+      return event.event.willRetry ? createRetryBusyState() : IDLE_BUSY_STATE;
+    }
+    return current;
+  }
+
+  if (event.type === 'auto_retry_start') {
+    return createRetryBusyState({
+      attempt: event.attempt,
+      maxAttempts: event.maxAttempts,
+      reason: event.errorMessage,
+    });
+  }
+
+  if (event.type === 'auto_retry_end') {
+    return current.kind === 'retry' ? IDLE_BUSY_STATE : current;
+  }
+
+  if (event.type === 'compaction_start') {
+    return {
+      kind: 'compaction',
+      label: 'Compacting',
+      cancellable: true,
+      reason: event.reason,
+    };
+  }
+
+  if (event.type === 'compaction_end') {
+    return event.willRetry ? createRetryBusyState({ reason: event.reason }) : IDLE_BUSY_STATE;
+  }
+
+  return current;
+}
+
 // ---------- Forwarder ----------
 
 export class SessionEventForwarder {
@@ -42,25 +98,13 @@ export class SessionEventForwarder {
   }
 
   handle(event: ScoutSessionEvent): void {
+    this.busyState = reduceBusyState(this.busyState, event);
+
     if (event.type === 'agent_event') {
-      if (event.event.type === 'agent_start') {
-        this.busyState = { kind: 'agent', label: 'Working', cancellable: true };
-      }
-      if (event.event.type === 'agent_end' && !event.event.willRetry) {
-        this.busyState = IDLE_BUSY_STATE;
-      }
       this.publishEvent({ type: 'agent_event', event: event.event });
     }
 
     if (event.type === 'auto_retry_start') {
-      this.busyState = {
-        kind: 'retry',
-        label: 'Retrying',
-        cancellable: true,
-        attempt: event.attempt,
-        maxAttempts: event.maxAttempts,
-        reason: event.errorMessage,
-      };
       this.publishEvent({
         type: 'auto_retry_start',
         attempt: event.attempt,
@@ -70,7 +114,6 @@ export class SessionEventForwarder {
       });
     }
     if (event.type === 'auto_retry_end') {
-      this.busyState = IDLE_BUSY_STATE;
       this.publishEvent({
         type: 'auto_retry_end',
         success: event.success,
@@ -80,18 +123,9 @@ export class SessionEventForwarder {
     }
 
     if (event.type === 'compaction_start') {
-      this.busyState = {
-        kind: 'compaction',
-        label: 'Compacting',
-        cancellable: true,
-        reason: event.reason,
-      };
       this.publishEvent({ type: 'compaction_start', reason: event.reason });
     }
     if (event.type === 'compaction_end') {
-      this.busyState = event.willRetry
-        ? { kind: 'retry', label: 'Retrying', cancellable: true, reason: event.reason }
-        : IDLE_BUSY_STATE;
       this.publishEvent({
         type: 'compaction_end',
         reason: event.reason,
@@ -124,7 +158,7 @@ export class SessionEventForwarder {
 
   getBusyState(): ScoutBusyState {
     if (this.busyState.kind === 'idle' && this.isStreaming()) {
-      return { kind: 'agent', label: 'Working', cancellable: true };
+      return AGENT_BUSY_STATE;
     }
     return this.busyState;
   }

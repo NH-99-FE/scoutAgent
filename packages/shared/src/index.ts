@@ -602,23 +602,20 @@ export type ScoutMessage =
 
 // ---------- Extension → Webview ----------
 
-export type ScoutBusyKind =
-  | 'idle'
-  | 'agent'
-  | 'retry'
-  | 'compaction'
-  | 'branch_summary'
-  | 'session'
-  | 'tool';
+export type ScoutBusyState =
+  | { kind: 'idle'; cancellable: false }
+  | { kind: 'agent'; label?: string; cancellable: boolean }
+  | {
+      kind: 'retry';
+      label?: string;
+      cancellable: boolean;
+      attempt?: number;
+      maxAttempts?: number;
+      reason?: string;
+    }
+  | { kind: 'compaction'; label?: string; cancellable: boolean; reason?: string };
 
-export interface ScoutBusyState {
-  kind: ScoutBusyKind;
-  label?: string;
-  cancellable: boolean;
-  attempt?: number;
-  maxAttempts?: number;
-  reason?: string;
-}
+export type ScoutBusyKind = ScoutBusyState['kind'];
 
 export interface ScoutQueuedFollowUp {
   id: string;
@@ -644,6 +641,7 @@ export interface ScoutQueueState {
 
 export interface ScoutWebviewState {
   messages: ScoutMessage[];
+  /** bootstrap/state_result/state_update 使用的运行态快照；流式增量以事件为准。 */
   isStreaming: boolean;
   busyState: ScoutBusyState;
   queueState?: ScoutQueueState;
@@ -882,6 +880,24 @@ export interface ScoutCompactionEndEvent {
   errorMessage?: string;
 }
 
+/**
+ * Webview 运行态 reducer 消费的实时事件集合。
+ * 这些事件只用于增量投影 UI，state_update/state_result/bootstrap 仍负责快照同步。
+ */
+export type ScoutRuntimeEvent =
+  | ScoutAgentEvent
+  | ScoutAutoRetryStartEvent
+  | ScoutAutoRetryEndEvent
+  | ScoutCompactionStartEvent
+  | ScoutCompactionEndEvent;
+
+export type ScoutRuntimeExtensionEvent =
+  | { type: 'agent_event'; event: ScoutAgentEvent }
+  | ScoutAutoRetryStartEvent
+  | ScoutAutoRetryEndEvent
+  | ScoutCompactionStartEvent
+  | ScoutCompactionEndEvent;
+
 // ---------- Thinking Level 事件 ----------
 
 export interface ScoutThinkingLevelChangedEvent {
@@ -915,21 +931,11 @@ export interface ScoutProtocolError {
 export type ExtensionEventMessage =
   | { type: 'state_update'; state: ScoutWebviewState }
   | { type: 'queue_update'; queueState: ScoutQueueState }
-  | { type: 'agent_event'; event: ScoutAgentEvent }
+  | ScoutRuntimeExtensionEvent
   | { type: 'config_update'; config: ScoutConfig }
   | { type: 'commands_update'; commands: ScoutCommandInfo[] }
   | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
   | ScoutNotificationMessage
-  | {
-      type: 'auto_retry_start';
-      attempt: number;
-      maxAttempts: number;
-      delayMs: number;
-      errorMessage: string;
-    }
-  | { type: 'auto_retry_end'; success: boolean; attempt: number; finalError?: string }
-  | ScoutCompactionStartEvent
-  | ScoutCompactionEndEvent
   | ScoutThinkingLevelChangedEvent
   | { type: 'tree_update'; tree: ScoutSessionTreeNode[]; leafId: string | null }
   | {

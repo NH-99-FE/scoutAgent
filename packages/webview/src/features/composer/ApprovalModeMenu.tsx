@@ -18,9 +18,14 @@ export function ApprovalModeMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button className="text-muted-foreground min-w-0" size="sm" type="button" variant="ghost">
+        <Button
+          className="text-muted-foreground max-w-28 min-w-0 shrink"
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
           <Hand />
-          <span className="truncate">{approvalLabel}</span>
+          <span className="min-w-0 truncate">{approvalLabel}</span>
           <ChevronDown data-icon="inline-end" />
         </Button>
       </DropdownMenuTrigger>

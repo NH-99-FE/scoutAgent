@@ -24,7 +24,7 @@ export function projectProtocolResponsePayload(
     case 'bootstrap_result':
       useConfigStore.getState().actions.setConfig(payload.config);
       useConfigStore.getState().actions.setCommands(payload.commands);
-      applyState(payload.state);
+      applyStateSnapshotToStores(payload.state);
       if (payload.sessions) {
         useSessionStore.getState().actions.setSessions(payload.sessions);
       }
@@ -36,7 +36,7 @@ export function projectProtocolResponsePayload(
       }
       break;
     case 'state_result':
-      applyState(payload.state);
+      applyStateSnapshotToStores(payload.state);
       break;
     case 'config_result':
       useConfigStore.getState().actions.setConfig(payload.config);
@@ -83,8 +83,8 @@ export function projectTaskHistoryResult(
   });
 }
 
-function applyState(state: ScoutWebviewState): void {
-  useConversationStore.getState().actions.applyState(state);
+function applyStateSnapshotToStores(state: ScoutWebviewState): void {
+  useConversationStore.getState().actions.applyStateSnapshot(state);
   useSessionStore.getState().actions.applyState(state);
   useTreeStore.getState().actions.applyState(state);
   useUiStore.getState().actions.resolveOpenTask(state.sessionFile);

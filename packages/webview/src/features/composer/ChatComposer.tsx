@@ -234,10 +234,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
   return (
     <>
-      <div>
+      <div className="min-w-0 max-w-full">
         {isCurrentSessionMode ? <FollowUpQueuePanel /> : null}
         <form
-          className="border-border bg-background rounded-2xl border px-2 py-2 shadow-sm"
+          className="border-border bg-background min-w-0 max-w-full overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
@@ -278,8 +278,8 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
             </div>
           ) : null}
 
-          <div className="mt-2 flex min-h-8 items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1">
+          <div className="mt-2 flex min-h-8 min-w-0 max-w-full flex-nowrap items-center justify-between gap-2 overflow-hidden">
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <input
                 accept={SUPPORTED_IMAGE_INPUT_ACCEPT}
                 aria-label="选择图片"
@@ -304,7 +304,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
               <ApprovalModeMenu />
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">
               <ModelStatusMenu />
               <SendButton
                 canSubmit={canSubmit}

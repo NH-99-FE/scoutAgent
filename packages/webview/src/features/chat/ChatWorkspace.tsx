@@ -2,12 +2,12 @@
 // Chat Workspace — 会话中页面布局
 // ============================================================
 
-import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import {
   ArrowLeft,
   Download,
   GitBranch,
   History,
+  LoaderCircle,
   MoreHorizontal,
   Pencil,
   Settings,
@@ -24,7 +24,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useConversationMessages } from '@/store/conversation-store';
+import {
+  useBusyState,
+  useConversationItems,
+  useConversationMessages,
+  useIsStreaming,
+  useToolExecutionsById,
+} from '@/store/conversation-store';
 import { useSessionName } from '@/store/session-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
 import { ConversationView } from '@/features/conversation/ConversationView';
@@ -39,9 +45,11 @@ interface ChatWorkspaceProps {
 
 export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspaceProps) {
   const messages = useConversationMessages();
+  const conversationItems = useConversationItems();
+  const isStreaming = useIsStreaming();
+  const toolExecutionsById = useToolExecutionsById();
+  const busyState = useBusyState();
   const sessionName = useSessionName();
-  const composerOverlayRef = useRef<HTMLDivElement | null>(null);
-  const composerOverlayHeight = useElementHeight(composerOverlayRef, 144);
   const {
     isRendered: taskHistoryRendered,
     isOpen: taskHistoryOpen,
@@ -65,17 +73,11 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     closeTaskHistory();
     onOpenTask(task);
   };
+  const isAgentRunning = busyState.kind === 'agent';
 
   return (
-    <main
-      className="bg-background text-foreground relative flex h-screen min-h-screen flex-col overflow-hidden"
-      style={
-        {
-          '--scout-composer-overlay-height': `${composerOverlayHeight}px`,
-        } as CSSProperties
-      }
-    >
-      <header className="h-auto shrink-0 px-2">
+    <main className="bg-background text-foreground relative flex h-screen min-h-screen min-w-0 max-w-full flex-col overflow-hidden">
+      <header className="h-auto min-w-0 max-w-full shrink-0 px-2">
         <HeaderBar
           className="h-full"
           title={title}
@@ -90,8 +92,12 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
           actions={
             <>
               <ConversationMoreMenu />
-              <IconButton label="历史任务" size="icon-xs" onClick={openTaskHistory}>
-                <History />
+              <IconButton
+                label={isAgentRunning ? '正在回复' : '历史任务'}
+                size="icon-xs"
+                onClick={openTaskHistory}
+              >
+                {isAgentRunning ? <LoaderCircle className="animate-spin" /> : <History />}
               </IconButton>
               <IconButton
                 label="打开设置"
@@ -128,25 +134,18 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         </div>
       ) : null}
 
-      <section className="relative min-h-0 flex-1 overflow-hidden">
-        <ConversationView
-          className="h-full"
-          contentClassName="pb-[calc(var(--scout-composer-overlay-height)+2rem)]"
-          messages={messages}
-        />
+      <ConversationView
+        busyState={busyState}
+        className="min-h-0 flex-1"
+        isStreaming={isStreaming}
+        items={conversationItems}
+        showScrollToBottomButton
+        toolExecutionsById={toolExecutionsById}
+      />
 
-        <div
-          ref={composerOverlayRef}
-          className="pointer-events-none absolute bottom-0 left-0 right-2.5 z-10"
-        >
-          <div className="absolute inset-x-0 bottom-0 z-0 h-full pt-3">
-            <div className="h-full bg-gradient-to-t from-background from-75% via-background via-90% to-transparent" />
-          </div>
-          <div className="pointer-events-auto relative z-10 px-3 pb-3">
-            <ChatComposer placeholder="要求后续变更" />
-          </div>
-        </div>
-      </section>
+      <footer className="bg-background min-w-0 max-w-full shrink-0 px-3 pb-3 pt-1">
+        <ChatComposer placeholder="要求后续变更" />
+      </footer>
     </main>
   );
 }
@@ -195,30 +194,4 @@ function getConversationTitle(messages: ReturnType<typeof useConversationMessage
           .map((content) => content.text)
           .join(' ');
   return text.trim().slice(0, 32);
-}
-
-function useElementHeight(ref: RefObject<HTMLElement | null>, fallback: number): number {
-  const [height, setHeight] = useState(fallback);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element) return;
-
-    const updateHeight = () => {
-      setHeight(Math.ceil(element.getBoundingClientRect().height));
-    };
-
-    updateHeight();
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateHeight);
-      return () => window.removeEventListener('resize', updateHeight);
-    }
-
-    const observer = new ResizeObserver(updateHeight);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [ref]);
-
-  return height;
 }
