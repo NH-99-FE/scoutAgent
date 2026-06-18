@@ -11,7 +11,11 @@ import type {
   ScoutToolCallContent,
   ScoutToolResultMessage,
 } from '@scout-agent/shared';
-import type { ConversationItem, ToolExecutionState } from '@/store/conversation-store';
+import type {
+  ConversationItem,
+  ToolCallPreviewState,
+  ToolExecutionState,
+} from '@/store/conversation-store';
 import type { ToolDisplayResult } from './tool-display';
 
 export type AssistantVisibleContent = ScoutTextContent | ScoutImageContent;
@@ -87,6 +91,7 @@ export interface AssistantToolActivity {
   toolCall: ScoutToolCallContent;
   display: ToolDisplayResult;
   runtime?: ToolExecutionState;
+  preview?: ToolCallPreviewState;
   toolResult?: ScoutToolResultMessage;
 }
 
@@ -112,4 +117,5 @@ export interface BuildConversationRowsOptions {
   isStreaming: boolean;
   busyState: ScoutBusyState;
   toolExecutionsById: Record<string, ToolExecutionState>;
+  toolPreviewsById?: Record<string, ToolCallPreviewState>;
 }

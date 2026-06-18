@@ -151,10 +151,29 @@ export function createScoutProtocolHostServices(
 
   bundle.sessionEventForwarder = new SessionEventForwarder({
     isStreaming: () => options.sessionManager.isStreaming,
+    getPreviewContext: () => {
+      const editTool = options.sessionManager
+        .getAllToolInfos()
+        .find((tool) => tool.name === 'edit');
+      return {
+        generation: options.sessionManager.toolPreviewGeneration,
+        sessionId: options.sessionManager.sessionId,
+        sessionFile: options.sessionManager.sessionFile,
+        cwd: options.sessionManager.currentCwd,
+        editTool: editTool
+          ? {
+              active: editTool.active,
+              source: editTool.sourceInfo.source,
+              path: editTool.sourceInfo.path,
+            }
+          : undefined,
+      };
+    },
     publishEvent: (message) => bundle.eventPublisher.publish(message),
     pushState: () => bundle.state.pushState(),
     pushQueueState: () => bundle.state.pushQueueState(),
     pushTreeData: () => bundle.tree.pushTreeData(),
+    logError: options.log,
   });
 
   bundle.protocolServices = {

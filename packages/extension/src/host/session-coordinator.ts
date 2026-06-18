@@ -110,6 +110,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private sessionRuntime?: AgentSessionRuntime;
   private isInitializing = false;
   private disposePromise?: Promise<void>;
+  private previewGeneration = 0;
   private readonly sessionOperationBroker = new SessionOperationBroker();
   private readonly agentEventCorrelator = new AgentEventCorrelator();
 
@@ -148,6 +149,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   get currentCwd(): string {
     return this.cwd;
+  }
+
+  get toolPreviewGeneration(): number {
+    return this.previewGeneration;
   }
 
   get sessionFile(): string | undefined {
@@ -741,6 +746,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     agentSession: AgentSession,
   ): Promise<AgentSessionRuntimeDiagnostic[]> {
     this.cwd = agentSession.sessionManager.getCwd();
+    this.previewGeneration += 1;
     this.setAgentSession(agentSession, false);
     return await agentSession.bindExtensions({
       bindCore: (extensionRunner, nextSession) =>

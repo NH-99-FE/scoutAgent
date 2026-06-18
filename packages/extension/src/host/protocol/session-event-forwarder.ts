@@ -3,20 +3,25 @@
 // 负责：维护宿主 busyState，并将 coordinator 事件转发为 shared 协议消息。
 // ============================================================
 
-import type {
-  ExtensionEventMessage,
-  ScoutBusyState,
-} from '@scout-agent/shared';
+import type { ExtensionEventMessage, ScoutBusyState } from '@scout-agent/shared';
 import type { ScoutSessionEvent } from '../session-coordinator.ts';
+import {
+  ToolCallPreviewProjector,
+  type ComputeEditPreview,
+  type ToolCallPreviewContext,
+} from './tool-call-preview-projector.ts';
 
 // ---------- 类型 ----------
 
 export interface SessionEventForwarderOptions {
   isStreaming: () => boolean;
+  getPreviewContext?: () => ToolCallPreviewContext;
   publishEvent: (message: ExtensionEventMessage) => void;
   pushState: () => Promise<void>;
   pushQueueState: () => void;
   pushTreeData: () => Promise<void>;
+  computeEditPreview?: ComputeEditPreview;
+  logError?: (message: string) => void;
 }
 
 // ---------- 常量 ----------
@@ -106,6 +111,7 @@ export class SessionEventForwarder {
   private readonly pushState: () => Promise<void>;
   private readonly pushQueueState: () => void;
   private readonly pushTreeData: () => Promise<void>;
+  private readonly previewProjector?: ToolCallPreviewProjector;
   private busyState: ScoutBusyState = IDLE_BUSY_STATE;
 
   constructor(options: SessionEventForwarderOptions) {
@@ -114,6 +120,14 @@ export class SessionEventForwarder {
     this.pushState = options.pushState;
     this.pushQueueState = options.pushQueueState;
     this.pushTreeData = options.pushTreeData;
+    if (options.getPreviewContext) {
+      this.previewProjector = new ToolCallPreviewProjector({
+        getPreviewContext: options.getPreviewContext,
+        publishEvent: options.publishEvent,
+        computeEditPreview: options.computeEditPreview,
+        logError: options.logError,
+      });
+    }
   }
 
   handle(event: ScoutSessionEvent): void {
@@ -130,6 +144,7 @@ export class SessionEventForwarder {
 
     if (event.type === 'agent_event') {
       this.publishEvent({ type: 'agent_event', event: event.event });
+      this.previewProjector?.handleAgentEvent(event.event);
     }
 
     if (event.type === 'auto_retry_start') {

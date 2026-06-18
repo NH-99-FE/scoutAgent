@@ -67,6 +67,7 @@ function isRuntimeExtensionEvent(
 ): message is Exclude<ScoutRuntimeExtensionEvent, ScoutRuntimeStateUpdateEvent> {
   return (
     message.type === 'agent_event' ||
+    message.type === 'tool_call_preview_update' ||
     message.type === 'auto_retry_start' ||
     message.type === 'auto_retry_end' ||
     message.type === 'compaction_start' ||
@@ -113,6 +114,7 @@ export const EXTENSION_EVENT_TYPES = new Set<string>([
   'queue_update',
   'runtime_state_update',
   'agent_event',
+  'tool_call_preview_update',
   'config_update',
   'commands_update',
   'context_usage_update',

@@ -61,6 +61,8 @@ type LegacyEditToolInput = EditToolInput & {
 };
 
 export interface EditToolDetails {
+  /** 结果语义标记，供上层安全识别文件编辑 diff。 */
+  kind: 'file_edit';
   /** 显示用 diff */
   diff: string;
   /** 标准统一补丁 */
@@ -213,7 +215,12 @@ export function createEditToolDefinition(
               text: `Successfully replaced ${edits.length} block(s) in ${path}.`,
             },
           ],
-          details: { diff: diffResult.diff, patch, firstChangedLine: diffResult.firstChangedLine },
+          details: {
+            kind: 'file_edit',
+            diff: diffResult.diff,
+            patch,
+            firstChangedLine: diffResult.firstChangedLine,
+          },
         };
       });
     },

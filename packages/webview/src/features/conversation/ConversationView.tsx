@@ -12,22 +12,15 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from 'lucide-react';
-import type {
-  ScoutBusyState,
-  ScoutContent,
-  ScoutMessage,
-} from '@scout-agent/shared';
+import type { ScoutBusyState, ScoutContent, ScoutMessage } from '@scout-agent/shared';
 import { Button } from '@/components/ui/button';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type {
   ConversationItem,
+  ToolCallPreviewState,
   ToolExecutionState,
 } from '@/store/conversation-store';
 import {
@@ -51,15 +44,19 @@ interface ConversationViewProps {
   items: ConversationItem[];
   isStreaming: boolean;
   toolExecutionsById: Record<string, ToolExecutionState>;
+  toolPreviewsById?: Record<string, ToolCallPreviewState>;
   className?: string;
   showScrollToBottomButton?: boolean;
 }
+
+const EMPTY_TOOL_PREVIEWS: Record<string, ToolCallPreviewState> = {};
 
 export function ConversationView({
   busyState,
   items,
   isStreaming,
   toolExecutionsById,
+  toolPreviewsById = EMPTY_TOOL_PREVIEWS,
   className,
   showScrollToBottomButton = false,
 }: ConversationViewProps) {
@@ -75,8 +72,9 @@ export function ConversationView({
         isStreaming,
         busyState,
         toolExecutionsById,
+        toolPreviewsById,
       }),
-    [items, isStreaming, busyState, toolExecutionsById],
+    [items, isStreaming, busyState, toolExecutionsById, toolPreviewsById],
   );
   const runtimeStatusKey = getRuntimeStatusKey(busyState);
 
@@ -170,9 +168,9 @@ export function ConversationView({
   }, [cancelScheduledScroll, rows, runtimeStatusKey, scheduleScrollToBottom, updateStickiness]);
 
   return (
-    <div className={cn('relative min-h-0 min-w-0 w-full flex-1', className)}>
+    <div className={cn('relative min-h-0 w-full min-w-0 flex-1', className)}>
       <ScrollArea
-        className="h-full min-h-0 min-w-0 w-full"
+        className="h-full min-h-0 w-full min-w-0"
         type="always"
         viewportClassName="scout-conversation-viewport"
         viewportRef={scrollContainerRef}
@@ -181,7 +179,7 @@ export function ConversationView({
           onScroll: updateStickiness,
         }}
       >
-        <div className="scout-conversation-content flex w-full min-w-0 max-w-full flex-col gap-3 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2">
+        <div className="scout-conversation-content flex w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2">
           {rows.map((row) => (
             <ConversationRowItem key={row.key} row={row} />
           ))}
@@ -203,7 +201,7 @@ function ScrollToBottomButton({ onClick }: { onClick: () => void }) {
           <TooltipTrigger asChild>
             <Button
               aria-label="滚动到底部"
-              className="border-border/70 bg-background/95 text-muted-foreground pointer-events-auto rounded-full shadow-md backdrop-blur hover:bg-muted hover:text-foreground"
+              className="border-border/70 bg-background/95 text-muted-foreground hover:bg-muted hover:text-foreground pointer-events-auto rounded-full shadow-md backdrop-blur"
               size="icon-sm"
               type="button"
               variant="outline"
@@ -245,16 +243,16 @@ function RuntimeInlineStatus({ busyState }: { busyState: ScoutBusyState }) {
 
   return (
     <div
-      className="text-muted-foreground flex min-w-0 max-w-full flex-col items-center gap-1 px-9 py-2.5 text-center"
+      className="text-muted-foreground flex max-w-full min-w-0 flex-col items-center gap-1 px-9 py-2.5 text-center"
       data-runtime-inline-status={busyState.kind}
     >
       <div className="flex w-full min-w-0 items-center gap-3">
         <span className="bg-border/80 h-px min-w-0 flex-1" />
-        <span className="shrink-0 text-[13px] font-medium leading-5">{display.label}</span>
+        <span className="shrink-0 text-[13px] leading-5 font-medium">{display.label}</span>
         <span className="bg-border/80 h-px min-w-0 flex-1" />
       </div>
       {display.detail ? (
-        <span className="max-w-full text-[11px] leading-4 break-words [overflow-wrap:anywhere]">
+        <span className="max-w-full text-[11px] leading-4 [overflow-wrap:anywhere] break-words">
           {display.detail}
         </span>
       ) : null}
@@ -324,8 +322,8 @@ function ConversationRowItem({ row }: { row: ConversationRow }) {
 
 function UserMessage({ message }: { message: Extract<ScoutMessage, { role: 'user' }> }) {
   return (
-    <article className="flex w-full min-w-0 max-w-full justify-end">
-      <div className="scout-user-message bg-foreground/[0.06] min-w-0 max-w-[77%] rounded-2xl px-3 py-2 text-left text-sm leading-5 break-words whitespace-pre-wrap shadow-sm [overflow-wrap:anywhere]">
+    <article className="flex w-full max-w-full min-w-0 justify-end">
+      <div className="scout-user-message bg-foreground/[0.06] max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
         {contentToText(message.content)}
       </div>
     </article>
@@ -336,8 +334,8 @@ function AssistantTurn({ row }: { row: AssistantConversationRow }) {
   const shouldShowActions = !row.isLatestAssistant || !row.isStreaming;
 
   return (
-    <article className="scout-assistant-turn group/message flex w-full min-w-0 max-w-full flex-col">
-      <div className="scout-assistant-content w-full min-w-0 max-w-full space-y-2 text-sm leading-5">
+    <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
+      <div className="scout-assistant-content w-full max-w-full min-w-0 space-y-2 text-sm leading-5">
         {row.entries.map((entry) =>
           entry.type === 'content' ? (
             <AssistantContentSegment entry={entry} key={entry.key} />
@@ -359,7 +357,7 @@ function AssistantTurn({ row }: { row: AssistantConversationRow }) {
 
 function AssistantContentSegment({ entry }: { entry: AssistantContentEntry }) {
   return (
-    <div className="scout-assistant-content-segment w-full min-w-0 max-w-full">
+    <div className="scout-assistant-content-segment w-full max-w-full min-w-0">
       {entry.blocks.map((content, index) => (
         <VisibleContentBlock content={content} key={`${entry.key}:${content.type}:${index}`} />
       ))}
@@ -414,7 +412,7 @@ function SystemBlock({ row }: { row: SystemConversationRow }) {
         </CollapsibleTrigger>
         {hasText ? (
           <CollapsibleContent>
-            <p className="mt-1 min-w-0 max-w-full leading-5 break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
+            <p className="mt-1 max-w-full min-w-0 leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
               {row.text}
             </p>
           </CollapsibleContent>

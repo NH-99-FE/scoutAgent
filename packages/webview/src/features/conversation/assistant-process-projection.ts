@@ -3,7 +3,11 @@
 // ============================================================
 
 import type { ScoutAssistantMessage, ScoutToolResultMessage } from '@scout-agent/shared';
-import type { ConversationItem, ToolExecutionState } from '@/store/conversation-store';
+import type {
+  ConversationItem,
+  ToolCallPreviewState,
+  ToolExecutionState,
+} from '@/store/conversation-store';
 import type {
   AssistantContentEntry,
   AssistantConversationRow,
@@ -19,12 +23,7 @@ import type {
 import type { AssistantRuntimeActivity } from './conversation-turn-index';
 import { contentToText, resolveToolDisplayResult } from './tool-display';
 
-type TurnProcessStatus =
-  | 'model_deciding'
-  | 'work_processing'
-  | 'completed'
-  | 'stopped'
-  | 'failed';
+type TurnProcessStatus = 'model_deciding' | 'work_processing' | 'completed' | 'stopped' | 'failed';
 
 export interface AssistantTurnBuilder {
   key: string;
@@ -66,6 +65,7 @@ export function appendAssistantMessageEntries({
   isStreaming,
   runtimeActivity,
   toolExecutionsById,
+  toolPreviewsById,
   resolveToolResult,
 }: {
   item: ConversationItem;
@@ -74,6 +74,7 @@ export function appendAssistantMessageEntries({
   isStreaming: boolean;
   runtimeActivity: AssistantRuntimeActivity;
   toolExecutionsById: Record<string, ToolExecutionState>;
+  toolPreviewsById: Record<string, ToolCallPreviewState>;
   resolveToolResult: (toolCallId: string) => ScoutToolResultMessage | undefined;
 }): void {
   turn.isStreaming ||= isStreaming;
@@ -113,6 +114,7 @@ export function appendAssistantMessageEntries({
 
     if (content.type === 'toolCall') {
       const runtime = toolExecutionsById[content.id];
+      const preview = toolPreviewsById[content.id];
       const toolResult = resolveToolResult(content.id);
       turn.hasWorkTrace = true;
       appendProcessActivity(turn, 'tool_processing', `${item.key}:tool-phase:${content.id}`, {
@@ -120,10 +122,12 @@ export function appendAssistantMessageEntries({
         key: `${item.key}:tool:${content.id}`,
         toolCall: content,
         runtime,
+        preview,
         toolResult,
         display: resolveToolDisplayResult({
           toolCall: content,
           runtime,
+          preview,
           toolResult,
           assistantErrorMessage: message.errorMessage,
           assistantStopReason: message.stopReason,
@@ -174,6 +178,7 @@ export function finalizeAssistantTurn(turn: AssistantTurnBuilder): AssistantConv
       status,
       hasVisibleContent: turn.contentEntries.length > 0,
       hasDetails: hasProcessDetails(turn.phases),
+      hasFileEdit: hasFileEditActivity(turn.phases),
     }),
     phases: turn.phases,
   };
@@ -236,6 +241,7 @@ export function appendRuntimeActivityRow(
           status,
           hasVisibleContent: false,
           hasDetails: hasProcessDetails(phases),
+          hasFileEdit: hasFileEditActivity(phases),
         }),
         phases,
       },
@@ -293,14 +299,17 @@ function getProcessDefaultOpen({
   status,
   hasVisibleContent,
   hasDetails,
+  hasFileEdit,
 }: {
   status: TurnProcessStatus;
   hasVisibleContent: boolean;
   hasDetails: boolean;
+  hasFileEdit: boolean;
 }): boolean {
   if (!hasDetails) return false;
   if (status === 'stopped') return true;
   if (status === 'failed') return true;
+  if (hasFileEdit) return true;
   if (hasVisibleContent) return false;
   return status === 'model_deciding' || status === 'work_processing';
 }
@@ -345,10 +354,21 @@ function hasProcessDetails(phases: AssistantProcessPhase[]): boolean {
   return phases.some((phase) => phase.activities.some(hasActivityDetails));
 }
 
+function hasFileEditActivity(phases: AssistantProcessPhase[]): boolean {
+  return phases.some((phase) =>
+    phase.activities.some(
+      (activity) => activity.type === 'tool' && activity.display.kind === 'file_edit',
+    ),
+  );
+}
+
 function hasActivityDetails(activity: AssistantProcessActivity): boolean {
   if (activity.type === 'status') return activity.text.trim().length > 0;
   if (activity.type === 'thinking') {
     return activity.content.redacted || activity.content.thinking.trim().length > 0;
+  }
+  if (activity.display.kind === 'file_edit') {
+    return Boolean(activity.display.previewError?.trim() || activity.display.diffText.trim());
   }
   return activity.display.detailText.trim().length > 0;
 }

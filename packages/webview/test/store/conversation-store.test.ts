@@ -5,7 +5,12 @@ import type { ScoutBusyState, ScoutMessage, ScoutWebviewState } from '@scout-age
 
 function makeState(
   messages: ScoutMessage[],
-  overrides: Partial<Pick<ScoutWebviewState, 'isStreaming' | 'busyState' | 'queueState'>> = {},
+  overrides: Partial<
+    Pick<
+      ScoutWebviewState,
+      'isStreaming' | 'busyState' | 'queueState' | 'sessionId' | 'sessionFile'
+    >
+  > = {},
 ): ScoutWebviewState {
   return {
     messages,
@@ -18,7 +23,8 @@ function makeState(
     tools: [],
     activeToolNames: [],
     commands: [],
-    sessionId: 'session-1',
+    sessionId: overrides.sessionId ?? 'session-1',
+    sessionFile: overrides.sessionFile,
     cwd: '/workspace',
   };
 }
@@ -299,6 +305,93 @@ describe('conversation store', () => {
     });
   });
 
+  it('stores tool call previews separately from runtime tool execution state', () => {
+    const actions = useConversationStore.getState().actions;
+    actions.applyStateSnapshot(
+      makeState([], {
+        sessionId: 'session-1',
+        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      }),
+    );
+
+    actions.applyRuntimeEvent({
+      type: 'tool_call_preview_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        diff: '-1 old\n+1 new',
+        additions: 1,
+        deletions: 1,
+        firstChangedLine: 1,
+      },
+    });
+
+    expect(useConversationStore.getState().toolPreviewsById['tool-1']).toEqual({
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        diff: '-1 old\n+1 new',
+        additions: 1,
+        deletions: 1,
+        firstChangedLine: 1,
+      },
+    });
+    expect(useConversationStore.getState().toolExecutionsById).toEqual({});
+
+    actions.applyRuntimeEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      result: {
+        content: [{ type: 'text', text: 'done' }],
+        details: { diff: '-1 old\n+1 final', patch: '', firstChangedLine: 1 },
+      },
+      isError: false,
+    });
+
+    expect(useConversationStore.getState().toolExecutionsById['tool-1']?.result?.details).toEqual({
+      diff: '-1 old\n+1 final',
+      patch: '',
+      firstChangedLine: 1,
+    });
+    expect(useConversationStore.getState().toolPreviewsById['tool-1']?.preview.diff).toBe(
+      '-1 old\n+1 new',
+    );
+  });
+
+  it('rejects tool call previews that do not belong to the current session', () => {
+    const actions = useConversationStore.getState().actions;
+    actions.applyStateSnapshot(
+      makeState([], {
+        sessionId: 'session-2',
+        sessionFile: '/workspace/.scout/sessions/session-2.jsonl',
+      }),
+    );
+
+    actions.applyRuntimeEvent({
+      type: 'tool_call_preview_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        diff: '-1 old\n+1 new',
+        additions: 1,
+        deletions: 1,
+      },
+    });
+
+    expect(useConversationStore.getState().toolPreviewsById).toEqual({});
+  });
+
   it('does not invent empty args when tool updates arrive without a start event', () => {
     const actions = useConversationStore.getState().actions;
 
@@ -355,6 +448,7 @@ describe('conversation store', () => {
 
     actions.applyStateSnapshot(makeState([]));
     expect(useConversationStore.getState().toolExecutionsById).toEqual({});
+    expect(useConversationStore.getState().toolPreviewsById).toEqual({});
 
     actions.applyRuntimeEvent({
       type: 'tool_execution_end',
@@ -365,6 +459,7 @@ describe('conversation store', () => {
     });
     actions.applyRuntimeEvent({ type: 'agent_start' });
     expect(useConversationStore.getState().toolExecutionsById).toEqual({});
+    expect(useConversationStore.getState().toolPreviewsById).toEqual({});
   });
 
   it('applies retry and compaction runtime state snapshots from the host', () => {

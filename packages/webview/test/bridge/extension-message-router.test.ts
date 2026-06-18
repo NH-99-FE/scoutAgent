@@ -224,6 +224,49 @@ describe('routeExtensionMessage', () => {
     expect(useConversationStore.getState().isStreaming).toBe(false);
   });
 
+  it('routes tool call preview updates into the conversation store', () => {
+    routeExtensionMessage({
+      type: 'state_update',
+      state: {
+        messages: [],
+        isStreaming: false,
+        busyState: { kind: 'idle', cancellable: false },
+        modelProvider: 'openai',
+        modelId: 'gpt-test',
+        thinkingLevel: 'off',
+        tools: [],
+        activeToolNames: [],
+        commands: [],
+        sessionId: 'session-1',
+        cwd: '/workspace',
+      },
+    });
+    routeExtensionMessage({
+      type: 'tool_call_preview_update',
+      sessionId: 'session-1',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        diff: '-1 old\n+1 new',
+        additions: 1,
+        deletions: 1,
+      },
+    });
+
+    expect(useConversationStore.getState().toolPreviewsById['tool-1']).toMatchObject({
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        additions: 1,
+        deletions: 1,
+      },
+    });
+  });
+
   it('routes new session results into chat navigation and home draft state', () => {
     useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');

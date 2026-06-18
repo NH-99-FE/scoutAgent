@@ -66,4 +66,22 @@ describe('builtin tools', () => {
       'Use write only for new files or complete rewrites.',
     ]);
   });
+
+  it('marks edit tool results as file edit details', async () => {
+    const target = path.join(cwd, 'sample.txt');
+    fs.writeFileSync(target, 'old value\n', 'utf-8');
+    const definition = createToolDefinition('edit', cwd);
+
+    const result = await definition.execute('tool-1', {
+      path: 'sample.txt',
+      edits: [{ oldText: 'old value', newText: 'new value' }],
+    });
+
+    expect(result.details).toMatchObject({
+      kind: 'file_edit',
+      firstChangedLine: 1,
+    });
+    expect((result.details as { diff?: string }).diff).toContain('-1 old value');
+    expect((result.details as { diff?: string }).diff).toContain('+1 new value');
+  });
 });

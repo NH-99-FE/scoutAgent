@@ -46,6 +46,7 @@ export function buildConversationRows({
   isStreaming,
   busyState,
   toolExecutionsById,
+  toolPreviewsById = {},
 }: BuildConversationRowsOptions): ConversationRow[] {
   const isTurnStreaming = isStreaming && busyState.kind === 'agent';
   const index = buildConversationIndex(items, isTurnStreaming);
@@ -89,6 +90,7 @@ export function buildConversationRows({
         isStreaming: item.key === index.streamingAssistantKey,
         runtimeActivity,
         toolExecutionsById,
+        toolPreviewsById,
         resolveToolResult: (toolCallId) => consumeNextToolResult(index, toolCallId, itemIndex),
       });
       continue;

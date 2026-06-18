@@ -6,7 +6,11 @@ import {
   buildConversationRows,
   type AssistantProcessActivity,
 } from '@/features/conversation/conversation-view-model';
-import type { ConversationItem, ToolExecutionState } from '@/store/conversation-store';
+import type {
+  ConversationItem,
+  ToolCallPreviewState,
+  ToolExecutionState,
+} from '@/store/conversation-store';
 
 const IDLE_BUSY_STATE: ScoutBusyState = { kind: 'idle', cancellable: false };
 const AGENT_BUSY_STATE: ScoutBusyState = { kind: 'agent', label: 'Working', cancellable: true };
@@ -17,12 +21,14 @@ function renderConversation({
   isStreaming = false,
   showScrollToBottomButton = false,
   toolExecutionsById = {},
+  toolPreviewsById = {},
 }: {
   busyState?: ScoutBusyState;
   items: ConversationItem[];
   isStreaming?: boolean;
   showScrollToBottomButton?: boolean;
   toolExecutionsById?: Record<string, ToolExecutionState>;
+  toolPreviewsById?: Record<string, ToolCallPreviewState>;
 }) {
   const resolvedBusyState = busyState ?? (isStreaming ? AGENT_BUSY_STATE : IDLE_BUSY_STATE);
   return render(
@@ -32,6 +38,7 @@ function renderConversation({
       items={items}
       showScrollToBottomButton={showScrollToBottomButton}
       toolExecutionsById={toolExecutionsById}
+      toolPreviewsById={toolPreviewsById}
     />,
   );
 }
@@ -1147,6 +1154,105 @@ describe('ConversationView', () => {
     expect(screen.getByText('等待搜索 hello')).toBeInTheDocument();
   });
 
+  it('renders edit previews with change counts and an expandable diff', () => {
+    renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: {
+                  path: 'src/app.ts',
+                  edits: [{ oldText: 'old', newText: 'new' }],
+                },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolPreviewsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'edit',
+          preview: {
+            kind: 'file_edit',
+            path: 'src/app.ts',
+            diff: ' 1 const value = 1;\n-2 old\n+2 new',
+            additions: 1,
+            deletions: 1,
+            firstChangedLine: 2,
+          },
+        },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
+    expect(screen.getByText('将编辑 src/app.ts')).toBeInTheDocument();
+    expect(screen.getByText('+1')).toBeInTheDocument();
+    expect(screen.getByText('-1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开编辑差异 src\/app\.ts/ }));
+
+    expect(screen.queryByText('Diff')).not.toBeInTheDocument();
+    expect(screen.getAllByText('+1')).toHaveLength(1);
+    expect(screen.getAllByText('-1')).toHaveLength(1);
+    expect(screen.getByText('-2 old')).toBeInTheDocument();
+    expect(screen.getByText('+2 new')).toBeInTheDocument();
+  });
+
+  it('shows edit preview errors without marking the real tool execution as failed', () => {
+    renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: {
+                  path: 'src/app.ts',
+                  edits: [{ oldText: 'missing', newText: 'new' }],
+                },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolPreviewsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'edit',
+          preview: {
+            kind: 'file_edit',
+            path: 'src/app.ts',
+            additions: 0,
+            deletions: 0,
+            error: 'Could not find the exact text',
+          },
+        },
+      },
+    });
+
+    expect(screen.getByText('编辑预览失败 src/app.ts')).toBeInTheDocument();
+    expect(screen.queryByText('编辑失败 src/app.ts')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开编辑差异 src\/app\.ts/ }));
+
+    expect(screen.getByText('Could not find the exact text')).toBeInTheDocument();
+  });
+
   it('keeps tool details inside the process body instead of the outer summary', () => {
     renderConversation({
       isStreaming: true,
@@ -1484,6 +1590,140 @@ describe('buildConversationRows', () => {
       [{ type: 'text', text: 'first output' }],
       [{ type: 'text', text: 'second output' }],
     ]);
+  });
+
+  it('uses final edit result details before transient edit previews', () => {
+    const rows = buildConversationRows({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      toolPreviewsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'edit',
+          preview: {
+            kind: 'file_edit',
+            path: 'src/app.ts',
+            diff: '-1 old\n+1 preview',
+            additions: 1,
+            deletions: 1,
+          },
+        },
+      },
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: {
+                  path: 'src/app.ts',
+                  edits: [{ oldText: 'old', newText: 'final' }],
+                },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_edit',
+              diff: '-1 old\n+1 final\n+2 extra',
+              patch: '',
+              firstChangedLine: 1,
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const toolActivity = rows
+      .flatMap((row) =>
+        row.type === 'assistant'
+          ? row.entries.flatMap((entry) =>
+              entry.type === 'process'
+                ? entry.phases.flatMap((phase) => phase.activities).filter(isToolActivity)
+                : [],
+            )
+          : [],
+      )
+      .at(0);
+
+    expect(toolActivity?.display).toMatchObject({
+      kind: 'file_edit',
+      additions: 2,
+      deletions: 1,
+      diffText: '-1 old\n+1 final\n+2 extra',
+    });
+  });
+
+  it('does not treat unmarked edit diff details as file edit output', () => {
+    const rows = buildConversationRows({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'extension output' }],
+            details: {
+              diff: '-1 old\n+1 extension',
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const toolActivity = rows
+      .flatMap((row) =>
+        row.type === 'assistant'
+          ? row.entries.flatMap((entry) =>
+              entry.type === 'process'
+                ? entry.phases.flatMap((phase) => phase.activities).filter(isToolActivity)
+                : [],
+            )
+          : [],
+      )
+      .at(0);
+
+    expect(toolActivity?.display.kind).toBe('generic');
+    if (toolActivity?.display.kind !== 'generic') {
+      throw new Error('Expected generic tool display');
+    }
+    expect(toolActivity.display.detailText).toContain('extension output');
   });
 
   it('keeps a prior matching tool result orphaned instead of attaching it to a later call', () => {

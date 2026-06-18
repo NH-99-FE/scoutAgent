@@ -30,6 +30,7 @@ import {
   useConversationMessages,
   useIsStreaming,
   useToolExecutionsById,
+  useToolPreviewsById,
 } from '@/store/conversation-store';
 import { useSessionName } from '@/store/session-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
@@ -48,6 +49,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   const conversationItems = useConversationItems();
   const isStreaming = useIsStreaming();
   const toolExecutionsById = useToolExecutionsById();
+  const toolPreviewsById = useToolPreviewsById();
   const busyState = useBusyState();
   const sessionName = useSessionName();
   const {
@@ -76,8 +78,8 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   const isAgentRunning = busyState.kind === 'agent';
 
   return (
-    <main className="bg-background text-foreground relative flex h-screen min-h-screen min-w-0 max-w-full flex-col overflow-hidden">
-      <header className="h-auto min-w-0 max-w-full shrink-0 px-2">
+    <main className="bg-background text-foreground relative flex h-screen min-h-screen max-w-full min-w-0 flex-col overflow-hidden">
+      <header className="h-auto max-w-full min-w-0 shrink-0 px-2">
         <HeaderBar
           className="h-full"
           title={title}
@@ -141,9 +143,10 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         items={conversationItems}
         showScrollToBottomButton
         toolExecutionsById={toolExecutionsById}
+        toolPreviewsById={toolPreviewsById}
       />
 
-      <footer className="bg-background min-w-0 max-w-full shrink-0 px-3 pb-3 pt-1">
+      <footer className="bg-background max-w-full min-w-0 shrink-0 px-3 pt-1 pb-3">
         <ChatComposer placeholder="要求后续变更" />
       </footer>
     </main>

@@ -283,6 +283,7 @@ export const SCOUT_PROTOCOL = {
       'queue_update',
       'runtime_state_update',
       'agent_event',
+      'tool_call_preview_update',
       'context_usage_update',
       'tree_update',
       'task_history_update',
@@ -298,6 +299,7 @@ export const SCOUT_PROTOCOL = {
       'state_update',
       'runtime_state_update',
       'agent_event',
+      'tool_call_preview_update',
       'tree_update',
       'task_history_update',
       'sessions_update',
@@ -320,6 +322,7 @@ export const SCOUT_PROTOCOL = {
       'queue_update',
       'runtime_state_update',
       'agent_event',
+      'tool_call_preview_update',
       'tree_update',
     ],
     surfaces: ['chat'],
@@ -449,6 +452,7 @@ export const SCOUT_PROTOCOL = {
       'queue_update',
       'runtime_state_update',
       'agent_event',
+      'tool_call_preview_update',
       'tree_update',
     ],
     surfaces: ['chat'],
@@ -732,6 +736,27 @@ export interface ScoutToolExecutionResult {
   details?: unknown;
 }
 
+export interface ScoutFileEditPreview {
+  kind: 'file_edit';
+  path: string;
+  diff?: string;
+  additions: number;
+  deletions: number;
+  firstChangedLine?: number;
+  error?: string;
+}
+
+export type ScoutToolCallPreview = ScoutFileEditPreview;
+
+export interface ScoutToolCallPreviewUpdateEvent {
+  type: 'tool_call_preview_update';
+  sessionId: string;
+  sessionFile?: string;
+  toolCallId: string;
+  toolName: string;
+  preview: ScoutToolCallPreview;
+}
+
 // ---------- Request-scoped protocol results ----------
 
 export interface ScoutBootstrapResult {
@@ -912,6 +937,7 @@ export interface ScoutCompactionEndEvent {
  */
 export type ScoutRuntimeEvent =
   | ScoutAgentEvent
+  | ScoutToolCallPreviewUpdateEvent
   | ScoutAutoRetryStartEvent
   | ScoutAutoRetryEndEvent
   | ScoutCompactionStartEvent
@@ -926,6 +952,7 @@ export interface ScoutRuntimeStateUpdateEvent {
 export type ScoutRuntimeExtensionEvent =
   | ScoutRuntimeStateUpdateEvent
   | { type: 'agent_event'; event: ScoutAgentEvent }
+  | ScoutToolCallPreviewUpdateEvent
   | ScoutAutoRetryStartEvent
   | ScoutAutoRetryEndEvent
   | ScoutCompactionStartEvent

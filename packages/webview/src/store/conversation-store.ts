@@ -9,6 +9,7 @@ import type {
   ScoutMessage,
   ScoutQueueState,
   ScoutRuntimeEvent,
+  ScoutToolCallPreview,
   ScoutToolExecutionResult,
   ScoutWebviewState,
 } from '@scout-agent/shared';
@@ -28,11 +29,15 @@ export interface ToolExecutionState {
   isError: boolean;
 }
 
+export interface ToolCallPreviewState {
+  toolCallId: string;
+  toolName: string;
+  preview: ScoutToolCallPreview;
+}
+
 interface ConversationActions {
   applyStateSnapshot: (state: ScoutWebviewState) => void;
-  applyRuntimeState: (
-    state: Pick<ConversationStore, 'isStreaming' | 'busyState'>,
-  ) => void;
+  applyRuntimeState: (state: Pick<ConversationStore, 'isStreaming' | 'busyState'>) => void;
   applyQueueState: (queueState: ScoutQueueState) => void;
   applyRuntimeEvent: (event: ScoutRuntimeEvent) => void;
   setContextUsage: (contextUsage: ScoutContextUsage | undefined) => void;
@@ -47,7 +52,10 @@ interface ConversationStore {
   busyState: ScoutBusyState;
   queueState: ScoutQueueState;
   contextUsage: ScoutContextUsage | undefined;
+  sessionId: string;
+  sessionFile: string;
   toolExecutionsById: Record<string, ToolExecutionState>;
+  toolPreviewsById: Record<string, ToolCallPreviewState>;
   actions: ConversationActions;
 }
 
@@ -70,7 +78,10 @@ const initialState = {
   busyState: IDLE_BUSY_STATE,
   queueState: EMPTY_QUEUE_STATE,
   contextUsage: undefined as ScoutContextUsage | undefined,
+  sessionId: '',
+  sessionFile: '',
   toolExecutionsById: {} as Record<string, ToolExecutionState>,
+  toolPreviewsById: {} as Record<string, ToolCallPreviewState>,
 };
 
 function getStateMessageKeys(messages: ScoutMessage[]): string[] {
@@ -135,7 +146,10 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           busyState: state.busyState,
           queueState: state.queueState ?? EMPTY_QUEUE_STATE,
           contextUsage: state.contextUsage,
+          sessionId: state.sessionId ?? '',
+          sessionFile: state.sessionFile ?? '',
           toolExecutionsById: {},
+          toolPreviewsById: {},
         };
       }),
     applyRuntimeState: (state) => set(state),
@@ -145,6 +159,7 @@ export const useConversationStore = create<ConversationStore>((set) => ({
         if (event.type === 'agent_start') {
           return {
             toolExecutionsById: {},
+            toolPreviewsById: {},
           };
         }
         if (event.type === 'agent_end') {
@@ -215,12 +230,33 @@ export const useConversationStore = create<ConversationStore>((set) => ({
             toolExecutionsById: nextToolExecutionsById,
           };
         }
+        if (event.type === 'tool_call_preview_update') {
+          if (!isPreviewForCurrentSession(event, state)) return {};
+          return {
+            toolPreviewsById: {
+              ...state.toolPreviewsById,
+              [event.toolCallId]: {
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                preview: event.preview,
+              },
+            },
+          };
+        }
         return {};
       }),
     setContextUsage: (contextUsage) => set({ contextUsage }),
     reset: () => set(initialState),
   },
 }));
+
+function isPreviewForCurrentSession(
+  event: Extract<ScoutRuntimeEvent, { type: 'tool_call_preview_update' }>,
+  state: ConversationStore,
+): boolean {
+  if (!state.sessionId) return false;
+  return event.sessionId === state.sessionId && (event.sessionFile ?? '') === state.sessionFile;
+}
 
 export const useConversationMessages = () => useConversationStore((state) => state.messages);
 export const useConversationItems = () => useConversationStore((state) => state.conversationItems);
@@ -233,4 +269,5 @@ export const useQueuedFollowUps = () => useConversationStore((state) => state.qu
 export const useContextUsage = () => useConversationStore((state) => state.contextUsage);
 export const useToolExecutionsById = () =>
   useConversationStore((state) => state.toolExecutionsById);
+export const useToolPreviewsById = () => useConversationStore((state) => state.toolPreviewsById);
 export const useConversationActions = () => useConversationStore((state) => state.actions);

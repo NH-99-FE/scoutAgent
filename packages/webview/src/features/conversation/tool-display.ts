@@ -8,23 +8,38 @@ import type {
   ScoutToolExecutionResult,
   ScoutToolResultMessage,
 } from '@scout-agent/shared';
-import type { ToolExecutionState } from '@/store/conversation-store';
+import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
 
 export type ToolDisplayStatus = 'pending' | 'running' | 'done' | 'error';
 
-export interface ToolDisplayResult {
+interface ToolDisplayBase {
   status: ToolDisplayStatus;
   toolName: string;
   summaryTitle: string;
-  groupTitle: string;
+}
+
+export interface GenericToolDisplayResult extends ToolDisplayBase {
+  kind: 'generic';
   detailTitle: string;
   detailText: string;
   completionLabel: string;
 }
 
+export interface FileEditToolDisplayResult extends ToolDisplayBase {
+  kind: 'file_edit';
+  path: string;
+  diffText: string;
+  additions: number;
+  deletions: number;
+  previewError?: string;
+}
+
+export type ToolDisplayResult = GenericToolDisplayResult | FileEditToolDisplayResult;
+
 export interface ResolveToolDisplayOptions {
   toolCall: ScoutToolCallContent;
   runtime?: ToolExecutionState;
+  preview?: ToolCallPreviewState;
   toolResult?: ScoutToolResultMessage;
   assistantErrorMessage?: string;
   assistantStopReason?: string;
@@ -33,6 +48,7 @@ export interface ResolveToolDisplayOptions {
 export function resolveToolDisplayResult({
   toolCall,
   runtime,
+  preview,
   toolResult,
   assistantErrorMessage,
   assistantStopReason,
@@ -43,6 +59,14 @@ export function resolveToolDisplayResult({
 
   if (toolResult) {
     const status = toolResult.isError ? 'error' : 'done';
+    const fileEditDisplay = createFileEditDisplayFromDetails({
+      status,
+      toolName,
+      args,
+      details: toolResult.details,
+    });
+    if (fileEditDisplay) return fileEditDisplay;
+
     const bodyText = contentToText(toolResult.content);
     return createToolDisplay({
       status,
@@ -57,6 +81,14 @@ export function resolveToolDisplayResult({
 
   if (runtime?.result) {
     const status = runtime.isError ? 'error' : 'done';
+    const fileEditDisplay = createFileEditDisplayFromDetails({
+      status,
+      toolName,
+      args,
+      details: runtime.result.details,
+    });
+    if (fileEditDisplay) return fileEditDisplay;
+
     const bodyText = resultToText(runtime.result);
     return createToolDisplay({
       status,
@@ -81,6 +113,15 @@ export function resolveToolDisplayResult({
       bodyText: assistantErrorMessage,
       isError: true,
       completionLabel: '失败',
+    });
+  }
+
+  if (preview?.preview.kind === 'file_edit' && toolName === 'edit') {
+    const status: ToolDisplayStatus = runtime ? 'running' : 'pending';
+    return createFileEditDisplayFromPreview({
+      status,
+      toolName,
+      preview,
     });
   }
 
@@ -151,14 +192,92 @@ function createToolDisplay({
   completionLabel: string;
 }): ToolDisplayResult {
   return {
+    kind: 'generic',
     status,
     toolName,
     summaryTitle: formatToolSummaryTitle(status, toolName, args),
-    groupTitle: formatToolGroupTitle(status, toolName),
     detailTitle: getToolDetailTitle(toolName),
     detailText: formatToolDetailText(toolName, args, argsText, bodyText, isError),
     completionLabel,
   };
+}
+
+function createFileEditDisplayFromDetails({
+  status,
+  toolName,
+  args,
+  details,
+}: {
+  status: ToolDisplayStatus;
+  toolName: string;
+  args: Record<string, unknown> | undefined;
+  details: unknown;
+}): FileEditToolDisplayResult | undefined {
+  const diffText = getFileEditDetailsDiff(details);
+  if (!diffText) return undefined;
+
+  const path = getFirstArgText(args, ['path', 'filePath', 'file', 'target']) || '文件';
+  const stats = countEditDiffStats(diffText);
+  return {
+    kind: 'file_edit',
+    status,
+    toolName,
+    path,
+    diffText,
+    additions: stats.additions,
+    deletions: stats.deletions,
+    summaryTitle: `${getToolStatusVerb(status, toolName)} ${path}`,
+  };
+}
+
+function createFileEditDisplayFromPreview({
+  status,
+  toolName,
+  preview,
+}: {
+  status: ToolDisplayStatus;
+  toolName: string;
+  preview: ToolCallPreviewState;
+}): FileEditToolDisplayResult {
+  const fileEdit = preview.preview;
+  const previewError = fileEdit.error;
+  const verb = previewError ? '编辑预览失败' : getPreviewEditVerb(status);
+
+  return {
+    kind: 'file_edit',
+    status,
+    toolName,
+    path: fileEdit.path,
+    diffText: fileEdit.diff ?? '',
+    additions: fileEdit.additions,
+    deletions: fileEdit.deletions,
+    previewError,
+    summaryTitle: `${verb} ${fileEdit.path}`,
+  };
+}
+
+function getFileEditDetailsDiff(details: unknown): string {
+  if (!details || typeof details !== 'object') return '';
+  if ((details as { kind?: unknown }).kind !== 'file_edit') return '';
+  const diff = (details as { diff?: unknown }).diff;
+  return typeof diff === 'string' ? diff : '';
+}
+
+function countEditDiffStats(diff: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
+    if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
+  }
+
+  return { additions, deletions };
+}
+
+function getPreviewEditVerb(status: ToolDisplayStatus): string {
+  if (status === 'running') return '正在编辑';
+  return '将编辑';
 }
 
 function resultToText(result: ScoutToolExecutionResult): string {
@@ -189,18 +308,6 @@ function formatToolSummaryTitle(
   if (toolName === 'edit') return target ? `${verb} ${target}` : `${verb}文件`;
   if (toolName === 'write') return target ? `${verb} ${target}` : `${verb}文件`;
   return `${verb} ${toolName}`;
-}
-
-function formatToolGroupTitle(status: ToolDisplayStatus, toolName: string): string {
-  const verb = getToolStatusVerb(status, toolName);
-  if (toolName === 'bash') return `${verb} 1 条命令`;
-  if (toolName === 'read' || toolName === 'edit' || toolName === 'write') {
-    return `${verb} 1 个文件`;
-  }
-  if (toolName === 'grep') return `${verb} 1 次搜索`;
-  if (toolName === 'find') return `${verb} 1 次查找`;
-  if (toolName === 'ls') return `${verb} 1 个目录`;
-  return `${verb} 1 次工具调用`;
 }
 
 function getToolStatusVerb(status: ToolDisplayStatus, toolName: string): string {
