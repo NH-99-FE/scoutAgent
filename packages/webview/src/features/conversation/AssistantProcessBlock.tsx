@@ -33,6 +33,8 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
   const summary = entry.summary;
   const tone = summary.tone;
   const firstActivity = getFirstProcessActivity(entry.phases);
+  const shimmerSummary = shouldShimmerSummary(summary);
+  const showDisclosureIcon = shouldShowDisclosureIcon(summary, hasDetails);
 
   return (
     <Collapsible open={open} onOpenChange={setManualOpen}>
@@ -55,14 +57,14 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
           type="button"
         >
           <ProcessSummaryIcon activity={firstActivity} />
-          <span className={cn('min-w-0 truncate', summary.running && 'scout-running-text-shimmer')}>
+          <span className={cn('min-w-0 truncate', shimmerSummary && 'scout-running-text-shimmer')}>
             {summary.label}
           </span>
-          {hasDetails ? (
+          {showDisclosureIcon ? (
             open ? (
-              <ChevronDown className="size-3.5 shrink-0" />
+              <ChevronDown className="size-3.5 shrink-0" data-process-disclosure-icon />
             ) : (
-              <ChevronRight className="size-3.5 shrink-0" />
+              <ChevronRight className="size-3.5 shrink-0" data-process-disclosure-icon />
             )
           ) : null}
         </CollapsibleTrigger>
@@ -255,6 +257,17 @@ function hasActivityDetails(activity: AssistantProcessActivity): boolean {
 
 function hasPhaseDetails(phase: AssistantProcessPhase): boolean {
   return phase.activities.some(hasActivityDetails);
+}
+
+function shouldShimmerSummary(summary: AssistantProcessEntry['summary']): boolean {
+  return summary.running && summary.label === '正在思考';
+}
+
+function shouldShowDisclosureIcon(
+  summary: AssistantProcessEntry['summary'],
+  hasDetails: boolean,
+): boolean {
+  return hasDetails && summary.label === '已处理';
 }
 
 function getFirstProcessActivity(

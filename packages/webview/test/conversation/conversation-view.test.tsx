@@ -78,13 +78,14 @@ describe('ConversationView', () => {
         },
       },
     ];
-    const { rerender } = renderConversation({
+    const { container, rerender } = renderConversation({
       items,
       isStreaming: true,
     });
 
     expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.getByText('分析当前布局')).toBeInTheDocument();
+    expect(container.querySelector('[data-process-disclosure-icon]')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /收起过程 正在思考/ }));
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
@@ -99,6 +100,7 @@ describe('ConversationView', () => {
     );
 
     expect(screen.getByText('已处理')).toBeInTheDocument();
+    expect(container.querySelector('[data-process-disclosure-icon]')).toBeTruthy();
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
   });
 
@@ -435,7 +437,7 @@ describe('ConversationView', () => {
 
     expect(container.querySelector('[data-runtime-inline-status]')).toBeNull();
     expect(screen.queryByText('正在回复')).not.toBeInTheDocument();
-    expect(screen.getByText('正在思考')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toHaveClass('scout-running-text-shimmer');
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
   });
 
@@ -1034,7 +1036,7 @@ describe('ConversationView', () => {
   });
 
   it('renders runtime partial tool output while a tool is running', () => {
-    renderConversation({
+    const { container } = renderConversation({
       isStreaming: true,
       items: [
         {
@@ -1068,6 +1070,8 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
+    expect(container.querySelector('[data-process-disclosure-icon]')).toBeNull();
+    expect(screen.getByText('正在处理')).not.toHaveClass('scout-running-text-shimmer');
     expect(screen.getByText('正在搜索 hello')).toBeInTheDocument();
     expect(screen.queryByText('匹配到 2 行')).not.toBeInTheDocument();
 
