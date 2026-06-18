@@ -6,10 +6,7 @@ import {
   buildConversationRows,
   type AssistantProcessActivity,
 } from '@/features/conversation/conversation-view-model';
-import type {
-  ConversationItem,
-  ToolExecutionState,
-} from '@/store/conversation-store';
+import type { ConversationItem, ToolExecutionState } from '@/store/conversation-store';
 
 const IDLE_BUSY_STATE: ScoutBusyState = { kind: 'idle', cancellable: false };
 const AGENT_BUSY_STATE: ScoutBusyState = { kind: 'agent', label: 'Working', cancellable: true };
@@ -86,10 +83,10 @@ describe('ConversationView', () => {
       isStreaming: true,
     });
 
-    expect(screen.getByText('思考中')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.getByText('分析当前布局')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /收起过程 思考中/ }));
+    fireEvent.click(screen.getByRole('button', { name: /收起过程 正在思考/ }));
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
 
     rerender(
@@ -123,7 +120,7 @@ describe('ConversationView', () => {
       isStreaming: true,
     });
 
-    expect(screen.getByText('思考中')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
     expect(screen.getByText('最终答案开始输出')).toBeInTheDocument();
   });
@@ -152,7 +149,7 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('已处理')).toBeInTheDocument();
-    expect(screen.getByText('思考中')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('上一轮思考')).not.toBeInTheDocument();
   });
 
@@ -305,7 +302,7 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('压缩中')).toBeInTheDocument();
     expect(screen.getByText('上下文溢出恢复')).toBeInTheDocument();
-    expect(screen.queryByText('思考中')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
     expect(container.querySelector('[data-runtime-inline-status="compaction"]')).toBeTruthy();
 
@@ -326,8 +323,51 @@ describe('ConversationView', () => {
     );
 
     expect(screen.getByText('正在重试 2/3')).toBeInTheDocument();
-    expect(screen.getByText('正在处理')).toBeInTheDocument();
+    expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
     expect(screen.getByText('rate limit')).toBeInTheDocument();
+    expect(container.querySelector('[data-runtime-inline-status="retry"]')).toBeTruthy();
+  });
+
+  it('keeps a failed assistant turn settled while retry is waiting', () => {
+    const { container } = renderConversation({
+      busyState: {
+        kind: 'retry',
+        label: 'Retrying',
+        cancellable: true,
+        attempt: 1,
+        maxAttempts: 3,
+        reason: 'retryable provider error',
+      },
+      isStreaming: true,
+      items: [
+        {
+          key: 'user-1',
+          message: {
+            role: 'user',
+            content: '继续',
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'assistant-error-1',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            errorMessage: 'Provider temporarily unavailable',
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByText('正在重试 1/3')).toBeInTheDocument();
+    expect(screen.getByText('retryable provider error')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起过程 处理失败/ })).toBeInTheDocument();
+    expect(screen.getByText('Provider temporarily unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
     expect(container.querySelector('[data-runtime-inline-status="retry"]')).toBeTruthy();
   });
 
@@ -395,7 +435,8 @@ describe('ConversationView', () => {
 
     expect(container.querySelector('[data-runtime-inline-status]')).toBeNull();
     expect(screen.queryByText('正在回复')).not.toBeInTheDocument();
-    expect(screen.getByText('正在处理')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
+    expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
   });
 
   it('shows only the thinking summary when no assistant message has started yet', () => {
@@ -415,9 +456,9 @@ describe('ConversationView', () => {
       items,
     });
 
-    expect(screen.getByText('思考中')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /展开过程 思考中/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /展开过程 正在思考/ })).toBeDisabled();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
 
     rerender(
@@ -439,9 +480,9 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(screen.getByText('思考中')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /展开过程 思考中/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /展开过程 正在思考/ })).toBeDisabled();
   });
 
   it('renders thinking summary before a message starts', () => {
@@ -460,7 +501,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 思考中/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /展开过程 正在思考/ })).toBeDisabled();
     expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
   });
 
@@ -481,6 +522,49 @@ describe('ConversationView', () => {
 
     expect(screen.getByRole('button', { name: /收起过程 已停止/ })).toBeInTheDocument();
     expect(screen.getByText('已经检查到这里')).toBeInTheDocument();
+  });
+
+  it('shows failed turns only for assistant error stop reasons', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            errorMessage: 'Provider request failed',
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: /收起过程 处理失败/ })).toBeInTheDocument();
+    expect(screen.getByText('Provider request failed')).toBeInTheDocument();
+  });
+
+  it('keeps status errors inside a completed turn when the assistant did not fail', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '已经给出可用结果' }],
+            errorMessage: '某个内部状态需要注意',
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByRole('button', { name: /展开过程 已处理/ })).toBeInTheDocument();
+    expect(screen.getByText('已经给出可用结果')).toBeInTheDocument();
+    expect(screen.queryByText('某个内部状态需要注意')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    expect(screen.getByText('某个内部状态需要注意')).toBeInTheDocument();
   });
 
   it('respects manual process expansion across streaming updates', () => {
@@ -510,7 +594,7 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('第一段思考')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /收起过程 思考中/ }));
+    fireEvent.click(screen.getByRole('button', { name: /收起过程 正在思考/ }));
     expect(screen.queryByText('第一段思考')).not.toBeInTheDocument();
 
     rerender(
@@ -522,10 +606,10 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(screen.getByText('思考中')).toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('第二段思考')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 思考中/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 正在思考/ }));
     expect(screen.getByText('第二段思考')).toBeInTheDocument();
   });
 
@@ -1102,6 +1186,77 @@ describe('ConversationView', () => {
     expect(screen.queryByText('匹配到 2 行')).not.toBeInTheDocument();
   });
 
+  it('keeps the turn processing after tools while preserving model phases', () => {
+    renderConversation({
+      busyState: { kind: 'agent', label: 'Working', cancellable: true },
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '先定位文件' },
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'read',
+                arguments: { path: 'README.md' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'read',
+            content: [{ type: 'text', text: '文件内容' }],
+            isError: false,
+            timestamp: 2,
+          },
+        },
+        {
+          key: 'assistant-2',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '根据文件内容继续分析' }],
+            timestamp: 3,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'read',
+          args: { path: 'README.md' },
+          status: 'done',
+          result: {
+            content: [{ type: 'text', text: '文件内容' }],
+          },
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /展开过程 正在处理/ })).toBeInTheDocument();
+    expect(screen.getByText('根据文件内容继续分析')).toBeInTheDocument();
+    expect(screen.queryByText('先定位文件')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 正在处理/ }));
+
+    expect(screen.getByText('先定位文件')).toBeInTheDocument();
+    expect(screen.getAllByText('已读取 README.md').length).toBeGreaterThan(0);
+    expect(
+      screen.getByText('先定位文件').closest('[data-assistant-process-phase]'),
+    ).toHaveAttribute('data-assistant-process-phase', 'model_responding');
+    expect(
+      screen.getAllByText('已读取 README.md')[0].closest('[data-assistant-process-phase]'),
+    ).toHaveAttribute('data-assistant-process-phase', 'tool_processing');
+  });
+
   it('opens errored tool calls and labels the error output', () => {
     renderConversation({
       items: [
@@ -1197,12 +1352,13 @@ describe('buildConversationRows', () => {
     });
 
     const latestAssistant = rows.filter((row) => row.type === 'assistant').at(-1);
-    const processEntry = latestAssistant?.type === 'assistant' ? latestAssistant.entries[0] : undefined;
+    const processEntry =
+      latestAssistant?.type === 'assistant' ? latestAssistant.entries[0] : undefined;
 
     expect(processEntry).toMatchObject({
       type: 'process',
-      summary: { label: '思考中' },
-      activities: [],
+      summary: { label: '正在思考' },
+      phases: [],
     });
   });
 
@@ -1239,12 +1395,13 @@ describe('buildConversationRows', () => {
     });
 
     const latestAssistant = rows.filter((row) => row.type === 'assistant').at(-1);
-    const processEntry = latestAssistant?.type === 'assistant' ? latestAssistant.entries[0] : undefined;
+    const processEntry =
+      latestAssistant?.type === 'assistant' ? latestAssistant.entries[0] : undefined;
 
     expect(processEntry).toMatchObject({
       type: 'process',
-      summary: { label: '思考中' },
-      activities: [],
+      summary: { label: '正在思考' },
+      phases: [],
     });
   });
 
@@ -1312,7 +1469,9 @@ describe('buildConversationRows', () => {
     const toolActivities = rows.flatMap((row) =>
       row.type === 'assistant'
         ? row.entries.flatMap((entry) =>
-            entry.type === 'process' ? entry.activities.filter(isToolActivity) : [],
+            entry.type === 'process'
+              ? entry.phases.flatMap((phase) => phase.activities).filter(isToolActivity)
+              : [],
           )
         : [],
     );
@@ -1369,7 +1528,9 @@ describe('buildConversationRows', () => {
       assistantRow?.type === 'assistant'
         ? assistantRow.entries
             .flatMap((entry) =>
-              entry.type === 'process' ? entry.activities.filter(isToolActivity) : [],
+              entry.type === 'process'
+                ? entry.phases.flatMap((phase) => phase.activities).filter(isToolActivity)
+                : [],
             )
             .at(0)
         : undefined;

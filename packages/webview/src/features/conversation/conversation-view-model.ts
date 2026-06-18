@@ -9,7 +9,6 @@ import {
   createAssistantTurnBuilder,
   finalizeAssistantTurn,
   type AssistantTurnBuilder,
-  type AssistantTurnMeta,
 } from './assistant-process-projection';
 import type {
   BuildConversationRowsOptions,
@@ -28,6 +27,8 @@ export type {
   AssistantConversationRow,
   AssistantProcessActivity,
   AssistantProcessEntry,
+  AssistantProcessPhase,
+  AssistantProcessPhaseKind,
   AssistantProcessSummary,
   AssistantStatusActivity,
   AssistantThinkingActivity,
@@ -46,7 +47,7 @@ export function buildConversationRows({
   busyState,
   toolExecutionsById,
 }: BuildConversationRowsOptions): ConversationRow[] {
-  const isTurnStreaming = isStreaming && (busyState.kind === 'agent' || busyState.kind === 'retry');
+  const isTurnStreaming = isStreaming && busyState.kind === 'agent';
   const index = buildConversationIndex(items, isTurnStreaming);
   const runtimeActivity = resolveRuntimeActivity({
     items,
@@ -56,15 +57,12 @@ export function buildConversationRows({
   });
   const rows: ConversationRow[] = [];
   let currentTurn: AssistantTurnBuilder | undefined;
-  let latestTurnMeta: AssistantTurnMeta | undefined;
   let latestUserKey: string | undefined;
   let latestUserTimestamp = 0;
 
   const flushTurn = () => {
     if (!currentTurn) return;
-    const projection = finalizeAssistantTurn(currentTurn);
-    rows.push(projection.row);
-    latestTurnMeta = projection.meta;
+    rows.push(finalizeAssistantTurn(currentTurn));
     currentTurn = undefined;
   };
 
@@ -75,7 +73,6 @@ export function buildConversationRows({
       flushTurn();
       latestUserKey = item.key;
       latestUserTimestamp = message.timestamp;
-      latestTurnMeta = undefined;
       rows.push({ type: 'user', key: item.key, message });
       continue;
     }
@@ -84,7 +81,6 @@ export function buildConversationRows({
       currentTurn ??= createAssistantTurnBuilder({
         anchorKey: latestUserKey ?? item.key,
         timestamp: latestUserTimestamp || message.timestamp,
-        forceProcessing: busyState.kind === 'retry',
       });
       appendAssistantMessageEntries({
         item,
@@ -110,8 +106,6 @@ export function buildConversationRows({
   appendRuntimeActivityRow(rows, {
     isTurnStreaming,
     activity: runtimeActivity,
-    forceProcessing: busyState.kind === 'retry',
-    hasProcessingTrace: latestTurnMeta?.hasProcessingTrace ?? false,
     anchorKey: latestUserKey,
     timestamp: latestUserTimestamp,
   });

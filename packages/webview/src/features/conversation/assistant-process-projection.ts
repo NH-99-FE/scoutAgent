@@ -9,6 +9,8 @@ import type {
   AssistantConversationRow,
   AssistantProcessActivity,
   AssistantProcessEntry,
+  AssistantProcessPhase,
+  AssistantProcessPhaseKind,
   AssistantProcessSummary,
   AssistantStatusActivity,
   AssistantVisibleContent,
@@ -17,48 +19,43 @@ import type {
 import type { AssistantRuntimeActivity } from './conversation-turn-index';
 import { contentToText, resolveToolDisplayResult } from './tool-display';
 
-type TurnProcessStatus = 'thinking' | 'processing' | 'completed' | 'stopped';
+type TurnProcessStatus =
+  | 'model_responding'
+  | 'tool_processing'
+  | 'completed'
+  | 'stopped'
+  | 'failed';
 
 export interface AssistantTurnBuilder {
   key: string;
   processKey: string;
   contentEntries: AssistantContentEntry[];
-  activities: AssistantProcessActivity[];
+  phases: AssistantProcessPhase[];
   actionTextParts: string[];
   timestamp: number;
   isStreaming: boolean;
-  forceProcessing: boolean;
+  // 仅用于当 assistant turn 自身没有可见内容时判断展示中的 processing 语义；
+  // 该信息不再上抛为会话元数据。
   hasProcessingTrace: boolean;
   stopReason?: string;
-}
-
-export interface AssistantTurnMeta {
-  hasProcessingTrace: boolean;
-}
-
-export interface AssistantTurnProjection {
-  row: AssistantConversationRow;
-  meta: AssistantTurnMeta;
+  errorMessage?: string;
 }
 
 export function createAssistantTurnBuilder({
   anchorKey,
   timestamp,
-  forceProcessing,
 }: {
   anchorKey: string;
   timestamp: number;
-  forceProcessing: boolean;
 }): AssistantTurnBuilder {
   return {
     key: `assistant-turn:${anchorKey}`,
     processKey: `assistant-turn:${anchorKey}:process`,
     contentEntries: [],
-    activities: [],
+    phases: [],
     actionTextParts: [],
     timestamp,
     isStreaming: false,
-    forceProcessing,
     hasProcessingTrace: false,
   };
 }
@@ -82,6 +79,7 @@ export function appendAssistantMessageEntries({
 }): void {
   turn.isStreaming ||= isStreaming;
   turn.stopReason = message.stopReason ?? turn.stopReason;
+  turn.errorMessage = message.errorMessage ?? turn.errorMessage;
   const contentBlocks: AssistantVisibleContent[] = [];
   const flushContent = (index: number) => {
     if (contentBlocks.length === 0) return;
@@ -104,7 +102,7 @@ export function appendAssistantMessageEntries({
     flushContent(index);
 
     if (content.type === 'thinking') {
-      turn.activities.push({
+      appendProcessActivity(turn, 'model_responding', `${item.key}:model:${index}`, {
         type: 'thinking',
         key: `${item.key}:thinking:${index}`,
         content,
@@ -118,7 +116,7 @@ export function appendAssistantMessageEntries({
       const runtime = toolExecutionsById[content.id];
       const toolResult = resolveToolResult(content.id);
       turn.hasProcessingTrace = true;
-      turn.activities.push({
+      appendProcessActivity(turn, 'tool_processing', `${item.key}:tool-phase:${content.id}`, {
         type: 'tool',
         key: `${item.key}:tool:${content.id}`,
         toolCall: content,
@@ -138,8 +136,7 @@ export function appendAssistantMessageEntries({
   flushContent(message.content.length);
 
   if (message.errorMessage) {
-    turn.hasProcessingTrace = true;
-    turn.activities.push({
+    appendProcessActivity(turn, 'status', `${item.key}:status-phase`, {
       type: 'status',
       key: `${item.key}:assistant-error`,
       text: message.errorMessage,
@@ -149,12 +146,18 @@ export function appendAssistantMessageEntries({
   }
 
   if (
-    turn.activities.length === 0 &&
+    !hasAnyProcessActivity(turn.phases) &&
     isStreaming &&
     runtimeActivity !== 'idle' &&
     runtimeActivity !== 'waiting'
   ) {
-    turn.activities.push(createRuntimeStatusActivity(item.key, runtimeActivity));
+    turn.hasProcessingTrace = true;
+    appendProcessActivity(
+      turn,
+      'tool_processing',
+      `${item.key}:runtime-tool-phase`,
+      createRuntimeStatusActivity(item.key, runtimeActivity),
+    );
   }
 
   const actionText = contentToText(message.content);
@@ -162,29 +165,28 @@ export function appendAssistantMessageEntries({
   turn.timestamp = message.timestamp;
 }
 
-export function finalizeAssistantTurn(turn: AssistantTurnBuilder): AssistantTurnProjection {
+export function finalizeAssistantTurn(turn: AssistantTurnBuilder): AssistantConversationRow {
   const status = resolveTurnProcessStatus(turn);
   const processEntry: AssistantProcessEntry = {
     type: 'process',
     key: turn.processKey,
     summary: resolveProcessSummary(status),
-    defaultOpen: getProcessDefaultOpen(status, turn.contentEntries.length > 0),
-    activities: turn.activities,
+    defaultOpen: getProcessDefaultOpen({
+      status,
+      hasVisibleContent: turn.contentEntries.length > 0,
+      hasDetails: hasProcessDetails(turn.phases),
+    }),
+    phases: turn.phases,
   };
 
   return {
-    row: {
-      type: 'assistant',
-      key: turn.key,
-      entries: [processEntry, ...turn.contentEntries],
-      actionText: turn.actionTextParts.join('\n'),
-      timestamp: turn.timestamp,
-      isLatestAssistant: false,
-      isStreaming: turn.isStreaming,
-    },
-    meta: {
-      hasProcessingTrace: turn.hasProcessingTrace,
-    },
+    type: 'assistant',
+    key: turn.key,
+    entries: [processEntry, ...turn.contentEntries],
+    actionText: turn.actionTextParts.join('\n'),
+    timestamp: turn.timestamp,
+    isLatestAssistant: false,
+    isStreaming: turn.isStreaming,
   };
 }
 
@@ -193,15 +195,11 @@ export function appendRuntimeActivityRow(
   {
     isTurnStreaming,
     activity,
-    forceProcessing,
-    hasProcessingTrace,
     anchorKey,
     timestamp,
   }: {
     isTurnStreaming: boolean;
     activity: AssistantRuntimeActivity;
-    forceProcessing: boolean;
-    hasProcessingTrace: boolean;
     anchorKey?: string;
     timestamp: number;
   },
@@ -212,12 +210,19 @@ export function appendRuntimeActivityRow(
   if (latestAssistant?.isStreaming || latestAssistant?.key === key) return;
 
   const status =
-    forceProcessing ||
-    hasProcessingTrace ||
-    activity === 'tool_pending' ||
-    activity === 'tool_running'
-      ? 'processing'
-      : 'thinking';
+    activity === 'tool_pending' || activity === 'tool_running'
+      ? 'tool_processing'
+      : 'model_responding';
+  const phases: AssistantProcessPhase[] =
+    activity === 'waiting'
+      ? []
+      : [
+          {
+            kind: status,
+            key: `${key}:phase:${status}`,
+            activities: [createRuntimeStatusActivity(key, activity)],
+          },
+        ];
   rows.push({
     type: 'assistant',
     key,
@@ -226,8 +231,12 @@ export function appendRuntimeActivityRow(
         type: 'process',
         key: `${key}:process`,
         summary: resolveProcessSummary(status),
-        defaultOpen: getProcessDefaultOpen(status, false),
-        activities: activity === 'waiting' ? [] : [createRuntimeStatusActivity(key, activity)],
+        defaultOpen: getProcessDefaultOpen({
+          status,
+          hasVisibleContent: false,
+          hasDetails: hasProcessDetails(phases),
+        }),
+        phases,
       },
     ],
     actionText: '',
@@ -256,29 +265,43 @@ function getLastRowTimestamp(rows: ConversationRow[]): number {
 
 function resolveTurnProcessStatus(turn: AssistantTurnBuilder): TurnProcessStatus {
   if (turn.isStreaming) {
-    return turn.forceProcessing || turn.hasProcessingTrace ? 'processing' : 'thinking';
+    return turn.hasProcessingTrace ? 'tool_processing' : 'model_responding';
   }
   if (turn.stopReason === 'aborted') return 'stopped';
+  if (turn.stopReason === 'error') return 'failed';
   return 'completed';
 }
 
 function resolveProcessSummary(status: TurnProcessStatus): AssistantProcessSummary {
-  if (status === 'thinking') {
-    return { label: '思考中', running: true, tone: 'default' };
+  if (status === 'model_responding') {
+    return { label: '正在思考', running: true, tone: 'default' };
   }
-  if (status === 'processing') {
+  if (status === 'tool_processing') {
     return { label: '正在处理', running: true, tone: 'default' };
   }
   if (status === 'stopped') {
     return { label: '已停止', running: false, tone: 'default' };
   }
+  if (status === 'failed') {
+    return { label: '处理失败', running: false, tone: 'error' };
+  }
   return { label: '已处理', running: false, tone: 'default' };
 }
 
-function getProcessDefaultOpen(status: TurnProcessStatus, hasVisibleContent: boolean): boolean {
+function getProcessDefaultOpen({
+  status,
+  hasVisibleContent,
+  hasDetails,
+}: {
+  status: TurnProcessStatus;
+  hasVisibleContent: boolean;
+  hasDetails: boolean;
+}): boolean {
+  if (!hasDetails) return false;
   if (status === 'stopped') return true;
+  if (status === 'failed') return true;
   if (hasVisibleContent) return false;
-  return status === 'thinking' || status === 'processing';
+  return status === 'model_responding' || status === 'tool_processing';
 }
 
 function createRuntimeStatusActivity(
@@ -297,4 +320,34 @@ function formatRuntimeActivityLabel(activity: AssistantRuntimeActivity): string 
   if (activity === 'tool_pending') return '等待运行工具';
   if (activity === 'tool_running') return '正在运行工具';
   return '等待模型响应';
+}
+
+function appendProcessActivity(
+  turn: AssistantTurnBuilder,
+  kind: AssistantProcessPhaseKind,
+  phaseKey: string,
+  activity: AssistantProcessActivity,
+): void {
+  const lastPhase = turn.phases.at(-1);
+  if (lastPhase?.kind === kind) {
+    lastPhase.activities.push(activity);
+  } else {
+    turn.phases.push({ kind, key: phaseKey, activities: [activity] });
+  }
+}
+
+function hasAnyProcessActivity(phases: AssistantProcessPhase[]): boolean {
+  return phases.some((phase) => phase.activities.length > 0);
+}
+
+function hasProcessDetails(phases: AssistantProcessPhase[]): boolean {
+  return phases.some((phase) => phase.activities.some(hasActivityDetails));
+}
+
+function hasActivityDetails(activity: AssistantProcessActivity): boolean {
+  if (activity.type === 'status') return activity.text.trim().length > 0;
+  if (activity.type === 'thinking') {
+    return activity.content.redacted || activity.content.thinking.trim().length > 0;
+  }
+  return activity.display.detailText.trim().length > 0;
 }

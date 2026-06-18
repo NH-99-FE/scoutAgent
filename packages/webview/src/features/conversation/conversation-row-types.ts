@@ -51,7 +51,7 @@ export interface AssistantProcessEntry {
   key: string;
   summary: AssistantProcessSummary;
   defaultOpen: boolean;
-  activities: AssistantProcessActivity[];
+  phases: AssistantProcessPhase[];
 }
 
 export interface AssistantProcessSummary {
@@ -64,6 +64,14 @@ export type AssistantProcessActivity =
   | AssistantThinkingActivity
   | AssistantToolActivity
   | AssistantStatusActivity;
+
+export type AssistantProcessPhaseKind = 'model_responding' | 'tool_processing' | 'status';
+
+export interface AssistantProcessPhase {
+  kind: AssistantProcessPhaseKind;
+  key: string;
+  activities: AssistantProcessActivity[];
+}
 
 export interface AssistantThinkingActivity {
   type: 'thinking';

@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import type {
   AssistantProcessActivity,
   AssistantProcessEntry,
+  AssistantProcessPhase,
   AssistantThinkingActivity,
   AssistantToolActivity,
 } from './conversation-view-model';
@@ -28,9 +29,10 @@ import type { ToolDisplayResult } from './tool-display';
 export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry }) {
   const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
   const open = manualOpen ?? entry.defaultOpen;
-  const hasDetails = entry.activities.some(hasActivityDetails);
+  const hasDetails = entry.phases.some(hasPhaseDetails);
   const summary = entry.summary;
   const tone = summary.tone;
+  const firstActivity = getFirstProcessActivity(entry.phases);
 
   return (
     <Collapsible open={open} onOpenChange={setManualOpen}>
@@ -52,7 +54,7 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
           disabled={!hasDetails}
           type="button"
         >
-          <ProcessSummaryIcon activity={entry.activities[0]} />
+          <ProcessSummaryIcon activity={firstActivity} />
           <span className={cn('min-w-0 truncate', summary.running && 'scout-running-text-shimmer')}>
             {summary.label}
           </span>
@@ -67,14 +69,27 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
         {hasDetails ? (
           <CollapsibleContent className="scout-process-collapse-content">
             <div className="mt-1.5 max-w-full min-w-0 space-y-2 overflow-hidden">
-              {entry.activities.map((activity) => (
-                <AssistantActivityItem activity={activity} key={activity.key} />
+              {entry.phases.map((phase) => (
+                <AssistantPhaseItem key={phase.key} phase={phase} />
               ))}
             </div>
           </CollapsibleContent>
         ) : null}
       </div>
     </Collapsible>
+  );
+}
+
+function AssistantPhaseItem({ phase }: { phase: AssistantProcessPhase }) {
+  const activities = phase.activities.filter(hasActivityDetails);
+  if (activities.length === 0) return null;
+
+  return (
+    <div className="max-w-full min-w-0 space-y-1.5" data-assistant-process-phase={phase.kind}>
+      {activities.map((activity) => (
+        <AssistantActivityItem activity={activity} key={activity.key} />
+      ))}
+    </div>
   );
 }
 
@@ -87,7 +102,9 @@ function AssistantActivityItem({ activity }: { activity: AssistantProcessActivit
     return <ThinkingActivityItem activity={activity} />;
   }
 
-  return <InlineStatus running={activity.running ?? true} text={activity.text} tone={activity.tone} />;
+  return (
+    <InlineStatus running={activity.running ?? true} text={activity.text} tone={activity.tone} />
+  );
 }
 
 function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
@@ -106,7 +123,7 @@ function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
         <ToolKindIcon toolName={display.toolName} />
         <span
           className={cn(
-            'min-w-0 truncate transition-colors group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground',
+            'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
             display.status === 'running' && 'scout-running-text-shimmer',
           )}
         >
@@ -234,4 +251,18 @@ function hasActivityDetails(activity: AssistantProcessActivity): boolean {
     return activity.content.redacted || activity.content.thinking.trim().length > 0;
   }
   return activity.display.detailText.trim().length > 0;
+}
+
+function hasPhaseDetails(phase: AssistantProcessPhase): boolean {
+  return phase.activities.some(hasActivityDetails);
+}
+
+function getFirstProcessActivity(
+  phases: AssistantProcessPhase[],
+): AssistantProcessActivity | undefined {
+  for (const phase of phases) {
+    const activity = phase.activities[0];
+    if (activity) return activity;
+  }
+  return undefined;
 }
