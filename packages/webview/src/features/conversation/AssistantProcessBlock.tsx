@@ -4,7 +4,6 @@
 
 import { useState } from 'react';
 import {
-  Brain,
   ChevronDown,
   ChevronRight,
   EyeOff,
@@ -12,7 +11,7 @@ import {
   FolderOpen,
   PencilLine,
   Search,
-  Terminal,
+  SquareTerminal,
   Wrench,
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -45,6 +44,7 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
           aria-label={`${open ? '收起' : '展开'}过程 ${summary.label}`}
           className={cn(
             '-ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
+            summary.label === '已处理' && 'border-border/55 w-full border-b pb-1.5',
             tone === 'error'
               ? 'hover:text-destructive focus-visible:text-destructive'
               : 'hover:text-muted-foreground focus-visible:text-muted-foreground',
@@ -65,8 +65,8 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
           ) : null}
         </CollapsibleTrigger>
         {hasDetails ? (
-          <CollapsibleContent>
-            <div className="mt-1.5 max-w-full min-w-0 space-y-1 overflow-hidden">
+          <CollapsibleContent className="scout-process-collapse-content">
+            <div className="mt-1.5 max-w-full min-w-0 space-y-2 overflow-hidden">
               {entry.activities.map((activity) => (
                 <AssistantActivityItem activity={activity} key={activity.key} />
               ))}
@@ -99,34 +99,25 @@ function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger
         aria-label={`${open ? '收起' : '展开'}工具输出 ${display.toolName}`}
-        className={cn(
-          'flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
-          display.status === 'error'
-            ? 'hover:text-destructive focus-visible:text-destructive'
-            : 'hover:text-muted-foreground focus-visible:text-muted-foreground',
-        )}
+        className="group/tool-action flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left disabled:pointer-events-none"
         disabled={!hasDetails}
         type="button"
       >
         <ToolKindIcon toolName={display.toolName} />
         <span
           className={cn(
-            'min-w-0 truncate',
+            'min-w-0 truncate transition-colors group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground',
             display.status === 'running' && 'scout-running-text-shimmer',
           )}
         >
           {display.summaryTitle}
         </span>
         {hasDetails ? (
-          open ? (
-            <ChevronDown className="size-3.5 shrink-0" />
-          ) : (
-            <ChevronRight className="size-3.5 shrink-0" />
-          )
+          <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-[opacity,transform] duration-220 ease-out group-hover/tool-action:opacity-100 group-focus-visible/tool-action:opacity-100 group-data-[state=open]/tool-action:rotate-90 group-data-[state=open]/tool-action:opacity-100" />
         ) : null}
       </CollapsibleTrigger>
       {hasDetails ? (
-        <CollapsibleContent>
+        <CollapsibleContent className="scout-process-collapse-content">
           <ToolDetailPanel display={display} />
         </CollapsibleContent>
       ) : null}
@@ -177,13 +168,13 @@ function ThinkingActivityItem({ activity }: { activity: AssistantThinkingActivit
   }
 
   if (!text) {
-    return activity.isStreaming ? <InlineStatus text="思考中" /> : null;
+    return null;
   }
 
   return (
     <div
       aria-label={`思考过程 ${activity.messageKey}`}
-      className="text-foreground/75 max-w-full min-w-0 px-1 py-0.5 text-xs leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+      className="text-foreground max-w-full min-w-0 px-1 py-0.5 text-xs leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
     >
       {text}
     </div>
@@ -212,17 +203,16 @@ function InlineStatus({
 }
 
 function ProcessSummaryIcon({ activity }: { activity: AssistantProcessActivity | undefined }) {
-  if (!activity) return <Wrench className="size-3.5 shrink-0" />;
+  if (!activity) return null;
   if (activity.type === 'tool') return <ToolKindIcon toolName={activity.display.toolName} />;
-  if (activity.type === 'thinking') return <Brain className="size-3.5 shrink-0" />;
-  return <Brain className="size-3.5 shrink-0" />;
+  return null;
 }
 
 function ToolKindIcon({ toolName }: { toolName: string }) {
   const className = 'size-3.5 shrink-0';
   switch (toolName) {
     case 'bash':
-      return <Terminal className={className} />;
+      return <SquareTerminal className={className} />;
     case 'grep':
     case 'find':
       return <Search className={className} />;

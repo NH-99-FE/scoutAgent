@@ -101,8 +101,31 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(screen.getByText('处理完成')).toBeInTheDocument();
+    expect(screen.getByText('已处理')).toBeInTheDocument();
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
+  });
+
+  it('collapses process history once final answer content starts streaming', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'message-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '分析当前布局' },
+              { type: 'text', text: '最终答案开始输出' },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      isStreaming: true,
+    });
+
+    expect(screen.getByText('思考中')).toBeInTheDocument();
+    expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
+    expect(screen.getByText('最终答案开始输出')).toBeInTheDocument();
   });
 
   it('does not mark an older assistant as streaming when a user message is last', () => {
@@ -128,7 +151,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByText('处理完成')).toBeInTheDocument();
+    expect(screen.getByText('已处理')).toBeInTheDocument();
     expect(screen.getByText('思考中')).toBeInTheDocument();
     expect(screen.queryByText('上一轮思考')).not.toBeInTheDocument();
   });
@@ -375,7 +398,7 @@ describe('ConversationView', () => {
     expect(screen.getByText('正在处理')).toBeInTheDocument();
   });
 
-  it('projects a waiting status when no assistant message has started yet', () => {
+  it('shows only the thinking summary when no assistant message has started yet', () => {
     const items: ConversationItem[] = [
       {
         key: 'user-1',
@@ -393,7 +416,8 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('思考中')).toBeInTheDocument();
-    expect(screen.getByText('等待模型响应')).toBeInTheDocument();
+    expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 思考中/ })).toBeDisabled();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
 
     rerender(
@@ -416,10 +440,11 @@ describe('ConversationView', () => {
     );
 
     expect(screen.getByText('思考中')).toBeInTheDocument();
-    expect(screen.getByText('等待模型响应')).toBeInTheDocument();
+    expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 思考中/ })).toBeDisabled();
   });
 
-  it('renders waiting state before a message starts', () => {
+  it('renders thinking summary before a message starts', () => {
     renderConversation({
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
       isStreaming: true,
@@ -435,8 +460,8 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 思考中/ })).toBeInTheDocument();
-    expect(screen.getByText('等待模型响应')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 思考中/ })).toBeDisabled();
+    expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
   });
 
   it('shows stopped turns as expanded process history', () => {
@@ -538,11 +563,11 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('准备读取文件')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /展开过程 处理完成/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 已处理/ })).toBeInTheDocument();
     expect(screen.queryByText('已读取 README.md')).not.toBeInTheDocument();
     expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 处理完成/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
 
     expect(screen.getAllByText('已读取 README.md').length).toBeGreaterThan(0);
     expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
@@ -702,7 +727,7 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 处理完成/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
 
     expect(screen.getByText(/# 不是标题/)).toBeInTheDocument();
@@ -741,7 +766,7 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 处理完成/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
 
     expect(screen.getAllByText('已运行 pnpm test').length).toBeGreaterThan(0);
   });
@@ -1110,11 +1135,11 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 处理完成/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 已处理/ })).toBeInTheDocument();
     expect(screen.queryByText('运行失败 pnpm test')).not.toBeInTheDocument();
     expect(screen.queryByText('测试失败')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 处理完成/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
     expect(screen.getAllByText('运行失败 pnpm test').length).toBeGreaterThan(0);
     expect(screen.queryByText('测试失败')).not.toBeInTheDocument();
 
@@ -1177,7 +1202,7 @@ describe('buildConversationRows', () => {
     expect(processEntry).toMatchObject({
       type: 'process',
       summary: { label: '思考中' },
-      activities: [expect.objectContaining({ text: '等待模型响应' })],
+      activities: [],
     });
   });
 
@@ -1219,7 +1244,7 @@ describe('buildConversationRows', () => {
     expect(processEntry).toMatchObject({
       type: 'process',
       summary: { label: '思考中' },
-      activities: [expect.objectContaining({ text: '等待模型响应' })],
+      activities: [],
     });
   });
 

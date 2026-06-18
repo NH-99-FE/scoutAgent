@@ -97,7 +97,6 @@ export function appendAssistantMessageEntries({
   message.content.forEach((content, index) => {
     if (content.type === 'text' || content.type === 'image') {
       if (content.type === 'text' && !content.text.trim()) return;
-      turn.hasProcessingTrace = true;
       contentBlocks.push(content);
       return;
     }
@@ -149,7 +148,12 @@ export function appendAssistantMessageEntries({
     });
   }
 
-  if (turn.activities.length === 0 && isStreaming && runtimeActivity !== 'idle') {
+  if (
+    turn.activities.length === 0 &&
+    isStreaming &&
+    runtimeActivity !== 'idle' &&
+    runtimeActivity !== 'waiting'
+  ) {
     turn.activities.push(createRuntimeStatusActivity(item.key, runtimeActivity));
   }
 
@@ -164,7 +168,7 @@ export function finalizeAssistantTurn(turn: AssistantTurnBuilder): AssistantTurn
     type: 'process',
     key: turn.processKey,
     summary: resolveProcessSummary(status),
-    defaultOpen: getProcessDefaultOpen(status),
+    defaultOpen: getProcessDefaultOpen(status, turn.contentEntries.length > 0),
     activities: turn.activities,
   };
 
@@ -203,10 +207,10 @@ export function appendRuntimeActivityRow(
   },
 ): void {
   if (!isTurnStreaming || activity === 'idle') return;
-  const latestAssistant = findLatestAssistantRow(rows);
-  if (latestAssistant?.isStreaming) return;
-
   const key = `assistant-turn:${anchorKey ?? `runtime:${activity}`}`;
+  const latestAssistant = findLatestAssistantRow(rows);
+  if (latestAssistant?.isStreaming || latestAssistant?.key === key) return;
+
   const status =
     forceProcessing ||
     hasProcessingTrace ||
@@ -222,8 +226,8 @@ export function appendRuntimeActivityRow(
         type: 'process',
         key: `${key}:process`,
         summary: resolveProcessSummary(status),
-        defaultOpen: getProcessDefaultOpen(status),
-        activities: [createRuntimeStatusActivity(key, activity)],
+        defaultOpen: getProcessDefaultOpen(status, false),
+        activities: activity === 'waiting' ? [] : [createRuntimeStatusActivity(key, activity)],
       },
     ],
     actionText: '',
@@ -268,11 +272,13 @@ function resolveProcessSummary(status: TurnProcessStatus): AssistantProcessSumma
   if (status === 'stopped') {
     return { label: '已停止', running: false, tone: 'default' };
   }
-  return { label: '处理完成', running: false, tone: 'default' };
+  return { label: '已处理', running: false, tone: 'default' };
 }
 
-function getProcessDefaultOpen(status: TurnProcessStatus): boolean {
-  return status === 'thinking' || status === 'processing' || status === 'stopped';
+function getProcessDefaultOpen(status: TurnProcessStatus, hasVisibleContent: boolean): boolean {
+  if (status === 'stopped') return true;
+  if (hasVisibleContent) return false;
+  return status === 'thinking' || status === 'processing';
 }
 
 function createRuntimeStatusActivity(
