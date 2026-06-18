@@ -12,7 +12,11 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from 'lucide-react';
-import type { ScoutBusyState, ScoutContent, ScoutMessage } from '@scout-agent/shared';
+import type {
+  ScoutBusyState,
+  ScoutContent,
+  ScoutMessage,
+} from '@scout-agent/shared';
 import { Button } from '@/components/ui/button';
 import {
   Collapsible,
@@ -22,7 +26,10 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import type { ConversationItem, ToolExecutionState } from '@/store/conversation-store';
+import type {
+  ConversationItem,
+  ToolExecutionState,
+} from '@/store/conversation-store';
 import {
   buildConversationRows,
   type AssistantContentEntry,
@@ -62,8 +69,14 @@ export function ConversationView({
   const scheduledScrollRef = useRef<number | null>(null);
   const [isScrollToBottomVisible, setIsScrollToBottomVisible] = useState(false);
   const rows = useMemo(
-    () => buildConversationRows({ items, isStreaming, toolExecutionsById }),
-    [items, isStreaming, toolExecutionsById],
+    () =>
+      buildConversationRows({
+        items,
+        isStreaming,
+        busyState,
+        toolExecutionsById,
+      }),
+    [items, isStreaming, busyState, toolExecutionsById],
   );
   const runtimeStatusKey = getRuntimeStatusKey(busyState);
 
@@ -254,7 +267,7 @@ function getRuntimeInlineDisplay(
 ): { label: string; detail: string } | null {
   if (busyState.kind === 'compaction') {
     return {
-      label: '正在压缩上下文',
+      label: '压缩中',
       detail: formatCompactionReason(busyState.reason),
     };
   }
@@ -350,11 +363,6 @@ function AssistantContentSegment({ entry }: { entry: AssistantContentEntry }) {
       {entry.blocks.map((content, index) => (
         <VisibleContentBlock content={content} key={`${entry.key}:${content.type}:${index}`} />
       ))}
-      {entry.errorMessage ? (
-        <p className="text-destructive min-w-0 max-w-full break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
-          {entry.errorMessage}
-        </p>
-      ) : null}
     </div>
   );
 }

@@ -28,9 +28,13 @@ describe('conversation store', () => {
     useConversationStore.getState().actions.reset();
   });
 
-  it('projects agent lifecycle and message events through the runtime reducer', () => {
+  it('applies host runtime state separately from message events', () => {
     const actions = useConversationStore.getState().actions;
 
+    actions.applyRuntimeState({
+      isStreaming: true,
+      busyState: { kind: 'agent', label: 'Working', cancellable: true },
+    });
     actions.applyRuntimeEvent({ type: 'agent_start' });
     expect(useConversationStore.getState().isStreaming).toBe(true);
     expect(useConversationStore.getState().busyState).toEqual({
@@ -66,6 +70,10 @@ describe('conversation store', () => {
         timestamp: 2,
       },
     });
+    actions.applyRuntimeState({
+      isStreaming: false,
+      busyState: { kind: 'idle', cancellable: false },
+    });
     actions.applyRuntimeEvent({ type: 'agent_end', willRetry: false });
 
     expect(useConversationStore.getState().isStreaming).toBe(false);
@@ -77,6 +85,45 @@ describe('conversation store', () => {
         timestamp: 2,
       },
     ]);
+  });
+
+  it('does not derive global runtime state from agent lifecycle events', () => {
+    const actions = useConversationStore.getState().actions;
+
+    actions.applyRuntimeEvent({ type: 'agent_start' });
+    expect(useConversationStore.getState().isStreaming).toBe(false);
+    expect(useConversationStore.getState().busyState).toEqual({ kind: 'idle', cancellable: false });
+
+    actions.applyRuntimeEvent({
+      type: 'auto_retry_start',
+      attempt: 2,
+      maxAttempts: 3,
+      delayMs: 100,
+      errorMessage: 'rate limit',
+    });
+    expect(useConversationStore.getState().isStreaming).toBe(false);
+    expect(useConversationStore.getState().busyState).toEqual({ kind: 'idle', cancellable: false });
+
+    actions.applyRuntimeState({
+      isStreaming: true,
+      busyState: {
+        kind: 'retry',
+        label: 'Retrying',
+        cancellable: true,
+        attempt: 2,
+        maxAttempts: 3,
+        reason: 'rate limit',
+      },
+    });
+    expect(useConversationStore.getState().isStreaming).toBe(true);
+    expect(useConversationStore.getState().busyState).toEqual({
+      kind: 'retry',
+      label: 'Retrying',
+      cancellable: true,
+      attempt: 2,
+      maxAttempts: 3,
+      reason: 'rate limit',
+    });
   });
 
   it('updates transient message events by protocol messageId', () => {
@@ -320,15 +367,19 @@ describe('conversation store', () => {
     expect(useConversationStore.getState().toolExecutionsById).toEqual({});
   });
 
-  it('keeps agent busy when retry completion arrives after the next agent start', () => {
+  it('applies retry and compaction runtime state snapshots from the host', () => {
     const actions = useConversationStore.getState().actions;
 
-    actions.applyRuntimeEvent({
-      type: 'auto_retry_start',
-      attempt: 2,
-      maxAttempts: 3,
-      delayMs: 100,
-      errorMessage: 'rate limit',
+    actions.applyRuntimeState({
+      isStreaming: true,
+      busyState: {
+        kind: 'retry',
+        label: 'Retrying',
+        cancellable: true,
+        attempt: 2,
+        maxAttempts: 3,
+        reason: 'rate limit',
+      },
     });
     expect(useConversationStore.getState().isStreaming).toBe(true);
     expect(useConversationStore.getState().busyState).toEqual({
@@ -340,21 +391,26 @@ describe('conversation store', () => {
       reason: 'rate limit',
     });
 
-    actions.applyRuntimeEvent({ type: 'agent_start' });
-    actions.applyRuntimeEvent({ type: 'auto_retry_end', success: true, attempt: 2 });
-
+    actions.applyRuntimeState({
+      isStreaming: true,
+      busyState: { kind: 'agent', label: 'Working', cancellable: true },
+    });
     expect(useConversationStore.getState().isStreaming).toBe(true);
     expect(useConversationStore.getState().busyState).toEqual({
       kind: 'agent',
       label: 'Working',
       cancellable: true,
     });
-  });
 
-  it('projects compaction busy state and retry handoff', () => {
-    const actions = useConversationStore.getState().actions;
-
-    actions.applyRuntimeEvent({ type: 'compaction_start', reason: 'overflow' });
+    actions.applyRuntimeState({
+      isStreaming: true,
+      busyState: {
+        kind: 'compaction',
+        label: 'Compacting',
+        cancellable: true,
+        reason: 'overflow',
+      },
+    });
     expect(useConversationStore.getState().isStreaming).toBe(true);
     expect(useConversationStore.getState().busyState).toEqual({
       kind: 'compaction',
@@ -363,27 +419,9 @@ describe('conversation store', () => {
       reason: 'overflow',
     });
 
-    actions.applyRuntimeEvent({
-      type: 'compaction_end',
-      reason: 'overflow',
-      aborted: false,
-      willRetry: true,
-    });
-    expect(useConversationStore.getState().isStreaming).toBe(true);
-    expect(useConversationStore.getState().busyState).toEqual({
-      kind: 'retry',
-      label: 'Retrying',
-      cancellable: true,
-      reason: 'overflow',
-    });
-
-    actions.applyRuntimeEvent({ type: 'compaction_start', reason: 'manual' });
-    actions.applyRuntimeEvent({
-      type: 'compaction_end',
-      reason: 'manual',
-      aborted: true,
-      willRetry: false,
-      errorMessage: 'cancelled',
+    actions.applyRuntimeState({
+      isStreaming: false,
+      busyState: { kind: 'idle', cancellable: false },
     });
     expect(useConversationStore.getState().isStreaming).toBe(false);
     expect(useConversationStore.getState().busyState).toEqual({ kind: 'idle', cancellable: false });

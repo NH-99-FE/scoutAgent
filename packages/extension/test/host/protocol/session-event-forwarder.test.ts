@@ -42,6 +42,15 @@ describe('SessionEventForwarder', () => {
       cancellable: true,
     });
     expect(publishEvent).toHaveBeenCalledWith({
+      type: 'runtime_state_update',
+      isStreaming: true,
+      busyState: {
+        kind: 'agent',
+        label: 'Working',
+        cancellable: true,
+      },
+    });
+    expect(publishEvent).toHaveBeenCalledWith({
       type: 'agent_event',
       event: { type: 'agent_start' },
     });
@@ -52,6 +61,11 @@ describe('SessionEventForwarder', () => {
     } as unknown as ScoutSessionEvent);
 
     expect(forwarder.getBusyState()).toEqual({ kind: 'idle', cancellable: false });
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'runtime_state_update',
+      isStreaming: false,
+      busyState: { kind: 'idle', cancellable: false },
+    });
   });
 
   it('keeps retry busy after an agent end that will retry', () => {
@@ -72,8 +86,40 @@ describe('SessionEventForwarder', () => {
       cancellable: true,
     });
     expect(publishEvent).toHaveBeenCalledWith({
+      type: 'runtime_state_update',
+      isStreaming: true,
+      busyState: {
+        kind: 'retry',
+        label: 'Retrying',
+        cancellable: true,
+      },
+    });
+    expect(publishEvent).toHaveBeenCalledWith({
       type: 'agent_event',
       event: { type: 'agent_end', willRetry: true },
+    });
+  });
+
+  it('publishes the raw idle runtime state when agent_end arrives before streaming clears', () => {
+    const { forwarder, publishEvent } = makeForwarder({
+      isStreaming: () => true,
+    });
+
+    forwarder.handle({
+      type: 'agent_event',
+      event: { type: 'agent_start' },
+    } as unknown as ScoutSessionEvent);
+    publishEvent.mockClear();
+
+    forwarder.handle({
+      type: 'agent_event',
+      event: { type: 'agent_end', willRetry: false },
+    } as unknown as ScoutSessionEvent);
+
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'runtime_state_update',
+      isStreaming: false,
+      busyState: { kind: 'idle', cancellable: false },
     });
   });
 
@@ -122,6 +168,18 @@ describe('SessionEventForwarder', () => {
       attempt: 2,
       maxAttempts: 3,
       reason: 'rate limit',
+    });
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'runtime_state_update',
+      isStreaming: true,
+      busyState: {
+        kind: 'retry',
+        label: 'Retrying',
+        cancellable: true,
+        attempt: 2,
+        maxAttempts: 3,
+        reason: 'rate limit',
+      },
     });
     expect(publishEvent).toHaveBeenCalledWith({
       type: 'auto_retry_start',

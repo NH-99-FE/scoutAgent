@@ -30,6 +30,9 @@ export interface ToolExecutionState {
 
 interface ConversationActions {
   applyStateSnapshot: (state: ScoutWebviewState) => void;
+  applyRuntimeState: (
+    state: Pick<ConversationStore, 'isStreaming' | 'busyState'>,
+  ) => void;
   applyQueueState: (queueState: ScoutQueueState) => void;
   applyRuntimeEvent: (event: ScoutRuntimeEvent) => void;
   setContextUsage: (contextUsage: ScoutContextUsage | undefined) => void;
@@ -135,62 +138,18 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           toolExecutionsById: {},
         };
       }),
+    applyRuntimeState: (state) => set(state),
     applyQueueState: (queueState) => set({ queueState }),
     applyRuntimeEvent: (event) =>
       set((state) => {
         if (event.type === 'agent_start') {
           return {
-            isStreaming: true,
-            busyState: { kind: 'agent', label: 'Working', cancellable: true },
             toolExecutionsById: {},
           };
         }
         if (event.type === 'agent_end') {
           return {
-            isStreaming: event.willRetry,
-            busyState: event.willRetry
-              ? { kind: 'retry', label: 'Retrying', cancellable: true }
-              : IDLE_BUSY_STATE,
             toolExecutionsById: keepSettledToolExecutions(state.toolExecutionsById),
-          };
-        }
-        if (event.type === 'auto_retry_start') {
-          return {
-            isStreaming: true,
-            busyState: {
-              kind: 'retry',
-              label: 'Retrying',
-              cancellable: true,
-              attempt: event.attempt,
-              maxAttempts: event.maxAttempts,
-              reason: event.errorMessage,
-            },
-          };
-        }
-        if (event.type === 'auto_retry_end') {
-          if (state.busyState.kind !== 'retry') return {};
-          return {
-            isStreaming: false,
-            busyState: IDLE_BUSY_STATE,
-          };
-        }
-        if (event.type === 'compaction_start') {
-          return {
-            isStreaming: true,
-            busyState: {
-              kind: 'compaction',
-              label: 'Compacting',
-              cancellable: true,
-              reason: event.reason,
-            },
-          };
-        }
-        if (event.type === 'compaction_end') {
-          return {
-            isStreaming: event.willRetry,
-            busyState: event.willRetry
-              ? { kind: 'retry', label: 'Retrying', cancellable: true, reason: event.reason }
-              : IDLE_BUSY_STATE,
           };
         }
         if (
@@ -198,12 +157,15 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           event.type === 'message_update' ||
           event.type === 'message_end'
         ) {
-          return upsertProtocolMessage(
+          const nextMessages = upsertProtocolMessage(
             state.messages,
             state.messageKeys,
             event.messageId,
             event.message,
           );
+          return {
+            ...nextMessages,
+          };
         }
         if (event.type === 'tool_execution_start') {
           return {
@@ -237,18 +199,20 @@ export const useConversationStore = create<ConversationStore>((set) => ({
         }
         if (event.type === 'tool_execution_end') {
           const existing = state.toolExecutionsById[event.toolCallId];
-          return {
-            toolExecutionsById: {
-              ...state.toolExecutionsById,
-              [event.toolCallId]: {
-                ...existing,
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                status: event.isError ? 'error' : 'done',
-                result: event.result,
-                isError: event.isError,
-              },
+          const status: ToolExecutionState['status'] = event.isError ? 'error' : 'done';
+          const nextToolExecutionsById: Record<string, ToolExecutionState> = {
+            ...state.toolExecutionsById,
+            [event.toolCallId]: {
+              ...existing,
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              status,
+              result: event.result,
+              isError: event.isError,
             },
+          };
+          return {
+            toolExecutionsById: nextToolExecutionsById,
           };
         }
         return {};

@@ -168,19 +168,53 @@ describe('routeExtensionMessage', () => {
     expect(useConversationStore.getState().queueState.paused).toBe(true);
   });
 
-  it('clears retry busy state when auto retry ends', () => {
+  it('routes runtime state updates into the conversation store', () => {
+    routeExtensionMessage({
+      type: 'runtime_state_update',
+      isStreaming: true,
+      busyState: {
+        kind: 'retry',
+        label: 'Retrying',
+        cancellable: true,
+        attempt: 1,
+        maxAttempts: 3,
+        reason: 'temporary failure',
+      },
+    });
+    expect(useConversationStore.getState().busyState).toEqual({
+      kind: 'retry',
+      label: 'Retrying',
+      cancellable: true,
+      attempt: 1,
+      maxAttempts: 3,
+      reason: 'temporary failure',
+    });
+    expect(useConversationStore.getState().isStreaming).toBe(true);
+
+    routeExtensionMessage({
+      type: 'runtime_state_update',
+      isStreaming: false,
+      busyState: {
+        kind: 'idle',
+        cancellable: false,
+      },
+    });
+
+    expect(useConversationStore.getState().busyState).toEqual({
+      kind: 'idle',
+      cancellable: false,
+    });
+    expect(useConversationStore.getState().isStreaming).toBe(false);
+  });
+
+  it('keeps retry and compaction events from deriving busy state in the webview', () => {
+    routeExtensionMessage({ type: 'compaction_start', reason: 'overflow' });
     routeExtensionMessage({
       type: 'auto_retry_start',
       attempt: 1,
       maxAttempts: 3,
       delayMs: 100,
-      errorMessage: 'temporary failure',
-    });
-    routeExtensionMessage({
-      type: 'auto_retry_end',
-      success: false,
-      attempt: 1,
-      finalError: 'cancelled',
+      errorMessage: 'retry',
     });
 
     expect(useConversationStore.getState().busyState).toEqual({
@@ -188,40 +222,6 @@ describe('routeExtensionMessage', () => {
       cancellable: false,
     });
     expect(useConversationStore.getState().isStreaming).toBe(false);
-  });
-
-  it('clears compaction busy state when compaction ends without retry', () => {
-    routeExtensionMessage({ type: 'compaction_start', reason: 'manual' });
-    routeExtensionMessage({
-      type: 'compaction_end',
-      reason: 'manual',
-      aborted: true,
-      willRetry: false,
-    });
-
-    expect(useConversationStore.getState().busyState).toEqual({
-      kind: 'idle',
-      cancellable: false,
-    });
-    expect(useConversationStore.getState().isStreaming).toBe(false);
-  });
-
-  it('switches compaction busy state to retry when compaction will retry', () => {
-    routeExtensionMessage({ type: 'compaction_start', reason: 'overflow' });
-    routeExtensionMessage({
-      type: 'compaction_end',
-      reason: 'overflow',
-      aborted: false,
-      willRetry: true,
-    });
-
-    expect(useConversationStore.getState().busyState).toEqual({
-      kind: 'retry',
-      label: 'Retrying',
-      cancellable: true,
-      reason: 'overflow',
-    });
-    expect(useConversationStore.getState().isStreaming).toBe(true);
   });
 
   it('routes new session results into chat navigation and home draft state', () => {

@@ -2,7 +2,11 @@
 // Extension event projector — Extension broadcast event 到 UI store 的投影
 // ============================================================
 
-import type { ExtensionEventMessage, ScoutRuntimeExtensionEvent } from '@scout-agent/shared';
+import type {
+  ExtensionEventMessage,
+  ScoutRuntimeExtensionEvent,
+  ScoutRuntimeStateUpdateEvent,
+} from '@scout-agent/shared';
 import { useConfigStore } from '@/store/config-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useSessionStore } from '@/store/session-store';
@@ -11,6 +15,11 @@ import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
 
 export function projectExtensionEvent(message: ExtensionEventMessage): void {
+  if (message.type === 'runtime_state_update') {
+    projectRuntimeState(message);
+    return;
+  }
+
   if (isRuntimeExtensionEvent(message)) {
     projectRuntimeEvent(message);
     return;
@@ -55,7 +64,7 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
 
 function isRuntimeExtensionEvent(
   message: ExtensionEventMessage,
-): message is ScoutRuntimeExtensionEvent {
+): message is Exclude<ScoutRuntimeExtensionEvent, ScoutRuntimeStateUpdateEvent> {
   return (
     message.type === 'agent_event' ||
     message.type === 'auto_retry_start' ||
@@ -65,10 +74,19 @@ function isRuntimeExtensionEvent(
   );
 }
 
-function projectRuntimeEvent(message: ScoutRuntimeExtensionEvent): void {
+function projectRuntimeEvent(
+  message: Exclude<ScoutRuntimeExtensionEvent, ScoutRuntimeStateUpdateEvent>,
+): void {
   useConversationStore
     .getState()
     .actions.applyRuntimeEvent(message.type === 'agent_event' ? message.event : message);
+}
+
+function projectRuntimeState(message: ScoutRuntimeStateUpdateEvent): void {
+  useConversationStore.getState().actions.applyRuntimeState({
+    isStreaming: message.isStreaming,
+    busyState: message.busyState,
+  });
 }
 
 export function projectTaskHistoryUpdate(
@@ -93,6 +111,7 @@ export function projectTaskHistoryUpdate(
 export const EXTENSION_EVENT_TYPES = new Set<string>([
   'state_update',
   'queue_update',
+  'runtime_state_update',
   'agent_event',
   'config_update',
   'commands_update',

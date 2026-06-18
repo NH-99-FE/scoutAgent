@@ -281,6 +281,7 @@ export const SCOUT_PROTOCOL = {
     emits: [
       'state_update',
       'queue_update',
+      'runtime_state_update',
       'agent_event',
       'context_usage_update',
       'tree_update',
@@ -293,7 +294,14 @@ export const SCOUT_PROTOCOL = {
     service: 'session',
     method: 'new_session_message',
     response: 'new_session_result',
-    emits: ['state_update', 'tree_update', 'task_history_update', 'sessions_update'],
+    emits: [
+      'state_update',
+      'runtime_state_update',
+      'agent_event',
+      'tree_update',
+      'task_history_update',
+      'sessions_update',
+    ],
     surfaces: ['chat'],
   },
   cancel_follow_up: {
@@ -307,28 +315,40 @@ export const SCOUT_PROTOCOL = {
     kind: 'command',
     service: 'session',
     method: 'promote_follow_up',
-    emits: ['state_update', 'queue_update', 'agent_event', 'tree_update'],
+    emits: [
+      'state_update',
+      'queue_update',
+      'runtime_state_update',
+      'agent_event',
+      'tree_update',
+    ],
     surfaces: ['chat'],
   },
   abort: {
     kind: 'command',
     service: 'session',
     method: 'abort',
-    emits: ['state_update', 'queue_update'],
+    emits: ['state_update', 'queue_update', 'runtime_state_update'],
     surfaces: ['chat'],
   },
   abort_retry: {
     kind: 'command',
     service: 'session',
     method: 'abort_retry',
-    emits: ['state_update'],
+    emits: ['state_update', 'runtime_state_update'],
     surfaces: ['chat'],
   },
   compact: {
     kind: 'command',
     service: 'session',
     method: 'compact',
-    emits: ['compaction_start', 'compaction_end', 'state_update', 'tree_update'],
+    emits: [
+      'runtime_state_update',
+      'compaction_start',
+      'compaction_end',
+      'state_update',
+      'tree_update',
+    ],
     surfaces: ['chat'],
   },
   select_model: {
@@ -424,7 +444,13 @@ export const SCOUT_PROTOCOL = {
     kind: 'command',
     service: 'session',
     method: 'continue_session',
-    emits: ['state_update', 'queue_update', 'agent_event', 'tree_update'],
+    emits: [
+      'state_update',
+      'queue_update',
+      'runtime_state_update',
+      'agent_event',
+      'tree_update',
+    ],
     surfaces: ['chat'],
   },
   request_commands: {
@@ -891,7 +917,14 @@ export type ScoutRuntimeEvent =
   | ScoutCompactionStartEvent
   | ScoutCompactionEndEvent;
 
+export interface ScoutRuntimeStateUpdateEvent {
+  type: 'runtime_state_update';
+  isStreaming: boolean;
+  busyState: ScoutBusyState;
+}
+
 export type ScoutRuntimeExtensionEvent =
+  | ScoutRuntimeStateUpdateEvent
   | { type: 'agent_event'; event: ScoutAgentEvent }
   | ScoutAutoRetryStartEvent
   | ScoutAutoRetryEndEvent

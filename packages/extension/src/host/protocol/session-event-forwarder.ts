@@ -3,7 +3,10 @@
 // 负责：维护宿主 busyState，并将 coordinator 事件转发为 shared 协议消息。
 // ============================================================
 
-import type { ExtensionEventMessage, ScoutBusyState } from '@scout-agent/shared';
+import type {
+  ExtensionEventMessage,
+  ScoutBusyState,
+} from '@scout-agent/shared';
 import type { ScoutSessionEvent } from '../session-coordinator.ts';
 
 // ---------- 类型 ----------
@@ -79,6 +82,22 @@ function reduceBusyState(current: ScoutBusyState, event: ScoutSessionEvent): Sco
   return current;
 }
 
+function shouldPublishRuntimeState(event: ScoutSessionEvent): boolean {
+  if (event.type === 'agent_event') {
+    return event.event.type === 'agent_start' || event.event.type === 'agent_end';
+  }
+  return (
+    event.type === 'auto_retry_start' ||
+    event.type === 'auto_retry_end' ||
+    event.type === 'compaction_start' ||
+    event.type === 'compaction_end'
+  );
+}
+
+function isBusyStateStreaming(busyState: ScoutBusyState): boolean {
+  return busyState.kind !== 'idle';
+}
+
 // ---------- Forwarder ----------
 
 export class SessionEventForwarder {
@@ -99,6 +118,15 @@ export class SessionEventForwarder {
 
   handle(event: ScoutSessionEvent): void {
     this.busyState = reduceBusyState(this.busyState, event);
+
+    if (shouldPublishRuntimeState(event)) {
+      const busyState = this.busyState;
+      this.publishEvent({
+        type: 'runtime_state_update',
+        isStreaming: isBusyStateStreaming(busyState),
+        busyState,
+      });
+    }
 
     if (event.type === 'agent_event') {
       this.publishEvent({ type: 'agent_event', event: event.event });

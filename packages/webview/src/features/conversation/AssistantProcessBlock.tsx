@@ -10,13 +10,13 @@ import {
   EyeOff,
   FileText,
   FolderOpen,
-  LoaderCircle,
   PencilLine,
   Search,
   Terminal,
   Wrench,
 } from 'lucide-react';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import type {
   AssistantProcessActivity,
@@ -24,31 +24,38 @@ import type {
   AssistantThinkingActivity,
   AssistantToolActivity,
 } from './conversation-view-model';
-import type { ToolDisplayResult, ToolDisplayStatus } from './tool-display';
+import type { ToolDisplayResult } from './tool-display';
 
 export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry }) {
-  const [open, setOpen] = useState(false);
+  const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
+  const open = manualOpen ?? entry.defaultOpen;
   const hasDetails = entry.activities.some(hasActivityDetails);
-  const summary = getProcessSummary(entry.activities);
-  const tone = getProcessTone(entry.activities);
+  const summary = entry.summary;
+  const tone = summary.tone;
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={setManualOpen}>
       <div
         className={cn(
-          'text-muted-foreground space-y-1 text-xs',
+          'text-muted-foreground/70 py-0.5 text-xs leading-5',
           tone === 'error' && 'text-destructive',
         )}
       >
         <CollapsibleTrigger
           aria-label={`${open ? '收起' : '展开'}过程 ${summary.label}`}
-          className="hover:bg-muted/60 hover:text-foreground -ml-1 inline-flex min-h-6 max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 text-left transition-colors disabled:pointer-events-none"
+          className={cn(
+            '-ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
+            tone === 'error'
+              ? 'hover:text-destructive focus-visible:text-destructive'
+              : 'hover:text-muted-foreground focus-visible:text-muted-foreground',
+          )}
           disabled={!hasDetails}
           type="button"
         >
           <ProcessSummaryIcon activity={entry.activities[0]} />
-          {summary.running ? <LoaderCircle className="size-3.5 shrink-0 animate-spin" /> : null}
-          <span className="min-w-0 truncate">{summary.label}</span>
+          <span className={cn('min-w-0 truncate', summary.running && 'scout-running-text-shimmer')}>
+            {summary.label}
+          </span>
           {hasDetails ? (
             open ? (
               <ChevronDown className="size-3.5 shrink-0" />
@@ -59,14 +66,13 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
         </CollapsibleTrigger>
         {hasDetails ? (
           <CollapsibleContent>
-            <div className="mt-1 max-w-full min-w-0 space-y-1 overflow-hidden">
+            <div className="mt-1.5 max-w-full min-w-0 space-y-1 overflow-hidden">
               {entry.activities.map((activity) => (
                 <AssistantActivityItem activity={activity} key={activity.key} />
               ))}
             </div>
           </CollapsibleContent>
         ) : null}
-        <div className="border-border/70 mt-1 border-t" />
       </div>
     </Collapsible>
   );
@@ -81,7 +87,7 @@ function AssistantActivityItem({ activity }: { activity: AssistantProcessActivit
     return <ThinkingActivityItem activity={activity} />;
   }
 
-  return <InlineStatus text={activity.text} />;
+  return <InlineStatus running={activity.running ?? true} text={activity.text} tone={activity.tone} />;
 }
 
 function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
@@ -93,15 +99,24 @@ function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger
         aria-label={`${open ? '收起' : '展开'}工具输出 ${display.toolName}`}
-        className="hover:bg-muted/60 hover:text-foreground flex min-h-6 w-full min-w-0 items-center gap-1.5 rounded-md px-1 text-left transition-colors disabled:pointer-events-none"
+        className={cn(
+          'flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
+          display.status === 'error'
+            ? 'hover:text-destructive focus-visible:text-destructive'
+            : 'hover:text-muted-foreground focus-visible:text-muted-foreground',
+        )}
         disabled={!hasDetails}
         type="button"
       >
         <ToolKindIcon toolName={display.toolName} />
-        {display.status === 'running' ? (
-          <LoaderCircle className="size-3.5 shrink-0 animate-spin" />
-        ) : null}
-        <span className="min-w-0 truncate">{display.summaryTitle}</span>
+        <span
+          className={cn(
+            'min-w-0 truncate',
+            display.status === 'running' && 'scout-running-text-shimmer',
+          )}
+        >
+          {display.summaryTitle}
+        </span>
         {hasDetails ? (
           open ? (
             <ChevronDown className="size-3.5 shrink-0" />
@@ -121,17 +136,24 @@ function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
 
 function ToolDetailPanel({ display }: { display: ToolDisplayResult }) {
   return (
-    <div className="border-border/70 bg-muted/25 max-w-full min-w-0 overflow-hidden rounded-xl border">
-      <div className="text-muted-foreground border-border/70 border-b px-3 py-1.5 text-[11px] leading-4">
+    <div className="border-border/60 bg-muted/15 max-w-full min-w-0 overflow-hidden rounded-md border-l">
+      <div className="text-muted-foreground/80 px-2.5 py-1 text-[11px] leading-4">
         {display.detailTitle}
       </div>
-      <pre className="text-foreground/85 max-h-44 max-w-full overflow-auto px-2.5 py-2 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap sm:max-h-56 sm:px-3">
-        {display.detailText}
-      </pre>
+      <ScrollArea
+        className="max-h-44 max-w-full min-w-0 sm:max-h-56"
+        scrollbars="vertical"
+        type="always"
+        viewportClassName="max-h-44 sm:max-h-56"
+      >
+        <pre className="text-foreground/80 max-w-full px-2.5 pb-2 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+          {display.detailText}
+        </pre>
+      </ScrollArea>
       {display.completionLabel ? (
         <div
           className={cn(
-            'text-muted-foreground px-3 pb-2 text-right text-[11px]',
+            'text-muted-foreground/75 px-2.5 pb-1.5 text-right text-[11px]',
             display.status === 'error' && 'text-destructive',
           )}
         >
@@ -147,7 +169,7 @@ function ThinkingActivityItem({ activity }: { activity: AssistantThinkingActivit
 
   if (activity.content.redacted) {
     return (
-      <div className="flex min-h-6 items-center gap-1.5">
+      <div className="flex min-h-5 items-center gap-1.5 px-1 py-0.5">
         <EyeOff className="size-3.5 shrink-0" />
         <span>思考内容已隐藏</span>
       </div>
@@ -155,24 +177,36 @@ function ThinkingActivityItem({ activity }: { activity: AssistantThinkingActivit
   }
 
   if (!text) {
-    return activity.isStreaming ? <InlineStatus text="正在思考" /> : null;
+    return activity.isStreaming ? <InlineStatus text="思考中" /> : null;
   }
 
   return (
     <div
       aria-label={`思考过程 ${activity.messageKey}`}
-      className="border-border/80 bg-muted/20 max-w-full min-w-0 rounded-r-xl border-l px-3 py-2 text-xs leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap italic"
+      className="text-foreground/75 max-w-full min-w-0 px-1 py-0.5 text-xs leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
     >
       {text}
     </div>
   );
 }
 
-function InlineStatus({ text }: { text: string }) {
+function InlineStatus({
+  text,
+  tone = 'default',
+  running = true,
+}: {
+  text: string;
+  tone?: 'default' | 'error';
+  running?: boolean;
+}) {
   return (
-    <div className="flex min-h-6 items-center gap-1.5">
-      <LoaderCircle className="size-3.5 animate-spin" />
-      <span>{text}</span>
+    <div
+      className={cn(
+        'flex min-h-5 items-center px-1 py-0.5',
+        tone === 'error' && 'text-destructive',
+      )}
+    >
+      <span className={cn(running && 'scout-running-text-shimmer')}>{text}</span>
     </div>
   );
 }
@@ -181,7 +215,7 @@ function ProcessSummaryIcon({ activity }: { activity: AssistantProcessActivity |
   if (!activity) return <Wrench className="size-3.5 shrink-0" />;
   if (activity.type === 'tool') return <ToolKindIcon toolName={activity.display.toolName} />;
   if (activity.type === 'thinking') return <Brain className="size-3.5 shrink-0" />;
-  return <LoaderCircle className="size-3.5 shrink-0 animate-spin" />;
+  return <Brain className="size-3.5 shrink-0" />;
 }
 
 function ToolKindIcon({ toolName }: { toolName: string }) {
@@ -204,83 +238,8 @@ function ToolKindIcon({ toolName }: { toolName: string }) {
   }
 }
 
-function getProcessSummary(activities: AssistantProcessActivity[]): {
-  label: string;
-  running: boolean;
-} {
-  if (activities.length === 0) {
-    return { label: '处理中', running: true };
-  }
-
-  if (activities.length === 1) {
-    const activity = activities[0];
-    return {
-      label: getActivityGroupTitle(activity),
-      running: getActivityStatus(activity) === 'running',
-    };
-  }
-
-  const statuses = activities.map(getActivityStatus);
-  const primaryActivity = getPrimarySummaryActivity(activities);
-
-  return {
-    label: formatMultiActivityTitle(getActivitySummaryTitle(primaryActivity), activities.length),
-    running: statuses.includes('running'),
-  };
-}
-
-function getPrimarySummaryActivity(
-  activities: AssistantProcessActivity[],
-): AssistantProcessActivity {
-  const priorityPredicates: Array<(activity: AssistantProcessActivity) => boolean> = [
-    (activity) => activity.type === 'tool' && getActivityStatus(activity) === 'running',
-    (activity) => activity.type === 'tool' && getActivityStatus(activity) === 'pending',
-    (activity) => activity.type === 'tool' && getActivityStatus(activity) === 'error',
-    (activity) => getActivityStatus(activity) === 'running',
-    (activity) => getActivityStatus(activity) === 'error',
-    (activity) => activity.type === 'tool',
-  ];
-
-  for (const predicate of priorityPredicates) {
-    const activity = activities.find(predicate);
-    if (activity) return activity;
-  }
-
-  return activities[0];
-}
-
-function formatMultiActivityTitle(title: string, activityCount: number): string {
-  if (activityCount <= 1) return title;
-  return `${title} 等 ${activityCount} 项`;
-}
-
-function getActivitySummaryTitle(activity: AssistantProcessActivity): string {
-  if (activity.type === 'status') return activity.text;
-  if (activity.type === 'thinking') return activity.isStreaming ? '正在思考' : '思考过程';
-  return activity.display.summaryTitle;
-}
-
-function getActivityGroupTitle(activity: AssistantProcessActivity | undefined): string {
-  if (!activity) return '处理中';
-  if (activity.type === 'status') return activity.text;
-  if (activity.type === 'thinking') return activity.isStreaming ? '正在思考' : '思考过程';
-  return activity.display.groupTitle;
-}
-
-function getActivityStatus(activity: AssistantProcessActivity): ToolDisplayStatus {
-  if (activity.type === 'status') return 'running';
-  if (activity.type === 'thinking') return activity.isStreaming ? 'running' : 'done';
-  return activity.display.status;
-}
-
-function getProcessTone(activities: AssistantProcessActivity[]): 'default' | 'error' {
-  return activities.some((activity) => getActivityStatus(activity) === 'error')
-    ? 'error'
-    : 'default';
-}
-
 function hasActivityDetails(activity: AssistantProcessActivity): boolean {
-  if (activity.type === 'status') return false;
+  if (activity.type === 'status') return activity.text.trim().length > 0;
   if (activity.type === 'thinking') {
     return activity.content.redacted || activity.content.thinking.trim().length > 0;
   }

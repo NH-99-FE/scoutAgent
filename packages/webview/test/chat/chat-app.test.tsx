@@ -894,7 +894,7 @@ describe('ChatApp', () => {
     expect(screen.queryByText('Working')).not.toBeInTheDocument();
   });
 
-  it('projects runtime status events to the header and conversation body', () => {
+  it('projects runtime state updates to the header and conversation body', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
     useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
@@ -904,8 +904,9 @@ describe('ChatApp', () => {
 
     act(() => {
       routeExtensionMessage({
-        type: 'agent_event',
-        event: { type: 'agent_start' },
+        type: 'runtime_state_update',
+        isStreaming: true,
+        busyState: { kind: 'agent', label: 'Working', cancellable: true },
       });
     });
     expect(screen.getByRole('button', { name: '正在回复' })).toBeInTheDocument();
@@ -913,31 +914,44 @@ describe('ChatApp', () => {
 
     act(() => {
       routeExtensionMessage({
-        type: 'auto_retry_start',
-        attempt: 2,
-        maxAttempts: 3,
-        delayMs: 100,
-        errorMessage: 'rate limit',
+        type: 'runtime_state_update',
+        isStreaming: true,
+        busyState: {
+          kind: 'retry',
+          label: 'Retrying',
+          cancellable: true,
+          attempt: 2,
+          maxAttempts: 3,
+          reason: 'rate limit',
+        },
       });
     });
     expect(screen.getByText('正在重试 2/3')).toBeInTheDocument();
     expect(screen.getByText('rate limit')).toBeInTheDocument();
 
     act(() => {
-      routeExtensionMessage({ type: 'compaction_start', reason: 'overflow' });
+      routeExtensionMessage({
+        type: 'runtime_state_update',
+        isStreaming: true,
+        busyState: {
+          kind: 'compaction',
+          label: 'Compacting',
+          cancellable: true,
+          reason: 'overflow',
+        },
+      });
     });
-    expect(screen.getByText('正在压缩上下文')).toBeInTheDocument();
+    expect(screen.getByText('压缩中')).toBeInTheDocument();
     expect(screen.getByText('上下文溢出恢复')).toBeInTheDocument();
 
     act(() => {
       routeExtensionMessage({
-        type: 'compaction_end',
-        reason: 'overflow',
-        aborted: false,
-        willRetry: false,
+        type: 'runtime_state_update',
+        isStreaming: false,
+        busyState: { kind: 'idle', cancellable: false },
       });
     });
-    expect(screen.queryByText('正在压缩上下文')).not.toBeInTheDocument();
+    expect(screen.queryByText('压缩中')).not.toBeInTheDocument();
   });
 
   it('sends current session messages with composer images', () => {
