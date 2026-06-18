@@ -21,7 +21,12 @@ import type {
   ConversationRow,
 } from './conversation-row-types';
 import type { AssistantRuntimeActivity } from './conversation-turn-index';
-import { contentToText, resolveToolDisplayResult } from './tool-display';
+import {
+  contentToText,
+  hasExpandableToolDisplayDetail,
+  hasToolDisplaySummary,
+  resolveToolDisplayResult,
+} from './tool-display';
 
 type TurnProcessStatus = 'model_deciding' | 'work_processing' | 'completed' | 'stopped' | 'failed';
 
@@ -177,8 +182,8 @@ export function finalizeAssistantTurn(turn: AssistantTurnBuilder): AssistantConv
     defaultOpen: getProcessDefaultOpen({
       status,
       hasVisibleContent: turn.contentEntries.length > 0,
-      hasDetails: hasProcessDetails(turn.phases),
-      hasFileEdit: hasFileEditActivity(turn.phases),
+      hasVisibleProcessContent: hasVisibleProcessContent(turn.phases),
+      hasDiffTool: hasDiffToolActivity(turn.phases),
     }),
     phases: turn.phases,
   };
@@ -240,8 +245,8 @@ export function appendRuntimeActivityRow(
         defaultOpen: getProcessDefaultOpen({
           status,
           hasVisibleContent: false,
-          hasDetails: hasProcessDetails(phases),
-          hasFileEdit: hasFileEditActivity(phases),
+          hasVisibleProcessContent: hasVisibleProcessContent(phases),
+          hasDiffTool: hasDiffToolActivity(phases),
         }),
         phases,
       },
@@ -298,18 +303,18 @@ function resolveProcessSummary(status: TurnProcessStatus): AssistantProcessSumma
 function getProcessDefaultOpen({
   status,
   hasVisibleContent,
-  hasDetails,
-  hasFileEdit,
+  hasVisibleProcessContent,
+  hasDiffTool,
 }: {
   status: TurnProcessStatus;
   hasVisibleContent: boolean;
-  hasDetails: boolean;
-  hasFileEdit: boolean;
+  hasVisibleProcessContent: boolean;
+  hasDiffTool: boolean;
 }): boolean {
-  if (!hasDetails) return false;
+  if (!hasVisibleProcessContent) return false;
   if (status === 'stopped') return true;
   if (status === 'failed') return true;
-  if (hasFileEdit) return true;
+  if (hasDiffTool) return true;
   if (hasVisibleContent) return false;
   return status === 'model_deciding' || status === 'work_processing';
 }
@@ -350,25 +355,24 @@ function hasAnyProcessActivity(phases: AssistantProcessPhase[]): boolean {
   return phases.some((phase) => phase.activities.length > 0);
 }
 
-function hasProcessDetails(phases: AssistantProcessPhase[]): boolean {
-  return phases.some((phase) => phase.activities.some(hasActivityDetails));
+function hasVisibleProcessContent(phases: AssistantProcessPhase[]): boolean {
+  return phases.some((phase) => phase.activities.some(hasVisibleActivity));
 }
 
-function hasFileEditActivity(phases: AssistantProcessPhase[]): boolean {
+function hasDiffToolActivity(phases: AssistantProcessPhase[]): boolean {
   return phases.some((phase) =>
     phase.activities.some(
-      (activity) => activity.type === 'tool' && activity.display.kind === 'file_edit',
+      (activity) => activity.type === 'tool' && activity.display.detail?.kind === 'diff',
     ),
   );
 }
 
-function hasActivityDetails(activity: AssistantProcessActivity): boolean {
+function hasVisibleActivity(activity: AssistantProcessActivity): boolean {
   if (activity.type === 'status') return activity.text.trim().length > 0;
   if (activity.type === 'thinking') {
     return activity.content.redacted || activity.content.thinking.trim().length > 0;
   }
-  if (activity.display.kind === 'file_edit') {
-    return Boolean(activity.display.previewError?.trim() || activity.display.diffText.trim());
-  }
-  return activity.display.detailText.trim().length > 0;
+  return (
+    hasToolDisplaySummary(activity.display) || hasExpandableToolDisplayDetail(activity.display)
+  );
 }

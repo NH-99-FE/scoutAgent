@@ -1,13 +1,10 @@
 // ============================================================
-// Tool Display — stable barrel file
+// Tool Display — barrel file
 // ============================================================
 
-export {
-  contentToText,
-  hasExpandableToolDisplayDetail,
-  hasToolDisplaySummary,
-  resolveToolDisplayResult,
-} from './tool-display/index';
+export { contentToText } from './content';
+export { hasExpandableToolDisplayDetail, hasToolDisplaySummary } from './model';
+export { resolveToolDisplayResult } from './resolve-tool-display';
 export type {
   DiffToolDisplayDetail,
   FileEditToolDisplayResult,
@@ -23,4 +20,4 @@ export type {
   ToolDisplayResult,
   ToolDisplayStatus,
   WriteContentToolDisplayDetail,
-} from './tool-display/index';
+} from './types';

@@ -2,7 +2,7 @@
 // Assistant Process Block — assistant 过程与工具活动渲染
 // ============================================================
 
-import { type CSSProperties, useState } from 'react';
+import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -24,21 +24,26 @@ import type {
   AssistantThinkingActivity,
   AssistantToolActivity,
 } from './conversation-view-model';
+import { hasExpandableToolDisplayDetail, hasToolDisplaySummary } from './tool-display';
 import type {
-  FileEditToolDisplayResult,
-  GenericToolDisplayResult,
+  DiffToolDisplayDetail,
+  TextToolDisplayDetail,
+  ToolDisplayDetail,
+  ToolDisplayIcon,
+  ToolDisplayMetric,
   ToolDisplayResult,
+  WriteContentToolDisplayDetail,
 } from './tool-display';
 
 export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry }) {
   const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
   const open = manualOpen ?? entry.defaultOpen;
-  const hasDetails = entry.phases.some(hasPhaseDetails);
+  const hasProcessContent = entry.phases.some(hasPhaseContent);
   const summary = entry.summary;
   const tone = summary.tone;
   const firstActivity = getFirstProcessActivity(entry.phases);
   const shimmerSummary = shouldShimmerSummary(summary);
-  const showDisclosureIcon = shouldShowDisclosureIcon(summary, hasDetails);
+  const showDisclosureIcon = shouldShowDisclosureIcon(summary, hasProcessContent);
 
   return (
     <Collapsible open={open} onOpenChange={setManualOpen}>
@@ -57,7 +62,7 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
               ? 'hover:text-destructive focus-visible:text-destructive'
               : 'hover:text-muted-foreground focus-visible:text-muted-foreground',
           )}
-          disabled={!hasDetails}
+          disabled={!hasProcessContent}
           type="button"
         >
           <ProcessSummaryIcon activity={firstActivity} />
@@ -72,7 +77,7 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
             )
           ) : null}
         </CollapsibleTrigger>
-        {hasDetails ? (
+        {hasProcessContent ? (
           <CollapsibleContent className="scout-process-collapse-content">
             <div className="mt-1.5 max-w-full min-w-0 space-y-2 overflow-hidden">
               {entry.phases.map((phase) => (
@@ -87,7 +92,7 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
 }
 
 function AssistantPhaseItem({ phase }: { phase: AssistantProcessPhase }) {
-  const activities = phase.activities.filter(hasActivityDetails);
+  const activities = phase.activities.filter(hasVisibleActivity);
   if (activities.length === 0) return null;
 
   return (
@@ -115,99 +120,112 @@ function AssistantActivityItem({ activity }: { activity: AssistantProcessActivit
 
 function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
   const { display } = activity;
+  const [open, setOpen] = useState(false);
+  const hasDetail = hasExpandableToolDisplayDetail(display);
 
-  if (display.kind === 'file_edit') {
-    return <FileEditActivityItem display={display} />;
+  if (!hasDetail) {
+    return (
+      <div className="flex min-h-5 w-full min-w-0 items-center gap-1.5 px-1 py-0.5 text-left">
+        <ToolActivitySummary display={display} hasDetail={false} />
+      </div>
+    );
   }
 
-  return <GenericToolActivityItem display={display} />;
-}
-
-function GenericToolActivityItem({ display }: { display: GenericToolDisplayResult }) {
-  const [open, setOpen] = useState(false);
-  const hasDetails = display.detailText.trim().length > 0;
-
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger
-        aria-label={`${open ? '收起' : '展开'}工具输出 ${display.toolName}`}
+        aria-label={formatToolDetailAriaLabel(open, display)}
         className="group/tool-action flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left disabled:pointer-events-none"
-        disabled={!hasDetails}
+        disabled={!hasDetail}
         type="button"
       >
-        <ToolKindIcon toolName={display.toolName} />
-        <span
-          className={cn(
-            'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
-            display.status === 'running' && 'scout-running-text-shimmer',
-          )}
-        >
-          {display.summaryTitle}
-        </span>
-        {hasDetails ? (
-          <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-[opacity,transform] duration-220 ease-out group-hover/tool-action:opacity-100 group-focus-visible/tool-action:opacity-100 group-data-[state=open]/tool-action:rotate-90 group-data-[state=open]/tool-action:opacity-100" />
-        ) : null}
+        <ToolActivitySummary display={display} hasDetail />
       </CollapsibleTrigger>
-      {hasDetails ? (
-        <CollapsibleContent className="scout-process-collapse-content">
-          <ToolDetailPanel display={display} />
+      {display.detail ? (
+        <CollapsibleContent className="scout-process-collapse-content mt-2">
+          <ToolDetailPanel detail={display.detail} status={display.status} />
         </CollapsibleContent>
       ) : null}
     </Collapsible>
   );
 }
 
-function FileEditActivityItem({ display }: { display: FileEditToolDisplayResult }) {
-  const [open, setOpen] = useState(false);
-  const hasDetails = hasToolDisplayDetails(display);
-
+function ToolActivitySummary({
+  display,
+  hasDetail,
+}: {
+  display: ToolDisplayResult;
+  hasDetail: boolean;
+}) {
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
-      <CollapsibleTrigger
-        aria-label={`${open ? '收起' : '展开'}编辑差异 ${display.path}`}
-        className="group/tool-action flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left disabled:pointer-events-none"
-        data-file-edit-activity
-        disabled={!hasDetails}
-        type="button"
+    <>
+      <ToolDisplayIconView icon={display.icon} />
+      <span
+        className={cn(
+          'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
+          (display.status === 'pending' || display.status === 'running') &&
+            'scout-running-text-shimmer',
+        )}
       >
-        <PencilLine className="size-3.5 shrink-0" />
-        <span
-          className={cn(
-            'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
-            display.status === 'running' && 'scout-running-text-shimmer',
-          )}
-        >
-          {display.summaryTitle}
-        </span>
-        {!display.previewError ? <FileEditStats display={display} /> : null}
-        {hasDetails ? (
-          <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-[opacity,transform] duration-220 ease-out group-hover/tool-action:opacity-100 group-focus-visible/tool-action:opacity-100 group-data-[state=open]/tool-action:rotate-90 group-data-[state=open]/tool-action:opacity-100" />
-        ) : null}
-      </CollapsibleTrigger>
-      {hasDetails ? (
-        <CollapsibleContent className="scout-process-collapse-content">
-          <FileEditDiffPanel display={display} />
-        </CollapsibleContent>
+        {display.summaryTitle}
+      </span>
+      <ToolDisplayMetrics metrics={display.metrics} placement={display.metricsPlacement} />
+      {hasDetail ? (
+        <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-[opacity,transform] duration-220 ease-out group-hover/tool-action:opacity-100 group-focus-visible/tool-action:opacity-100 group-data-[state=open]/tool-action:rotate-90 group-data-[state=open]/tool-action:opacity-100" />
       ) : null}
-    </Collapsible>
+    </>
   );
 }
 
-function FileEditStats({ display }: { display: FileEditToolDisplayResult }) {
+function ToolDisplayMetrics({
+  metrics,
+  placement = 'inline',
+}: {
+  metrics: ToolDisplayMetric[] | undefined;
+  placement?: ToolDisplayResult['metricsPlacement'];
+}) {
+  if (!metrics?.length) return null;
+
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-[11px] leading-4">
-      <span style={ADDED_TEXT_STYLE}>+{display.additions}</span>
-      <span style={DELETED_TEXT_STYLE}>-{display.deletions}</span>
+    <span
+      className={cn(
+        'flex shrink-0 items-center gap-1 font-mono text-[11px] leading-4',
+        placement === 'end' && 'ml-auto',
+      )}
+    >
+      {metrics.map((metric) => (
+        <span key={metric.key} style={getMetricStyle(metric)}>
+          {`${metric.prefix ?? ''}${metric.value}${metric.label ? ` ${metric.label}` : ''}`}
+        </span>
+      ))}
     </span>
   );
 }
 
-function FileEditDiffPanel({ display }: { display: FileEditToolDisplayResult }) {
-  if (display.previewError) {
-    return <FileEditPreviewErrorPanel message={display.previewError} />;
+function getMetricStyle(metric: ToolDisplayMetric): CSSProperties | undefined {
+  if (metric.tone === 'added') return ADDED_TEXT_STYLE;
+  if (metric.tone === 'deleted') return DELETED_TEXT_STYLE;
+  return undefined;
+}
+
+function ToolDetailPanel({
+  detail,
+  status,
+}: {
+  detail: ToolDisplayDetail;
+  status: ToolDisplayResult['status'];
+}) {
+  if (detail.kind === 'diff') return <FileEditDiffPanel detail={detail} />;
+  if (detail.kind === 'write_content') return <FileWriteContentPanel detail={detail} />;
+  return <TextToolDetailPanel detail={detail} status={status} />;
+}
+
+function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
+  if (detail.previewError) {
+    return <FileEditPreviewErrorPanel message={detail.previewError} />;
   }
 
-  const lines = display.diffText.split('\n');
+  const lines = detail.diffText.split('\n');
   return (
     <div className="border-border/60 bg-muted/15 max-w-full min-w-0 overflow-hidden rounded-md border-l">
       <ScrollArea
@@ -232,6 +250,70 @@ function FileEditDiffPanel({ display }: { display: FileEditToolDisplayResult }) 
   );
 }
 
+function FileWriteContentPanel({ detail }: { detail: WriteContentToolDisplayDetail }) {
+  const lines = detail.lines;
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const shouldStickToBottomRef = useRef(true);
+
+  const updateStickiness = useCallback(() => {
+    const element = viewportRef.current;
+    if (!element) return;
+    shouldStickToBottomRef.current = getIsNearScrollBottom(element);
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = viewportRef.current;
+    if (!element || !shouldStickToBottomRef.current) return;
+    element.scrollTop = element.scrollHeight;
+  }, [detail.contentText, lines.length]);
+
+  return (
+    <div
+      className="border-border/60 max-w-full min-w-0 overflow-hidden rounded-md border-l"
+      style={WRITE_PANEL_STYLE}
+    >
+      {detail.errorText ? (
+        <pre className="text-destructive/90 border-border/40 max-w-full border-b px-2.5 py-1.5 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+          {detail.errorText}
+        </pre>
+      ) : null}
+      {lines.length > 0 ? (
+        <ScrollArea
+          className="max-h-44 max-w-full min-w-0 sm:max-h-56"
+          scrollbars="vertical"
+          type="always"
+          viewportClassName="max-h-44 sm:max-h-56"
+          viewportProps={{ onScroll: updateStickiness }}
+          viewportRef={viewportRef}
+        >
+          <pre className="max-w-full py-1 font-mono text-[12px] leading-5">
+            {lines.map((line, index) => (
+              <span
+                className="grid min-h-5 max-w-full grid-cols-[2rem_minmax(0,1fr)]"
+                key={`${index}:${line.slice(0, 16)}`}
+              >
+                <span className="pr-1.5 text-right select-none" style={ADDED_TEXT_STYLE}>
+                  {index + 1}
+                </span>
+                <span
+                  className="text-foreground/85 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+                  data-write-line-content
+                >
+                  {line || ' '}
+                </span>
+              </span>
+            ))}
+          </pre>
+        </ScrollArea>
+      ) : (
+        <div className="text-muted-foreground/75 border-border/40 border-t px-2.5 py-2 text-[12px]">
+          等待内容
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FileEditPreviewErrorPanel({ message }: { message: string }) {
   return (
     <div className="border-border/60 bg-muted/15 max-w-full min-w-0 overflow-hidden rounded-md border-l">
@@ -243,11 +325,17 @@ function FileEditPreviewErrorPanel({ message }: { message: string }) {
   );
 }
 
-function ToolDetailPanel({ display }: { display: GenericToolDisplayResult }) {
+function TextToolDetailPanel({
+  detail,
+  status,
+}: {
+  detail: TextToolDisplayDetail;
+  status: ToolDisplayResult['status'];
+}) {
   return (
     <div className="border-border/60 bg-muted/15 max-w-full min-w-0 overflow-hidden rounded-md border-l">
       <div className="text-muted-foreground/80 px-2.5 py-1 text-[11px] leading-4">
-        {display.detailTitle}
+        {detail.title}
       </div>
       <ScrollArea
         className="max-h-44 max-w-full min-w-0 sm:max-h-56"
@@ -256,17 +344,17 @@ function ToolDetailPanel({ display }: { display: GenericToolDisplayResult }) {
         viewportClassName="max-h-44 sm:max-h-56"
       >
         <pre className="text-foreground/80 max-w-full px-2.5 pb-2 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
-          {display.detailText}
+          {detail.text}
         </pre>
       </ScrollArea>
-      {display.completionLabel ? (
+      {detail.completionLabel ? (
         <div
           className={cn(
             'text-muted-foreground/75 px-2.5 pb-1.5 text-right text-[11px]',
-            display.status === 'error' && 'text-destructive',
+            status === 'error' && 'text-destructive',
           )}
         >
-          {display.status === 'error' ? '×' : '✓'} {display.completionLabel}
+          {status === 'error' ? '×' : '✓'} {detail.completionLabel}
         </div>
       ) : null}
     </div>
@@ -322,24 +410,22 @@ function InlineStatus({
 
 function ProcessSummaryIcon({ activity }: { activity: AssistantProcessActivity | undefined }) {
   if (!activity) return null;
-  if (activity.type === 'tool') return <ToolKindIcon toolName={activity.display.toolName} />;
+  if (activity.type === 'tool') return <ToolDisplayIconView icon={activity.display.icon} />;
   return null;
 }
 
-function ToolKindIcon({ toolName }: { toolName: string }) {
+function ToolDisplayIconView({ icon }: { icon: ToolDisplayIcon }) {
   const className = 'size-3.5 shrink-0';
-  switch (toolName) {
-    case 'bash':
+  switch (icon) {
+    case 'terminal':
       return <SquareTerminal className={className} />;
-    case 'grep':
-    case 'find':
+    case 'search':
       return <Search className={className} />;
-    case 'read':
+    case 'file':
       return <FileText className={className} />;
     case 'edit':
-    case 'write':
       return <PencilLine className={className} />;
-    case 'ls':
+    case 'folder':
       return <FolderOpen className={className} />;
     default:
       return <Wrench className={className} />;
@@ -353,6 +439,16 @@ const ADDED_TEXT_STYLE: CSSProperties = {
 const DELETED_TEXT_STYLE: CSSProperties = {
   color: '#df7b7b',
 };
+
+const WRITE_PANEL_STYLE: CSSProperties = {
+  backgroundColor: 'rgba(111, 186, 124, 0.08)',
+  borderLeftColor: '#6fba7c',
+};
+
+function getIsNearScrollBottom(element: HTMLElement): boolean {
+  const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+  return distanceToBottom <= 24;
+}
 
 function getDiffLineStyle(line: string): CSSProperties | undefined {
   if (line.startsWith('+') && !line.startsWith('+++')) {
@@ -374,23 +470,24 @@ function getDiffLineStyle(line: string): CSSProperties | undefined {
   return undefined;
 }
 
-function hasActivityDetails(activity: AssistantProcessActivity): boolean {
+function hasVisibleActivity(activity: AssistantProcessActivity): boolean {
   if (activity.type === 'status') return activity.text.trim().length > 0;
   if (activity.type === 'thinking') {
     return activity.content.redacted || activity.content.thinking.trim().length > 0;
   }
-  return hasToolDisplayDetails(activity.display);
+  return (
+    hasToolDisplaySummary(activity.display) || hasExpandableToolDisplayDetail(activity.display)
+  );
 }
 
-function hasToolDisplayDetails(display: ToolDisplayResult): boolean {
-  if (display.kind === 'file_edit') {
-    return Boolean(display.previewError?.trim() || display.diffText.trim());
-  }
-  return display.detailText.trim().length > 0;
+function hasPhaseContent(phase: AssistantProcessPhase): boolean {
+  return phase.activities.some(hasVisibleActivity);
 }
 
-function hasPhaseDetails(phase: AssistantProcessPhase): boolean {
-  return phase.activities.some(hasActivityDetails);
+function formatToolDetailAriaLabel(open: boolean, display: ToolDisplayResult): string {
+  const label = display.detailLabel ?? '工具输出';
+  const target = display.detailTarget ?? display.toolName;
+  return `${open ? '收起' : '展开'}${label} ${target}`;
 }
 
 function shouldShimmerSummary(summary: AssistantProcessEntry['summary']): boolean {
@@ -399,9 +496,9 @@ function shouldShimmerSummary(summary: AssistantProcessEntry['summary']): boolea
 
 function shouldShowDisclosureIcon(
   summary: AssistantProcessEntry['summary'],
-  hasDetails: boolean,
+  hasProcessContent: boolean,
 ): boolean {
-  return hasDetails && summary.label === '已处理';
+  return hasProcessContent && summary.label === '已处理';
 }
 
 function getFirstProcessActivity(

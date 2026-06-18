@@ -664,11 +664,230 @@ describe('ConversationView', () => {
 
     expect(screen.getAllByText('已读取 README.md').length).toBeGreaterThan(0);
     expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开工具输出 read/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/"path": "README.md"/)).not.toBeInTheDocument();
+  });
+
+  it('keeps read failures expandable without showing arguments', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'read',
+                arguments: { path: 'missing.md' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'read',
+            content: [{ type: 'text', text: 'ENOENT: no such file or directory' }],
+            isError: true,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    expect(screen.getAllByText('读取失败 missing.md').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/ENOENT/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 read/ }));
+    expect(screen.getByText(/ENOENT: no such file or directory/)).toBeInTheDocument();
+    expect(screen.getByText('× 失败')).toBeInTheDocument();
+    expect(screen.queryByText(/"path": "missing.md"/)).not.toBeInTheDocument();
+  });
 
-    expect(screen.getByText(/文件内容/)).toBeInTheDocument();
-    expect(screen.getByText(/"path": "README.md"/)).toBeInTheDocument();
+  it('shows write progress as a compact line count and expands generated content', () => {
+    renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'write',
+                arguments: { path: 'src/generated.ts', content: 'secret\nline 2\nline 3\n' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'write',
+          args: { path: 'src/generated.ts', content: 'secret\nline 2\nline 3\n' },
+          status: 'running',
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByText('正在写入 src/generated.ts')).toBeInTheDocument();
+    expect(screen.getByText('+3')).toBeInTheDocument();
+    expect(screen.queryByText('-0')).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/generated\.ts/ }));
+    expect(screen.getByText(/secret/)).toBeInTheDocument();
+  });
+
+  it('shows growing write line counts while exposing generated content on expand', () => {
+    renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'write',
+                arguments: { path: 'src/generated.ts', content: 'secret\nline 2\nline 3\n' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByText('正在创建 src/generated.ts')).toBeInTheDocument();
+    expect(screen.getByText('+3')).toBeInTheDocument();
+    expect(screen.queryByText('-0')).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/generated\.ts/ }));
+    expect(screen.getByText(/secret/)).toBeInTheDocument();
+  });
+
+  it('preserves raw write content when counting and rendering lines', () => {
+    const { container } = renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'write',
+                arguments: { path: 'src/spaced.ts', content: '  indented\n   \nlast\n' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByText('+3')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/spaced\.ts/ }));
+    const lineContents = Array.from(container.querySelectorAll('[data-write-line-content]')).map(
+      (node) => node.textContent,
+    );
+    expect(lineContents).toEqual(['  indented', '   ', 'last']);
+    expect(screen.queryByText('+4')).not.toBeInTheDocument();
+  });
+
+  it('allows expanding purely blank write content', () => {
+    const { container } = renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'write',
+                arguments: { path: 'src/blank.txt', content: '   \n' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByText('+1')).toBeInTheDocument();
+    const expandButton = screen.getByRole('button', { name: /展开写入内容 src\/blank\.txt/ });
+    expect(expandButton).not.toBeDisabled();
+
+    fireEvent.click(expandButton);
+    const lineContents = Array.from(container.querySelectorAll('[data-write-line-content]')).map(
+      (node) => node.textContent,
+    );
+    expect(lineContents).toEqual(['   ']);
+  });
+
+  it('keeps write failures expandable without exposing content', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'write',
+                arguments: { path: 'src/generated.ts', content: 'secret\nline 2\n' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'write',
+            content: [{ type: 'text', text: 'EACCES: permission denied' }],
+            isError: true,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    expect(screen.getAllByText('写入失败 src/generated.ts').length).toBeGreaterThan(0);
+    expect(screen.getByText('+2')).toBeInTheDocument();
+    expect(screen.queryByText('-0')).not.toBeInTheDocument();
+    expect(screen.queryByText(/EACCES/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/generated\.ts/ }));
+    expect(screen.getByText(/EACCES: permission denied/)).toBeInTheDocument();
+    expect(screen.getByText(/secret/)).toBeInTheDocument();
   });
 
   it('renders assistant text as safe GitHub flavored markdown', () => {
@@ -1665,7 +1884,10 @@ describe('buildConversationRows', () => {
       kind: 'file_edit',
       additions: 2,
       deletions: 1,
-      diffText: '-1 old\n+1 final\n+2 extra',
+      detail: {
+        kind: 'diff',
+        diffText: '-1 old\n+1 final\n+2 extra',
+      },
     });
   });
 
@@ -1723,7 +1945,12 @@ describe('buildConversationRows', () => {
     if (toolActivity?.display.kind !== 'generic') {
       throw new Error('Expected generic tool display');
     }
-    expect(toolActivity.display.detailText).toContain('extension output');
+    const detail = toolActivity.display.detail;
+    expect(detail?.kind).toBe('text');
+    if (detail?.kind !== 'text') {
+      throw new Error('Expected text tool detail');
+    }
+    expect(detail.text).toContain('extension output');
   });
 
   it('keeps a prior matching tool result orphaned instead of attaching it to a later call', () => {
