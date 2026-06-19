@@ -5,7 +5,7 @@
 import type { ScoutToolCallContent, ScoutToolResultMessage } from '@scout-agent/shared';
 import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
 
-export type ToolDisplayStatus = 'pending' | 'running' | 'done' | 'error';
+export type ToolDisplayStatus = 'pending' | 'running' | 'done' | 'error' | 'stopped';
 export type ToolDisplayIcon = 'terminal' | 'file' | 'folder' | 'edit' | 'search' | 'tool';
 export type ToolDisplayMetricTone = 'default' | 'added' | 'deleted' | 'muted';
 export type ToolDisplayMetricPlacement = 'inline' | 'end';

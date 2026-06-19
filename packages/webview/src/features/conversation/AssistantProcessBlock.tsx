@@ -354,7 +354,7 @@ function TextToolDetailPanel({
             status === 'error' && 'text-destructive',
           )}
         >
-          {status === 'error' ? '×' : '✓'} {detail.completionLabel}
+          {status === 'error' || status === 'stopped' ? '×' : '✓'} {detail.completionLabel}
         </div>
       ) : null}
     </div>

@@ -10,7 +10,7 @@
 
 ## 文案语义
 
-- `正在思考`：模型决策态。Scout 正在分析上下文、规划下一步、决定是否读文件/跑命令/改代码/直接回复。此状态不等于真实 thinking 内容。
+- `正在思考`：模型决策态。Scout 正在分析上下文、规划下一步、决定是否读文件/跑命令/改代码/直接回复；如果 assistant message 已出现 `toolCall` 但执行器尚未回传执行事实，外层仍归入此状态。此状态不等于真实 thinking 内容。
 - `正在处理`：工作循环态。Scout 已进入可观察的执行链路，可能在调用工具、读写文件、跑命令、等待输出、等待权限或整合工具结果。
 - `已处理`：assistant turn 正常收束。
 - `已停止`：assistant turn 被用户中止。
@@ -19,14 +19,16 @@
 一句话边界：
 
 ```text
-正在思考 = 还在决定下一步
+正在思考 = 外层尚未进入可观察执行；内层尚无明确工具动作
 正在处理 = 已经开始推进具体工作
 ```
 
 ## 推导规则
 
-- `busyState.kind === 'agent'` 且本轮没有 work trace：显示 `正在思考`。
-- 出现 `toolCall` 或 runtime `tool_pending/tool_running` 后，本轮进入 work trace，显示 `正在处理`。
+- `busyState.kind === 'agent'` 且本轮没有可观察 work trace：外层显示 `正在思考`。
+- 仅出现 `toolCall`、但没有 `tool_execution_start` / partial / result / preview 等执行事实时，外层仍显示 `正在思考`，内层工具项显示 `正在运行 <目标>`，不展示 `等待运行/等待搜索/等待编辑`。
+- 出现 runtime `tool_running`、toolResult 或可见 tool preview 后，本轮进入 work trace，外层显示 `正在处理`。
+- 如果 turn 已经 `aborted` / `error`，裸 `toolCall` 不再使用 `正在运行`；内层应显示 `已停止 <目标>` 或 `运行失败 <目标>`，与外层 `已停止` / `处理失败` 对齐。
 - 一旦本轮进入过 work trace，运行中保持 `正在处理`，避免工具结果后模型继续输出时在 `正在思考` / `正在处理` 间来回跳。
 - turn 完成后按 `stopReason` 收束为 `已处理 / 已停止 / 处理失败`。
 - `errorMessage` 可以作为 status 明细展示，但只有 `stopReason === 'error'` 才让外层显示 `处理失败`。
@@ -34,7 +36,8 @@
 ## 过程明细
 
 - 真实 thinking 明细只由 `content.type === 'thinking'` 决定。
-- 工具明细由 `toolCall + toolExecution + toolResult` 投影。
+- 工具明细由 `toolCall + toolExecution + toolResult` 投影；pending toolCall 会产生内层工具明细，但不算外层 work trace。
+- 工具活动文案使用 `正在运行 <目标>` / `已运行 <目标>`，其中 active turn 里的 `正在运行` 覆盖 pending 与 running 两段，不使用 `等待...` 作为用户可见状态。
 - text/image 始终作为 assistant 正文展示，不塞进过程明细。
 - `phases` 是过程明细的唯一事实源，不要再维护 flattened `activities` 副本。
 

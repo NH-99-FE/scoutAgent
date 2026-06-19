@@ -74,16 +74,26 @@ function createToolDisplayContext({
     };
   }
 
-  if (
-    assistantErrorMessage &&
-    (assistantStopReason === 'error' || assistantStopReason === 'aborted')
-  ) {
+  if (assistantStopReason === 'aborted') {
+    return {
+      toolName,
+      args,
+      argsText,
+      status: 'stopped',
+      bodyText: assistantErrorMessage ?? '',
+      isError: false,
+      completionLabel: '已停止',
+      preview,
+    };
+  }
+
+  if (assistantStopReason === 'error') {
     return {
       toolName,
       args,
       argsText,
       status: 'error',
-      bodyText: assistantErrorMessage,
+      bodyText: assistantErrorMessage ?? '',
       isError: true,
       completionLabel: '失败',
       preview,
@@ -108,7 +118,7 @@ function createToolDisplayContext({
     toolName,
     args,
     argsText,
-    status: runtime ? 'running' : 'pending',
+    status: runtime || preview ? 'running' : 'pending',
     bodyText: '',
     isError: false,
     completionLabel: '',

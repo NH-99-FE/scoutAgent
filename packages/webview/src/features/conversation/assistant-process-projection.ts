@@ -121,7 +121,8 @@ export function appendAssistantMessageEntries({
       const runtime = toolExecutionsById[content.id];
       const preview = toolPreviewsById[content.id];
       const toolResult = resolveToolResult(content.id);
-      turn.hasWorkTrace = true;
+      const hasExecutionTrace = runtime || toolResult || preview;
+      turn.hasWorkTrace ||= Boolean(hasExecutionTrace);
       appendProcessActivity(turn, 'tool_processing', `${item.key}:tool-phase:${content.id}`, {
         type: 'tool',
         key: `${item.key}:tool:${content.id}`,
@@ -157,7 +158,8 @@ export function appendAssistantMessageEntries({
     !hasAnyProcessActivity(turn.phases) &&
     isStreaming &&
     runtimeActivity !== 'idle' &&
-    runtimeActivity !== 'waiting'
+    runtimeActivity !== 'waiting' &&
+    runtimeActivity !== 'tool_pending'
   ) {
     turn.hasWorkTrace = true;
     appendProcessActivity(
@@ -219,13 +221,11 @@ export function appendRuntimeActivityRow(
   if (latestAssistant?.isStreaming || latestAssistant?.key === key) return;
 
   const status: TurnProcessStatus =
-    activity === 'tool_pending' || activity === 'tool_running'
-      ? 'work_processing'
-      : 'model_deciding';
+    activity === 'tool_running' ? 'work_processing' : 'model_deciding';
   const phaseKind: AssistantProcessPhaseKind =
     status === 'work_processing' ? 'tool_processing' : 'model_responding';
   const phases: AssistantProcessPhase[] =
-    activity === 'waiting'
+    activity === 'waiting' || activity === 'tool_pending'
       ? []
       : [
           {
@@ -332,7 +332,7 @@ function createRuntimeStatusActivity(
 }
 
 function formatRuntimeActivityLabel(activity: AssistantRuntimeActivity): string {
-  if (activity === 'tool_pending') return '等待运行工具';
+  if (activity === 'tool_pending') return '正在思考';
   if (activity === 'tool_running') return '正在运行工具';
   return '等待模型响应';
 }

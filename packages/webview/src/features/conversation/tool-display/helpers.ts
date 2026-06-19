@@ -21,7 +21,7 @@ export function createGenericDisplay(
     toolName: context.toolName,
     summaryTitle:
       options.summaryTitle ??
-      formatToolSummaryTitle(context.status, context.toolName, context.args),
+      formatToolExecutionSummary(context.status, context.toolName, context.args),
     icon: getToolDisplayIcon(context.toolName),
     detail: options.detailText.trim()
       ? {
@@ -71,7 +71,7 @@ export function createFileEditDisplayFromDetails({
     metricsPlacement: 'end',
     detailLabel: '编辑差异',
     detailTarget: path,
-    summaryTitle: `${getToolStatusVerb(status, toolName)} ${path}`,
+    summaryTitle: formatToolExecutionSummary(status, toolName, args),
   };
 }
 
@@ -86,7 +86,6 @@ export function createFileEditDisplayFromPreview({
 }): FileEditToolDisplayResult {
   const fileEdit = preview.preview;
   const previewError = fileEdit.error;
-  const verb = previewError ? '编辑预览失败' : getPreviewEditVerb(status);
 
   return {
     kind: 'file_edit',
@@ -110,7 +109,9 @@ export function createFileEditDisplayFromPreview({
     metricsPlacement: 'end',
     detailLabel: '编辑差异',
     detailTarget: fileEdit.path,
-    summaryTitle: `${verb} ${fileEdit.path}`,
+    summaryTitle: previewError
+      ? `预览失败 编辑 ${fileEdit.path}`
+      : `${getToolStatusPrefix(status)} 编辑 ${fileEdit.path}`,
   };
 }
 
@@ -168,73 +169,44 @@ function countEditDiffStats(diff: string): { additions: number; deletions: numbe
   return { additions, deletions };
 }
 
-function getPreviewEditVerb(status: ToolDisplayStatus): string {
-  if (status === 'running') return '正在编辑';
-  return '将编辑';
+export function formatToolExecutionSummary(
+  status: ToolDisplayStatus,
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): string {
+  return `${getToolStatusPrefix(status)} ${getToolActionLabel(toolName, args)}`;
 }
 
-function formatToolSummaryTitle(
-  status: ToolDisplayStatus,
+function getToolActionLabel(
   toolName: string,
   args: Record<string, unknown> | undefined,
 ): string {
   const target = getFirstArgText(args, ['path', 'filePath', 'file', 'target', 'cwd', 'directory']);
   const command = getFirstArgText(args, ['command', 'cmd', 'script']);
   const pattern = getFirstArgText(args, ['pattern', 'query', 'regex', 'term']);
-  const verb = getToolStatusVerb(status, toolName);
 
-  if (toolName === 'bash') return command ? `${verb} ${command}` : `${verb}命令`;
-  if (toolName === 'read') return target ? `${verb} ${target}` : `${verb}文件`;
+  if (toolName === 'bash') return command || '命令';
+  if (toolName === 'read') return target ? `读取 ${target}` : '读取文件';
   if (toolName === 'grep') {
-    if (pattern && target) return `${verb} ${pattern} in ${target}`;
-    if (pattern) return `${verb} ${pattern}`;
-    return `${verb}文本`;
+    if (pattern && target) return `搜索 ${pattern} in ${target}`;
+    if (pattern) return `搜索 ${pattern}`;
+    return '搜索文本';
   }
   if (toolName === 'find') {
-    return pattern ? `${verb} ${pattern}` : target ? `${verb} ${target}` : `${verb}文件`;
+    return pattern ? `查找 ${pattern}` : target ? `查找 ${target}` : '查找文件';
   }
-  if (toolName === 'ls') return target ? `${verb} ${target}` : `${verb}目录`;
-  if (toolName === 'edit') return target ? `${verb} ${target}` : `${verb}文件`;
-  if (toolName === 'write') return target ? `${verb} ${target}` : `${verb}文件`;
-  return `${verb} ${toolName}`;
+  if (toolName === 'ls') return target ? `列出 ${target}` : '列出目录';
+  if (toolName === 'edit') return target ? `编辑 ${target}` : '编辑文件';
+  if (toolName === 'write') return target ? `写入 ${target}` : '写入文件';
+  return toolName;
 }
 
-function getToolStatusVerb(status: ToolDisplayStatus, toolName: string): string {
-  const verbs = getToolVerbs(toolName);
-  if (status === 'running') return verbs.running;
-  if (status === 'done') return verbs.done;
-  if (status === 'error') return verbs.error;
-  return verbs.pending;
-}
-
-function getToolVerbs(toolName: string): {
-  pending: string;
-  running: string;
-  done: string;
-  error: string;
-} {
-  if (toolName === 'bash') {
-    return { pending: '等待运行', running: '正在运行', done: '已运行', error: '运行失败' };
-  }
-  if (toolName === 'read') {
-    return { pending: '等待读取', running: '正在读取', done: '已读取', error: '读取失败' };
-  }
-  if (toolName === 'grep') {
-    return { pending: '等待搜索', running: '正在搜索', done: '已搜索', error: '搜索失败' };
-  }
-  if (toolName === 'find') {
-    return { pending: '等待查找', running: '正在查找', done: '已查找', error: '查找失败' };
-  }
-  if (toolName === 'ls') {
-    return { pending: '等待列出', running: '正在列出', done: '已列出', error: '列出失败' };
-  }
-  if (toolName === 'edit') {
-    return { pending: '等待编辑', running: '正在编辑', done: '已编辑', error: '编辑失败' };
-  }
-  if (toolName === 'write') {
-    return { pending: '等待写入', running: '正在写入', done: '已写入', error: '写入失败' };
-  }
-  return { pending: '等待调用', running: '正在调用', done: '已调用', error: '调用失败' };
+function getToolStatusPrefix(status: ToolDisplayStatus): string {
+  if (status === 'running') return '正在运行';
+  if (status === 'done') return '已运行';
+  if (status === 'error') return '运行失败';
+  if (status === 'stopped') return '已停止';
+  return '正在运行';
 }
 
 function getFirstArgText(args: Record<string, unknown> | undefined, keys: string[]): string {

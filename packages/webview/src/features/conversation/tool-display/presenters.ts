@@ -9,6 +9,7 @@ import {
   createGenericDisplay,
   formatBashDetailText,
   formatDefaultDetailText,
+  formatToolExecutionSummary,
   getToolDisplayIcon,
 } from './helpers';
 import type {
@@ -120,15 +121,8 @@ function presentWriteTool(context: ToolDisplayContext): FileWriteToolDisplayResu
         : undefined,
     detailLabel: '写入内容',
     detailTarget: path,
-    summaryTitle: `${getWriteStatusVerb(context.status)} ${path}`,
+    summaryTitle: formatToolExecutionSummary(context.status, context.toolName, context.args),
   };
-}
-
-function getWriteStatusVerb(status: ToolDisplayContext['status']): string {
-  if (status === 'running') return '正在写入';
-  if (status === 'done') return '已写入';
-  if (status === 'error') return '写入失败';
-  return '正在创建';
 }
 
 function getStringArg(args: Record<string, unknown> | undefined, keys: string[]): string {
