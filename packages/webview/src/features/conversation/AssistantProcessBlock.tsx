@@ -57,7 +57,7 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
           aria-label={`${open ? '收起' : '展开'}过程 ${summary.label}`}
           className={cn(
             '-ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
-            summary.label === '已处理' && 'border-border/55 w-full border-b pb-1.5',
+            summary.status === 'completed' && 'border-border/55 w-full border-b pb-1.5',
             tone === 'error'
               ? 'hover:text-destructive focus-visible:text-destructive'
               : 'hover:text-muted-foreground focus-visible:text-muted-foreground',
@@ -491,14 +491,14 @@ function formatToolDetailAriaLabel(open: boolean, display: ToolDisplayResult): s
 }
 
 function shouldShimmerSummary(summary: AssistantProcessEntry['summary']): boolean {
-  return summary.running && summary.label === '正在思考';
+  return summary.running && summary.status === 'model_deciding';
 }
 
 function shouldShowDisclosureIcon(
   summary: AssistantProcessEntry['summary'],
   hasProcessContent: boolean,
 ): boolean {
-  return hasProcessContent && summary.label === '已处理';
+  return hasProcessContent && summary.status === 'completed';
 }
 
 function getFirstProcessActivity(

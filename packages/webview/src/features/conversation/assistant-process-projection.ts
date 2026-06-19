@@ -16,6 +16,7 @@ import type {
   AssistantProcessPhase,
   AssistantProcessPhaseKind,
   AssistantProcessSummary,
+  AssistantProcessStatus,
   AssistantStatusActivity,
   AssistantVisibleContent,
   ConversationRow,
@@ -28,8 +29,6 @@ import {
   resolveToolDisplayResult,
 } from './tool-display';
 
-type TurnProcessStatus = 'model_deciding' | 'work_processing' | 'completed' | 'stopped' | 'failed';
-
 export interface AssistantTurnBuilder {
   key: string;
   processKey: string;
@@ -38,8 +37,6 @@ export interface AssistantTurnBuilder {
   actionTextParts: string[];
   timestamp: number;
   isStreaming: boolean;
-  // 进入过可观察工作链路后，本轮运行中保持“正在处理”，避免工具后继续输出时来回跳。
-  hasWorkTrace: boolean;
   stopReason?: string;
   errorMessage?: string;
 }
@@ -59,7 +56,6 @@ export function createAssistantTurnBuilder({
     actionTextParts: [],
     timestamp,
     isStreaming: false,
-    hasWorkTrace: false,
   };
 }
 
@@ -121,8 +117,6 @@ export function appendAssistantMessageEntries({
       const runtime = toolExecutionsById[content.id];
       const preview = toolPreviewsById[content.id];
       const toolResult = resolveToolResult(content.id);
-      const hasExecutionTrace = runtime || toolResult || preview;
-      turn.hasWorkTrace ||= Boolean(hasExecutionTrace);
       appendProcessActivity(turn, 'tool_processing', `${item.key}:tool-phase:${content.id}`, {
         type: 'tool',
         key: `${item.key}:tool:${content.id}`,
@@ -158,10 +152,8 @@ export function appendAssistantMessageEntries({
     !hasAnyProcessActivity(turn.phases) &&
     isStreaming &&
     runtimeActivity !== 'idle' &&
-    runtimeActivity !== 'waiting' &&
-    runtimeActivity !== 'tool_pending'
+    runtimeActivity !== 'waiting'
   ) {
-    turn.hasWorkTrace = true;
     appendProcessActivity(
       turn,
       'tool_processing',
@@ -220,12 +212,12 @@ export function appendRuntimeActivityRow(
   const latestAssistant = findLatestAssistantRow(rows);
   if (latestAssistant?.isStreaming || latestAssistant?.key === key) return;
 
-  const status: TurnProcessStatus =
+  const status: AssistantProcessStatus =
     activity === 'tool_running' ? 'work_processing' : 'model_deciding';
   const phaseKind: AssistantProcessPhaseKind =
     status === 'work_processing' ? 'tool_processing' : 'model_responding';
   const phases: AssistantProcessPhase[] =
-    activity === 'waiting' || activity === 'tool_pending'
+    activity === 'waiting'
       ? []
       : [
           {
@@ -275,29 +267,29 @@ function getLastRowTimestamp(rows: ConversationRow[]): number {
   return 0;
 }
 
-function resolveTurnProcessStatus(turn: AssistantTurnBuilder): TurnProcessStatus {
+function resolveTurnProcessStatus(turn: AssistantTurnBuilder): AssistantProcessStatus {
   if (turn.isStreaming) {
-    return turn.hasWorkTrace ? 'work_processing' : 'model_deciding';
+    return hasObservableWorkTrace(turn.phases) ? 'work_processing' : 'model_deciding';
   }
   if (turn.stopReason === 'aborted') return 'stopped';
   if (turn.stopReason === 'error') return 'failed';
   return 'completed';
 }
 
-function resolveProcessSummary(status: TurnProcessStatus): AssistantProcessSummary {
+function resolveProcessSummary(status: AssistantProcessStatus): AssistantProcessSummary {
   if (status === 'model_deciding') {
-    return { label: '正在思考', running: true, tone: 'default' };
+    return { status, label: '正在思考', running: true, tone: 'default' };
   }
   if (status === 'work_processing') {
-    return { label: '正在处理', running: true, tone: 'default' };
+    return { status, label: '正在处理', running: true, tone: 'default' };
   }
   if (status === 'stopped') {
-    return { label: '已停止', running: false, tone: 'default' };
+    return { status, label: '已停止', running: false, tone: 'default' };
   }
   if (status === 'failed') {
-    return { label: '处理失败', running: false, tone: 'error' };
+    return { status, label: '处理失败', running: false, tone: 'error' };
   }
-  return { label: '已处理', running: false, tone: 'default' };
+  return { status, label: '已处理', running: false, tone: 'default' };
 }
 
 function getProcessDefaultOpen({
@@ -306,7 +298,7 @@ function getProcessDefaultOpen({
   hasVisibleProcessContent,
   hasDiffTool,
 }: {
-  status: TurnProcessStatus;
+  status: AssistantProcessStatus;
   hasVisibleContent: boolean;
   hasVisibleProcessContent: boolean;
   hasDiffTool: boolean;
@@ -332,7 +324,6 @@ function createRuntimeStatusActivity(
 }
 
 function formatRuntimeActivityLabel(activity: AssistantRuntimeActivity): string {
-  if (activity === 'tool_pending') return '正在思考';
   if (activity === 'tool_running') return '正在运行工具';
   return '等待模型响应';
 }
@@ -353,6 +344,15 @@ function appendProcessActivity(
 
 function hasAnyProcessActivity(phases: AssistantProcessPhase[]): boolean {
   return phases.some((phase) => phase.activities.length > 0);
+}
+
+function hasObservableWorkTrace(phases: AssistantProcessPhase[]): boolean {
+  return phases.some((phase) =>
+    phase.activities.some((activity) => {
+      if (activity.type === 'tool') return true;
+      return phase.kind === 'tool_processing' && activity.type === 'status';
+    }),
+  );
 }
 
 function hasVisibleProcessContent(phases: AssistantProcessPhase[]): boolean {

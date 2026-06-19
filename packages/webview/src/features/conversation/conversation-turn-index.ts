@@ -5,7 +5,7 @@
 import type { ScoutToolResultMessage } from '@scout-agent/shared';
 import type { ConversationItem, ToolExecutionState } from '@/store/conversation-store';
 
-export type AssistantRuntimeActivity = 'idle' | 'waiting' | 'tool_pending' | 'tool_running';
+export type AssistantRuntimeActivity = 'idle' | 'waiting' | 'tool_running';
 
 export interface ConversationIndex {
   streamingAssistantKey?: string;
@@ -86,9 +86,6 @@ export function resolveRuntimeActivity({
     (toolCallId) => toolExecutionsById[toolCallId]?.status === 'running',
   );
   if (runningTool) return 'tool_running';
-
-  const pendingToolCall = toolCallIds.some((toolCallId) => !toolExecutionsById[toolCallId]);
-  if (pendingToolCall) return 'tool_pending';
 
   return 'waiting';
 }

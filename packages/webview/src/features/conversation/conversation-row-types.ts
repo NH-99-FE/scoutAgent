@@ -58,7 +58,15 @@ export interface AssistantProcessEntry {
   phases: AssistantProcessPhase[];
 }
 
+export type AssistantProcessStatus =
+  | 'model_deciding'
+  | 'work_processing'
+  | 'completed'
+  | 'stopped'
+  | 'failed';
+
 export interface AssistantProcessSummary {
+  status: AssistantProcessStatus;
   label: string;
   running: boolean;
   tone: 'default' | 'error';

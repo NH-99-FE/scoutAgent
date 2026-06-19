@@ -1374,7 +1374,7 @@ describe('ConversationView', () => {
     expect(screen.getByText(/来自运行事实的部分输出/)).toBeInTheDocument();
   });
 
-  it('renders pending tool calls as inner running actions while the outer state is thinking', () => {
+  it('renders pending tool calls as processing actions before execution start arrives', () => {
     renderConversation({
       isStreaming: true,
       items: [
@@ -1396,7 +1396,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 正在思考/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
     expect(screen.queryByText('等待搜索 hello')).not.toBeInTheDocument();
     expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
   });
@@ -1769,7 +1769,7 @@ describe('buildConversationRows', () => {
 
     expect(processEntry).toMatchObject({
       type: 'process',
-      summary: { label: '正在思考' },
+      summary: { status: 'model_deciding', label: '正在思考' },
       phases: [],
     });
   });
@@ -1812,7 +1812,7 @@ describe('buildConversationRows', () => {
 
     expect(processEntry).toMatchObject({
       type: 'process',
-      summary: { label: '正在思考' },
+      summary: { status: 'model_deciding', label: '正在思考' },
       phases: [],
     });
   });

@@ -30,6 +30,7 @@ export type {
   AssistantProcessPhase,
   AssistantProcessPhaseKind,
   AssistantProcessSummary,
+  AssistantProcessStatus,
   AssistantStatusActivity,
   AssistantThinkingActivity,
   AssistantToolActivity,
