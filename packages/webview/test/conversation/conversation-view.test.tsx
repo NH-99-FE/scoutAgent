@@ -31,6 +31,20 @@ const fireEvent = {
     });
     return result;
   },
+  touchMove: (...args: Parameters<typeof rtlFireEvent.touchMove>) => {
+    let result = false;
+    act(() => {
+      result = rtlFireEvent.touchMove(...args);
+    });
+    return result;
+  },
+  wheel: (...args: Parameters<typeof rtlFireEvent.wheel>) => {
+    let result = false;
+    act(() => {
+      result = rtlFireEvent.wheel(...args);
+    });
+    return result;
+  },
 };
 
 function renderConversation({
@@ -596,20 +610,17 @@ describe('ConversationView', () => {
     const button = screen.getByRole('button', { name: '滚动到底部' });
     expect(button).toBeInTheDocument();
 
-    let frameTimestamp = 0;
     const requestAnimationFrame = vi
       .spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
-        frameTimestamp += 80;
-        callback(frameTimestamp);
-        return frameTimestamp;
+        callback(1);
+        return 1;
       });
-    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
 
     fireEvent.click(button);
 
-    expect(requestAnimationFrame).toHaveBeenCalled();
-    expect(scrollTo).not.toHaveBeenCalled();
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 840, behavior: 'auto' });
     expect(resolvedViewport.scrollTop).toBe(840);
     expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
   });
@@ -1366,6 +1377,218 @@ describe('ConversationView', () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
+  it('stops following streaming updates immediately after user scroll intent', () => {
+    const firstItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段\n\n第二段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const { rerender } = renderConversation({ items: firstItems });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = vi.fn();
+
+    Object.defineProperty(scrollContainer, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      value: 560,
+      writable: true,
+    });
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    fireEvent.wheel(scrollContainer, { deltaY: -120 });
+    scrollTo.mockClear();
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it('keeps following when the user wheels downward at the bottom', () => {
+    const firstItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段\n\n第二段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const { rerender } = renderConversation({ items: firstItems });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = vi.fn();
+
+    Object.defineProperty(scrollContainer, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      value: 600,
+      writable: true,
+    });
+
+    fireEvent.wheel(scrollContainer, { deltaY: 120 });
+    scrollTo.mockClear();
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+
+    expect(requestAnimationFrame).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
+  });
+
+  it('keeps following when a nested scroll area consumes the wheel gesture', () => {
+    const firstItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段\n\n第二段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const { rerender } = renderConversation({ items: firstItems });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = vi.fn();
+
+    Object.defineProperty(scrollContainer, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      value: 600,
+      writable: true,
+    });
+
+    const nestedScrollArea = document.createElement('div');
+    nestedScrollArea.dataset.slot = 'scroll-area-viewport';
+    scrollContainer.appendChild(nestedScrollArea);
+    Object.defineProperty(nestedScrollArea, 'scrollHeight', {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(nestedScrollArea, 'clientHeight', {
+      configurable: true,
+      value: 240,
+    });
+    Object.defineProperty(nestedScrollArea, 'scrollTop', {
+      configurable: true,
+      value: 120,
+      writable: true,
+    });
+
+    fireEvent.wheel(nestedScrollArea, { deltaY: -120 });
+    scrollTo.mockClear();
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+
+    expect(requestAnimationFrame).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
+  });
+
   it('keeps following streaming updates while the user is near the bottom', () => {
     const firstItems: ConversationItem[] = [
       {
@@ -1411,6 +1634,12 @@ describe('ConversationView', () => {
 
     fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
 
     rerender(
       <ConversationView
@@ -1421,7 +1650,8 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: 'auto' });
+    expect(requestAnimationFrame).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
   });
 
   it('keeps following visible runtime status changes when rows stay unchanged', () => {
@@ -1465,6 +1695,12 @@ describe('ConversationView', () => {
 
     fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
 
     rerender(
       <ConversationView
@@ -1483,7 +1719,8 @@ describe('ConversationView', () => {
     );
 
     expect(screen.getByText('正在重试 2/3')).toBeInTheDocument();
-    expect(scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: 'auto' });
+    expect(requestAnimationFrame).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
   });
 
   it('renders runtime partial tool output while a tool is running', () => {

@@ -2,7 +2,7 @@
 // Conversation View — 会话 turn 与 assistant 过程渲染
 // ============================================================
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ArrowDown,
   ChevronDown,
@@ -41,10 +41,7 @@ import { AssistantProcessBlock } from './AssistantProcessBlock';
 import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
 import { MarkdownContent } from './MarkdownContent';
 import { contentToText } from './tool-display';
-
-const STICKY_SCROLL_THRESHOLD_PX = 48;
-const MIN_SCROLL_TO_BOTTOM_ANIMATION_MS = 420;
-const MAX_SCROLL_TO_BOTTOM_ANIMATION_MS = 720;
+import { useConversationAutoScroll } from './use-conversation-auto-scroll';
 
 interface ConversationViewProps {
   busyState: ScoutBusyState;
@@ -69,11 +66,6 @@ export function ConversationView({
   className,
   showScrollToBottomButton = false,
 }: ConversationViewProps) {
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const shouldStickToBottomRef = useRef(true);
-  const hasAutoScrolledRef = useRef(false);
-  const scheduledScrollRef = useRef<number | null>(null);
-  const [isScrollToBottomVisible, setIsScrollToBottomVisible] = useState(false);
   const rows = useMemo(
     () =>
       buildConversationRows({
@@ -86,95 +78,16 @@ export function ConversationView({
     [items, isStreaming, busyState, toolExecutionsById, toolPreviewsById],
   );
   const runtimeStatusKey = getRuntimeStatusKey(busyState);
-
-  const cancelScheduledScroll = useCallback(() => {
-    if (scheduledScrollRef.current === null) return;
-    window.cancelAnimationFrame(scheduledScrollRef.current);
-    scheduledScrollRef.current = null;
-  }, []);
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
-    const element = scrollContainerRef.current;
-    if (!element) return;
-
-    if (typeof element.scrollTo === 'function') {
-      element.scrollTo({ top: element.scrollHeight, behavior });
-    } else {
-      element.scrollTop = element.scrollHeight;
-    }
-    shouldStickToBottomRef.current = true;
-    setIsScrollToBottomVisible(false);
-  }, []);
-  const animateScrollToBottom = useCallback(() => {
-    const element = scrollContainerRef.current;
-    if (!element || typeof window.requestAnimationFrame !== 'function') {
-      scrollToBottom();
-      return;
-    }
-
-    cancelScheduledScroll();
-
-    const startTop = element.scrollTop;
-    const targetTop = getScrollBottomTop(element);
-    const distance = targetTop - startTop;
-    if (Math.abs(distance) <= STICKY_SCROLL_THRESHOLD_PX) {
-      scrollToBottom();
-      return;
-    }
-
-    let startTime: number | undefined;
-    const duration = getScrollToBottomAnimationDuration(Math.abs(distance));
-    const step = (timestamp: number) => {
-      startTime ??= timestamp;
-      const elapsed = timestamp - startTime;
-      const progress = Math.min(1, elapsed / duration);
-      element.scrollTop = startTop + distance * easeInOutSine(progress);
-
-      if (progress < 1) {
-        scheduledScrollRef.current = window.requestAnimationFrame(step);
-        return;
-      }
-
-      scheduledScrollRef.current = null;
-      element.scrollTop = targetTop;
-      setIsScrollToBottomVisible(false);
-    };
-
-    shouldStickToBottomRef.current = true;
-    scheduledScrollRef.current = window.requestAnimationFrame(step);
-  }, [cancelScheduledScroll, scrollToBottom]);
-
-  const scheduleScrollToBottom = useCallback(() => {
-    cancelScheduledScroll();
-    scrollToBottom();
-
-    if (typeof window.requestAnimationFrame !== 'function') return;
-    scheduledScrollRef.current = window.requestAnimationFrame(() => {
-      scheduledScrollRef.current = null;
-      scrollToBottom();
-    });
-  }, [cancelScheduledScroll, scrollToBottom]);
-
-  const updateStickiness = useCallback(() => {
-    const element = scrollContainerRef.current;
-    if (!element) return;
-
-    const isNearBottom = getIsNearBottom(element);
-    shouldStickToBottomRef.current = isNearBottom;
-    setIsScrollToBottomVisible(showScrollToBottomButton && !isNearBottom);
-  }, [showScrollToBottomButton]);
-
-  useLayoutEffect(() => {
-    const shouldScroll = !hasAutoScrolledRef.current || shouldStickToBottomRef.current;
-    hasAutoScrolledRef.current = true;
-    if (!shouldScroll) {
-      updateStickiness();
-      return undefined;
-    }
-
-    scheduleScrollToBottom();
-    return cancelScheduledScroll;
-  }, [cancelScheduledScroll, rows, runtimeStatusKey, scheduleScrollToBottom, updateStickiness]);
+  const {
+    isScrollToBottomVisible,
+    scrollToBottom,
+    viewportHandlers,
+    viewportRef: scrollContainerRef,
+  } = useConversationAutoScroll({
+    contentKey: rows,
+    runtimeStatusKey,
+    showScrollToBottomButton,
+  });
 
   return (
     <div className={cn('relative min-h-0 w-full min-w-0 flex-1', className)}>
@@ -185,7 +98,7 @@ export function ConversationView({
         viewportRef={scrollContainerRef}
         viewportProps={{
           'aria-label': '会话滚动区域',
-          onScroll: updateStickiness,
+          ...viewportHandlers,
         }}
       >
         <div className="scout-conversation-content flex w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2">
@@ -193,10 +106,11 @@ export function ConversationView({
             <ConversationRowItem expansionScope={expansionScope} key={row.key} row={row} />
           ))}
           <RuntimeInlineStatus busyState={busyState} />
+          <div aria-hidden="true" className="scout-conversation-bottom-anchor h-px shrink-0" />
         </div>
       </ScrollArea>
       {showScrollToBottomButton && isScrollToBottomVisible ? (
-        <ScrollToBottomButton onClick={animateScrollToBottom} />
+        <ScrollToBottomButton onClick={scrollToBottom} />
       ) : null}
     </div>
   );
@@ -224,26 +138,6 @@ function ScrollToBottomButton({ onClick }: { onClick: () => void }) {
       </TooltipProvider>
     </div>
   );
-}
-
-function getIsNearBottom(element: HTMLElement): boolean {
-  const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-  return distanceToBottom <= STICKY_SCROLL_THRESHOLD_PX;
-}
-
-function getScrollBottomTop(element: HTMLElement): number {
-  return Math.max(0, element.scrollHeight - element.clientHeight);
-}
-
-function getScrollToBottomAnimationDuration(distance: number): number {
-  return Math.min(
-    MAX_SCROLL_TO_BOTTOM_ANIMATION_MS,
-    Math.max(MIN_SCROLL_TO_BOTTOM_ANIMATION_MS, 420 + distance / 4),
-  );
-}
-
-function easeInOutSine(progress: number): number {
-  return -(Math.cos(Math.PI * progress) - 1) / 2;
 }
 
 function RuntimeInlineStatus({ busyState }: { busyState: ScoutBusyState }) {

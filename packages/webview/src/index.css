@@ -282,6 +282,19 @@ body,
   min-width: 0 !important;
 }
 
+.scout-conversation-viewport {
+  scroll-behavior: auto;
+  overscroll-behavior: contain;
+}
+
+.scout-conversation-viewport * {
+  overflow-anchor: none;
+}
+
+.scout-conversation-bottom-anchor {
+  overflow-anchor: auto;
+}
+
 .scout-conversation-content,
 .scout-assistant-turn,
 .scout-assistant-content,
