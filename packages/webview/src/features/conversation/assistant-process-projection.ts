@@ -150,7 +150,7 @@ export function appendAssistantMessageEntries({
 
   flushContent(message.content.length);
 
-  if (message.errorMessage) {
+  if (message.errorMessage && message.stopReason !== 'aborted') {
     appendProcessActivity(turn, 'status', `${item.key}:status-phase`, {
       type: 'status',
       key: `${item.key}:assistant-error`,
@@ -270,11 +270,8 @@ function resolveAssistantTurnSummary(
 
   if (turn.isStreaming) {
     const activeProcesses = processes.filter((entry) => entry.lifecycle === 'active');
-    if (activeProcesses.length === 0) return undefined;
-    const hasWorkProcessing = activeProcesses.some(
-      (entry) => entry.summary.status === 'work_processing',
-    );
-    if (hasWorkProcessing) {
+    const hasWorkTrace = processes.some((entry) => hasObservableWorkTrace(entry.phases));
+    if (hasWorkTrace) {
       return {
         status: 'work_processing',
         label: '正在处理',
@@ -282,6 +279,7 @@ function resolveAssistantTurnSummary(
         tone: 'default',
       };
     }
+    if (activeProcesses.length === 0) return undefined;
     return {
       status: 'model_deciding',
       label: '正在思考',

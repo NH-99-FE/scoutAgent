@@ -282,6 +282,46 @@ describe('ConversationView', () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it('keeps the assistant turn marked as processing after work content starts streaming', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'message-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'read',
+                arguments: { path: 'README.md' },
+              },
+              { type: 'text', text: '读完了，继续整理结论' },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      isStreaming: true,
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'read',
+          args: { path: 'README.md' },
+          status: 'done',
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByText('正在处理')).toBeInTheDocument();
+    expect(screen.getByText('读完了，继续整理结论')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
+  });
+
   it('does not mark an older assistant as streaming when a user message is last', () => {
     renderConversation({
       isStreaming: true,
@@ -663,7 +703,7 @@ describe('ConversationView', () => {
   });
 
   it('shows stopped turns as expanded process history', () => {
-    renderConversation({
+    const { container } = renderConversation({
       items: [
         {
           key: 'assistant-1',
@@ -671,14 +711,23 @@ describe('ConversationView', () => {
             role: 'assistant',
             content: [{ type: 'thinking', thinking: '已经检查到这里' }],
             stopReason: 'aborted',
+            errorMessage: 'Request was aborted',
             timestamp: 1,
           },
         },
       ],
     });
 
+    const notice = container.querySelector('[data-manual-abort-notice="true"]');
+    const thinking = screen.getByText('已经检查到这里');
     expect(screen.getByRole('button', { name: /收起回复 已停止/ })).toBeInTheDocument();
-    expect(screen.getByText('已经检查到这里')).toBeInTheDocument();
+    expect(thinking).toBeInTheDocument();
+    expect(screen.getByText('你停止了会话')).toBeInTheDocument();
+    expect(screen.queryByText('Request was aborted')).not.toBeInTheDocument();
+    expect(notice).toHaveClass('justify-end', 'border-b');
+    expect(
+      thinking.compareDocumentPosition(notice as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('shows failed turns only for assistant error stop reasons', () => {
@@ -1566,6 +1615,7 @@ describe('ConversationView', () => {
               },
             ],
             stopReason: 'aborted',
+            errorMessage: 'Request was aborted',
             timestamp: 1,
           },
         },
@@ -1575,6 +1625,8 @@ describe('ConversationView', () => {
     expect(screen.getByRole('button', { name: /收起回复 已停止/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /收起过程 已停止 搜索 hello/ })).toBeInTheDocument();
     expect(screen.queryByText('正在运行 搜索 hello')).not.toBeInTheDocument();
+    expect(screen.getByText('你停止了会话')).toBeInTheDocument();
+    expect(screen.queryByText('Request was aborted')).not.toBeInTheDocument();
     expect(screen.getAllByText('已停止 搜索 hello').length).toBeGreaterThan(0);
   });
 

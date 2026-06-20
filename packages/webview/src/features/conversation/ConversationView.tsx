@@ -332,6 +332,10 @@ function ConversationRowItem({
     return <AssistantTurn expansionScope={expansionScope} row={row} />;
   }
 
+  if (row.type === 'manual_abort') {
+    return <ManualAbortNotice label={row.label} />;
+  }
+
   return <SystemBlock row={row} />;
 }
 
@@ -341,6 +345,19 @@ function UserMessage({ message }: { message: Extract<ScoutMessage, { role: 'user
       <div className="scout-user-message bg-foreground/[0.06] max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
         {contentToText(message.content)}
       </div>
+    </article>
+  );
+}
+
+function ManualAbortNotice({ label }: { label: string }) {
+  return (
+    <article
+      className="border-border/70 flex w-full max-w-full min-w-0 justify-end border-b pb-2"
+      data-manual-abort-notice="true"
+    >
+      <span className="text-muted-foreground max-w-[77%] min-w-0 text-right text-xs leading-5 [overflow-wrap:anywhere] break-words">
+        {label}
+      </span>
     </article>
   );
 }

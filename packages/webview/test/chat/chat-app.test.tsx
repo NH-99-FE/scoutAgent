@@ -1200,6 +1200,33 @@ describe('ChatApp', () => {
     expect(screen.queryByText('partial answer stale queued text')).not.toBeInTheDocument();
   });
 
+  it('shows provider abort errors as a conversation row after the assistant turn', () => {
+    const state = makeState([
+      { role: 'user', content: 'hello', timestamp: 1 },
+      {
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'working' }],
+        stopReason: 'aborted',
+        errorMessage: 'Request was aborted',
+        timestamp: 2,
+      },
+    ]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    const { container } = render(<ChatApp />);
+
+    const notice = container.querySelector('[data-manual-abort-notice="true"]');
+    const assistantText = screen.getByText('working');
+    expect(screen.getByText('你停止了会话')).toBeInTheDocument();
+    expect(screen.queryByText('Request was aborted')).not.toBeInTheDocument();
+    expect(notice).toHaveClass('justify-end', 'border-b');
+    expect(notice?.querySelector('span')).toHaveClass('text-muted-foreground');
+    expect(
+      assistantText.compareDocumentPosition(notice as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it('does not re-enable stop while an aborted run is settling', () => {
     const messages: ScoutMessage[] = [
       { role: 'user', content: 'hello', timestamp: 1 },

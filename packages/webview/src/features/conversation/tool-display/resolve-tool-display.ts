@@ -80,7 +80,7 @@ function createToolDisplayContext({
       args,
       argsText,
       status: 'stopped',
-      bodyText: assistantErrorMessage ?? '',
+      bodyText: '',
       isError: false,
       completionLabel: '已停止',
       preview,

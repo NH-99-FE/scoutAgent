@@ -13,6 +13,7 @@ import {
 import type {
   BuildConversationRowsOptions,
   ConversationRow,
+  ManualAbortConversationRow,
   SystemConversationRow,
 } from './conversation-row-types';
 import {
@@ -39,6 +40,7 @@ export type {
   AssistantVisibleContent,
   BuildConversationRowsOptions,
   ConversationRow,
+  ManualAbortConversationRow,
   SystemConversationRow,
   UserConversationRow,
 } from './conversation-row-types';
@@ -66,6 +68,9 @@ export function buildConversationRows({
   const flushTurn = () => {
     if (!currentTurn) return;
     rows.push(finalizeAssistantTurn(currentTurn));
+    if (currentTurn.stopReason === 'aborted') {
+      rows.push(createManualAbortRow(currentTurn));
+    }
     currentTurn = undefined;
   };
 
@@ -124,6 +129,14 @@ function markLatestAssistantRow(rows: ConversationRow[]): void {
     row.isLatestAssistant = true;
     return;
   }
+}
+
+function createManualAbortRow(turn: AssistantTurnBuilder): ManualAbortConversationRow {
+  return {
+    type: 'manual_abort',
+    key: `${turn.key}:manual-abort`,
+    label: '你停止了会话',
+  };
 }
 
 function createSystemRow(item: ConversationItem): SystemConversationRow {

@@ -23,6 +23,7 @@ export type AssistantVisibleContent = ScoutTextContent | ScoutImageContent;
 export type ConversationRow =
   | UserConversationRow
   | AssistantConversationRow
+  | ManualAbortConversationRow
   | SystemConversationRow;
 
 export interface UserConversationRow {
@@ -40,6 +41,12 @@ export interface AssistantConversationRow {
   timestamp: number;
   isLatestAssistant: boolean;
   isStreaming: boolean;
+}
+
+export interface ManualAbortConversationRow {
+  type: 'manual_abort';
+  key: string;
+  label: string;
 }
 
 export interface AssistantTurnSummary {
