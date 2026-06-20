@@ -174,7 +174,7 @@ export function formatToolActivitySummaryLabel(kind: string, count: number): str
 }
 
 export function formatMixedToolActivitySummaryLabel(count: number): string {
-  return `已处理 ${count} 项`;
+  return `已完成 ${count} 项`;
 }
 
 function getFileEditDetailsDiff(details: unknown): string {
