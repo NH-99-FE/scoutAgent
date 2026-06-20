@@ -415,12 +415,7 @@ function AssistantTurn({
   if (turnSummary.running) {
     return (
       <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
-        <div
-          className={cn(
-            'text-muted-foreground/80 mb-1 -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs leading-5',
-            turnSummary.status === 'model_deciding' && 'scout-running-text-shimmer',
-          )}
-        >
+        <div className="text-muted-foreground/80 mb-1 -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs leading-5">
           <span className="min-w-0 truncate">{turnSummary.label}</span>
         </div>
         {content}

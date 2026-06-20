@@ -153,7 +153,7 @@ describe('ConversationView', () => {
     });
 
     expect(screen.queryByRole('button', { name: /展开过程 已处理/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
     expect(screen.getByText('最终答案开始输出')).toBeInTheDocument();
   });
@@ -614,7 +614,7 @@ describe('ConversationView', () => {
     expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
   });
 
-  it('does not render an inline status for normal agent streaming', () => {
+  it('shows the assistant thinking status without runtime inline status for normal agent streaming', () => {
     const { container } = renderConversation({
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
       isStreaming: true,
@@ -632,7 +632,7 @@ describe('ConversationView', () => {
 
     expect(container.querySelector('[data-runtime-inline-status]')).toBeNull();
     expect(screen.queryByText('正在回复')).not.toBeInTheDocument();
-    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
   });
 
@@ -653,8 +653,9 @@ describe('ConversationView', () => {
       items,
     });
 
-    expect(screen.getByText('正在思考')).toBeInTheDocument();
-    expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
+    const thinkingStatus = screen.getByText('正在思考');
+    expect(thinkingStatus).toBeInTheDocument();
+    expect(thinkingStatus.parentElement).not.toHaveClass('scout-running-text-shimmer');
     expect(screen.queryByRole('button', { name: /展开过程 正在思考/ })).not.toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
 
@@ -678,7 +679,6 @@ describe('ConversationView', () => {
     );
 
     expect(screen.getByText('正在思考')).toBeInTheDocument();
-    expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /展开过程 正在思考/ })).not.toBeInTheDocument();
   });
 
@@ -698,8 +698,8 @@ describe('ConversationView', () => {
       ],
     });
 
+    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /展开过程 正在思考/ })).not.toBeInTheDocument();
-    expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
   });
 
   it('shows stopped turns as expanded process history', () => {

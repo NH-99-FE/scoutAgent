@@ -269,7 +269,6 @@ function resolveAssistantTurnSummary(
   );
 
   if (turn.isStreaming) {
-    const activeProcesses = processes.filter((entry) => entry.lifecycle === 'active');
     const hasWorkTrace = processes.some((entry) => hasObservableWorkTrace(entry.phases));
     if (hasWorkTrace) {
       return {
@@ -279,7 +278,6 @@ function resolveAssistantTurnSummary(
         tone: 'default',
       };
     }
-    if (activeProcesses.length === 0) return undefined;
     return {
       status: 'model_deciding',
       label: '正在思考',
@@ -525,19 +523,14 @@ function getProcessDefaultOpen({
 
 function createRuntimeStatusActivity(
   key: string,
-  activity: AssistantRuntimeActivity,
+  _activity: Extract<AssistantRuntimeActivity, 'tool_running'>,
 ): AssistantStatusActivity {
   return {
     type: 'status',
     key: `${key}:runtime-status`,
-    text: formatRuntimeActivityLabel(activity),
+    text: '正在运行工具',
     running: true,
   };
-}
-
-function formatRuntimeActivityLabel(activity: AssistantRuntimeActivity): string {
-  if (activity === 'tool_running') return '正在运行工具';
-  return '等待模型响应';
 }
 
 function appendProcessActivity(
