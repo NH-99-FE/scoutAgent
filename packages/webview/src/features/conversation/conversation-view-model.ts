@@ -34,6 +34,7 @@ export type {
   AssistantStatusActivity,
   AssistantThinkingActivity,
   AssistantToolActivity,
+  AssistantTurnSummary,
   AssistantTurnEntry,
   AssistantVisibleContent,
   BuildConversationRowsOptions,

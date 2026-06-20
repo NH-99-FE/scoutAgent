@@ -18,6 +18,12 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import {
+  getAssistantTurnExpansionId,
+  getConversationExpansionScope,
+  useConversationExpansionOpen,
+  useConversationExpansionStore,
+} from '@/store/conversation-expansion-store';
 import type {
   ConversationItem,
   ToolCallPreviewState,
@@ -32,6 +38,7 @@ import {
   type SystemConversationRow,
 } from './conversation-view-model';
 import { AssistantProcessBlock } from './AssistantProcessBlock';
+import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
 import { MarkdownContent } from './MarkdownContent';
 import { contentToText } from './tool-display';
 
@@ -41,6 +48,7 @@ const MAX_SCROLL_TO_BOTTOM_ANIMATION_MS = 720;
 
 interface ConversationViewProps {
   busyState: ScoutBusyState;
+  expansionScope?: string;
   items: ConversationItem[];
   isStreaming: boolean;
   toolExecutionsById: Record<string, ToolExecutionState>;
@@ -53,6 +61,7 @@ const EMPTY_TOOL_PREVIEWS: Record<string, ToolCallPreviewState> = {};
 
 export function ConversationView({
   busyState,
+  expansionScope = getConversationExpansionScope({}),
   items,
   isStreaming,
   toolExecutionsById,
@@ -181,7 +190,7 @@ export function ConversationView({
       >
         <div className="scout-conversation-content flex w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2">
           {rows.map((row) => (
-            <ConversationRowItem key={row.key} row={row} />
+            <ConversationRowItem expansionScope={expansionScope} key={row.key} row={row} />
           ))}
           <RuntimeInlineStatus busyState={busyState} />
         </div>
@@ -308,13 +317,19 @@ function getRuntimeStatusKey(busyState: ScoutBusyState): string {
   return 'none';
 }
 
-function ConversationRowItem({ row }: { row: ConversationRow }) {
+function ConversationRowItem({
+  expansionScope,
+  row,
+}: {
+  expansionScope: string;
+  row: ConversationRow;
+}) {
   if (row.type === 'user') {
     return <UserMessage message={row.message} />;
   }
 
   if (row.type === 'assistant') {
-    return <AssistantTurn row={row} />;
+    return <AssistantTurn expansionScope={expansionScope} row={row} />;
   }
 
   return <SystemBlock row={row} />;
@@ -330,19 +345,37 @@ function UserMessage({ message }: { message: Extract<ScoutMessage, { role: 'user
   );
 }
 
-function AssistantTurn({ row }: { row: AssistantConversationRow }) {
+function AssistantTurn({
+  expansionScope,
+  row,
+}: {
+  expansionScope: string;
+  row: AssistantConversationRow;
+}) {
   const shouldShowActions = !row.isLatestAssistant || !row.isStreaming;
+  const expansionId = getAssistantTurnExpansionId(row.key, expansionScope);
+  const open = useConversationExpansionOpen(expansionId, true);
+  const turnSummary = row.turnSummary;
 
-  return (
-    <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
+  useRegisterConversationExpansionNode({
+    id: expansionId,
+    kind: 'assistant_turn',
+  });
+
+  const handleToggleProcessVisibility = useCallback(() => {
+    const { actions } = useConversationExpansionStore.getState();
+    actions.setExpanded(expansionId, !open);
+  }, [expansionId, open]);
+
+  const content = (
+    <>
       <div className="scout-assistant-content w-full max-w-full min-w-0 space-y-2 text-sm leading-5">
-        {row.entries.map((entry) =>
-          entry.type === 'content' ? (
-            <AssistantContentSegment entry={entry} key={entry.key} />
-          ) : (
-            <AssistantProcessBlock entry={entry} key={entry.key} />
-          ),
-        )}
+        <AssistantTurnEntries
+          parentExpansionId={expansionId}
+          row={row}
+          expansionScope={expansionScope}
+          showProcessEntries={!turnSummary || turnSummary.running || open}
+        />
       </div>
       {shouldShowActions ? (
         <MessageActions
@@ -351,7 +384,84 @@ function AssistantTurn({ row }: { row: AssistantConversationRow }) {
           timestamp={row.timestamp}
         />
       ) : null}
+    </>
+  );
+
+  if (!turnSummary) {
+    return (
+      <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
+        {content}
+      </article>
+    );
+  }
+
+  if (turnSummary.running) {
+    return (
+      <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
+        <div
+          className={cn(
+            'text-muted-foreground/80 mb-1 -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs leading-5',
+            turnSummary.status === 'model_deciding' && 'scout-running-text-shimmer',
+          )}
+        >
+          <span className="min-w-0 truncate">{turnSummary.label}</span>
+        </div>
+        {content}
+      </article>
+    );
+  }
+
+  return (
+    <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
+      <button
+        aria-expanded={open}
+        aria-label={`${open ? '收起' : '展开'}回复 ${turnSummary.label}`}
+        className={cn(
+          'text-muted-foreground/80 hover:text-muted-foreground focus-visible:text-muted-foreground mb-1 -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs leading-5 transition-colors',
+          turnSummary.tone === 'error' && 'text-destructive hover:text-destructive',
+        )}
+        type="button"
+        onClick={handleToggleProcessVisibility}
+      >
+        <span className="min-w-0 truncate">{turnSummary.label}</span>
+        {open ? (
+          <ChevronDown className="size-3.5 shrink-0" data-assistant-turn-disclosure-icon />
+        ) : (
+          <ChevronRight className="size-3.5 shrink-0" data-assistant-turn-disclosure-icon />
+        )}
+      </button>
+      {content}
     </article>
+  );
+}
+
+function AssistantTurnEntries({
+  expansionScope,
+  parentExpansionId,
+  row,
+  showProcessEntries,
+}: {
+  expansionScope: string;
+  parentExpansionId: string;
+  row: AssistantConversationRow;
+  showProcessEntries: boolean;
+}) {
+  return (
+    <>
+      {row.entries.map((entry) =>
+        entry.type === 'content' ? (
+          <AssistantContentSegment entry={entry} key={entry.key} />
+        ) : showProcessEntries ? (
+          <AssistantProcessBlock
+            entry={entry}
+            expansionScope={expansionScope}
+            key={entry.key}
+            parentExpansionId={parentExpansionId}
+            suppressLifecycleOnlyProcess={row.isStreaming}
+          />
+        ) : null,
+      )}
+    </>
   );
 }
 

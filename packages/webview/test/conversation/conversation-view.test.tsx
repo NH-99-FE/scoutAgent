@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent as rtlFireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScoutBusyState } from '@scout-agent/shared';
 import { ConversationView } from '@/features/conversation/ConversationView';
@@ -11,12 +11,31 @@ import type {
   ToolCallPreviewState,
   ToolExecutionState,
 } from '@/store/conversation-store';
+import { useConversationExpansionStore } from '@/store/conversation-expansion-store';
 
 const IDLE_BUSY_STATE: ScoutBusyState = { kind: 'idle', cancellable: false };
 const AGENT_BUSY_STATE: ScoutBusyState = { kind: 'agent', label: 'Working', cancellable: true };
 
+const fireEvent = {
+  click: (...args: Parameters<typeof rtlFireEvent.click>) => {
+    let result = false;
+    act(() => {
+      result = rtlFireEvent.click(...args);
+    });
+    return result;
+  },
+  scroll: (...args: Parameters<typeof rtlFireEvent.scroll>) => {
+    let result = false;
+    act(() => {
+      result = rtlFireEvent.scroll(...args);
+    });
+    return result;
+  },
+};
+
 function renderConversation({
   busyState,
+  expansionScope,
   items,
   isStreaming = false,
   showScrollToBottomButton = false,
@@ -24,6 +43,7 @@ function renderConversation({
   toolPreviewsById = {},
 }: {
   busyState?: ScoutBusyState;
+  expansionScope?: string;
   items: ConversationItem[];
   isStreaming?: boolean;
   showScrollToBottomButton?: boolean;
@@ -34,6 +54,7 @@ function renderConversation({
   return render(
     <ConversationView
       busyState={resolvedBusyState}
+      expansionScope={expansionScope}
       isStreaming={isStreaming}
       items={items}
       showScrollToBottomButton={showScrollToBottomButton}
@@ -70,6 +91,7 @@ function isToolActivity(
 
 describe('ConversationView', () => {
   afterEach(() => {
+    useConversationExpansionStore.getState().actions.reset();
     cleanup();
     vi.restoreAllMocks();
   });
@@ -93,9 +115,7 @@ describe('ConversationView', () => {
     expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.getByText('分析当前布局')).toBeInTheDocument();
     expect(container.querySelector('[data-process-disclosure-icon]')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: /收起过程 正在思考/ }));
-    expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
+    expect(container.querySelector('[data-assistant-turn-disclosure-icon]')).toBeNull();
 
     rerender(
       <ConversationView
@@ -106,8 +126,11 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(screen.getByText('已处理')).toBeInTheDocument();
-    expect(container.querySelector('[data-process-disclosure-icon]')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
+    expect(container.querySelector('[data-assistant-turn-disclosure-icon]')).toBeTruthy();
+    expect(screen.getByText('分析当前布局')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /收起回复 已处理/ }));
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
   });
 
@@ -129,9 +152,128 @@ describe('ConversationView', () => {
       isStreaming: true,
     });
 
-    expect(screen.getByText('正在思考')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开过程 已处理/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
     expect(screen.getByText('最终答案开始输出')).toBeInTheDocument();
+  });
+
+  it('starts a new running process segment below text when tools continue', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'message-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'thinking', thinking: '分析当前布局' },
+              { type: 'text', text: '我先看一下文件' },
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'read',
+                arguments: { path: 'README.md' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      isStreaming: true,
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'read',
+          args: { path: 'README.md' },
+          status: 'running',
+          isError: false,
+        },
+      },
+    });
+
+    const text = screen.getByText('我先看一下文件');
+    const runningTool = screen.getByText('正在运行 读取 README.md');
+
+    expect(screen.queryByRole('button', { name: /展开过程 已处理/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
+    expect(screen.getByText('正在处理')).toBeInTheDocument();
+    expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
+    expect(text.compareDocumentPosition(runningTool) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it('collapses a running process segment when a following text block arrives', () => {
+    const initialItems: ConversationItem[] = [
+      {
+        key: 'message-1',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: '分析当前布局' },
+            {
+              type: 'toolCall',
+              id: 'tool-1',
+              name: 'read',
+              arguments: { path: 'README.md' },
+            },
+          ],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'message-1',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: '分析当前布局' },
+            {
+              type: 'toolCall',
+              id: 'tool-1',
+              name: 'read',
+              arguments: { path: 'README.md' },
+            },
+            { type: 'text', text: '文件读完了，继续分析' },
+          ],
+          timestamp: 1,
+        },
+      },
+    ];
+    const toolExecutionsById: Record<string, ToolExecutionState> = {
+      'tool-1': {
+        toolCallId: 'tool-1',
+        toolName: 'read',
+        args: { path: 'README.md' },
+        status: 'running',
+        isError: false,
+      },
+    };
+    const { rerender } = renderConversation({
+      items: initialItems,
+      isStreaming: true,
+      toolExecutionsById,
+    });
+
+    expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
+    expect(screen.getByText('分析当前布局')).toBeInTheDocument();
+    expect(screen.getByText('正在运行 读取 README.md')).toBeInTheDocument();
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={toolExecutionsById}
+      />,
+    );
+
+    expect(screen.getByText('文件读完了，继续分析')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
   });
 
   it('does not mark an older assistant as streaming when a user message is last', () => {
@@ -157,9 +299,9 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByText('已处理')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
     expect(screen.getByText('正在思考')).toBeInTheDocument();
-    expect(screen.queryByText('上一轮思考')).not.toBeInTheDocument();
+    expect(screen.getByText('上一轮思考')).toBeInTheDocument();
   });
 
   it('uses a wrapping boundary for user messages across sidebar widths', () => {
@@ -373,7 +515,7 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('正在重试 1/3')).toBeInTheDocument();
     expect(screen.getByText('retryable provider error')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /收起过程 处理失败/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起回复 处理失败/ })).toBeInTheDocument();
     expect(screen.getByText('Provider temporarily unavailable')).toBeInTheDocument();
     expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
@@ -444,7 +586,7 @@ describe('ConversationView', () => {
 
     expect(container.querySelector('[data-runtime-inline-status]')).toBeNull();
     expect(screen.queryByText('正在回复')).not.toBeInTheDocument();
-    expect(screen.getByText('正在思考')).toHaveClass('scout-running-text-shimmer');
+    expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
   });
 
@@ -467,7 +609,7 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /展开过程 正在思考/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /展开过程 正在思考/ })).not.toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
 
     rerender(
@@ -491,7 +633,7 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /展开过程 正在思考/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /展开过程 正在思考/ })).not.toBeInTheDocument();
   });
 
   it('renders thinking summary before a message starts', () => {
@@ -510,7 +652,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 正在思考/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /展开过程 正在思考/ })).not.toBeInTheDocument();
     expect(screen.queryByText('等待模型响应')).not.toBeInTheDocument();
   });
 
@@ -529,7 +671,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 已停止/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起回复 已停止/ })).toBeInTheDocument();
     expect(screen.getByText('已经检查到这里')).toBeInTheDocument();
   });
 
@@ -549,7 +691,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 处理失败/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起回复 处理失败/ })).toBeInTheDocument();
     expect(screen.getByText('Provider request failed')).toBeInTheDocument();
   });
 
@@ -568,11 +710,8 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 已处理/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
     expect(screen.getByText('已经给出可用结果')).toBeInTheDocument();
-    expect(screen.queryByText('某个内部状态需要注意')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
     expect(screen.getByText('某个内部状态需要注意')).toBeInTheDocument();
   });
 
@@ -582,7 +721,10 @@ describe('ConversationView', () => {
         key: 'message-1',
         message: {
           role: 'assistant',
-          content: [{ type: 'thinking', thinking: '第一段思考' }],
+          content: [
+            { type: 'thinking', thinking: '第一段思考' },
+            { type: 'text', text: '开始回答' },
+          ],
           timestamp: 1,
         },
       },
@@ -592,7 +734,10 @@ describe('ConversationView', () => {
         key: 'message-1',
         message: {
           role: 'assistant',
-          content: [{ type: 'thinking', thinking: '第二段思考' }],
+          content: [
+            { type: 'thinking', thinking: '第二段思考' },
+            { type: 'text', text: '继续回答' },
+          ],
           timestamp: 1,
         },
       },
@@ -602,9 +747,8 @@ describe('ConversationView', () => {
       isStreaming: true,
     });
 
-    expect(screen.getByText('第一段思考')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /收起过程 正在思考/ }));
     expect(screen.queryByText('第一段思考')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开过程 已处理/ })).not.toBeInTheDocument();
 
     rerender(
       <ConversationView
@@ -615,11 +759,7 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.queryByText('第二段思考')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 正在思考/ }));
-    expect(screen.getByText('第二段思考')).toBeInTheDocument();
   });
 
   it('merges tool results into matching assistant tool calls', () => {
@@ -656,11 +796,12 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('准备读取文件')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /展开过程 已处理/ })).toBeInTheDocument();
-    expect(screen.queryByText('已运行 读取 README.md')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }));
 
     expect(screen.getAllByText('已运行 读取 README.md').length).toBeGreaterThan(0);
     expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
@@ -700,7 +841,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 读取 missing\.md/ }));
     expect(screen.getAllByText('运行失败 读取 missing.md').length).toBeGreaterThan(0);
     expect(screen.queryByText(/ENOENT/)).not.toBeInTheDocument();
 
@@ -905,7 +1046,9 @@ describe('ConversationView', () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /展开过程 运行失败 写入 src\/generated\.ts/ }),
+    );
     expect(screen.getAllByText('运行失败 写入 src/generated.ts').length).toBeGreaterThan(0);
     expect(screen.getByText('+2')).toBeInTheDocument();
     expect(screen.queryByText('-0')).not.toBeInTheDocument();
@@ -1066,7 +1209,7 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 printf markdown/ }));
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
 
     expect(screen.getByText(/# 不是标题/)).toBeInTheDocument();
@@ -1105,7 +1248,7 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 pnpm test/ }));
 
     expect(screen.getAllByText('已运行 pnpm test').length).toBeGreaterThan(0);
   });
@@ -1322,9 +1465,9 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(container.querySelector('[data-process-disclosure-icon]')).toBeNull();
-    expect(screen.getByText('正在处理')).not.toHaveClass('scout-running-text-shimmer');
+    expect(screen.getByText('正在处理')).toBeInTheDocument();
     expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
     expect(screen.queryByText('匹配到 2 行')).not.toBeInTheDocument();
 
@@ -1367,7 +1510,7 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 grep/ }));
@@ -1396,7 +1539,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(screen.queryByText('等待搜索 hello')).not.toBeInTheDocument();
     expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
   });
@@ -1423,9 +1566,10 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 已停止/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起回复 已停止/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起过程 已停止 搜索 hello/ })).toBeInTheDocument();
     expect(screen.queryByText('正在运行 搜索 hello')).not.toBeInTheDocument();
-    expect(screen.getByText('已停止 搜索 hello')).toBeInTheDocument();
+    expect(screen.getAllByText('已停止 搜索 hello').length).toBeGreaterThan(0);
   });
 
   it('does not show pending tool calls as running after the turn fails before execution', () => {
@@ -1451,9 +1595,12 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 处理失败/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /收起回复 处理失败/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /收起过程 运行失败 搜索 hello/ }),
+    ).toBeInTheDocument();
     expect(screen.queryByText('正在运行 搜索 hello')).not.toBeInTheDocument();
-    expect(screen.getByText('运行失败 搜索 hello')).toBeInTheDocument();
+    expect(screen.getAllByText('运行失败 搜索 hello').length).toBeGreaterThan(0);
   });
 
   it('renders edit previews with change counts and an expandable diff', () => {
@@ -1495,7 +1642,7 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(screen.getByText('正在运行 编辑 src/app.ts')).toBeInTheDocument();
     expect(screen.getByText('+1')).toBeInTheDocument();
     expect(screen.getByText('-1')).toBeInTheDocument();
@@ -1590,7 +1737,7 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /收起过程 正在处理/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /正在运行 搜索 hello/ })).not.toBeInTheDocument();
     expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
     expect(screen.queryByText('正在运行 搜索 hello 等 2 项')).not.toBeInTheDocument();
@@ -1653,19 +1800,22 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 正在处理/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
+    ).toBeInTheDocument();
     expect(screen.getByText('根据文件内容继续分析')).toBeInTheDocument();
     expect(screen.queryByText('先定位文件')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 正在处理/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }));
 
     expect(screen.getByText('先定位文件')).toBeInTheDocument();
     expect(screen.getAllByText('已运行 读取 README.md').length).toBeGreaterThan(0);
     expect(
       screen.getByText('先定位文件').closest('[data-assistant-process-phase]'),
     ).toHaveAttribute('data-assistant-process-phase', 'model_responding');
+    const readActivityLabels = screen.getAllByText('已运行 读取 README.md');
     expect(
-      screen.getAllByText('已运行 读取 README.md')[0].closest('[data-assistant-process-phase]'),
+      readActivityLabels[readActivityLabels.length - 1].closest('[data-assistant-process-phase]'),
     ).toHaveAttribute('data-assistant-process-phase', 'tool_processing');
   });
 
@@ -1702,17 +1852,273 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 已处理/ })).toBeInTheDocument();
-    expect(screen.queryByText('运行失败 pnpm test')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ })).toBeInTheDocument();
     expect(screen.queryByText('测试失败')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已处理/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ }));
     expect(screen.getAllByText('运行失败 pnpm test').length).toBeGreaterThan(0);
     expect(screen.queryByText('测试失败')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
     expect(screen.getByText(/测试失败/)).toBeInTheDocument();
     expect(screen.getByText('× 失败')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /收起过程 运行失败 pnpm test/ }));
+    expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ }));
+    expect(screen.getAllByText('运行失败 pnpm test').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /展开工具输出 bash/ })).toBeInTheDocument();
+    expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
+  });
+
+  it('summarizes list tools with the shared folder display category', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'ls',
+                arguments: { path: 'src' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'ls',
+          args: { path: 'src' },
+          status: 'done',
+          result: {
+            content: [{ type: 'text', text: 'index.ts' }],
+          },
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /展开过程 已运行 列出 src/ })).toBeInTheDocument();
+    expect(screen.queryByText('处理了 1 项')).not.toBeInTheDocument();
+  });
+
+  it('summarizes multiple tools of the same category in one process block', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'bash',
+                arguments: { command: 'pnpm lint' },
+              },
+              {
+                type: 'toolCall',
+                id: 'tool-2',
+                name: 'bash',
+                arguments: { command: 'pnpm test' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'bash',
+          args: { command: 'pnpm lint' },
+          status: 'done',
+          isError: false,
+        },
+        'tool-2': {
+          toolCallId: 'tool-2',
+          toolName: 'bash',
+          args: { command: 'pnpm test' },
+          status: 'done',
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /展开过程 已运行 2 条命令/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 已运行 pnpm lint/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('uses a single mixed summary for multiple tool categories in one process block', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'bash',
+                arguments: { command: 'pnpm test' },
+              },
+              {
+                type: 'toolCall',
+                id: 'tool-2',
+                name: 'read',
+                arguments: { path: 'README.md' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'bash',
+          args: { command: 'pnpm test' },
+          status: 'done',
+          isError: false,
+        },
+        'tool-2': {
+          toolCallId: 'tool-2',
+          toolName: 'read',
+          args: { path: 'README.md' },
+          status: 'done',
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /展开过程 已处理 2 项/ })).toBeInTheDocument();
+    expect(screen.queryByText('已运行 1 条命令')).not.toBeInTheDocument();
+    expect(screen.queryByText('已读取 1 个文件')).not.toBeInTheDocument();
+  });
+
+  it('collapses process summaries when the assistant turn closes', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '最终答案内容' },
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'bash',
+                arguments: { command: 'pnpm test' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'bash',
+          args: { command: 'pnpm test' },
+          status: 'error',
+          result: {
+            content: [{ type: 'text', text: '测试失败' }],
+          },
+          isError: true,
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
+    expect(screen.getByText('最终答案内容')).toBeInTheDocument();
+    expect(screen.getByText(/测试失败/)).toBeInTheDocument();
+
+    const turnNode = Object.values(useConversationExpansionStore.getState().nodesById).find(
+      (node) => node.kind === 'assistant_turn',
+    );
+    if (!turnNode) throw new Error('Expected assistant turn expansion node');
+
+    act(() => {
+      useConversationExpansionStore.getState().actions.setExpanded(turnNode.id, false);
+    });
+
+    expect(screen.getByRole('button', { name: /展开回复 已处理/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 运行失败 pnpm test/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('最终答案内容')).toBeInTheDocument();
+    expect(screen.queryByText('运行失败 pnpm test')).not.toBeInTheDocument();
+    expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /展开回复 已处理/ }));
+    expect(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ })).toBeInTheDocument();
+    expect(screen.getByText('最终答案内容')).toBeInTheDocument();
+    expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
+  });
+
+  it('keeps expansion state scoped to the active session', () => {
+    const items: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: 'tool-1',
+              name: 'bash',
+              arguments: { command: 'pnpm test' },
+            },
+          ],
+          timestamp: 1,
+        },
+      },
+    ];
+    const toolExecutionsById: Record<string, ToolExecutionState> = {
+      'tool-1': {
+        toolCallId: 'tool-1',
+        toolName: 'bash',
+        args: { command: 'pnpm test' },
+        status: 'done',
+        result: {
+          content: [{ type: 'text', text: '测试输出' }],
+        },
+        isError: false,
+      },
+    };
+    const { rerender } = renderConversation({
+      expansionScope: 'session-one',
+      items,
+      toolExecutionsById,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /收起回复 已处理/ }));
+    expect(screen.getByRole('button', { name: /展开回复 已处理/ })).toBeInTheDocument();
+
+    rerender(
+      <ConversationView
+        busyState={IDLE_BUSY_STATE}
+        expansionScope="session-two"
+        isStreaming={false}
+        items={items}
+        toolExecutionsById={toolExecutionsById}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 已运行 pnpm test/ })).toBeInTheDocument();
   });
 
   it('falls back to a system block for orphan tool results', () => {
@@ -1738,6 +2144,76 @@ describe('ConversationView', () => {
 });
 
 describe('buildConversationRows', () => {
+  it('segments assistant process entries around interleaved text', () => {
+    const rows = buildConversationRows({
+      isStreaming: true,
+      busyState: AGENT_BUSY_STATE,
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'read',
+          args: { path: 'README.md' },
+          status: 'done',
+          isError: false,
+        },
+        'tool-2': {
+          toolCallId: 'tool-2',
+          toolName: 'grep',
+          args: { pattern: 'TODO' },
+          status: 'running',
+          isError: false,
+        },
+      },
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '先说明读取计划' },
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'read',
+                arguments: { path: 'README.md' },
+              },
+              { type: 'text', text: '再说明搜索计划' },
+              {
+                type: 'toolCall',
+                id: 'tool-2',
+                name: 'grep',
+                arguments: { pattern: 'TODO' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    const assistantRow = rows.find((row) => row.type === 'assistant');
+    if (assistantRow?.type !== 'assistant') {
+      throw new Error('Expected assistant row');
+    }
+
+    expect(assistantRow.entries.map((entry) => entry.type)).toEqual([
+      'content',
+      'process',
+      'content',
+      'process',
+    ]);
+    expect(assistantRow.entries[1]).toMatchObject({
+      type: 'process',
+      summary: { status: 'completed', label: '已处理' },
+      defaultOpen: false,
+    });
+    expect(assistantRow.entries[3]).toMatchObject({
+      type: 'process',
+      summary: { status: 'work_processing', label: '正在处理' },
+      defaultOpen: true,
+    });
+  });
+
   it('does not carry processing trace from a prior turn into a new waiting turn', () => {
     const rows = buildConversationRows({
       isStreaming: true,

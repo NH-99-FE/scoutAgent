@@ -12,7 +12,9 @@ import type {
   AssistantContentEntry,
   AssistantConversationRow,
   AssistantProcessActivity,
+  AssistantProcessActivitySummary,
   AssistantProcessEntry,
+  AssistantProcessLifecycle,
   AssistantProcessPhase,
   AssistantProcessPhaseKind,
   AssistantProcessSummary,
@@ -24,16 +26,26 @@ import type {
 import type { AssistantRuntimeActivity } from './conversation-turn-index';
 import {
   contentToText,
+  formatMixedToolActivitySummaryLabel,
+  formatToolActivitySummaryLabel,
   hasExpandableToolDisplayDetail,
   hasToolDisplaySummary,
+  resolveToolActivitySummary,
   resolveToolDisplayResult,
 } from './tool-display';
+
+type AssistantProcessSegment = Omit<
+  AssistantProcessEntry,
+  'summary' | 'displayMode' | 'activitySummary' | 'defaultOpen'
+> & {
+  lifecycle: AssistantProcessLifecycle;
+};
+type AssistantTurnDraftEntry = AssistantContentEntry | AssistantProcessSegment;
 
 export interface AssistantTurnBuilder {
   key: string;
   processKey: string;
-  contentEntries: AssistantContentEntry[];
-  phases: AssistantProcessPhase[];
+  entries: AssistantTurnDraftEntry[];
   actionTextParts: string[];
   timestamp: number;
   isStreaming: boolean;
@@ -51,8 +63,7 @@ export function createAssistantTurnBuilder({
   return {
     key: `assistant-turn:${anchorKey}`,
     processKey: `assistant-turn:${anchorKey}:process`,
-    contentEntries: [],
-    phases: [],
+    entries: [],
     actionTextParts: [],
     timestamp,
     isStreaming: false,
@@ -84,7 +95,8 @@ export function appendAssistantMessageEntries({
   const contentBlocks: AssistantVisibleContent[] = [];
   const flushContent = (index: number) => {
     if (contentBlocks.length === 0) return;
-    turn.contentEntries.push({
+    closeActiveProcessSegment(turn);
+    turn.entries.push({
       type: 'content',
       key: `${item.key}:content:${index}`,
       blocks: [...contentBlocks],
@@ -149,7 +161,7 @@ export function appendAssistantMessageEntries({
   }
 
   if (
-    !hasAnyProcessActivity(turn.phases) &&
+    !hasAnyProcessActivity(getProcessSegments(turn.entries)) &&
     isStreaming &&
     runtimeActivity !== 'idle' &&
     runtimeActivity !== 'waiting'
@@ -168,24 +180,13 @@ export function appendAssistantMessageEntries({
 }
 
 export function finalizeAssistantTurn(turn: AssistantTurnBuilder): AssistantConversationRow {
-  const status = resolveTurnProcessStatus(turn);
-  const processEntry: AssistantProcessEntry = {
-    type: 'process',
-    key: turn.processKey,
-    summary: resolveProcessSummary(status),
-    defaultOpen: getProcessDefaultOpen({
-      status,
-      hasVisibleContent: turn.contentEntries.length > 0,
-      hasVisibleProcessContent: hasVisibleProcessContent(turn.phases),
-      hasDiffTool: hasDiffToolActivity(turn.phases),
-    }),
-    phases: turn.phases,
-  };
+  const entries = finalizeTurnEntries(turn);
 
   return {
     type: 'assistant',
     key: turn.key,
-    entries: [processEntry, ...turn.contentEntries],
+    entries,
+    turnSummary: resolveAssistantTurnSummary(turn, entries),
     actionText: turn.actionTextParts.join('\n'),
     timestamp: turn.timestamp,
     isLatestAssistant: false,
@@ -233,21 +234,76 @@ export function appendRuntimeActivityRow(
       {
         type: 'process',
         key: `${key}:process`,
+        lifecycle: 'active',
         summary: resolveProcessSummary(status),
+        displayMode: resolveProcessDisplayMode(status, 'active', phases),
+        activitySummary: resolveActivitySummary(phases),
         defaultOpen: getProcessDefaultOpen({
           status,
-          hasVisibleContent: false,
+          lifecycle: 'active',
           hasVisibleProcessContent: hasVisibleProcessContent(phases),
           hasDiffTool: hasDiffToolActivity(phases),
         }),
         phases,
       },
     ],
+    turnSummary: {
+      status,
+      label: status === 'work_processing' ? '正在处理' : '正在思考',
+      running: true,
+      tone: 'default',
+    },
     actionText: '',
     timestamp: timestamp || getLastRowTimestamp(rows),
     isLatestAssistant: false,
     isStreaming: true,
   });
+}
+
+function resolveAssistantTurnSummary(
+  turn: AssistantTurnBuilder,
+  entries: Array<AssistantContentEntry | AssistantProcessEntry>,
+): AssistantConversationRow['turnSummary'] {
+  const processes = entries.filter(
+    (entry): entry is AssistantProcessEntry => entry.type === 'process',
+  );
+
+  if (turn.isStreaming) {
+    const activeProcesses = processes.filter((entry) => entry.lifecycle === 'active');
+    if (activeProcesses.length === 0) return undefined;
+    const hasWorkProcessing = activeProcesses.some(
+      (entry) => entry.summary.status === 'work_processing',
+    );
+    if (hasWorkProcessing) {
+      return {
+        status: 'work_processing',
+        label: '正在处理',
+        running: true,
+        tone: 'default',
+      };
+    }
+    return {
+      status: 'model_deciding',
+      label: '正在思考',
+      running: true,
+      tone: 'default',
+    };
+  }
+
+  if (!processes.some((entry) => hasVisibleProcessContent(entry.phases))) return undefined;
+
+  if (turn.stopReason === 'error' || processes.some((entry) => entry.summary.status === 'failed')) {
+    return { status: 'failed', label: '处理失败', running: false, tone: 'error' };
+  }
+
+  if (
+    turn.stopReason === 'aborted' ||
+    processes.some((entry) => entry.summary.status === 'stopped')
+  ) {
+    return { status: 'stopped', label: '已停止', running: false, tone: 'default' };
+  }
+
+  return { status: 'completed', label: '已处理', running: false, tone: 'default' };
 }
 
 function findLatestAssistantRow(rows: ConversationRow[]): AssistantConversationRow | undefined {
@@ -267,12 +323,80 @@ function getLastRowTimestamp(rows: ConversationRow[]): number {
   return 0;
 }
 
-function resolveTurnProcessStatus(turn: AssistantTurnBuilder): AssistantProcessStatus {
-  if (turn.isStreaming) {
-    return hasObservableWorkTrace(turn.phases) ? 'work_processing' : 'model_deciding';
+function finalizeTurnEntries(
+  turn: AssistantTurnBuilder,
+): Array<AssistantContentEntry | AssistantProcessEntry> {
+  const processSegments = getProcessSegments(turn.entries);
+  if (processSegments.length === 0 && turn.entries.length > 0) {
+    return turn.entries.filter((entry): entry is AssistantContentEntry => entry.type === 'content');
   }
+
+  const draftEntries =
+    processSegments.length > 0
+      ? turn.entries
+      : [
+          {
+            type: 'process' as const,
+            key: turn.processKey,
+            phases: [],
+            lifecycle: 'active' as const,
+          },
+        ];
+
+  return draftEntries.map((entry) => {
+    if (entry.type === 'content') return entry;
+    const lifecycle = resolveProcessLifecycle(turn, entry);
+
+    const status = resolveSegmentProcessStatus({
+      turn,
+      phases: entry.phases,
+      lifecycle,
+    });
+
+    return {
+      type: entry.type,
+      key: entry.key,
+      lifecycle,
+      phases: entry.phases,
+      summary: resolveProcessSummary(status),
+      displayMode: resolveProcessDisplayMode(status, lifecycle, entry.phases),
+      activitySummary: resolveActivitySummary(entry.phases),
+      defaultOpen: getProcessDefaultOpen({
+        status,
+        lifecycle,
+        hasVisibleProcessContent: hasVisibleProcessContent(entry.phases),
+        hasDiffTool: hasDiffToolActivity(entry.phases),
+      }),
+    };
+  });
+}
+
+function resolveProcessLifecycle(
+  turn: AssistantTurnBuilder,
+  segment: AssistantProcessSegment,
+): AssistantProcessLifecycle {
+  if (segment.lifecycle !== 'active') return segment.lifecycle;
+  if (!turn.isStreaming || turn.stopReason === 'aborted' || turn.stopReason === 'error') {
+    return 'settled';
+  }
+  return 'active';
+}
+
+function resolveSegmentProcessStatus({
+  turn,
+  phases,
+  lifecycle,
+}: {
+  turn: AssistantTurnBuilder;
+  phases: AssistantProcessPhase[];
+  lifecycle: AssistantProcessLifecycle;
+}): AssistantProcessStatus {
+  if (lifecycle === 'closed_by_content') return 'completed';
   if (turn.stopReason === 'aborted') return 'stopped';
   if (turn.stopReason === 'error') return 'failed';
+  if (lifecycle === 'active') {
+    return hasObservableWorkTrace(phases) ? 'work_processing' : 'model_deciding';
+  }
   return 'completed';
 }
 
@@ -292,14 +416,104 @@ function resolveProcessSummary(status: AssistantProcessStatus): AssistantProcess
   return { status, label: '已处理', running: false, tone: 'default' };
 }
 
+function resolveProcessDisplayMode(
+  status: AssistantProcessStatus,
+  lifecycle: AssistantProcessLifecycle,
+  phases: AssistantProcessPhase[],
+): AssistantProcessEntry['displayMode'] {
+  if (status === 'failed' || status === 'stopped') return 'status';
+  if (!hasVisibleProcessContent(phases)) return 'status';
+  return lifecycle === 'active' ? 'live' : 'compact';
+}
+
+function resolveActivitySummary(phases: AssistantProcessPhase[]): AssistantProcessActivitySummary {
+  const tools: Array<{
+    key: string;
+    icon: AssistantProcessActivitySummary['items'][number]['icon'];
+    label: string;
+  }> = [];
+  const counts = new Map<
+    string,
+    { icon: AssistantProcessActivitySummary['items'][number]['icon']; count: number }
+  >();
+
+  for (const phase of phases) {
+    for (const activity of phase.activities) {
+      if (activity.type !== 'tool') continue;
+      const summary = resolveToolActivitySummary(activity.display);
+      tools.push({
+        key: activity.key,
+        icon: summary.icon,
+        label: activity.display.summaryTitle,
+      });
+      const existing = counts.get(summary.key);
+      counts.set(summary.key, {
+        icon: summary.icon,
+        count: (existing?.count ?? 0) + 1,
+      });
+    }
+  }
+
+  const totalCount = tools.length;
+  return {
+    items: Array.from(counts.entries()).map(([kind, item]) => ({
+      key: kind,
+      icon: item.icon,
+      label: formatToolActivitySummaryLabel(kind, item.count),
+      count: item.count,
+    })),
+    mixed: counts.size > 1,
+    primary: resolvePrimaryActivitySummary(tools, counts),
+    totalCount,
+  };
+}
+
+function resolvePrimaryActivitySummary(
+  tools: Array<{
+    key: string;
+    icon: AssistantProcessActivitySummary['items'][number]['icon'];
+    label: string;
+  }>,
+  counts: Map<
+    string,
+    { icon: AssistantProcessActivitySummary['items'][number]['icon']; count: number }
+  >,
+): AssistantProcessActivitySummary['primary'] {
+  if (tools.length === 0) return undefined;
+  if (tools.length === 1) {
+    const [tool] = tools;
+    return {
+      key: tool.key,
+      icon: tool.icon,
+      label: tool.label,
+      count: 1,
+    };
+  }
+  if (counts.size === 1) {
+    const [kind, item] = Array.from(counts.entries())[0];
+    return {
+      key: kind,
+      icon: item.icon,
+      label: formatToolActivitySummaryLabel(kind, item.count),
+      count: item.count,
+    };
+  }
+  return {
+    key: 'mixed',
+    icon: 'clipboard-list',
+    label: formatMixedToolActivitySummaryLabel(tools.length),
+    count: tools.length,
+  };
+}
+
 function getProcessDefaultOpen({
   status,
-  hasVisibleContent,
+  lifecycle,
   hasVisibleProcessContent,
   hasDiffTool,
 }: {
   status: AssistantProcessStatus;
-  hasVisibleContent: boolean;
+  lifecycle: AssistantProcessLifecycle;
   hasVisibleProcessContent: boolean;
   hasDiffTool: boolean;
 }): boolean {
@@ -307,7 +521,7 @@ function getProcessDefaultOpen({
   if (status === 'stopped') return true;
   if (status === 'failed') return true;
   if (hasDiffTool) return true;
-  if (hasVisibleContent) return false;
+  if (lifecycle === 'closed_by_content') return false;
   return status === 'model_deciding' || status === 'work_processing';
 }
 
@@ -334,16 +548,44 @@ function appendProcessActivity(
   phaseKey: string,
   activity: AssistantProcessActivity,
 ): void {
-  const lastPhase = turn.phases.at(-1);
+  const process = ensureCurrentProcessSegment(turn, phaseKey);
+  const lastPhase = process.phases.at(-1);
   if (lastPhase?.kind === kind) {
     lastPhase.activities.push(activity);
   } else {
-    turn.phases.push({ kind, key: phaseKey, activities: [activity] });
+    process.phases.push({ kind, key: phaseKey, activities: [activity] });
   }
 }
 
-function hasAnyProcessActivity(phases: AssistantProcessPhase[]): boolean {
-  return phases.some((phase) => phase.activities.length > 0);
+function ensureCurrentProcessSegment(
+  turn: AssistantTurnBuilder,
+  phaseKey: string,
+): AssistantProcessSegment {
+  const lastEntry = turn.entries.at(-1);
+  if (lastEntry?.type === 'process' && lastEntry.lifecycle === 'active') return lastEntry;
+
+  const process: AssistantProcessSegment = {
+    type: 'process',
+    key: `${phaseKey}:process`,
+    phases: [],
+    lifecycle: 'active',
+  };
+  turn.entries.push(process);
+  return process;
+}
+
+function closeActiveProcessSegment(turn: AssistantTurnBuilder): void {
+  const lastEntry = turn.entries.at(-1);
+  if (lastEntry?.type !== 'process' || lastEntry.lifecycle !== 'active') return;
+  lastEntry.lifecycle = 'closed_by_content';
+}
+
+function getProcessSegments(entries: AssistantTurnDraftEntry[]): AssistantProcessSegment[] {
+  return entries.filter((entry): entry is AssistantProcessSegment => entry.type === 'process');
+}
+
+function hasAnyProcessActivity(processes: AssistantProcessSegment[]): boolean {
+  return processes.some((process) => process.phases.some((phase) => phase.activities.length > 0));
 }
 
 function hasObservableWorkTrace(phases: AssistantProcessPhase[]): boolean {

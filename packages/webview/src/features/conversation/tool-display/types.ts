@@ -6,7 +6,14 @@ import type { ScoutToolCallContent, ScoutToolResultMessage } from '@scout-agent/
 import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
 
 export type ToolDisplayStatus = 'pending' | 'running' | 'done' | 'error' | 'stopped';
-export type ToolDisplayIcon = 'terminal' | 'file' | 'folder' | 'edit' | 'search' | 'tool';
+export type ToolDisplayIcon =
+  | 'terminal'
+  | 'file'
+  | 'folder'
+  | 'edit'
+  | 'search'
+  | 'clipboard-list'
+  | 'tool';
 export type ToolDisplayMetricTone = 'default' | 'added' | 'deleted' | 'muted';
 export type ToolDisplayMetricPlacement = 'inline' | 'end';
 
@@ -54,6 +61,11 @@ export interface ToolDisplayResult {
   detailTarget?: string;
   metrics?: ToolDisplayMetric[];
   metricsPlacement?: ToolDisplayMetricPlacement;
+}
+
+export interface ToolActivitySummarySpec {
+  key: string;
+  icon: ToolDisplayIcon;
 }
 
 export interface GenericToolDisplayResult extends ToolDisplayResult {

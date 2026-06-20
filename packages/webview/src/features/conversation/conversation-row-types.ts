@@ -35,10 +35,18 @@ export interface AssistantConversationRow {
   type: 'assistant';
   key: string;
   entries: AssistantTurnEntry[];
+  turnSummary?: AssistantTurnSummary;
   actionText: string;
   timestamp: number;
   isLatestAssistant: boolean;
   isStreaming: boolean;
+}
+
+export interface AssistantTurnSummary {
+  label: string;
+  running: boolean;
+  status: 'model_deciding' | 'work_processing' | 'completed' | 'stopped' | 'failed';
+  tone: 'default' | 'error';
 }
 
 export type AssistantTurnEntry = AssistantContentEntry | AssistantProcessEntry;
@@ -53,9 +61,29 @@ export interface AssistantContentEntry {
 export interface AssistantProcessEntry {
   type: 'process';
   key: string;
+  lifecycle: AssistantProcessLifecycle;
   summary: AssistantProcessSummary;
+  displayMode: AssistantProcessDisplayMode;
+  activitySummary: AssistantProcessActivitySummary;
   defaultOpen: boolean;
   phases: AssistantProcessPhase[];
+}
+
+export type AssistantProcessDisplayMode = 'live' | 'compact' | 'status';
+export type AssistantProcessLifecycle = 'active' | 'closed_by_content' | 'settled';
+
+export interface AssistantProcessActivitySummary {
+  primary?: AssistantProcessActivitySummaryItem;
+  items: AssistantProcessActivitySummaryItem[];
+  mixed: boolean;
+  totalCount: number;
+}
+
+export interface AssistantProcessActivitySummaryItem {
+  key: string;
+  icon: ToolDisplayResult['icon'];
+  label: string;
+  count: number;
 }
 
 export type AssistantProcessStatus =

@@ -32,7 +32,8 @@ import {
   useToolExecutionsById,
   useToolPreviewsById,
 } from '@/store/conversation-store';
-import { useSessionName } from '@/store/session-store';
+import { getConversationExpansionScope } from '@/store/conversation-expansion-store';
+import { useSessionFile, useSessionId, useSessionName } from '@/store/session-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
 import { ConversationView } from '@/features/conversation/ConversationView';
 import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
@@ -51,6 +52,8 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   const toolExecutionsById = useToolExecutionsById();
   const toolPreviewsById = useToolPreviewsById();
   const busyState = useBusyState();
+  const sessionFile = useSessionFile();
+  const sessionId = useSessionId();
   const sessionName = useSessionName();
   const {
     isRendered: taskHistoryRendered,
@@ -139,6 +142,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
       <ConversationView
         busyState={busyState}
         className="min-h-0 flex-1"
+        expansionScope={getConversationExpansionScope({ sessionFile, sessionId })}
         isStreaming={isStreaming}
         items={conversationItems}
         showScrollToBottomButton

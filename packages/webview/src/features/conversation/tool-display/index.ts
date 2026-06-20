@@ -3,6 +3,11 @@
 // ============================================================
 
 export { contentToText } from './content';
+export {
+  formatMixedToolActivitySummaryLabel,
+  formatToolActivitySummaryLabel,
+  resolveToolActivitySummary,
+} from './helpers';
 export { hasExpandableToolDisplayDetail, hasToolDisplaySummary } from './model';
 export { resolveToolDisplayResult } from './resolve-tool-display';
 export type {
@@ -19,5 +24,6 @@ export type {
   ToolDisplayMetricTone,
   ToolDisplayResult,
   ToolDisplayStatus,
+  ToolActivitySummarySpec,
   WriteContentToolDisplayDetail,
 } from './types';

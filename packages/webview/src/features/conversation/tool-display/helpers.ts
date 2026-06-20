@@ -8,6 +8,7 @@ import type {
   GenericToolDisplayResult,
   ToolDisplayContext,
   ToolDisplayIcon,
+  ToolDisplayResult,
   ToolDisplayStatus,
 } from './types';
 
@@ -150,6 +151,32 @@ export function getToolDisplayIcon(toolName: string): ToolDisplayIcon {
   return 'tool';
 }
 
+export function resolveToolActivitySummary(display: ToolDisplayResult): {
+  key: string;
+  icon: ToolDisplayIcon;
+} {
+  const toolName = display.toolName;
+  if (toolName === 'bash') return { key: 'command', icon: 'terminal' };
+  if (toolName === 'edit' || toolName === 'write') return { key: 'edit', icon: 'edit' };
+  if (toolName === 'read') return { key: 'read', icon: 'file' };
+  if (toolName === 'grep' || toolName === 'find') return { key: 'search', icon: 'search' };
+  if (toolName === 'ls') return { key: 'list', icon: 'folder' };
+  return { key: 'generic', icon: display.icon };
+}
+
+export function formatToolActivitySummaryLabel(kind: string, count: number): string {
+  if (kind === 'command') return `已运行 ${count} 条命令`;
+  if (kind === 'edit') return `已编辑 ${count} 个文件`;
+  if (kind === 'read') return `已读取 ${count} 个文件`;
+  if (kind === 'search') return `已搜索 ${count} 次`;
+  if (kind === 'list') return `已列出 ${count} 次`;
+  return `处理了 ${count} 项`;
+}
+
+export function formatMixedToolActivitySummaryLabel(count: number): string {
+  return `已处理 ${count} 项`;
+}
+
 function getFileEditDetailsDiff(details: unknown): string {
   if (!details || typeof details !== 'object') return '';
   if ((details as { kind?: unknown }).kind !== 'file_edit') return '';
@@ -177,10 +204,7 @@ export function formatToolExecutionSummary(
   return `${getToolStatusPrefix(status)} ${getToolActionLabel(toolName, args)}`;
 }
 
-function getToolActionLabel(
-  toolName: string,
-  args: Record<string, unknown> | undefined,
-): string {
+function getToolActionLabel(toolName: string, args: Record<string, unknown> | undefined): string {
   const target = getFirstArgText(args, ['path', 'filePath', 'file', 'target', 'cwd', 'directory']);
   const command = getFirstArgText(args, ['command', 'cmd', 'script']);
   const pattern = getFirstArgText(args, ['pattern', 'query', 'regex', 'term']);

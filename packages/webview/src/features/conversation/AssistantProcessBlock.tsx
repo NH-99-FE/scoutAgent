@@ -2,10 +2,11 @@
 // Assistant Process Block — assistant 过程与工具活动渲染
 // ============================================================
 
-import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useLayoutEffect, useRef } from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  ClipboardList,
   EyeOff,
   FileText,
   FolderOpen,
@@ -17,6 +18,12 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import {
+  getProcessExpansionId,
+  getToolDetailExpansionId,
+  useConversationExpansionStore,
+  useConversationExpansionOpen,
+} from '@/store/conversation-expansion-store';
 import type {
   AssistantProcessActivity,
   AssistantProcessEntry,
@@ -34,19 +41,95 @@ import type {
   ToolDisplayResult,
   WriteContentToolDisplayDetail,
 } from './tool-display';
+import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
 
-export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry }) {
-  const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
-  const open = manualOpen ?? entry.defaultOpen;
+export function AssistantProcessBlock({
+  entry,
+  expansionScope,
+  parentExpansionId,
+  suppressLifecycleOnlyProcess = false,
+}: {
+  entry: AssistantProcessEntry;
+  expansionScope: string;
+  parentExpansionId?: string;
+  suppressLifecycleOnlyProcess?: boolean;
+}) {
+  const expansionId = getProcessExpansionId(entry.key, expansionScope);
+  const open = useConversationExpansionOpen(expansionId, entry.defaultOpen);
   const hasProcessContent = entry.phases.some(hasPhaseContent);
+  const hasActivitySummary = Boolean(entry.activitySummary.primary);
   const summary = entry.summary;
   const tone = summary.tone;
   const firstActivity = getFirstProcessActivity(entry.phases);
   const shimmerSummary = shouldShimmerSummary(summary);
   const showDisclosureIcon = shouldShowDisclosureIcon(summary, hasProcessContent);
+  const triggerLabel = getProcessTriggerLabel(entry);
+
+  useRegisterConversationExpansionNode({
+    id: expansionId,
+    kind: 'process',
+    parentId: parentExpansionId,
+  });
+
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      const { actions } = useConversationExpansionStore.getState();
+      actions.setExpanded(expansionId, nextOpen);
+    },
+    [expansionId],
+  );
+
+  if (entry.displayMode === 'live' && hasProcessContent) {
+    return (
+      <div
+        className={cn(
+          'text-muted-foreground/70 py-0.5 text-xs leading-5',
+          tone === 'error' && 'text-destructive',
+        )}
+      >
+        <ProcessPhaseList
+          expansionScope={expansionScope}
+          parentExpansionId={expansionId}
+          phases={entry.phases}
+        />
+      </div>
+    );
+  }
+
+  if (!hasActivitySummary) {
+    if (!hasProcessContent) {
+      if (suppressLifecycleOnlyProcess) return null;
+      if (!summary.running) return null;
+      return (
+        <div
+          className={cn(
+            'text-muted-foreground/70 py-0.5 text-xs leading-5',
+            tone === 'error' && 'text-destructive',
+          )}
+        >
+          <InlineStatus running={summary.running} text={summary.label} tone={tone} />
+        </div>
+      );
+    }
+    if (suppressLifecycleOnlyProcess && !summary.running) return null;
+    return (
+      <div
+        className={cn(
+          'text-muted-foreground/70 py-0.5 text-xs leading-5',
+          tone === 'error' && 'text-destructive',
+        )}
+      >
+        <ProcessPhaseList
+          expansionScope={expansionScope}
+          parentExpansionId={expansionId}
+          phases={entry.phases}
+        />
+      </div>
+    );
+  }
 
   return (
-    <Collapsible open={open} onOpenChange={setManualOpen}>
+    <Collapsible open={open} onOpenChange={handleOpenChange}>
       <div
         className={cn(
           'text-muted-foreground/70 py-0.5 text-xs leading-5',
@@ -54,36 +137,53 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
         )}
       >
         <CollapsibleTrigger
-          aria-label={`${open ? '收起' : '展开'}过程 ${summary.label}`}
+          aria-label={`${open ? '收起' : '展开'}过程 ${triggerLabel}`}
           className={cn(
-            '-ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
-            summary.status === 'completed' && 'border-border/55 w-full border-b pb-1.5',
-            tone === 'error'
-              ? 'hover:text-destructive focus-visible:text-destructive'
-              : 'hover:text-muted-foreground focus-visible:text-muted-foreground',
+            'group/process-trigger -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
+            entry.displayMode === 'compact' && 'w-full',
+            tone === 'error' && 'text-destructive',
           )}
           disabled={!hasProcessContent}
           type="button"
         >
-          <ProcessSummaryIcon activity={firstActivity} />
-          <span className={cn('min-w-0 truncate', shimmerSummary && 'scout-running-text-shimmer')}>
-            {summary.label}
-          </span>
+          {hasActivitySummary ? (
+            <CompactActivitySummary entry={entry} />
+          ) : (
+            <>
+              <ProcessSummaryIcon activity={firstActivity} />
+              <span
+                className={cn(
+                  'group-hover/process-trigger:text-foreground group-focus-visible/process-trigger:text-foreground min-w-0 truncate transition-colors',
+                  shimmerSummary && 'scout-running-text-shimmer',
+                )}
+              >
+                {summary.label}
+              </span>
+            </>
+          )}
           {showDisclosureIcon ? (
             open ? (
-              <ChevronDown className="size-3.5 shrink-0" data-process-disclosure-icon />
+              <ChevronDown
+                className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover/process-trigger:opacity-100 group-focus-visible/process-trigger:opacity-100"
+                data-process-disclosure-icon
+              />
             ) : (
-              <ChevronRight className="size-3.5 shrink-0" data-process-disclosure-icon />
+              <ChevronRight
+                className="size-3.5 shrink-0 opacity-0 transition-opacity group-hover/process-trigger:opacity-100 group-focus-visible/process-trigger:opacity-100"
+                data-process-disclosure-icon
+              />
             )
           ) : null}
         </CollapsibleTrigger>
         {hasProcessContent ? (
           <CollapsibleContent className="scout-process-collapse-content">
-            <div className="mt-1.5 max-w-full min-w-0 space-y-2 overflow-hidden">
-              {entry.phases.map((phase) => (
-                <AssistantPhaseItem key={phase.key} phase={phase} />
-              ))}
-            </div>
+            <ProcessPhaseList
+              className="mt-1.5 -ml-1"
+              expansionScope={expansionScope}
+              hideToolIcons={entry.displayMode === 'compact'}
+              parentExpansionId={expansionId}
+              phases={entry.phases}
+            />
           </CollapsibleContent>
         ) : null}
       </div>
@@ -91,22 +191,103 @@ export function AssistantProcessBlock({ entry }: { entry: AssistantProcessEntry 
   );
 }
 
-function AssistantPhaseItem({ phase }: { phase: AssistantProcessPhase }) {
+function ProcessPhaseList({
+  className,
+  expansionScope,
+  hideToolIcons = false,
+  parentExpansionId,
+  phases,
+}: {
+  className?: string;
+  expansionScope: string;
+  hideToolIcons?: boolean;
+  parentExpansionId?: string;
+  phases: AssistantProcessPhase[];
+}) {
+  return (
+    <div className={cn('max-w-full min-w-0 space-y-2 overflow-hidden', className)}>
+      {phases.map((phase) => (
+        <AssistantPhaseItem
+          expansionScope={expansionScope}
+          hideToolIcons={hideToolIcons}
+          key={phase.key}
+          parentExpansionId={parentExpansionId}
+          phase={phase}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CompactActivitySummary({ entry }: { entry: AssistantProcessEntry }) {
+  const primary = entry.activitySummary.primary;
+  if (!primary) {
+    return (
+      <span className="group-hover/process-trigger:text-foreground group-focus-visible/process-trigger:text-foreground inline-flex h-5 min-w-0 items-center truncate leading-4 transition-colors">
+        {entry.summary.label}
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex h-5 max-w-full min-w-0 items-center gap-1.5 overflow-hidden">
+      <ToolDisplayIconView icon={primary.icon} />
+      <span className="group-hover/process-trigger:text-foreground group-focus-visible/process-trigger:text-foreground min-w-0 truncate leading-4 transition-colors">
+        {primary.label}
+      </span>
+    </span>
+  );
+}
+
+function AssistantPhaseItem({
+  expansionScope,
+  hideToolIcons = false,
+  parentExpansionId,
+  phase,
+}: {
+  expansionScope: string;
+  hideToolIcons?: boolean;
+  parentExpansionId?: string;
+  phase: AssistantProcessPhase;
+}) {
   const activities = phase.activities.filter(hasVisibleActivity);
   if (activities.length === 0) return null;
 
   return (
     <div className="max-w-full min-w-0 space-y-1.5" data-assistant-process-phase={phase.kind}>
       {activities.map((activity) => (
-        <AssistantActivityItem activity={activity} key={activity.key} />
+        <AssistantActivityItem
+          activity={activity}
+          expansionScope={expansionScope}
+          hideToolIcon={hideToolIcons}
+          key={activity.key}
+          parentExpansionId={parentExpansionId}
+        />
       ))}
     </div>
   );
 }
 
-function AssistantActivityItem({ activity }: { activity: AssistantProcessActivity }) {
+function AssistantActivityItem({
+  activity,
+  expansionScope,
+  hideToolIcon = false,
+  parentExpansionId,
+}: {
+  activity: AssistantProcessActivity;
+  expansionScope: string;
+  hideToolIcon?: boolean;
+  parentExpansionId?: string;
+}) {
   if (activity.type === 'tool') {
-    return <ToolActivityItem activity={activity} />;
+    return (
+      <ToolActivityItem
+        activity={activity}
+        expansionScope={expansionScope}
+        hideIcon={hideToolIcon}
+        parentExpansionId={parentExpansionId}
+      />
+    );
   }
 
   if (activity.type === 'thinking') {
@@ -118,28 +299,53 @@ function AssistantActivityItem({ activity }: { activity: AssistantProcessActivit
   );
 }
 
-function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
+function ToolActivityItem({
+  activity,
+  expansionScope,
+  hideIcon = false,
+  parentExpansionId,
+}: {
+  activity: AssistantToolActivity;
+  expansionScope: string;
+  hideIcon?: boolean;
+  parentExpansionId?: string;
+}) {
   const { display } = activity;
-  const [open, setOpen] = useState(false);
+  const expansionId = getToolDetailExpansionId(activity.key, expansionScope);
+  const open = useConversationExpansionOpen(expansionId, false);
   const hasDetail = hasExpandableToolDisplayDetail(display);
+
+  useRegisterConversationExpansionNode({
+    id: expansionId,
+    kind: 'tool_detail',
+    parentId: parentExpansionId,
+  });
+
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      const { actions } = useConversationExpansionStore.getState();
+      actions.setExpanded(expansionId, nextOpen);
+    },
+    [expansionId],
+  );
 
   if (!hasDetail) {
     return (
       <div className="flex min-h-5 w-full min-w-0 items-center gap-1.5 px-1 py-0.5 text-left">
-        <ToolActivitySummary display={display} hasDetail={false} />
+        <ToolActivitySummary display={display} hasDetail={false} hideIcon={hideIcon} />
       </div>
     );
   }
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen}>
+    <Collapsible open={open} onOpenChange={handleOpenChange}>
       <CollapsibleTrigger
         aria-label={formatToolDetailAriaLabel(open, display)}
         className="group/tool-action flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left disabled:pointer-events-none"
         disabled={!hasDetail}
         type="button"
       >
-        <ToolActivitySummary display={display} hasDetail />
+        <ToolActivitySummary display={display} hasDetail hideIcon={hideIcon} />
       </CollapsibleTrigger>
       {display.detail ? (
         <CollapsibleContent className="scout-process-collapse-content mt-2">
@@ -153,13 +359,15 @@ function ToolActivityItem({ activity }: { activity: AssistantToolActivity }) {
 function ToolActivitySummary({
   display,
   hasDetail,
+  hideIcon = false,
 }: {
   display: ToolDisplayResult;
   hasDetail: boolean;
+  hideIcon?: boolean;
 }) {
   return (
     <>
-      <ToolDisplayIconView icon={display.icon} />
+      {hideIcon ? null : <ToolDisplayIconView icon={display.icon} />}
       <span
         className={cn(
           'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
@@ -415,7 +623,7 @@ function ProcessSummaryIcon({ activity }: { activity: AssistantProcessActivity |
 }
 
 function ToolDisplayIconView({ icon }: { icon: ToolDisplayIcon }) {
-  const className = 'size-3.5 shrink-0';
+  const className = 'size-3.5 shrink-0 self-center';
   switch (icon) {
     case 'terminal':
       return <SquareTerminal className={className} />;
@@ -427,6 +635,8 @@ function ToolDisplayIconView({ icon }: { icon: ToolDisplayIcon }) {
       return <PencilLine className={className} />;
     case 'folder':
       return <FolderOpen className={className} />;
+    case 'clipboard-list':
+      return <ClipboardList className={className} />;
     default:
       return <Wrench className={className} />;
   }
@@ -490,15 +700,19 @@ function formatToolDetailAriaLabel(open: boolean, display: ToolDisplayResult): s
   return `${open ? '收起' : '展开'}${label} ${target}`;
 }
 
+function getProcessTriggerLabel(entry: AssistantProcessEntry): string {
+  return entry.activitySummary.primary?.label ?? entry.summary.label;
+}
+
 function shouldShimmerSummary(summary: AssistantProcessEntry['summary']): boolean {
   return summary.running && summary.status === 'model_deciding';
 }
 
 function shouldShowDisclosureIcon(
-  summary: AssistantProcessEntry['summary'],
+  _summary: AssistantProcessEntry['summary'],
   hasProcessContent: boolean,
 ): boolean {
-  return hasProcessContent && summary.status === 'completed';
+  return hasProcessContent;
 }
 
 function getFirstProcessActivity(
