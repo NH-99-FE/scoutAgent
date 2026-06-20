@@ -472,7 +472,7 @@ describe('ChatApp', () => {
     });
   });
 
-  it('opens task history from the home header action', () => {
+  it('opens and closes task history from the home header action', async () => {
     useTaskStore.getState().actions.setRecentTasks([
       {
         id: 'task-1',
@@ -493,6 +493,11 @@ describe('ChatApp', () => {
       purpose: 'panel',
       limit: 20,
       offset: 0,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText('搜索历史任务')).not.toBeInTheDocument();
     });
   });
 
@@ -560,6 +565,12 @@ describe('ChatApp', () => {
       limit: 20,
       offset: 0,
     });
+
+    fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText('搜索历史任务')).not.toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '历史任务' }));
     postMessage.mockClear();
 
     const currentTask = screen.getByRole('button', { name: /检查未提交更改/ });

@@ -64,8 +64,9 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     loadingMore: taskLoadingMore,
     hasMore: taskHasMore,
     sentinelRef: taskHistorySentinelRef,
-    open: openTaskHistory,
+    triggerRef: taskHistoryTriggerRef,
     close: closeTaskHistory,
+    toggle: toggleTaskHistory,
     setQuery: setTaskHistoryQuery,
   } = useTaskHistoryPanel();
   const title = sessionName || getConversationTitle(messages) || '当前会话';
@@ -96,13 +97,15 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
           actions={
             <>
               <ConversationMoreMenu />
-              <IconButton
-                label={isAgentRunning ? '正在回复' : '历史任务'}
-                size="icon-xs"
-                onClick={openTaskHistory}
-              >
-                {isAgentRunning ? <LoaderCircle className="animate-spin" /> : <History />}
-              </IconButton>
+              <span ref={taskHistoryTriggerRef} className="inline-flex">
+                <IconButton
+                  label={isAgentRunning ? '正在回复' : '历史任务'}
+                  size="icon-xs"
+                  onClick={toggleTaskHistory}
+                >
+                  {isAgentRunning ? <LoaderCircle className="animate-spin" /> : <History />}
+                </IconButton>
+              </span>
               <IconButton
                 label="打开设置"
                 size="icon-xs"

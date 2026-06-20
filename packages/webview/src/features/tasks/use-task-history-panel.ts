@@ -24,6 +24,7 @@ export function useTaskHistoryPanel() {
   const [isRendered, setIsRendered] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLSpanElement>(null);
   const closeTimerRef = useRef<number | undefined>(undefined);
   const searchTimerRef = useRef<number | undefined>(undefined);
   const lastRequestedQueryRef = useRef<string | undefined>(undefined);
@@ -95,12 +96,27 @@ export function useTaskHistoryPanel() {
     }, TASK_HISTORY_PANEL_EXIT_MS);
   }, [taskActions]);
 
+  const toggle = useCallback(() => {
+    if (isOpen) {
+      close();
+      return;
+    }
+    open();
+  }, [close, isOpen, open]);
+
   useEffect(() => {
     if (!isOpen) return;
 
     const handlePointerDown = (event: PointerEvent) => {
       const panel = panelRef.current;
-      if (!panel || panel.contains(event.target as Node)) return;
+      const trigger = triggerRef.current;
+      if (
+        !panel ||
+        panel.contains(event.target as Node) ||
+        trigger?.contains(event.target as Node)
+      ) {
+        return;
+      }
       close();
     };
 
@@ -149,6 +165,7 @@ export function useTaskHistoryPanel() {
     isRendered,
     isOpen,
     panelRef,
+    triggerRef,
     tasks: historyTasks,
     query,
     pending,
@@ -157,6 +174,7 @@ export function useTaskHistoryPanel() {
     sentinelRef,
     open,
     close,
+    toggle,
     setQuery,
   };
 }

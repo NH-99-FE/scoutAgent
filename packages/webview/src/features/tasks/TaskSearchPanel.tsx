@@ -13,6 +13,7 @@ interface TaskSearchPanelProps {
   tasks: ScoutTaskItem[];
   query: string;
   pending: boolean;
+  className?: string;
   loadingMore?: boolean;
   hasMore?: boolean;
   showCurrentState?: boolean;
@@ -25,6 +26,7 @@ export function TaskSearchPanel({
   tasks,
   query,
   pending,
+  className,
   loadingMore = false,
   hasMore = false,
   showCurrentState = false,
@@ -34,7 +36,10 @@ export function TaskSearchPanel({
 }: TaskSearchPanelProps) {
   return (
     <section
-      className="border-border/70 bg-background flex max-h-[min(320px,calc(100vh-230px))] min-h-0 flex-col overflow-hidden rounded-xl border"
+      className={cn(
+        'border-border/70 bg-background flex max-h-[min(260px,calc(100vh-120px))] min-h-0 flex-col overflow-hidden rounded-xl border',
+        className,
+      )}
       aria-label="任务历史"
     >
       <div className="task-search-field flex h-8 shrink-0 items-center gap-2 px-3">
@@ -52,7 +57,10 @@ export function TaskSearchPanel({
         <Separator />
       </div>
 
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea
+        className="max-h-[min(220px,calc(100vh-160px))] min-h-0"
+        viewportClassName="max-h-[min(220px,calc(100vh-160px))]"
+      >
         <div className="px-3 py-1.5">
           {tasks.length > 0 ? (
             <div className="space-y-px">

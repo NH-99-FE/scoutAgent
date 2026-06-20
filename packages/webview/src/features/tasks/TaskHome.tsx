@@ -35,15 +35,17 @@ export function TaskHome({
     loadingMore: taskLoadingMore,
     hasMore: taskHasMore,
     sentinelRef: taskHistorySentinelRef,
+    triggerRef: taskHistoryTriggerRef,
     open: openTaskHistory,
+    toggle: toggleTaskHistory,
     setQuery: setTaskHistoryQuery,
   } = useTaskHistoryPanel();
   const recentTasks = useRecentTasks();
   const visibleTasks = taskHistoryRendered ? tasks : recentTasks.slice(0, 3);
 
   return (
-    <main className="bg-background text-foreground flex h-screen min-h-screen min-w-0 max-w-full flex-col overflow-hidden">
-      <header className="h-auto min-w-0 max-w-full shrink-0 px-2">
+    <main className="bg-background text-foreground flex h-screen min-h-screen max-w-full min-w-0 flex-col overflow-hidden">
+      <header className="h-auto max-w-full min-w-0 shrink-0 px-2">
         <HeaderBar
           className="h-full gap-2 pl-1.5"
           title="任务"
@@ -51,9 +53,11 @@ export function TaskHome({
           actionsClassName="text-muted-foreground"
           actions={
             <>
-              <IconButton label="历史任务" size="icon-xs" onClick={openTaskHistory}>
-                <History />
-              </IconButton>
+              <span ref={taskHistoryTriggerRef} className="inline-flex">
+                <IconButton label="历史任务" size="icon-xs" onClick={toggleTaskHistory}>
+                  <History />
+                </IconButton>
+              </span>
               <IconButton
                 label="打开设置"
                 size="icon-xs"
@@ -70,7 +74,7 @@ export function TaskHome({
         />
       </header>
 
-      <div className="min-w-0 max-w-full shrink-0 px-2">
+      <div className="max-w-full min-w-0 shrink-0 px-2">
         {!taskHistoryRendered ? (
           <div className="mt-1 space-y-0.5">
             {visibleTasks.map((task) => (
@@ -119,7 +123,7 @@ export function TaskHome({
         ) : null}
       </section>
 
-      <footer className="min-w-0 max-w-full shrink-0 px-3 pb-3">
+      <footer className="max-w-full min-w-0 shrink-0 px-3 pb-3">
         <ChatComposer
           draftSessionId={HOME_COMPOSER_SESSION_ID}
           mode="newSession"
