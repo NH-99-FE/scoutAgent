@@ -19,6 +19,7 @@ import {
 import {
   cancelProtocolRequest,
   discardProtocolRequest,
+  sendControlMessage,
   sendProtocolRequest,
   setDefaultProtocolErrorHandler,
 } from './transport-client';
@@ -201,8 +202,8 @@ export const protocolClient = {
     }
     send(payload);
   },
-  abort: () => send({ type: 'abort' }),
-  abortRetry: () => send({ type: 'abort_retry' }),
+  abort: () => sendControlMessage({ type: 'control_abort' }),
+  abortRetry: () => sendControlMessage({ type: 'control_abort_retry' }),
   compact: (customInstructions?: string) => send({ type: 'compact', customInstructions }),
   continueSession: (options?: ContinueSessionOptions) => {
     const payload: WebviewRequestPayload = { type: 'continue_session' };

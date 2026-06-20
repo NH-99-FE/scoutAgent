@@ -58,8 +58,6 @@ const PAYLOAD_VALIDATORS = {
     optionalBoolean('resume'),
     optionalBoolean('preserveFollowUpQueue'),
   ),
-  abort: fields('type'),
-  abort_retry: fields('type'),
   compact: combine(fields('type', 'customInstructions'), optionalString('customInstructions')),
   select_model: combine(
     fields('type', 'provider', 'modelId'),

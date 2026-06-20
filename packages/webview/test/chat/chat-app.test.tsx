@@ -6,6 +6,7 @@ import { resetProtocolTransport } from '@/bridge/transport-client';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
+import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useUiStore } from '@/store/ui-store';
@@ -139,6 +140,12 @@ function getLatestPostedProtocolRequest(payloadType: string) {
   return getPostedProtocolRequests(payloadType).at(-1);
 }
 
+function getPostedControlMessages(type: string) {
+  return postMessage.mock.calls
+    .map(([message]) => message)
+    .filter((message) => message.type === type);
+}
+
 function expectPostedPayload(payloadType: string, payload: Record<string, unknown>): void {
   expect(getLatestPostedProtocolRequest(payloadType)?.payload).toEqual(payload);
 }
@@ -196,6 +203,7 @@ describe('ChatApp', () => {
     cleanup();
     useComposerStore.getState().actions.reset();
     useConversationStore.getState().actions.reset();
+    useRuntimeOverlayStore.getState().actions.reset();
     useSessionStore.getState().actions.reset();
     useTaskStore.getState().actions.reset();
     useUiStore.getState().actions.reset();
@@ -1027,10 +1035,11 @@ describe('ChatApp', () => {
     render(<ChatApp />);
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Escape' });
     expect(getPostedProtocolRequests('abort')).toHaveLength(0);
+    expect(getPostedControlMessages('control_abort')).toHaveLength(0);
     expect(screen.getByRole('button', { name: '确认中断' })).toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Escape' });
-    expectPostedPayload('abort', { type: 'abort' });
+    expect(getPostedControlMessages('control_abort')).toEqual([{ type: 'control_abort' }]);
   });
 
   it('keeps composer drafts isolated by session id', () => {
@@ -1135,7 +1144,62 @@ describe('ChatApp', () => {
   });
 
   it('aborts immediately when clicking the stop button', () => {
-    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+    const state = makeState(
+      [
+        { role: 'user', content: 'hello', timestamp: 1 },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'partial answer' }],
+          timestamp: 2,
+          entryId: 'assistant-1',
+        },
+      ],
+      {
+        isStreaming: true,
+        busyState: { kind: 'agent', label: 'Working', cancellable: true },
+      },
+    );
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    expect(screen.getByText('partial answer')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '停止' }));
+
+    expect(getPostedControlMessages('control_abort')).toEqual([{ type: 'control_abort' }]);
+    expect(screen.queryByRole('button', { name: '确认中断' })).not.toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'agent_event',
+        event: {
+          type: 'message_update',
+          messageId: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'partial answer stale queued text' }],
+            timestamp: 2,
+          },
+        },
+      });
+    });
+
+    expect(screen.getByText('partial answer')).toBeInTheDocument();
+    expect(screen.queryByText('partial answer stale queued text')).not.toBeInTheDocument();
+  });
+
+  it('does not re-enable stop while an aborted run is settling', () => {
+    const messages: ScoutMessage[] = [
+      { role: 'user', content: 'hello', timestamp: 1 },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'partial answer' }],
+        timestamp: 2,
+        entryId: 'assistant-1',
+      },
+    ];
+    const state = makeState(messages, {
       isStreaming: true,
       busyState: { kind: 'agent', label: 'Working', cancellable: true },
     });
@@ -1145,8 +1209,59 @@ describe('ChatApp', () => {
     render(<ChatApp />);
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
 
-    expectPostedPayload('abort', { type: 'abort' });
-    expect(screen.queryByRole('button', { name: '确认中断' })).not.toBeInTheDocument();
+    act(() => {
+      routeExtensionMessage({
+        type: 'runtime_state_update',
+        isStreaming: false,
+        busyState: { kind: 'idle', cancellable: false },
+      });
+    });
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState(messages, {
+          isStreaming: true,
+          busyState: { kind: 'agent', label: 'Working', cancellable: true },
+        }),
+      });
+    });
+
+    expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument();
+  });
+
+  it('keeps immediate post-abort submits in the follow-up channel until runtime idle', () => {
+    const messages: ScoutMessage[] = [
+      { role: 'user', content: 'hello', timestamp: 1 },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'partial answer' }],
+        timestamp: 2,
+        entryId: 'assistant-1',
+      },
+    ];
+    const state = makeState(messages, {
+      isStreaming: true,
+      busyState: { kind: 'agent', label: 'Working', cancellable: true },
+    });
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: '停止' }));
+    postMessage.mockClear();
+
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: '马上继续提问' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
+
+    expectPostedPayload('user_message', {
+      type: 'user_message',
+      text: '马上继续提问',
+      deliverAs: 'followUp',
+    });
   });
 
   it('shows queued follow-ups and exposes promote/delete actions', () => {

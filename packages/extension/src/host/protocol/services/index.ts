@@ -87,12 +87,6 @@ export function registerScoutProtocolServices(
     promote_follow_up: async (message) => {
       await services.session.promoteFollowUp(payload<'promote_follow_up'>(message));
     },
-    abort: () => {
-      services.session.abort();
-    },
-    abort_retry: () => {
-      services.session.abortRetry();
-    },
     compact: async (message) => {
       await services.session.compact(payload<'compact'>(message));
     },

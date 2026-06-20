@@ -168,7 +168,9 @@ export interface ScoutProtocolCancel {
   requestId: string;
 }
 
-export type WebviewMessage = ScoutProtocolRequest | ScoutProtocolCancel;
+export type ScoutControlMessage = { type: 'control_abort' } | { type: 'control_abort_retry' };
+
+export type WebviewMessage = ScoutProtocolRequest | ScoutProtocolCancel | ScoutControlMessage;
 
 export type WebviewRequestPayload =
   | { type: 'ready' }
@@ -194,8 +196,6 @@ export type WebviewRequestPayload =
       resume?: boolean;
       preserveFollowUpQueue?: boolean;
     }
-  | { type: 'abort' }
-  | { type: 'abort_retry' }
   | { type: 'compact'; customInstructions?: string }
   | { type: 'select_model'; provider: string; modelId: string }
   | { type: 'select_thinking'; level: ThinkingLevel }
@@ -325,20 +325,6 @@ export const SCOUT_PROTOCOL = {
       'tool_call_preview_update',
       'tree_update',
     ],
-    surfaces: ['chat'],
-  },
-  abort: {
-    kind: 'command',
-    service: 'session',
-    method: 'abort',
-    emits: ['state_update', 'queue_update', 'runtime_state_update'],
-    surfaces: ['chat'],
-  },
-  abort_retry: {
-    kind: 'command',
-    service: 'session',
-    method: 'abort_retry',
-    emits: ['state_update', 'runtime_state_update'],
     surfaces: ['chat'],
   },
   compact: {

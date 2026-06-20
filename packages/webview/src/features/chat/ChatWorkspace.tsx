@@ -25,14 +25,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  useBusyState,
-  useConversationItems,
   useConversationMessages,
-  useIsStreaming,
+  useConversationItems,
   useToolExecutionsById,
   useToolPreviewsById,
 } from '@/store/conversation-store';
 import { getConversationExpansionScope } from '@/store/conversation-expansion-store';
+import { useVisualBusyState, useVisualIsStreaming } from '@/store/runtime-overlay-store';
 import { useSessionFile, useSessionId, useSessionName } from '@/store/session-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
 import { ConversationView } from '@/features/conversation/ConversationView';
@@ -48,10 +47,10 @@ interface ChatWorkspaceProps {
 export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspaceProps) {
   const messages = useConversationMessages();
   const conversationItems = useConversationItems();
-  const isStreaming = useIsStreaming();
+  const isStreaming = useVisualIsStreaming();
   const toolExecutionsById = useToolExecutionsById();
   const toolPreviewsById = useToolPreviewsById();
-  const busyState = useBusyState();
+  const busyState = useVisualBusyState();
   const sessionFile = useSessionFile();
   const sessionId = useSessionId();
   const sessionName = useSessionName();

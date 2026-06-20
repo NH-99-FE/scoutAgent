@@ -134,14 +134,6 @@ export class SessionProtocolService implements SessionProtocolHost {
     }
   }
 
-  abort(): void {
-    void this.sessionManager.abort();
-  }
-
-  abortRetry(): void {
-    void this.sessionManager.abortRetry();
-  }
-
   async compact(message: ProtocolPayload<'compact'>): Promise<void> {
     try {
       await this.sessionManager.compact(message.customInstructions);

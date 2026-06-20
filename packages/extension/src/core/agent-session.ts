@@ -572,6 +572,7 @@ export class AgentSession implements CoreDisposable {
   async abort(): Promise<void> {
     if (!this.agent) return;
     try {
+      const hasActiveRun = this._isStreaming || this.isPostAgentProcessing;
       this.retryAbortController?.abort();
       this.bashAbortController?.abort();
       this.manualCompactionAbortController?.abort();
@@ -580,6 +581,9 @@ export class AgentSession implements CoreDisposable {
       this.queuedMessages.pauseFollowUpsAfterAbort(this.agent);
       this.emit({ type: 'queue_change' });
       this.agent?.abort();
+      if (!hasActiveRun) {
+        this.emit({ type: 'state_change' });
+      }
     } catch (error) {
       this.logger.appendLine(
         `[scout] Abort error: ${error instanceof Error ? error.message : String(error)}`,

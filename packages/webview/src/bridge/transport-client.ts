@@ -3,6 +3,7 @@
 // ============================================================
 
 import type {
+  ScoutControlMessage,
   ScoutProtocolResponsePayload,
   ScoutProtocolRequest,
   ScoutProtocolResponse,
@@ -72,6 +73,10 @@ export function cancelProtocolRequest(requestId: string): void {
   activeRequests.delete(requestId);
   pendingRequests.delete(requestId);
   getVsCodeApi().postMessage({ type: 'protocol_cancel', requestId });
+}
+
+export function sendControlMessage(message: ScoutControlMessage): void {
+  getVsCodeApi().postMessage(message);
 }
 
 export function discardProtocolRequest(requestId: string | undefined): void {

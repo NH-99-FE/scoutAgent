@@ -8,7 +8,12 @@ import type { ScoutImageContent } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
 import { useComposerActions, useComposerImages, useComposerText } from '@/store/composer-store';
-import { useBusyState, useIsStreaming, useQueueState } from '@/store/conversation-store';
+import { useIsStreaming, useQueueState } from '@/store/conversation-store';
+import {
+  useRuntimeOverlayActions,
+  useVisualBusyState,
+  useVisualIsStreaming,
+} from '@/store/runtime-overlay-store';
 import { useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
 import { ApprovalModeMenu } from './ApprovalModeMenu';
@@ -112,11 +117,14 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const images = useComposerImages(sessionId);
   const text = useComposerText(sessionId);
   const composerActions = useComposerActions();
-  const busy = useBusyState();
+  const runtimeOverlayActions = useRuntimeOverlayActions();
+  const visualBusy = useVisualBusyState();
   const currentSessionStreaming = useIsStreaming();
+  const currentSessionVisualStreaming = useVisualIsStreaming();
   const currentSessionQueueState = useQueueState();
   const isCurrentSessionMode = mode === 'currentSession';
   const isStreaming = isCurrentSessionMode ? currentSessionStreaming : false;
+  const visualIsStreaming = isCurrentSessionMode ? currentSessionVisualStreaming : false;
   const queueState = isCurrentSessionMode ? currentSessionQueueState : EMPTY_QUEUE_STATE;
   const hasText = text.trim().length > 0;
   const hasImages = images.length > 0;
@@ -124,8 +132,8 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const isSubmitDisabled = submitDisabled;
   const isSubmitPending = mode === 'newSession' && isSubmitDisabled;
   const canSubmit = hasDraft && !isSubmitDisabled;
-  const canStop = isCurrentSessionMode && busy.cancellable;
-  const showStop = (isStreaming || canStop) && !hasDraft;
+  const canStop = isCurrentSessionMode && visualBusy.cancellable;
+  const showStop = (visualIsStreaming || canStop) && !hasDraft;
   const hasPausedFollowUps = queueState.paused && queueState.followUps.length > 0;
 
   useEffect(() => {
@@ -186,16 +194,19 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
   const stop = () => {
     if (!canStop) return;
-    if (busy.kind === 'retry') {
+    if (visualBusy.kind === 'retry') {
       protocolClient.abortRetry();
       return;
+    }
+    if (visualBusy.kind === 'agent') {
+      runtimeOverlayActions.beginLocalAbort();
     }
     protocolClient.abort();
   };
 
   const requestKeyboardStop = () => {
     if (!canStop) return;
-    if (isStreaming && showStop && !confirmAbort) {
+    if (visualIsStreaming && showStop && !confirmAbort) {
       setConfirmAbort(true);
       return;
     }
@@ -234,10 +245,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
   return (
     <>
-      <div className="min-w-0 max-w-full">
+      <div className="max-w-full min-w-0">
         {isCurrentSessionMode ? <FollowUpQueuePanel /> : null}
         <form
-          className="border-border bg-background min-w-0 max-w-full overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
+          className="border-border bg-background max-w-full min-w-0 overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
@@ -250,7 +261,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
             onSubmit={submit}
             onCancel={requestKeyboardStop}
             isStreaming={isStreaming}
-            canRequestAbort={isStreaming && showStop && canStop}
+            canRequestAbort={visualIsStreaming && showStop && canStop}
           />
 
           {images.length > 0 ? (
@@ -278,7 +289,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
             </div>
           ) : null}
 
-          <div className="mt-2 flex min-h-8 min-w-0 max-w-full flex-nowrap items-center justify-between gap-2 overflow-hidden">
+          <div className="mt-2 flex min-h-8 max-w-full min-w-0 flex-nowrap items-center justify-between gap-2 overflow-hidden">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
               <input
                 accept={SUPPORTED_IMAGE_INPUT_ACCEPT}

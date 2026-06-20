@@ -38,8 +38,6 @@ const ROUTE_CASES = [
     { type: 'promote_follow_up', id: 'follow-up-1', resume: true },
     { service: 'session', method: 'promote_follow_up' },
   ),
-  protocolCase({ type: 'abort' }, { service: 'session', method: 'abort' }),
-  protocolCase({ type: 'abort_retry' }, { service: 'session', method: 'abort_retry' }),
   protocolCase(
     { type: 'compact', customInstructions: 'short' },
     { service: 'session', method: 'compact' },

@@ -104,6 +104,12 @@ export class ScoutController implements vscode.Disposable {
 
   handleWebviewMessage(message: WebviewMessage, surface: ScoutWebviewSurface = 'chat'): void {
     switch (message.type) {
+      case 'control_abort':
+        void this.sessionManager.abort();
+        break;
+      case 'control_abort_retry':
+        void this.sessionManager.abortRetry();
+        break;
       case 'protocol_request':
         void this.protocolServer.handleRequest(message, surface);
         break;

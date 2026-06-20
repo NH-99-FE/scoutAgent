@@ -5,6 +5,7 @@
 
 import type { ExtensionEventMessage, ScoutBusyState } from '@scout-agent/shared';
 import type { ScoutSessionEvent } from '../session-coordinator.ts';
+import { AgentEventUpdateCoalescer } from './agent-event-update-coalescer.ts';
 import {
   ToolCallPreviewProjector,
   type ComputeEditPreview,
@@ -22,6 +23,7 @@ export interface SessionEventForwarderOptions {
   pushTreeData: () => Promise<void>;
   computeEditPreview?: ComputeEditPreview;
   logError?: (message: string) => void;
+  agentEventFlushDelayMs?: number;
 }
 
 // ---------- 常量 ----------
@@ -103,6 +105,14 @@ function isBusyStateStreaming(busyState: ScoutBusyState): boolean {
   return busyState.kind !== 'idle';
 }
 
+function shouldPublishIdleRuntimeState(
+  previous: ScoutBusyState,
+  current: ScoutBusyState,
+  event: ScoutSessionEvent,
+): boolean {
+  return event.type === 'state_change' && previous.kind !== 'idle' && current.kind === 'idle';
+}
+
 // ---------- Forwarder ----------
 
 export class SessionEventForwarder {
@@ -112,6 +122,7 @@ export class SessionEventForwarder {
   private readonly pushQueueState: () => void;
   private readonly pushTreeData: () => Promise<void>;
   private readonly previewProjector?: ToolCallPreviewProjector;
+  private readonly agentEventCoalescer: AgentEventUpdateCoalescer;
   private busyState: ScoutBusyState = IDLE_BUSY_STATE;
 
   constructor(options: SessionEventForwarderOptions) {
@@ -128,12 +139,25 @@ export class SessionEventForwarder {
         logError: options.logError,
       });
     }
+    this.agentEventCoalescer = new AgentEventUpdateCoalescer({
+      publishEvent: (event) => {
+        this.publishEvent({ type: 'agent_event', event });
+      },
+      flushDelayMs: options.agentEventFlushDelayMs,
+    });
   }
 
   handle(event: ScoutSessionEvent): void {
+    const previousBusyState = this.busyState;
     this.busyState = reduceBusyState(this.busyState, event);
+    if (event.type === 'state_change' && !this.isStreaming()) {
+      this.busyState = IDLE_BUSY_STATE;
+    }
 
-    if (shouldPublishRuntimeState(event)) {
+    if (
+      shouldPublishRuntimeState(event) ||
+      shouldPublishIdleRuntimeState(previousBusyState, this.busyState, event)
+    ) {
       const busyState = this.busyState;
       this.publishEvent({
         type: 'runtime_state_update',
@@ -143,8 +167,8 @@ export class SessionEventForwarder {
     }
 
     if (event.type === 'agent_event') {
-      this.publishEvent({ type: 'agent_event', event: event.event });
       this.previewProjector?.handleAgentEvent(event.event);
+      this.agentEventCoalescer.handle(event.event);
     }
 
     if (event.type === 'auto_retry_start') {
@@ -187,6 +211,7 @@ export class SessionEventForwarder {
       if (event.type === 'error') {
         this.publishEvent({ type: 'notification', level: 'error', message: event.message });
       }
+      this.agentEventCoalescer.discardPendingUpdates();
       void this.pushState();
     }
 

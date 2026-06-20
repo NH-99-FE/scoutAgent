@@ -18,6 +18,17 @@ function request(payload: WebviewRequestPayload | Record<string, unknown>) {
 }
 
 describe('validateWebviewMessage', () => {
+  it('accepts high-priority control abort messages without protocol envelope fields', () => {
+    expect(validateWebviewMessage({ type: 'control_abort' })).toMatchObject({
+      ok: true,
+      message: { type: 'control_abort' },
+    });
+    expect(validateWebviewMessage({ type: 'control_abort_retry' })).toMatchObject({
+      ok: true,
+      message: { type: 'control_abort_retry' },
+    });
+  });
+
   it('accepts a valid protocol request with optional undefined fields', () => {
     const result = validateWebviewMessage(
       request({ type: 'request_file_mentions', query: 'src', limit: undefined }),

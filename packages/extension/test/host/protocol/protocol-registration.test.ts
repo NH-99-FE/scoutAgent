@@ -49,8 +49,6 @@ const PAYLOAD_CASES = [
     { type: 'promote_follow_up', id: 'follow-up-1', resume: true },
     { service: 'session', method: 'promote_follow_up' },
   ),
-  protocolCase({ type: 'abort' }, { service: 'session', method: 'abort' }),
-  protocolCase({ type: 'abort_retry' }, { service: 'session', method: 'abort_retry' }),
   protocolCase(
     { type: 'compact', customInstructions: 'short' },
     { service: 'session', method: 'compact' },
@@ -172,8 +170,6 @@ function makeServices(): ScoutProtocolServices {
       }),
       cancelFollowUp: vi.fn(),
       promoteFollowUp: vi.fn(async () => undefined),
-      abort: vi.fn(),
-      abortRetry: vi.fn(),
       compact: vi.fn(async () => undefined),
       continueSession: vi.fn(async () => undefined),
       clearConversation: vi.fn(),

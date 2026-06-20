@@ -59,7 +59,7 @@ interface ConversationStore {
   actions: ConversationActions;
 }
 
-const IDLE_BUSY_STATE: ScoutBusyState = {
+export const IDLE_BUSY_STATE: ScoutBusyState = {
   kind: 'idle',
   cancellable: false,
 };

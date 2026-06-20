@@ -4,6 +4,7 @@ import {
   discardProtocolRequest,
   resetProtocolTransport,
   routeProtocolResponse,
+  sendControlMessage,
   sendProtocolRequest,
   setDefaultProtocolErrorHandler,
 } from '@/bridge/transport-client';
@@ -68,6 +69,12 @@ describe('transport-client', () => {
         purpose: 'panel',
       },
     });
+  });
+
+  it('posts control messages without allocating a protocol request', () => {
+    sendControlMessage({ type: 'control_abort' });
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'control_abort' });
   });
 
   it('routes responses only to the pending callback with the same requestId', () => {

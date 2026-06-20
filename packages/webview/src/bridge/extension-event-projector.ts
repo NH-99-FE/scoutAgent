@@ -4,11 +4,13 @@
 
 import type {
   ExtensionEventMessage,
+  ScoutRuntimeEvent,
   ScoutRuntimeExtensionEvent,
   ScoutRuntimeStateUpdateEvent,
 } from '@scout-agent/shared';
 import { useConfigStore } from '@/store/config-store';
 import { useConversationStore } from '@/store/conversation-store';
+import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useTreeStore } from '@/store/tree-store';
@@ -27,7 +29,11 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
 
   switch (message.type) {
     case 'state_update':
-      useConversationStore.getState().actions.applyStateSnapshot(message.state);
+      useConversationStore
+        .getState()
+        .actions.applyStateSnapshot(
+          useRuntimeOverlayStore.getState().actions.projectStateSnapshot(message.state),
+        );
       useSessionStore.getState().actions.applyState(message.state);
       useTreeStore.getState().actions.applyState(message.state);
       useUiStore.getState().actions.resolveOpenTask(message.state.sessionFile);
@@ -78,9 +84,8 @@ function isRuntimeExtensionEvent(
 function projectRuntimeEvent(
   message: Exclude<ScoutRuntimeExtensionEvent, ScoutRuntimeStateUpdateEvent>,
 ): void {
-  useConversationStore
-    .getState()
-    .actions.applyRuntimeEvent(message.type === 'agent_event' ? message.event : message);
+  const event = message.type === 'agent_event' ? message.event : message;
+  applyRuntimeEvent(event);
 }
 
 function projectRuntimeState(message: ScoutRuntimeStateUpdateEvent): void {
@@ -107,6 +112,11 @@ export function projectTaskHistoryUpdate(
     hasMore: message.hasMore,
     nextOffset: message.nextOffset,
   });
+}
+
+function applyRuntimeEvent(event: ScoutRuntimeEvent): void {
+  if (!useRuntimeOverlayStore.getState().actions.projectRuntimeEvent(event)) return;
+  useConversationStore.getState().actions.applyRuntimeEvent(event);
 }
 
 export const EXTENSION_EVENT_TYPES = new Set<string>([

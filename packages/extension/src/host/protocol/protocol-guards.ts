@@ -26,6 +26,10 @@ export function validateWebviewMessage(value: unknown): WebviewMessageGuardResul
     return { ok: true, message: value as unknown as WebviewMessage, error: '' };
   }
 
+  if (value.type === 'control_abort' || value.type === 'control_abort_retry') {
+    return { ok: true, message: value as unknown as WebviewMessage, error: '' };
+  }
+
   if (value.type !== 'protocol_request') {
     return { ok: false, requestId, error: `Unknown message type: ${String(value.type)}` };
   }

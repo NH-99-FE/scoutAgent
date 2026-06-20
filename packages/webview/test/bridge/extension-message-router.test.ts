@@ -6,6 +6,7 @@ import { resetProtocolTransport } from '@/bridge/transport-client';
 import { useConfigStore } from '@/store/config-store';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
+import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useTreeStore } from '@/store/tree-store';
@@ -23,6 +24,7 @@ describe('routeExtensionMessage', () => {
     useConfigStore.getState().actions.reset();
     useComposerStore.getState().actions.reset();
     useConversationStore.getState().actions.reset();
+    useRuntimeOverlayStore.getState().actions.reset();
     useSessionStore.getState().actions.reset();
     useTaskStore.getState().actions.reset();
     useTreeStore.getState().actions.reset();
@@ -205,6 +207,155 @@ describe('routeExtensionMessage', () => {
       cancellable: false,
     });
     expect(useConversationStore.getState().isStreaming).toBe(false);
+  });
+
+  it('ignores late message updates after message_end', () => {
+    routeExtensionMessage({
+      type: 'agent_event',
+      event: {
+        type: 'message_start',
+        messageId: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'hel' }],
+          timestamp: 1,
+        },
+      },
+    });
+    routeExtensionMessage({
+      type: 'agent_event',
+      event: {
+        type: 'message_end',
+        messageId: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'final aborted text' }],
+          stopReason: 'aborted',
+          timestamp: 1,
+        },
+      },
+    });
+
+    routeExtensionMessage({
+      type: 'agent_event',
+      event: {
+        type: 'message_update',
+        messageId: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'late stale update' }],
+          timestamp: 1,
+        },
+      },
+    });
+
+    expect(useConversationStore.getState().messages).toEqual([
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'final aborted text' }],
+        stopReason: 'aborted',
+        timestamp: 1,
+      },
+    ]);
+  });
+
+  it('hides the next assistant runtime message and matching snapshot after local abort', () => {
+    const previousMessages = [
+      { role: 'user' as const, content: 'previous prompt', timestamp: 1 },
+      {
+        role: 'assistant' as const,
+        content: [{ type: 'text' as const, text: 'previous answer' }],
+        timestamp: 2,
+        entryId: 'assistant-old',
+      },
+    ];
+
+    routeExtensionMessage({
+      type: 'state_update',
+      state: {
+        messages: previousMessages,
+        isStreaming: true,
+        busyState: { kind: 'agent', label: 'Working', cancellable: true },
+        modelProvider: 'openai',
+        modelId: 'gpt-test',
+        thinkingLevel: 'off',
+        tools: [],
+        activeToolNames: [],
+        commands: [],
+        sessionId: 'session-1',
+        cwd: '/workspace',
+      },
+    });
+    useRuntimeOverlayStore.getState().actions.beginLocalAbort();
+
+    routeExtensionMessage({
+      type: 'agent_event',
+      event: {
+        type: 'message_start',
+        messageId: 'assistant-new',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'new partial' }],
+          timestamp: 3,
+        },
+      },
+    });
+    routeExtensionMessage({
+      type: 'agent_event',
+      event: {
+        type: 'message_end',
+        messageId: 'assistant-new',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'new final' }],
+          stopReason: 'aborted',
+          timestamp: 3,
+        },
+      },
+    });
+    routeExtensionMessage({
+      type: 'state_update',
+      state: {
+        messages: [
+          ...previousMessages,
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'new final' }],
+            stopReason: 'aborted',
+            timestamp: 3,
+            entryId: 'assistant-new-entry',
+          },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'unrelated same-timestamp answer' }],
+            stopReason: 'aborted',
+            timestamp: 3,
+            entryId: 'assistant-other-entry',
+          },
+        ],
+        isStreaming: false,
+        busyState: { kind: 'idle', cancellable: false },
+        modelProvider: 'openai',
+        modelId: 'gpt-test',
+        thinkingLevel: 'off',
+        tools: [],
+        activeToolNames: [],
+        commands: [],
+        sessionId: 'session-1',
+        cwd: '/workspace',
+      },
+    });
+
+    expect(useConversationStore.getState().messages).toEqual([
+      ...previousMessages,
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'unrelated same-timestamp answer' }],
+        stopReason: 'aborted',
+        timestamp: 3,
+        entryId: 'assistant-other-entry',
+      },
+    ]);
   });
 
   it('keeps retry and compaction events from deriving busy state in the webview', () => {

@@ -83,8 +83,6 @@ export interface SessionProtocolHost {
   ) => Promise<void>;
   cancelFollowUp: (message: ProtocolPayload<'cancel_follow_up'>) => void;
   promoteFollowUp: (message: ProtocolPayload<'promote_follow_up'>) => Promise<void>;
-  abort: () => void;
-  abortRetry: () => void;
   compact: (message: ProtocolPayload<'compact'>) => Promise<void>;
   continueSession: (message: ProtocolPayload<'continue_session'>) => Promise<void>;
   clearConversation: () => void;

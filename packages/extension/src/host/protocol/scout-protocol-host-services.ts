@@ -198,8 +198,6 @@ export function createScoutProtocolHostServices(
       newSessionMessage: (message, respond) => bundle.session.newSessionMessage(message, respond),
       cancelFollowUp: (message) => bundle.session.cancelFollowUp(message),
       promoteFollowUp: (message) => bundle.session.promoteFollowUp(message),
-      abort: () => bundle.session.abort(),
-      abortRetry: () => bundle.session.abortRetry(),
       compact: (message) => bundle.session.compact(message),
       continueSession: (message) => bundle.session.continueSession(message),
       clearConversation: () => bundle.session.clearConversation(),

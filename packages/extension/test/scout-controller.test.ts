@@ -102,6 +102,26 @@ function resolveRoute(payload: WebviewRequestPayload): {
 }
 
 describe('ScoutController webview surfaces', () => {
+  it('handles control abort messages without routing through the protocol server', () => {
+    const controller = makeController();
+    const internals = controller as unknown as {
+      sessionManager: { abort: () => Promise<void>; abortRetry: () => Promise<void> };
+      protocolServer: { handleRequest: (message: unknown, surface: string) => Promise<void> };
+    };
+    const abort = vi.spyOn(internals.sessionManager, 'abort').mockResolvedValue(undefined);
+    const abortRetry = vi
+      .spyOn(internals.sessionManager, 'abortRetry')
+      .mockResolvedValue(undefined);
+    const handleRequest = vi.spyOn(internals.protocolServer, 'handleRequest');
+
+    controller.handleWebviewMessage({ type: 'control_abort' }, 'chat');
+    controller.handleWebviewMessage({ type: 'control_abort_retry' }, 'chat');
+
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(abortRetry).toHaveBeenCalledTimes(1);
+    expect(handleRequest).not.toHaveBeenCalled();
+  });
+
   it('directs request-scoped messages to the source webview surface', () => {
     const controller = makeController();
     const chat = makeWebview();
