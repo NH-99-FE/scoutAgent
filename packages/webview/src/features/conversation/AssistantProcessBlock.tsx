@@ -58,11 +58,13 @@ export function AssistantProcessBlock({
   const open = useConversationExpansionOpen(expansionId, entry.defaultOpen);
   const hasProcessContent = entry.phases.some(hasPhaseContent);
   const hasActivitySummary = Boolean(entry.activitySummary.primary);
+  const { detailPhases, leadingThinkingPhases } = splitLeadingThinkingPhases(entry.phases);
+  const hasDetailProcessContent = detailPhases.some(hasPhaseContent);
   const summary = entry.summary;
   const tone = summary.tone;
   const firstActivity = getFirstProcessActivity(entry.phases);
   const shimmerSummary = shouldShimmerSummary(summary);
-  const showDisclosureIcon = shouldShowDisclosureIcon(summary, hasProcessContent);
+  const showDisclosureIcon = shouldShowDisclosureIcon(summary, hasDetailProcessContent);
   const triggerLabel = getProcessTriggerLabel(entry);
 
   useRegisterConversationExpansionNode({
@@ -136,6 +138,14 @@ export function AssistantProcessBlock({
           tone === 'error' && 'text-destructive',
         )}
       >
+        {leadingThinkingPhases.length > 0 ? (
+          <ProcessPhaseList
+            className="mb-1 -ml-1"
+            expansionScope={expansionScope}
+            parentExpansionId={expansionId}
+            phases={leadingThinkingPhases}
+          />
+        ) : null}
         <CollapsibleTrigger
           aria-label={`${open ? '收起' : '展开'}过程 ${triggerLabel}`}
           className={cn(
@@ -143,7 +153,7 @@ export function AssistantProcessBlock({
             entry.displayMode === 'compact' && 'w-full',
             tone === 'error' && 'text-destructive',
           )}
-          disabled={!hasProcessContent}
+          disabled={!hasDetailProcessContent}
           type="button"
         >
           {hasActivitySummary ? (
@@ -175,14 +185,14 @@ export function AssistantProcessBlock({
             )
           ) : null}
         </CollapsibleTrigger>
-        {hasProcessContent ? (
+        {hasDetailProcessContent ? (
           <CollapsibleContent className="scout-process-collapse-content">
             <ProcessPhaseList
               className="mt-1.5 -ml-1"
               expansionScope={expansionScope}
               hideToolIcons={entry.displayMode === 'compact'}
               parentExpansionId={expansionId}
-              phases={entry.phases}
+              phases={detailPhases}
             />
           </CollapsibleContent>
         ) : null}
@@ -217,6 +227,43 @@ function ProcessPhaseList({
       ))}
     </div>
   );
+}
+
+function splitLeadingThinkingPhases(phases: AssistantProcessPhase[]): {
+  detailPhases: AssistantProcessPhase[];
+  leadingThinkingPhases: AssistantProcessPhase[];
+} {
+  const firstToolPhaseIndex = phases.findIndex((phase) =>
+    phase.activities.some((activity) => activity.type === 'tool'),
+  );
+  if (firstToolPhaseIndex <= 0) {
+    return { detailPhases: phases, leadingThinkingPhases: [] };
+  }
+
+  const leadingActivityKeys = new Set<string>();
+  const leadingThinkingPhases = phases
+    .slice(0, firstToolPhaseIndex)
+    .map((phase) => {
+      const activities = phase.activities.filter((activity) => activity.type === 'thinking');
+      for (const activity of activities) {
+        leadingActivityKeys.add(activity.key);
+      }
+      return { ...phase, activities };
+    })
+    .filter(hasPhaseContent);
+
+  if (leadingThinkingPhases.length === 0) {
+    return { detailPhases: phases, leadingThinkingPhases: [] };
+  }
+
+  const detailPhases = phases
+    .map((phase) => ({
+      ...phase,
+      activities: phase.activities.filter((activity) => !leadingActivityKeys.has(activity.key)),
+    }))
+    .filter(hasPhaseContent);
+
+  return { detailPhases, leadingThinkingPhases };
 }
 
 function CompactActivitySummary({ entry }: { entry: AssistantProcessEntry }) {

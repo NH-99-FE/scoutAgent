@@ -273,7 +273,13 @@ describe('ConversationView', () => {
     expect(
       screen.getByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
     ).toBeInTheDocument();
-    expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
+    const thinking = screen.getByText('分析当前布局');
+    const processSummary = screen.getByRole('button', {
+      name: /展开过程 正在运行 读取 README\.md/,
+    });
+    expect(
+      thinking.compareDocumentPosition(processSummary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it('does not mark an older assistant as streaming when a user message is last', () => {
@@ -1804,11 +1810,17 @@ describe('ConversationView', () => {
       screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
     ).toBeInTheDocument();
     expect(screen.getByText('根据文件内容继续分析')).toBeInTheDocument();
-    expect(screen.queryByText('先定位文件')).not.toBeInTheDocument();
+    const thinking = screen.getByText('先定位文件');
+    const processSummary = screen.getByRole('button', {
+      name: /展开过程 已运行 读取 README\.md/,
+    });
+    expect(
+      thinking.compareDocumentPosition(processSummary) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
     fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }));
 
-    expect(screen.getByText('先定位文件')).toBeInTheDocument();
+    expect(screen.getAllByText('先定位文件')).toHaveLength(1);
     expect(screen.getAllByText('已运行 读取 README.md').length).toBeGreaterThan(0);
     expect(
       screen.getByText('先定位文件').closest('[data-assistant-process-phase]'),
@@ -2001,7 +2013,7 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 已处理 2 项/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开过程 已完成 2 项/ })).toBeInTheDocument();
     expect(screen.queryByText('已运行 1 条命令')).not.toBeInTheDocument();
     expect(screen.queryByText('已读取 1 个文件')).not.toBeInTheDocument();
   });
