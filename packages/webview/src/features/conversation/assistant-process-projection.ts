@@ -150,7 +150,7 @@ export function appendAssistantMessageEntries({
 
   flushContent(message.content.length);
 
-  if (message.errorMessage && message.stopReason !== 'aborted') {
+  if (message.errorMessage && message.stopReason !== 'aborted' && message.stopReason !== 'error') {
     appendProcessActivity(turn, 'status', `${item.key}:status-phase`, {
       type: 'status',
       key: `${item.key}:assistant-error`,
@@ -286,11 +286,11 @@ function resolveAssistantTurnSummary(
     };
   }
 
-  if (!processes.some((entry) => hasVisibleProcessContent(entry.phases))) return undefined;
-
   if (turn.stopReason === 'error' || processes.some((entry) => entry.summary.status === 'failed')) {
     return { status: 'failed', label: '处理失败', running: false, tone: 'error' };
   }
+
+  if (!processes.some((entry) => hasVisibleProcessContent(entry.phases))) return undefined;
 
   if (
     turn.stopReason === 'aborted' ||

@@ -960,8 +960,8 @@ describe('ChatApp', () => {
         },
       });
     });
-    expect(screen.getByText('压缩中')).toBeInTheDocument();
-    expect(screen.getByText('上下文溢出恢复')).toBeInTheDocument();
+    expect(screen.getByText('正在压缩上下文')).toBeInTheDocument();
+    expect(screen.queryByText('上下文溢出恢复')).not.toBeInTheDocument();
 
     act(() => {
       routeExtensionMessage({
@@ -970,7 +970,7 @@ describe('ChatApp', () => {
         busyState: { kind: 'idle', cancellable: false },
       });
     });
-    expect(screen.queryByText('压缩中')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在压缩上下文')).not.toBeInTheDocument();
   });
 
   it('sends current session messages with composer images', () => {

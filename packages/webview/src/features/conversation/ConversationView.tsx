@@ -3,8 +3,11 @@
 // ============================================================
 
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import type { ReactElement } from 'react';
 import {
+  Archive,
   ArrowDown,
+  CircleAlert,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -33,6 +36,7 @@ import {
   createConversationRowsProjector,
   type AssistantContentEntry,
   type AssistantConversationRow,
+  type AssistantOutcomeConversationRow,
   type AssistantVisibleContent,
   type ConversationRow,
   type SystemConversationRow,
@@ -251,13 +255,6 @@ function RuntimeInlineStatus({ busyState }: { busyState: ScoutBusyState }) {
 function getRuntimeInlineDisplay(
   busyState: ScoutBusyState,
 ): { label: string; detail: string } | null {
-  if (busyState.kind === 'compaction') {
-    return {
-      label: '压缩中',
-      detail: formatCompactionReason(busyState.reason),
-    };
-  }
-
   if (busyState.kind === 'retry') {
     const attempt =
       busyState.attempt !== undefined && busyState.maxAttempts !== undefined
@@ -272,18 +269,8 @@ function getRuntimeInlineDisplay(
   return null;
 }
 
-function formatCompactionReason(reason: string | undefined): string {
-  if (reason === 'manual') return '手动';
-  if (reason === 'threshold') return '上下文接近上限';
-  if (reason === 'overflow') return '上下文溢出恢复';
-  return reason ?? '';
-}
 
 function getRuntimeStatusKey(busyState: ScoutBusyState): string {
-  if (busyState.kind === 'compaction') {
-    return `compaction:${busyState.reason ?? ''}`;
-  }
-
   if (busyState.kind === 'retry') {
     return [
       'retry',
@@ -311,10 +298,9 @@ function ConversationRowItem({
     return <AssistantTurn expansionScope={expansionScope} row={row} />;
   }
 
-  if (row.type === 'manual_abort') {
-    return <ManualAbortNotice label={row.label} />;
+  if (row.type === 'assistant_outcome') {
+    return <AssistantOutcomeRow row={row} />;
   }
-
   return <SystemBlock row={row} />;
 }
 
@@ -332,15 +318,94 @@ const UserMessage = memo(function UserMessage({
   );
 });
 
-function ManualAbortNotice({ label }: { label: string }) {
+interface AssistantOutcomeRenderer {
+  render: (row: AssistantOutcomeConversationRow) => ReactElement;
+}
+
+// 把需要独立视觉策略的 assistant outcome 放在这里；新增 kind 时仅接入终止结果或压缩分隔提示，过程明细继续留在 process/tool 投影中。
+const ASSISTANT_OUTCOME_RENDERERS: Record<
+  AssistantOutcomeConversationRow['kind'],
+  AssistantOutcomeRenderer
+> = {
+  aborted: { render: renderAssistantAbortedOutcomeRow },
+  compacted: { render: renderAssistantCompactedOutcomeRow },
+  compacting: { render: renderAssistantCompactingOutcomeRow },
+  error: { render: renderAssistantErrorOutcomeRow },
+};
+
+function AssistantOutcomeRow({ row }: { row: AssistantOutcomeConversationRow }) {
+  return ASSISTANT_OUTCOME_RENDERERS[row.kind].render(row);
+}
+
+function renderAssistantAbortedOutcomeRow(row: AssistantOutcomeConversationRow): ReactElement {
   return (
     <article
       className="border-border/70 flex w-full max-w-full min-w-0 justify-end border-b pb-2"
+      data-assistant-outcome-kind={row.kind}
       data-manual-abort-notice="true"
     >
       <span className="text-muted-foreground max-w-[77%] min-w-0 text-right text-xs leading-5 [overflow-wrap:anywhere] break-words">
-        {label}
+        {row.text}
       </span>
+    </article>
+  );
+}
+
+function renderAssistantCompactingOutcomeRow(row: AssistantOutcomeConversationRow): ReactElement {
+  return (
+    <article className="max-w-full min-w-0 px-1 py-2.5" data-assistant-outcome-kind={row.kind}>
+      <AssistantOutcomeDivider row={row} />
+    </article>
+  );
+}
+
+function renderAssistantCompactedOutcomeRow(row: AssistantOutcomeConversationRow): ReactElement {
+  if (row.kind !== 'compacted') return renderAssistantCompactingOutcomeRow(row);
+  const markdown = row.markdown.trim();
+
+  return (
+    <article
+      className="flex max-w-full min-w-0 flex-col gap-2 px-1 py-2.5"
+      data-assistant-outcome-kind={row.kind}
+    >
+      <AssistantOutcomeDivider row={row} icon={<Archive className="size-3.5 shrink-0" />} />
+      {markdown ? (
+        <MarkdownContent className="text-foreground/90 text-[13px] leading-5">
+          {row.markdown}
+        </MarkdownContent>
+      ) : null}
+    </article>
+  );
+}
+
+function AssistantOutcomeDivider({
+  row,
+  icon,
+}: {
+  row: AssistantOutcomeConversationRow;
+  icon?: ReactElement;
+}): ReactElement {
+  return (
+    <div className="text-muted-foreground flex max-w-full min-w-0 items-center gap-3 text-center">
+      <span className="bg-border/80 h-px min-w-0 flex-1" />
+      <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 text-[13px] leading-5 font-medium">
+        {icon}
+        <span className="min-w-0 truncate">{row.text}</span>
+      </span>
+      <span className="bg-border/80 h-px min-w-0 flex-1" />
+    </div>
+  );
+}
+
+function renderAssistantErrorOutcomeRow(row: AssistantOutcomeConversationRow): ReactElement {
+  return (
+    <article
+      className="border-border/70 text-muted-foreground flex w-full max-w-full min-w-0 items-center gap-2 rounded-2xl border px-3 py-2.5 text-xs leading-5 [overflow-wrap:anywhere] break-words"
+      data-assistant-error-notice="true"
+      data-assistant-outcome-kind={row.kind}
+    >
+      <CircleAlert className="size-3.5 shrink-0" />
+      <span className="min-w-0 flex-1">{row.text}</span>
     </article>
   );
 }

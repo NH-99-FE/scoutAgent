@@ -6,7 +6,7 @@
 
 - `busyState` 是宿主全局运行态，只表达 `idle / agent / retry / compaction`。
 - assistant process 是 webview 内部投影，用来展示本轮 assistant 的过程状态。
-- `正在重试`、`压缩中` 属于全局 runtime 状态，只在底部 inline 展示，不混入 assistant process。
+- `正在重试` 属于全局 runtime 状态，只在底部 inline 展示；压缩开始/完成作为 assistant outcome 分隔提示展示，不混入 assistant process。
 
 ## 文案语义
 

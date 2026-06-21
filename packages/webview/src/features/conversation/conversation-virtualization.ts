@@ -20,7 +20,12 @@ export function shouldVirtualizeConversationRows(rowCount: number): boolean {
 export function estimateConversationRowSize(row: ConversationRow | undefined): number {
   if (!row) return 120;
   if (row.type === 'user') return 64;
-  if (row.type === 'system' || row.type === 'manual_abort') return 72;
+  if (row.type === 'assistant_outcome') {
+    if (row.kind === 'error') return 120;
+    if (row.kind === 'compacted') return Math.min(360, 96 + Math.ceil(row.markdown.length / 80) * 24);
+    return 72;
+  }
+  if (row.type === 'system') return 120;
   return row.isStreaming ? 260 : 180;
 }
 

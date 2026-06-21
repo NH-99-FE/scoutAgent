@@ -23,7 +23,7 @@ export type AssistantVisibleContent = ScoutTextContent | ScoutImageContent;
 export type ConversationRow =
   | UserConversationRow
   | AssistantConversationRow
-  | ManualAbortConversationRow
+  | AssistantOutcomeConversationRow
   | SystemConversationRow;
 
 export interface UserConversationRow {
@@ -43,10 +43,25 @@ export interface AssistantConversationRow {
   isStreaming: boolean;
 }
 
-export interface ManualAbortConversationRow {
-  type: 'manual_abort';
+export type AssistantOutcomeKind = 'aborted' | 'error' | 'compacting' | 'compacted';
+
+export type AssistantOutcomeConversationRow =
+  | AssistantSimpleOutcomeConversationRow
+  | AssistantCompactedOutcomeConversationRow;
+
+export interface AssistantSimpleOutcomeConversationRow {
+  type: 'assistant_outcome';
   key: string;
-  label: string;
+  kind: Exclude<AssistantOutcomeKind, 'compacted'>;
+  text: string;
+}
+
+export interface AssistantCompactedOutcomeConversationRow {
+  type: 'assistant_outcome';
+  key: string;
+  kind: 'compacted';
+  text: string;
+  markdown: string;
 }
 
 export interface AssistantTurnSummary {

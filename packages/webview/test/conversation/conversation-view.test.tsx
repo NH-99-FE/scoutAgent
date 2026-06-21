@@ -503,7 +503,7 @@ describe('ConversationView', () => {
     expect(inlineCode).not.toHaveClass('whitespace-pre');
   });
 
-  it('renders compaction and retry status inline at the bottom of the conversation', () => {
+  it('renders compaction as an outcome and retry status inline at the bottom', () => {
     const items: ConversationItem[] = [
       {
         key: 'user-1',
@@ -525,11 +525,12 @@ describe('ConversationView', () => {
       items,
     });
 
-    expect(screen.getByText('压缩中')).toBeInTheDocument();
-    expect(screen.getByText('上下文溢出恢复')).toBeInTheDocument();
+    expect(screen.getByText('正在压缩上下文')).toBeInTheDocument();
+    expect(screen.queryByText('上下文溢出恢复')).not.toBeInTheDocument();
     expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
-    expect(container.querySelector('[data-runtime-inline-status="compaction"]')).toBeTruthy();
+    expect(container.querySelector('[data-assistant-outcome-kind="compacting"]')).toBeTruthy();
+    expect(container.querySelector('[data-runtime-inline-status="compaction"]')).toBeNull();
 
     rerender(
       <ConversationView
@@ -856,8 +857,29 @@ describe('ConversationView', () => {
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it('renders compacted summary markdown under the outcome divider', () => {
+    const { container } = renderConversation({
+      items: [
+        {
+          key: 'compaction-1',
+          message: {
+            role: 'compactionSummary',
+            summary: '## Summary\n\n- **Kept** important context',
+            tokensBefore: 1234,
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    const outcome = container.querySelector('[data-assistant-outcome-kind="compacted"]');
+    expect(screen.getByText('上下文已压缩')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Summary' })).toBeInTheDocument();
+    expect(screen.getByText('Kept')).toBeInTheDocument();
+    expect(outcome?.querySelector('[data-scout-markdown-content="true"]')).toBeTruthy();
+  });
   it('shows failed turns only for assistant error stop reasons', () => {
-    renderConversation({
+    const { container } = renderConversation({
       items: [
         {
           key: 'assistant-1',
@@ -873,7 +895,9 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByRole('button', { name: /收起回复 处理失败/ })).toBeInTheDocument();
-    expect(screen.getByText('Provider request failed')).toBeInTheDocument();
+    expect(container.querySelector('[data-assistant-error-notice="true"]')).toHaveTextContent(
+      'Provider request failed',
+    );
   });
 
   it('keeps status errors inside a completed turn when the assistant did not fail', () => {
@@ -894,6 +918,80 @@ describe('ConversationView', () => {
     expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
     expect(screen.getByText('已经给出可用结果')).toBeInTheDocument();
     expect(screen.getByText('某个内部状态需要注意')).toBeInTheDocument();
+  });
+
+  it('does not tint successful process history red when the assistant fails later', () => {
+    const errorMessage =
+      '403 The free tier of the model has been exhausted. Please disable free tier only mode.';
+
+    const { container } = renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              { type: 'text', text: '先检查最后一章。' },
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'read',
+                arguments: { path: 'chapter.md' },
+              },
+              { type: 'text', text: '我会继续润色结尾。' },
+              {
+                type: 'toolCall',
+                id: 'tool-2',
+                name: 'edit',
+                arguments: { path: 'chapter.md' },
+              },
+            ],
+            stopReason: 'error',
+            errorMessage,
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'read',
+          args: { path: 'chapter.md' },
+          status: 'done',
+          result: {
+            content: [{ type: 'text', text: 'chapter content' }],
+          },
+          isError: false,
+        },
+        'tool-2': {
+          toolCallId: 'tool-2',
+          toolName: 'edit',
+          args: { path: 'chapter.md' },
+          status: 'done',
+          result: {
+            content: [{ type: 'text', text: 'edit complete' }],
+          },
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: /收起回复 处理失败/ })).toHaveClass(
+      'text-destructive',
+    );
+    const errorNotice = container.querySelector('[data-assistant-error-notice="true"]');
+    const assistantTurn = container.querySelector('.scout-assistant-turn');
+    expect(errorNotice).toHaveTextContent(errorMessage);
+    expect(errorNotice).not.toHaveClass('text-destructive');
+    expect(screen.getByText(errorMessage).closest('[data-assistant-process-phase]')).toBeNull();
+    expect(screen.getByText(errorMessage).closest('.text-destructive')).toBeNull();
+    expect(
+      assistantTurn &&
+        errorNotice &&
+        (assistantTurn.compareDocumentPosition(errorNotice) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(screen.getByText('已运行 读取 chapter.md').closest('.text-destructive')).toBeNull();
+    expect(screen.getByText('已运行 编辑 chapter.md').closest('.text-destructive')).toBeNull();
   });
 
   it('respects manual process expansion across streaming updates', () => {
@@ -2708,6 +2806,88 @@ describe('conversation rows projector', () => {
   });
 });
 describe('buildConversationRows', () => {
+  it('projects assistant terminal outcomes by kind', () => {
+    const abortedRows = buildConversationRows({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        {
+          key: 'assistant-aborted',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'aborted',
+            errorMessage: 'Request was aborted',
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+    const errorRows = buildConversationRows({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        {
+          key: 'assistant-error',
+          message: {
+            role: 'assistant',
+            content: [],
+            stopReason: 'error',
+            errorMessage: 'Provider request failed',
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    expect(abortedRows.at(-1)).toMatchObject({
+      type: 'assistant_outcome',
+      kind: 'aborted',
+      text: '你停止了会话',
+    });
+    expect(errorRows.at(-1)).toMatchObject({
+      type: 'assistant_outcome',
+      kind: 'error',
+      text: 'Provider request failed',
+    });
+
+    const compactingRows = buildConversationRows({
+      isStreaming: true,
+      busyState: { kind: 'compaction', label: 'Compacting', cancellable: true, reason: 'manual' },
+      toolExecutionsById: {},
+      items: [],
+    });
+    const compactedRows = buildConversationRows({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        {
+          key: 'compaction-1',
+          message: {
+            role: 'compactionSummary',
+            summary: 'Compressed context',
+            tokensBefore: 1234,
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    expect(compactingRows.at(-1)).toMatchObject({
+      type: 'assistant_outcome',
+      kind: 'compacting',
+      text: '正在压缩上下文',
+    });
+    expect(compactedRows.at(-1)).toMatchObject({
+      type: 'assistant_outcome',
+      kind: 'compacted',
+      text: '上下文已压缩',
+      markdown: 'Compressed context',
+    });
+  });
   it('segments assistant process entries around interleaved text', () => {
     const rows = buildConversationRows({
       isStreaming: true,

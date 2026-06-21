@@ -13,12 +13,12 @@ import {
   appendRuntimeActivityRow,
   createAssistantTurnBuilder,
   finalizeAssistantTurn,
-  type AssistantTurnBuilder,
 } from './assistant-process-projection';
 import type {
+  AssistantOutcomeConversationRow,
+  AssistantOutcomeKind,
   BuildConversationRowsOptions,
   ConversationRow,
-  ManualAbortConversationRow,
   SystemConversationRow,
 } from './conversation-row-types';
 import {
@@ -32,6 +32,7 @@ import { contentToText } from './tool-display';
 export type {
   AssistantContentEntry,
   AssistantConversationRow,
+  AssistantOutcomeConversationRow,
   AssistantProcessActivity,
   AssistantProcessEntry,
   AssistantProcessPhase,
@@ -46,7 +47,6 @@ export type {
   AssistantVisibleContent,
   BuildConversationRowsOptions,
   ConversationRow,
-  ManualAbortConversationRow,
   SystemConversationRow,
   UserConversationRow,
 } from './conversation-row-types';
@@ -170,6 +170,16 @@ class IncrementalConversationRowsProjector implements ConversationRowsProjector 
             };
       nextSegmentsByKey.set(segment.key, projected);
       rows.push(...projected.rows);
+    }
+
+    if (options.busyState.kind === 'compaction') {
+      rows.push(
+        createAssistantOutcomeRow({
+          key: `runtime:compaction:${options.busyState.reason ?? ''}`,
+          kind: 'compacting',
+          text: '正在压缩上下文',
+        }),
+      );
     }
 
     this.projectedSegmentsByKey = nextSegmentsByKey;
@@ -488,7 +498,7 @@ function projectSegment(
   }
 
   if (segment.kind === 'system') {
-    return [createSystemRow(segment.item)];
+    return projectSystemSegment(segment);
   }
 
   if (segment.kind === 'runtime') {
@@ -524,7 +534,22 @@ function projectAssistantSegment(
   assistantRow.isLatestAssistant = segment.isLatestAssistant;
   const rows: ConversationRow[] = [assistantRow];
   if (turn.stopReason === 'aborted') {
-    rows.push(createManualAbortRow(turn));
+    rows.push(
+      createAssistantOutcomeRow({
+        key: `${turn.key}:outcome:aborted`,
+        kind: 'aborted',
+        text: '你停止了会话',
+      }),
+    );
+  }
+  if (turn.stopReason === 'error' && turn.errorMessage?.trim()) {
+    rows.push(
+      createAssistantOutcomeRow({
+        key: `${turn.key}:outcome:error`,
+        kind: 'error',
+        text: turn.errorMessage?.trim() ?? '',
+      }),
+    );
   }
   return rows;
 }
@@ -557,11 +582,29 @@ function projectRuntimeSegment(segment: RuntimeSegmentPlan): ConversationRow[] {
   return rows;
 }
 
-function createManualAbortRow(turn: AssistantTurnBuilder): ManualAbortConversationRow {
+function projectSystemSegment(segment: SystemSegmentPlan): ConversationRow[] {
+  if (segment.item.message.role === 'compactionSummary') {
+    return [
+      createAssistantOutcomeRow({
+        key: `${segment.key}:outcome:compacted`,
+        kind: 'compacted',
+        text: '上下文已压缩',
+        markdown: segment.item.message.summary,
+      }),
+    ];
+  }
+
+  return [createSystemRow(segment.item)];
+}
+
+type AssistantOutcomeRowInput =
+  | { key: string; kind: Exclude<AssistantOutcomeKind, 'compacted'>; text: string }
+  | { key: string; kind: 'compacted'; text: string; markdown: string };
+
+function createAssistantOutcomeRow(row: AssistantOutcomeRowInput): AssistantOutcomeConversationRow {
   return {
-    type: 'manual_abort',
-    key: `${turn.key}:manual-abort`,
-    label: '你停止了会话',
+    type: 'assistant_outcome',
+    ...row,
   };
 }
 
@@ -590,16 +633,6 @@ function createSystemRow(item: ConversationItem): SystemConversationRow {
     };
   }
 
-  if (message.role === 'compactionSummary') {
-    return {
-      type: 'system',
-      key: item.key,
-      title: '压缩摘要',
-      text: message.summary,
-      tone: 'default',
-      defaultOpen: false,
-    };
-  }
 
   if (message.role === 'custom') {
     return {

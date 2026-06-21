@@ -86,10 +86,7 @@ export function AssistantProcessBlock({
   if (entry.displayMode === 'live' && hasProcessContent) {
     return (
       <div
-        className={cn(
-          'text-muted-foreground/70 py-0.5 text-xs leading-5',
-          tone === 'error' && 'text-destructive',
-        )}
+        className="text-muted-foreground/70 py-0.5 text-xs leading-5"
       >
         <ProcessPhaseList
           expansionScope={expansionScope}
@@ -107,10 +104,7 @@ export function AssistantProcessBlock({
       if (!summary.running) return null;
       return (
         <div
-          className={cn(
-            'text-muted-foreground/70 py-0.5 text-xs leading-5',
-            tone === 'error' && 'text-destructive',
-          )}
+          className="text-muted-foreground/70 py-0.5 text-xs leading-5"
         >
           <InlineStatus running={summary.running} text={summary.label} tone={tone} />
         </div>
@@ -119,10 +113,7 @@ export function AssistantProcessBlock({
     if (suppressLifecycleOnlyProcess && !summary.running && !hasToolProcessContent) return null;
     return (
       <div
-        className={cn(
-          'text-muted-foreground/70 py-0.5 text-xs leading-5',
-          tone === 'error' && 'text-destructive',
-        )}
+        className="text-muted-foreground/70 py-0.5 text-xs leading-5"
       >
         <ProcessPhaseList
           expansionScope={expansionScope}
@@ -136,10 +127,7 @@ export function AssistantProcessBlock({
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange}>
       <div
-        className={cn(
-          'text-muted-foreground/70 py-0.5 text-xs leading-5',
-          tone === 'error' && 'text-destructive',
-        )}
+        className="text-muted-foreground/70 py-0.5 text-xs leading-5"
       >
         {leadingThinkingPhases.length > 0 ? (
           <ProcessPhaseList
@@ -154,7 +142,6 @@ export function AssistantProcessBlock({
           className={cn(
             'group/process-trigger -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
             entry.displayMode === 'compact' && 'w-full',
-            tone === 'error' && 'text-destructive',
           )}
           disabled={!hasDetailProcessContent}
           type="button"
@@ -421,6 +408,7 @@ function ToolActivitySummary({
       <span
         className={cn(
           'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
+          display.status === 'error' && 'text-destructive',
           (display.status === 'pending' || display.status === 'running') &&
             'scout-running-text-shimmer',
         )}
