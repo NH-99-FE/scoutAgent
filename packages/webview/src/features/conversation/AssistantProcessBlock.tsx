@@ -101,6 +101,7 @@ export function AssistantProcessBlock({
   }
 
   if (!hasActivitySummary) {
+    const hasToolProcessContent = hasToolActivity(entry.phases);
     if (!hasProcessContent) {
       if (suppressLifecycleOnlyProcess) return null;
       if (!summary.running) return null;
@@ -115,7 +116,7 @@ export function AssistantProcessBlock({
         </div>
       );
     }
-    if (suppressLifecycleOnlyProcess && !summary.running) return null;
+    if (suppressLifecycleOnlyProcess && !summary.running && !hasToolProcessContent) return null;
     return (
       <div
         className={cn(
@@ -798,6 +799,10 @@ function hasVisibleActivity(activity: AssistantProcessActivity): boolean {
 
 function hasPhaseContent(phase: AssistantProcessPhase): boolean {
   return phase.activities.some(hasVisibleActivity);
+}
+
+function hasToolActivity(phases: AssistantProcessPhase[]): boolean {
+  return phases.some((phase) => phase.activities.some((activity) => activity.type === 'tool'));
 }
 
 function formatToolDetailAriaLabel(open: boolean, display: ToolDisplayResult): string {

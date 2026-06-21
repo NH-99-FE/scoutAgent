@@ -475,16 +475,7 @@ function resolvePrimaryActivitySummary(
     { icon: AssistantProcessActivitySummary['items'][number]['icon']; count: number }
   >,
 ): AssistantProcessActivitySummary['primary'] {
-  if (tools.length === 0) return undefined;
-  if (tools.length === 1) {
-    const [tool] = tools;
-    return {
-      key: tool.key,
-      icon: tool.icon,
-      label: tool.label,
-      count: 1,
-    };
-  }
+  if (tools.length < 2) return undefined;
   if (counts.size === 1) {
     const [kind, item] = Array.from(counts.entries())[0];
     return {

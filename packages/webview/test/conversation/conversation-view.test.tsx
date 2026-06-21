@@ -300,15 +300,13 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('文件读完了，继续分析')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
+    ).not.toBeInTheDocument();
     const thinking = screen.getByText('分析当前布局');
-    const processSummary = screen.getByRole('button', {
-      name: /展开过程 正在运行 读取 README\.md/,
-    });
-    expect(
-      thinking.compareDocumentPosition(processSummary) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    const runningTool = screen.getByText('正在运行 读取 README.md');
+    expect(thinking.compareDocumentPosition(runningTool) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
   });
 
   it('keeps the assistant turn marked as processing after work content starts streaming', () => {
@@ -345,9 +343,10 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('正在处理')).toBeInTheDocument();
     expect(screen.getByText('读完了，继续整理结论')).toBeInTheDocument();
+    expect(screen.getByText('正在运行 读取 README.md')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
   });
 
@@ -978,14 +977,10 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('准备读取文件')).toBeInTheDocument();
+    expect(screen.getByText('已运行 读取 README.md')).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }));
-
-    expect(screen.getAllByText('已运行 读取 README.md').length).toBeGreaterThan(0);
+      screen.queryByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /展开工具输出 read/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/"path": "README.md"/)).not.toBeInTheDocument();
@@ -1023,8 +1018,10 @@ describe('ConversationView', () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 读取 missing\.md/ }));
-    expect(screen.getAllByText('运行失败 读取 missing.md').length).toBeGreaterThan(0);
+    expect(screen.getByText('运行失败 读取 missing.md')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 运行失败 读取 missing\.md/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/ENOENT/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 read/ }));
@@ -1228,10 +1225,10 @@ describe('ConversationView', () => {
       ],
     });
 
-    fireEvent.click(
-      screen.getByRole('button', { name: /展开过程 运行失败 写入 src\/generated\.ts/ }),
-    );
-    expect(screen.getAllByText('运行失败 写入 src/generated.ts').length).toBeGreaterThan(0);
+    expect(screen.getByText('运行失败 写入 src/generated.ts')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 运行失败 写入 src\/generated\.ts/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('+2')).toBeInTheDocument();
     expect(screen.queryByText('-0')).not.toBeInTheDocument();
     expect(screen.queryByText(/EACCES/)).not.toBeInTheDocument();
@@ -1391,7 +1388,7 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 printf markdown/ }));
+    expect(screen.getByText('已运行 printf markdown')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
 
     expect(screen.getByText(/# 不是标题/)).toBeInTheDocument();
@@ -1430,9 +1427,10 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 pnpm test/ }));
-
-    expect(screen.getAllByText('已运行 pnpm test').length).toBeGreaterThan(0);
+    expect(screen.getByText('已运行 pnpm test')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 已运行 pnpm test/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('does not force scroll to bottom after the user scrolls away from the tail', () => {
@@ -1976,11 +1974,13 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByRole('button', { name: /收起回复 已停止/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /收起过程 已停止 搜索 hello/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /收起过程 已停止 搜索 hello/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('正在运行 搜索 hello')).not.toBeInTheDocument();
     expect(screen.getByText('你停止了会话')).toBeInTheDocument();
     expect(screen.queryByText('Request was aborted')).not.toBeInTheDocument();
-    expect(screen.getAllByText('已停止 搜索 hello').length).toBeGreaterThan(0);
+    expect(screen.getByText('已停止 搜索 hello')).toBeInTheDocument();
   });
 
   it('does not show pending tool calls as running after the turn fails before execution', () => {
@@ -2008,10 +2008,10 @@ describe('ConversationView', () => {
 
     expect(screen.getByRole('button', { name: /收起回复 处理失败/ })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: /收起过程 运行失败 搜索 hello/ }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /收起过程 运行失败 搜索 hello/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('正在运行 搜索 hello')).not.toBeInTheDocument();
-    expect(screen.getAllByText('运行失败 搜索 hello').length).toBeGreaterThan(0);
+    expect(screen.getByText('运行失败 搜索 hello')).toBeInTheDocument();
   });
 
   it('renders edit previews with change counts and an expandable diff', () => {
@@ -2306,21 +2306,17 @@ describe('ConversationView', () => {
     });
 
     expect(
-      screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText('根据文件内容继续分析')).toBeInTheDocument();
     const thinking = screen.getByText('先定位文件');
-    const processSummary = screen.getByRole('button', {
-      name: /展开过程 已运行 读取 README\.md/,
-    });
-    expect(
-      thinking.compareDocumentPosition(processSummary) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 已运行 读取 README\.md/ }));
+    const readActivity = screen.getByText('已运行 读取 README.md');
+    expect(thinking.compareDocumentPosition(readActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
 
     expect(screen.getAllByText('先定位文件')).toHaveLength(1);
-    expect(screen.getAllByText('已运行 读取 README.md').length).toBeGreaterThan(0);
+    expect(screen.getByText('已运行 读取 README.md')).toBeInTheDocument();
     expect(
       screen.getByText('先定位文件').closest('[data-assistant-process-phase]'),
     ).toHaveAttribute('data-assistant-process-phase', 'model_responding');
@@ -2363,24 +2359,19 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ })).toBeInTheDocument();
-    expect(screen.queryByText('测试失败')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ }));
-    expect(screen.getAllByText('运行失败 pnpm test').length).toBeGreaterThan(0);
+    expect(screen.getByText('运行失败 pnpm test')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 运行失败 pnpm test/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('测试失败')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
     expect(screen.getByText(/测试失败/)).toBeInTheDocument();
     expect(screen.getByText('× 失败')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /收起过程 运行失败 pnpm test/ }));
+    fireEvent.click(screen.getByRole('button', { name: /收起工具输出 bash/ }));
     expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ }));
-    expect(screen.getAllByText('运行失败 pnpm test').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /展开工具输出 bash/ })).toBeInTheDocument();
-    expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
   });
 
   it('summarizes list tools with the shared folder display category', () => {
@@ -2416,7 +2407,10 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByRole('button', { name: /展开过程 已运行 列出 src/ })).toBeInTheDocument();
+    expect(screen.getByText('已运行 列出 src')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 已运行 列出 src/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('处理了 1 项')).not.toBeInTheDocument();
   });
 
@@ -2551,7 +2545,6 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ }));
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
     expect(screen.getByText('最终答案内容')).toBeInTheDocument();
     expect(screen.getByText(/测试失败/)).toBeInTheDocument();
@@ -2566,15 +2559,13 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByRole('button', { name: /展开回复 已处理/ })).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /展开过程 运行失败 pnpm test/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开工具输出 bash/ })).not.toBeInTheDocument();
     expect(screen.getByText('最终答案内容')).toBeInTheDocument();
     expect(screen.queryByText('运行失败 pnpm test')).not.toBeInTheDocument();
     expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开回复 已处理/ }));
-    expect(screen.getByRole('button', { name: /展开过程 运行失败 pnpm test/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开工具输出 bash/ })).toBeInTheDocument();
     expect(screen.getByText('最终答案内容')).toBeInTheDocument();
     expect(screen.queryByText(/测试失败/)).not.toBeInTheDocument();
   });
@@ -2629,7 +2620,10 @@ describe('ConversationView', () => {
     );
 
     expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /展开过程 已运行 pnpm test/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开工具输出 bash/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开过程 已运行 pnpm test/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('falls back to a system block for orphan tool results', () => {
