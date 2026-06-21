@@ -91,16 +91,20 @@ function getStateMessageKeys(messages: ScoutMessage[]): string[] {
 function createConversationItems(
   messages: ScoutMessage[],
   messageKeys: string[],
+  previousItems: ConversationItem[] = [],
 ): ConversationItem[] {
-  return messages.map((message, index) => ({
-    key: messageKeys[index] ?? message.entryId ?? `state:${index}`,
-    message,
-  }));
+  return messages.map((message, index) => {
+    const key = messageKeys[index] ?? message.entryId ?? `state:${index}`;
+    const previous = previousItems[index];
+    if (previous?.key === key && previous.message === message) return previous;
+    return { key, message };
+  });
 }
 
 function upsertProtocolMessage(
   messages: ScoutMessage[],
   messageKeys: string[],
+  conversationItems: ConversationItem[],
   messageId: string,
   message: ScoutMessage,
 ): Pick<ConversationStore, 'messages' | 'messageKeys' | 'conversationItems'> {
@@ -111,7 +115,7 @@ function upsertProtocolMessage(
     return {
       messages: nextMessages,
       messageKeys: nextMessageKeys,
-      conversationItems: createConversationItems(nextMessages, nextMessageKeys),
+      conversationItems: createConversationItems(nextMessages, nextMessageKeys, conversationItems),
     };
   }
 
@@ -120,7 +124,7 @@ function upsertProtocolMessage(
   return {
     messages: nextMessages,
     messageKeys,
-    conversationItems: createConversationItems(nextMessages, messageKeys),
+    conversationItems: createConversationItems(nextMessages, messageKeys, conversationItems),
   };
 }
 
@@ -175,6 +179,7 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           const nextMessages = upsertProtocolMessage(
             state.messages,
             state.messageKeys,
+            state.conversationItems,
             event.messageId,
             event.message,
           );

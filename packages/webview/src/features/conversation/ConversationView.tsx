@@ -2,7 +2,7 @@
 // Conversation View — 会话 turn 与 assistant 过程渲染
 // ============================================================
 
-import { useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ChevronDown,
@@ -30,7 +30,7 @@ import type {
   ToolExecutionState,
 } from '@/store/conversation-store';
 import {
-  buildConversationRows,
+  createConversationRowsProjector,
   type AssistantContentEntry,
   type AssistantConversationRow,
   type AssistantVisibleContent,
@@ -39,6 +39,10 @@ import {
 } from './conversation-view-model';
 import { AssistantProcessBlock } from './AssistantProcessBlock';
 import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
+import {
+  useConversationVirtualRows,
+  type ConversationRowVirtualizer,
+} from './use-conversation-virtual-rows';
 import { MarkdownContent } from './MarkdownContent';
 import { contentToText } from './tool-display';
 import { useConversationAutoScroll } from './use-conversation-auto-scroll';
@@ -66,28 +70,35 @@ export function ConversationView({
   className,
   showScrollToBottomButton = false,
 }: ConversationViewProps) {
+  const projector = useMemo(() => createConversationRowsProjector(), []);
   const rows = useMemo(
     () =>
-      buildConversationRows({
+      projector.project({
         items,
         isStreaming,
         busyState,
         toolExecutionsById,
         toolPreviewsById,
       }),
-    [items, isStreaming, busyState, toolExecutionsById, toolPreviewsById],
+    [projector, items, isStreaming, busyState, toolExecutionsById, toolPreviewsById],
   );
-  const runtimeStatusKey = getRuntimeStatusKey(busyState);
-  const {
-    isScrollToBottomVisible,
-    scrollToBottom,
-    viewportHandlers,
-    viewportRef: scrollContainerRef,
-  } = useConversationAutoScroll({
-    contentKey: rows,
-    runtimeStatusKey,
-    showScrollToBottomButton,
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const virtualRows = useConversationVirtualRows({
+    isStreaming,
+    rows,
+    scrollContainerRef,
   });
+  const runtimeStatusKey = getRuntimeStatusKey(busyState);
+  const { isScrollToBottomVisible, scrollToBottom, viewportHandlers, viewportRef } =
+    useConversationAutoScroll({
+      contentKey: rows,
+      contentLayoutKey: virtualRows.scrollLayoutKey,
+      getScrollMetrics: virtualRows.getScrollMetrics,
+      runtimeStatusKey,
+      scrollToBottomOverride: virtualRows.scrollToBottomOverride,
+      showScrollToBottomButton,
+      viewportRef: scrollContainerRef,
+    });
 
   return (
     <div className={cn('relative min-h-0 w-full min-w-0 flex-1', className)}>
@@ -95,23 +106,97 @@ export function ConversationView({
         className="h-full min-h-0 w-full min-w-0"
         type="always"
         viewportClassName="scout-conversation-viewport"
-        viewportRef={scrollContainerRef}
+        viewportRef={viewportRef}
         viewportProps={{
           'aria-label': '会话滚动区域',
           ...viewportHandlers,
         }}
       >
-        <div className="scout-conversation-content flex w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2">
-          {rows.map((row) => (
-            <ConversationRowItem expansionScope={expansionScope} key={row.key} row={row} />
-          ))}
-          <RuntimeInlineStatus busyState={busyState} />
-          <div aria-hidden="true" className="scout-conversation-bottom-anchor h-px shrink-0" />
-        </div>
+        {virtualRows.enabled ? (
+          <VirtualConversationRows
+            busyState={busyState}
+            expansionScope={expansionScope}
+            rowVirtualizer={virtualRows.rowVirtualizer}
+            rows={rows}
+          />
+        ) : (
+          <StaticConversationRows
+            busyState={busyState}
+            expansionScope={expansionScope}
+            rows={rows}
+          />
+        )}
       </ScrollArea>
       {showScrollToBottomButton && isScrollToBottomVisible ? (
         <ScrollToBottomButton onClick={scrollToBottom} />
       ) : null}
+    </div>
+  );
+}
+
+function StaticConversationRows({
+  busyState,
+  expansionScope,
+  rows,
+}: {
+  busyState: ScoutBusyState;
+  expansionScope: string;
+  rows: ConversationRow[];
+}) {
+  return (
+    <div
+      className="scout-conversation-content flex w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2"
+      data-scout-conversation-virtualized="false"
+    >
+      {rows.map((row) => (
+        <ConversationRowItem expansionScope={expansionScope} key={row.key} row={row} />
+      ))}
+      <RuntimeInlineStatus busyState={busyState} />
+      <div aria-hidden="true" className="scout-conversation-bottom-anchor h-px shrink-0" />
+    </div>
+  );
+}
+
+function VirtualConversationRows({
+  busyState,
+  expansionScope,
+  rows,
+  rowVirtualizer,
+}: {
+  busyState: ScoutBusyState;
+  expansionScope: string;
+  rows: ConversationRow[];
+  rowVirtualizer: ConversationRowVirtualizer;
+}) {
+  return (
+    <div
+      className="scout-conversation-content w-full max-w-full min-w-0 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2"
+      data-scout-conversation-virtualized="true"
+    >
+      <div
+        className="relative w-full max-w-full min-w-0"
+        style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+      >
+        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+          const row = rows[virtualRow.index];
+          if (!row) return null;
+
+          return (
+            <div
+              className="absolute top-0 left-0 w-full max-w-full min-w-0 pb-3"
+              data-index={virtualRow.index}
+              data-scout-conversation-virtual-row="true"
+              key={virtualRow.key}
+              ref={rowVirtualizer.measureElement}
+              style={{ transform: `translateY(${virtualRow.start}px)` }}
+            >
+              <ConversationRowItem expansionScope={expansionScope} row={row} />
+            </div>
+          );
+        })}
+      </div>
+      <RuntimeInlineStatus busyState={busyState} />
+      <div aria-hidden="true" className="scout-conversation-bottom-anchor h-px shrink-0" />
     </div>
   );
 }
@@ -233,7 +318,11 @@ function ConversationRowItem({
   return <SystemBlock row={row} />;
 }
 
-function UserMessage({ message }: { message: Extract<ScoutMessage, { role: 'user' }> }) {
+const UserMessage = memo(function UserMessage({
+  message,
+}: {
+  message: Extract<ScoutMessage, { role: 'user' }>;
+}) {
   return (
     <article className="flex w-full max-w-full min-w-0 justify-end">
       <div className="scout-user-message bg-foreground/[0.06] max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
@@ -241,7 +330,7 @@ function UserMessage({ message }: { message: Extract<ScoutMessage, { role: 'user
       </div>
     </article>
   );
-}
+});
 
 function ManualAbortNotice({ label }: { label: string }) {
   return (
@@ -371,15 +460,22 @@ function AssistantTurnEntries({
   );
 }
 
-function AssistantContentSegment({ entry }: { entry: AssistantContentEntry }) {
+const AssistantContentSegment = memo(function AssistantContentSegment({
+  entry,
+}: {
+  entry: AssistantContentEntry;
+}) {
   return (
     <div className="scout-assistant-content-segment w-full max-w-full min-w-0">
       {entry.blocks.map((content, index) => (
-        <VisibleContentBlock content={content} key={`${entry.key}:${content.type}:${index}`} />
+        <MemoizedVisibleContentBlock
+          content={content}
+          key={`${entry.key}:${content.type}:${index}`}
+        />
       ))}
     </div>
   );
-}
+});
 
 function VisibleContentBlock({ content }: { content: AssistantVisibleContent }) {
   if (content.type === 'text') {
@@ -388,6 +484,11 @@ function VisibleContentBlock({ content }: { content: AssistantVisibleContent }) 
 
   return <ImageBlock content={content} />;
 }
+
+const MemoizedVisibleContentBlock = memo(
+  VisibleContentBlock,
+  (previous, next) => previous.content === next.content,
+);
 
 function ImageBlock({ content }: { content: Extract<ScoutContent, { type: 'image' }> }) {
   return (
@@ -399,7 +500,7 @@ function ImageBlock({ content }: { content: Extract<ScoutContent, { type: 'image
   );
 }
 
-function SystemBlock({ row }: { row: SystemConversationRow }) {
+const SystemBlock = memo(function SystemBlock({ row }: { row: SystemConversationRow }) {
   const [open, setOpen] = useState(row.defaultOpen);
   const hasText = row.text.trim().length > 0;
 
@@ -436,7 +537,7 @@ function SystemBlock({ row }: { row: SystemConversationRow }) {
       </article>
     </Collapsible>
   );
-}
+});
 
 function MessageActions({
   persistent,

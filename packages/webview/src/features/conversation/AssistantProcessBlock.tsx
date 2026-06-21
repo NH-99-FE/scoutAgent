@@ -2,7 +2,7 @@
 // Assistant Process Block — assistant 过程与工具活动渲染
 // ============================================================
 
-import { type CSSProperties, useCallback, useLayoutEffect, useRef } from 'react';
+import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -42,6 +42,8 @@ import type {
   WriteContentToolDisplayDetail,
 } from './tool-display';
 import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
+
+const TOOL_DETAIL_PREVIEW_LINE_LIMIT = 400;
 
 export function AssistantProcessBlock({
   entry,
@@ -476,11 +478,13 @@ function ToolDetailPanel({
 }
 
 function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
+  const lines = detail.previewError ? [] : detail.diffText.split('\n');
+  const { hiddenLineCount, isTruncated, setShowAll, visibleLines } = usePreviewLines(lines);
+
   if (detail.previewError) {
     return <FileEditPreviewErrorPanel message={detail.previewError} />;
   }
 
-  const lines = detail.diffText.split('\n');
   return (
     <div className="border-border/60 bg-muted/15 max-w-full min-w-0 overflow-hidden rounded-md border-l">
       <ScrollArea
@@ -490,9 +494,10 @@ function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
         viewportClassName="max-h-44 sm:max-h-56"
       >
         <pre className="max-w-full py-1 font-mono text-[12px] leading-5">
-          {lines.map((line, index) => (
+          {visibleLines.map((line, index) => (
             <span
               className="block min-h-5 max-w-full px-2.5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+              data-diff-line-content
               key={`${index}:${line.slice(0, 16)}`}
               style={getDiffLineStyle(line)}
             >
@@ -501,12 +506,20 @@ function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
           ))}
         </pre>
       </ScrollArea>
+      {isTruncated ? (
+        <ToolDetailLineLimitButton
+          hiddenLineCount={hiddenLineCount}
+          totalLineCount={lines.length}
+          onShowAll={() => setShowAll(true)}
+        />
+      ) : null}
     </div>
   );
 }
 
 function FileWriteContentPanel({ detail }: { detail: WriteContentToolDisplayDetail }) {
   const lines = detail.lines;
+  const { hiddenLineCount, isTruncated, setShowAll, visibleLines } = usePreviewLines(lines);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const shouldStickToBottomRef = useRef(true);
 
@@ -520,7 +533,7 @@ function FileWriteContentPanel({ detail }: { detail: WriteContentToolDisplayDeta
     const element = viewportRef.current;
     if (!element || !shouldStickToBottomRef.current) return;
     element.scrollTop = element.scrollHeight;
-  }, [detail.contentText, lines.length]);
+  }, [detail.contentText, visibleLines.length]);
 
   return (
     <div
@@ -533,39 +546,85 @@ function FileWriteContentPanel({ detail }: { detail: WriteContentToolDisplayDeta
         </pre>
       ) : null}
       {lines.length > 0 ? (
-        <ScrollArea
-          className="max-h-44 max-w-full min-w-0 sm:max-h-56"
-          scrollbars="vertical"
-          type="always"
-          viewportClassName="max-h-44 sm:max-h-56"
-          viewportProps={{ onScroll: updateStickiness }}
-          viewportRef={viewportRef}
-        >
-          <pre className="max-w-full py-1 font-mono text-[12px] leading-5">
-            {lines.map((line, index) => (
-              <span
-                className="grid min-h-5 max-w-full grid-cols-[2rem_minmax(0,1fr)]"
-                key={`${index}:${line.slice(0, 16)}`}
-              >
-                <span className="pr-1.5 text-right select-none" style={ADDED_TEXT_STYLE}>
-                  {index + 1}
-                </span>
+        <>
+          <ScrollArea
+            className="max-h-44 max-w-full min-w-0 sm:max-h-56"
+            scrollbars="vertical"
+            type="always"
+            viewportClassName="max-h-44 sm:max-h-56"
+            viewportProps={{ onScroll: updateStickiness }}
+            viewportRef={viewportRef}
+          >
+            <pre className="max-w-full py-1 font-mono text-[12px] leading-5">
+              {visibleLines.map((line, index) => (
                 <span
-                  className="text-foreground/85 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
-                  data-write-line-content
+                  className="grid min-h-5 max-w-full grid-cols-[2rem_minmax(0,1fr)]"
+                  key={`${index}:${line.slice(0, 16)}`}
                 >
-                  {line || ' '}
+                  <span className="pr-1.5 text-right select-none" style={ADDED_TEXT_STYLE}>
+                    {index + 1}
+                  </span>
+                  <span
+                    className="text-foreground/85 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+                    data-write-line-content
+                  >
+                    {line || ' '}
+                  </span>
                 </span>
-              </span>
-            ))}
-          </pre>
-        </ScrollArea>
+              ))}
+            </pre>
+          </ScrollArea>
+          {isTruncated ? (
+            <ToolDetailLineLimitButton
+              hiddenLineCount={hiddenLineCount}
+              totalLineCount={lines.length}
+              onShowAll={() => setShowAll(true)}
+            />
+          ) : null}
+        </>
       ) : (
         <div className="text-muted-foreground/75 border-border/40 border-t px-2.5 py-2 text-[12px]">
           等待内容
         </div>
       )}
     </div>
+  );
+}
+
+function usePreviewLines(lines: string[]): {
+  hiddenLineCount: number;
+  isTruncated: boolean;
+  setShowAll: (showAll: boolean) => void;
+  visibleLines: string[];
+} {
+  const [showAll, setShowAll] = useState(false);
+  const isTruncated = !showAll && lines.length > TOOL_DETAIL_PREVIEW_LINE_LIMIT;
+  return {
+    hiddenLineCount: isTruncated ? lines.length - TOOL_DETAIL_PREVIEW_LINE_LIMIT : 0,
+    isTruncated,
+    setShowAll,
+    visibleLines: isTruncated ? lines.slice(0, TOOL_DETAIL_PREVIEW_LINE_LIMIT) : lines,
+  };
+}
+
+function ToolDetailLineLimitButton({
+  hiddenLineCount,
+  onShowAll,
+  totalLineCount,
+}: {
+  hiddenLineCount: number;
+  onShowAll: () => void;
+  totalLineCount: number;
+}) {
+  return (
+    <button
+      className="text-muted-foreground hover:text-foreground border-border/40 flex w-full items-center justify-center border-t px-2.5 py-1.5 text-[11px] leading-4 transition-colors"
+      data-tool-detail-line-limit
+      type="button"
+      onClick={onShowAll}
+    >
+      显示全部 {totalLineCount} 行，已隐藏 {hiddenLineCount} 行
+    </button>
   );
 }
 

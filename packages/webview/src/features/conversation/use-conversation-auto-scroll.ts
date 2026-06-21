@@ -4,6 +4,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import type {
+  RefObject,
   TouchEvent,
   TouchEventHandler,
   UIEventHandler,
@@ -16,8 +17,12 @@ const SCROLLABLE_OVERFLOW_VALUES = new Set(['auto', 'scroll', 'overlay']);
 
 interface UseConversationAutoScrollOptions {
   contentKey: unknown;
+  contentLayoutKey?: unknown;
+  getScrollMetrics?: (element: HTMLElement) => ConversationScrollMetrics;
   runtimeStatusKey: string;
+  scrollToBottomOverride?: () => void;
   showScrollToBottomButton: boolean;
+  viewportRef?: RefObject<HTMLDivElement | null>;
 }
 
 interface ConversationViewportHandlers {
@@ -29,12 +34,31 @@ interface ConversationViewportHandlers {
   onWheel: WheelEventHandler<HTMLDivElement>;
 }
 
+export interface ConversationScrollMetrics {
+  clientHeight: number;
+  scrollHeight: number;
+  scrollTop: number;
+}
+
 export function useConversationAutoScroll({
   contentKey,
+  contentLayoutKey,
+  getScrollMetrics,
   runtimeStatusKey,
+  scrollToBottomOverride,
   showScrollToBottomButton,
+  viewportRef,
 }: UseConversationAutoScrollOptions) {
-  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const viewportElementRef = useRef<HTMLDivElement | null>(null);
+  const setViewportRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      viewportElementRef.current = element;
+      if (viewportRef) {
+        viewportRef.current = element;
+      }
+    },
+    [viewportRef],
+  );
   const shouldStickToBottomRef = useRef(true);
   const hasAutoScrolledRef = useRef(false);
   const lastTouchClientYRef = useRef<number | null>(null);
@@ -50,18 +74,22 @@ export function useConversationAutoScroll({
   }, []);
 
   const writeScrollToBottom = useCallback(() => {
-    const element = viewportRef.current;
+    const element = viewportElementRef.current;
     if (!element) return;
 
-    const top = getScrollBottomTop(element);
-    if (typeof element.scrollTo === 'function') {
-      element.scrollTo({ top, behavior: 'auto' });
+    if (scrollToBottomOverride) {
+      scrollToBottomOverride();
     } else {
-      element.scrollTop = top;
+      const top = getScrollBottomTop(element, getScrollMetrics);
+      if (typeof element.scrollTo === 'function') {
+        element.scrollTo({ top, behavior: 'auto' });
+      } else {
+        element.scrollTop = top;
+      }
     }
     shouldStickToBottomRef.current = true;
     setIsScrollToBottomVisible(false);
-  }, []);
+  }, [getScrollMetrics, scrollToBottomOverride]);
 
   const schedulePinnedScrollToBottom = useCallback(() => {
     cancelScheduledScroll();
@@ -84,16 +112,16 @@ export function useConversationAutoScroll({
 
   const updateScrollState = useCallback(
     ({ updateStickiness }: { updateStickiness: boolean }) => {
-      const element = viewportRef.current;
+      const element = viewportElementRef.current;
       if (!element) return;
 
-      const isNearBottom = getIsNearBottom(element);
+      const isNearBottom = getIsNearBottom(element, getScrollMetrics);
       if (updateStickiness) {
         shouldStickToBottomRef.current = isNearBottom;
       }
       setIsScrollToBottomVisible(showScrollToBottomButton && !isNearBottom);
     },
-    [showScrollToBottomButton],
+    [getScrollMetrics, showScrollToBottomButton],
   );
 
   const stopFollowingUserScroll = useCallback(() => {
@@ -104,7 +132,7 @@ export function useConversationAutoScroll({
 
   const handleDirectionalScrollIntent = useCallback(
     (target: EventTarget | null, deltaY: number) => {
-      const element = viewportRef.current;
+      const element = viewportElementRef.current;
       if (!element) return;
 
       if (deltaY === 0 || canNestedScrollContainerHandleGesture(element, target, deltaY)) {
@@ -112,14 +140,14 @@ export function useConversationAutoScroll({
         return;
       }
 
-      if (getIsNearBottom(element) && deltaY >= 0) {
+      if (getIsNearBottom(element, getScrollMetrics) && deltaY >= 0) {
         updateScrollState({ updateStickiness: false });
         return;
       }
 
       stopFollowingUserScroll();
     },
-    [stopFollowingUserScroll, updateScrollState],
+    [getScrollMetrics, stopFollowingUserScroll, updateScrollState],
   );
 
   const handleScroll = useCallback(() => {
@@ -179,6 +207,7 @@ export function useConversationAutoScroll({
   }, [
     cancelScheduledScroll,
     contentKey,
+    contentLayoutKey,
     runtimeStatusKey,
     schedulePinnedScrollToBottom,
     updateScrollState,
@@ -198,17 +227,38 @@ export function useConversationAutoScroll({
     isScrollToBottomVisible,
     scrollToBottom,
     viewportHandlers,
-    viewportRef,
+    viewportRef: setViewportRef,
   };
 }
 
-function getIsNearBottom(element: HTMLElement): boolean {
-  const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+function getIsNearBottom(
+  element: HTMLElement,
+  getScrollMetrics: UseConversationAutoScrollOptions['getScrollMetrics'],
+): boolean {
+  const { clientHeight, scrollHeight, scrollTop } = resolveScrollMetrics(element, getScrollMetrics);
+  const distanceToBottom = scrollHeight - scrollTop - clientHeight;
   return distanceToBottom <= STICKY_SCROLL_THRESHOLD_PX;
 }
 
-function getScrollBottomTop(element: HTMLElement): number {
-  return Math.max(0, element.scrollHeight - element.clientHeight);
+function getScrollBottomTop(
+  element: HTMLElement,
+  getScrollMetrics: UseConversationAutoScrollOptions['getScrollMetrics'],
+): number {
+  const { clientHeight, scrollHeight } = resolveScrollMetrics(element, getScrollMetrics);
+  return Math.max(0, scrollHeight - clientHeight);
+}
+
+function resolveScrollMetrics(
+  element: HTMLElement,
+  getScrollMetrics: UseConversationAutoScrollOptions['getScrollMetrics'],
+): ConversationScrollMetrics {
+  return (
+    getScrollMetrics?.(element) ?? {
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    }
+  );
 }
 
 function canNestedScrollContainerHandleGesture(

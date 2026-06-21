@@ -573,6 +573,41 @@ describe('conversation store', () => {
     expect(useConversationStore.getState().toolExecutionsById).toEqual({});
   });
 
+  it('preserves unchanged conversation item references across message updates', () => {
+    const actions = useConversationStore.getState().actions;
+
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'message-1',
+      message: { role: 'user', content: 'hello', timestamp: 1 },
+    });
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'message-2',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hel' }],
+        timestamp: 2,
+      },
+    });
+
+    const previousItems = useConversationStore.getState().conversationItems;
+
+    actions.applyRuntimeEvent({
+      type: 'message_update',
+      messageId: 'message-2',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hello' }],
+        timestamp: 2,
+      },
+    });
+
+    const nextItems = useConversationStore.getState().conversationItems;
+    expect(nextItems[0]).toBe(previousItems[0]);
+    expect(nextItems[1]).not.toBe(previousItems[1]);
+    expect(nextItems[1]?.key).toBe('message-2');
+  });
   it('exposes stable conversation item keys across message updates', () => {
     const actions = useConversationStore.getState().actions;
     const { result } = renderHook(() => useConversationItems());

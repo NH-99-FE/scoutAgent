@@ -4,6 +4,7 @@ import type { ScoutBusyState } from '@scout-agent/shared';
 import { ConversationView } from '@/features/conversation/ConversationView';
 import {
   buildConversationRows,
+  createConversationRowsProjector,
   type AssistantProcessActivity,
 } from '@/features/conversation/conversation-view-model';
 import type {
@@ -95,6 +96,20 @@ function setViewportScrollMetrics(
     },
   });
   return scrollTo;
+}
+
+function makeUserConversationItems(count: number, contentOverrides: Record<number, string> = {}) {
+  return Array.from(
+    { length: count },
+    (_, index): ConversationItem => ({
+      key: `user-${index}`,
+      message: {
+        role: 'user',
+        content: contentOverrides[index] ?? `message ${index}`,
+        timestamp: index + 1,
+      },
+    }),
+  );
 }
 
 function isToolActivity(
@@ -623,6 +638,107 @@ describe('ConversationView', () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 840, behavior: 'auto' });
     expect(resolvedViewport.scrollTop).toBe(840);
     expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
+  });
+
+  it('keeps short conversations on the normal render path', () => {
+    const { container } = renderConversation({ items: makeUserConversationItems(159) });
+
+    expect(container.querySelector('[data-scout-conversation-virtualized="false"]')).toBeTruthy();
+    expect(container.querySelector('[data-scout-conversation-virtual-row]')).toBeNull();
+  });
+
+  it('virtualizes top-level rows once the conversation reaches the threshold', () => {
+    const { container } = renderConversation({ items: makeUserConversationItems(160) });
+
+    expect(container.querySelector('[data-scout-conversation-virtualized="true"]')).toBeTruthy();
+  });
+
+  it('scrolls virtualized conversations to the measured bottom from the scroll button', () => {
+    const { container } = renderConversation({
+      items: makeUserConversationItems(160),
+      showScrollToBottomButton: true,
+    });
+    const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    expect(viewport).not.toBeNull();
+    const resolvedViewport = viewport!;
+    const scrollTo = setViewportScrollMetrics(resolvedViewport, {
+      clientHeight: 360,
+      scrollHeight: 12_000,
+      scrollTop: 1_000,
+    });
+
+    fireEvent.scroll(resolvedViewport);
+    fireEvent.click(screen.getByRole('button', { name: '滚动到底部' }));
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 11_640, behavior: 'auto' });
+    expect(resolvedViewport.scrollTop).toBe(11_640);
+    expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
+  });
+
+  it('does not force virtualized conversations to the bottom after the user scrolls away', () => {
+    const firstItems = makeUserConversationItems(160);
+    const nextItems = makeUserConversationItems(160, { 159: 'updated tail message' });
+    const { rerender } = renderConversation({ items: firstItems, isStreaming: true });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = setViewportScrollMetrics(scrollContainer, {
+      clientHeight: 400,
+      scrollHeight: 12_000,
+      scrollTop: 1_000,
+    });
+
+    fireEvent.scroll(scrollContainer);
+    scrollTo.mockClear();
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
+  it('keeps virtualized conversations pinned while the user is near the bottom', () => {
+    const firstItems = makeUserConversationItems(160);
+    const nextItems = makeUserConversationItems(160, { 159: 'updated tail message' });
+    const { rerender } = renderConversation({ items: firstItems, isStreaming: true });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = setViewportScrollMetrics(scrollContainer, {
+      clientHeight: 400,
+      scrollHeight: 12_000,
+      scrollTop: 11_580,
+    });
+
+    fireEvent.scroll(scrollContainer);
+    scrollTo.mockClear();
+    const requestAnimationFrame = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+
+    expect(requestAnimationFrame).toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 11_600, behavior: 'auto' });
   });
 
   it('shows the assistant thinking status without runtime inline status for normal agent streaming', () => {
@@ -1951,6 +2067,100 @@ describe('ConversationView', () => {
     expect(screen.getByText('+2 new')).toBeInTheDocument();
   });
 
+  it('limits large edit diffs until the detail is explicitly expanded', () => {
+    const diff = Array.from({ length: 405 }, (_, index) => ` ${index + 1} line-${index + 1}`).join(
+      '\n',
+    );
+
+    renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/large.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolPreviewsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'edit',
+          preview: {
+            kind: 'file_edit',
+            path: 'src/large.ts',
+            diff,
+            additions: 0,
+            deletions: 0,
+            firstChangedLine: 1,
+          },
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开编辑差异 src\/large\.ts/ }));
+
+    expect(screen.getByText(/400 line-400/)).toBeInTheDocument();
+    expect(screen.queryByText(/405 line-405/)).not.toBeInTheDocument();
+    const showAll = screen.getByRole('button', { name: /显示全部 405 行，已隐藏 5 行/ });
+
+    fireEvent.click(showAll);
+
+    expect(screen.getByText(/405 line-405/)).toBeInTheDocument();
+  });
+
+  it('limits large write content until the detail is explicitly expanded', () => {
+    const content = Array.from({ length: 405 }, (_, index) => `line-${index + 1}`).join('\n');
+
+    renderConversation({
+      isStreaming: true,
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'write',
+                arguments: { path: 'src/large.ts', content },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'write',
+          args: { path: 'src/large.ts', content },
+          status: 'running',
+          isError: false,
+        },
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/large\.ts/ }));
+
+    expect(screen.getByText('line-400')).toBeInTheDocument();
+    expect(screen.queryByText('line-405')).not.toBeInTheDocument();
+    const showAll = screen.getByRole('button', { name: /显示全部 405 行，已隐藏 5 行/ });
+
+    fireEvent.click(showAll);
+
+    expect(screen.getByText('line-405')).toBeInTheDocument();
+  });
   it('shows edit preview errors without marking the real tool execution as failed', () => {
     renderConversation({
       isStreaming: true,
@@ -2444,6 +2654,65 @@ describe('ConversationView', () => {
   });
 });
 
+describe('conversation rows projector', () => {
+  it('reuses unchanged prefix rows when a later streaming assistant updates', () => {
+    const firstUserMessage: ConversationItem['message'] = {
+      role: 'user',
+      content: 'first',
+      timestamp: 1,
+    };
+    const settledAssistantMessage: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'settled answer' }],
+      timestamp: 2,
+    };
+    const streamingUserMessage: ConversationItem['message'] = {
+      role: 'user',
+      content: 'second',
+      timestamp: 3,
+    };
+    const streamingAssistantStart: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hel' }],
+      timestamp: 4,
+    };
+    const streamingAssistantUpdate: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello' }],
+      timestamp: 4,
+    };
+    const projector = createConversationRowsProjector();
+
+    const firstRows = projector.project({
+      isStreaming: true,
+      busyState: AGENT_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        { key: 'user-1', message: firstUserMessage },
+        { key: 'assistant-1', message: settledAssistantMessage },
+        { key: 'user-2', message: streamingUserMessage },
+        { key: 'assistant-2', message: streamingAssistantStart },
+      ],
+    });
+
+    const nextRows = projector.project({
+      isStreaming: true,
+      busyState: AGENT_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        { key: 'user-1', message: firstUserMessage },
+        { key: 'assistant-1', message: settledAssistantMessage },
+        { key: 'user-2', message: streamingUserMessage },
+        { key: 'assistant-2', message: streamingAssistantUpdate },
+      ],
+    });
+
+    expect(nextRows[0]).toBe(firstRows[0]);
+    expect(nextRows[1]).toBe(firstRows[1]);
+    expect(nextRows[2]).toBe(firstRows[2]);
+    expect(nextRows[3]).not.toBe(firstRows[3]);
+  });
+});
 describe('buildConversationRows', () => {
   it('segments assistant process entries around interleaved text', () => {
     const rows = buildConversationRows({
