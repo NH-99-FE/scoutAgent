@@ -1,12 +1,13 @@
 // ============================================================
 // 配置管理器 — VS Code settings + 项目级 .scout/settings.json + 模型解析
-// 等价 Pi SettingsManager + ModelRegistry 的简化版
 // ============================================================
 
 import * as vscode from 'vscode';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { getSupportedThinkingLevels } from '@scout-agent/ai';
 import type { Model, Api, ThinkingBudgets, Transport } from '@scout-agent/ai';
+import { THINKING_LEVELS } from '@scout-agent/shared';
 import type { ScoutConfig, ThinkingLevel } from '@scout-agent/shared';
 import { ScoutModelRegistry } from './core/model-registry.ts';
 import { ScoutModelResolver, type ModelResolution } from './core/model-resolver.ts';
@@ -22,7 +23,11 @@ import type { QueueMode } from '@scout-agent/agent';
 
 const SECTION = 'scout-agent';
 const VALID_TRANSPORTS: Transport[] = ['sse', 'websocket', 'websocket-cached', 'auto'];
-const VALID_THINKING_LEVELS: ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+const VALID_THINKING_LEVEL_SET: ReadonlySet<string> = new Set(THINKING_LEVELS);
+
+function isThinkingLevel(level: string | undefined): level is ThinkingLevel {
+  return typeof level === 'string' && VALID_THINKING_LEVEL_SET.has(level);
+}
 
 export interface ConfigManagerOptions {
   cwd: string;
@@ -220,6 +225,19 @@ export class ConfigManager implements ScoutCoreConfig {
     return this.config().get<T>(key) ?? vscodeDefault;
   }
 
+  /** 获取用户显式配置值，忽略 VS Code contribution default。 */
+  private getExplicitSetting<T>(key: string): T | undefined {
+    if (key in this.projectSettings) {
+      return this.projectSettings[key] as T;
+    }
+
+    const config = this.config();
+    const inspected = config.inspect<T>(key);
+    if (!inspected) return config.get<T>(key);
+
+    return inspected.workspaceFolderValue ?? inspected.workspaceValue ?? inspected.globalValue;
+  }
+
   getApiKey(provider: string): string | undefined {
     switch (provider) {
       case 'anthropic':
@@ -240,11 +258,9 @@ export class ConfigManager implements ScoutCoreConfig {
   }
 
   getDefaultThinkingLevel(): ThinkingLevel | undefined {
-    const level = this.getSetting<string>('defaultThinkingLevel');
+    const level = this.getExplicitSetting<string>('defaultThinkingLevel');
     if (!level) return undefined;
-    return VALID_THINKING_LEVELS.includes(level as ThinkingLevel)
-      ? (level as ThinkingLevel)
-      : undefined;
+    return isThinkingLevel(level) ? level : undefined;
   }
 
   getCompactionSettings(): CompactionSettings {
@@ -386,7 +402,7 @@ export class ConfigManager implements ScoutCoreConfig {
         provider: m.provider,
         id: m.id,
         name: m.name,
-        reasoning: m.model.reasoning,
+        supportedThinkingLevels: getSupportedThinkingLevels(m.model).filter(isThinkingLevel),
         input: m.model.input,
         contextWindow: m.model.contextWindow,
       })),

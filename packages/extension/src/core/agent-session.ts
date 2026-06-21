@@ -106,6 +106,11 @@ import type {
   SessionTreeNode,
 } from './session/index.ts';
 import { CURRENT_SESSION_VERSION } from './session/index.ts';
+import {
+  DEFAULT_REASONING_THINKING_LEVEL,
+  normalizeThinkingLevelForModel,
+  normalizeThinkingLevelForModelSwitch,
+} from './thinking-level.ts';
 
 // ---------- 可重试错误判断 ----------
 
@@ -747,23 +752,14 @@ export class AgentSession implements CoreDisposable {
     const model = provider
       ? this.configManager.findModelByProvider(provider, modelId)
       : this.configManager.findModel(modelId);
-    if (model) {
-      try {
-        const previousModel = this.agent.state.model;
-        await this.session.appendModelChange(model.provider, model.id);
-        this.agent.state.model = model;
-        await this.extensionRunner?.emit({
-          type: 'model_select',
-          model,
-          previousModel,
-          source: 'set',
-        });
-        this.emit({ type: 'state_change' });
-      } catch (error) {
-        this.logger.appendLine(
-          `[scout] Model select error: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
+    if (!model) return;
+
+    try {
+      await this.applyModelSelection(model, 'set');
+    } catch (error) {
+      this.logger.appendLine(
+        `[scout] Model select error: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -784,28 +780,41 @@ export class AgentSession implements CoreDisposable {
     const nextModel = availableModels[nextIndex];
     if (!nextModel) return undefined;
 
-    const previousModel = this.agent.state.model;
-    const previousLevel = this.agent.state.thinkingLevel as ThinkingLevel;
-    const thinkingLevel = nextModel.reasoning
+    const thinkingLevel = await this.applyModelSelection(nextModel, 'cycle');
+    if (!thinkingLevel) return undefined;
+    return { model: nextModel, thinkingLevel, isScoped: false };
+  }
+
+  private async applyModelSelection(
+    model: Model<Api>,
+    source: 'set' | 'cycle',
+  ): Promise<ThinkingLevel | undefined> {
+    const agent = this.agent;
+    if (!agent) return undefined;
+
+    const previousModel = agent.state.model;
+    const previousLevel = agent.state.thinkingLevel as ThinkingLevel;
+    const requestedLevel = previousModel.reasoning
       ? previousLevel
-      : (this.configManager.getDefaultThinkingLevel() ?? 'off');
-    await this.session.appendModelChange(nextModel.provider, nextModel.id);
+      : this.configManager.getDefaultThinkingLevel();
+    const thinkingLevel = normalizeThinkingLevelForModelSwitch(model, requestedLevel);
+    await this.session.appendModelChange(model.provider, model.id);
     if (thinkingLevel !== previousLevel) {
       await this.session.appendThinkingLevelChange(thinkingLevel);
     }
-    this.agent.state.model = nextModel;
-    this.agent.state.thinkingLevel = thinkingLevel;
+    agent.state.model = model;
+    agent.state.thinkingLevel = thinkingLevel;
     await this.extensionRunner?.emit({
       type: 'model_select',
-      model: nextModel,
+      model,
       previousModel,
-      source: 'cycle',
+      source,
     });
     this.emit({ type: 'state_change' });
     if (thinkingLevel !== previousLevel) {
       this.emit({ type: 'thinking_level_changed', level: thinkingLevel });
     }
-    return { model: nextModel, thinkingLevel, isScoped: false };
+    return thinkingLevel;
   }
 
   supportsThinking(): boolean {
@@ -815,16 +824,19 @@ export class AgentSession implements CoreDisposable {
   async setThinkingLevel(level: ThinkingLevel): Promise<void> {
     if (!this.agent) return;
     try {
-      const previousLevel = this.agent.state.thinkingLevel;
-      await this.session.appendThinkingLevelChange(level);
-      this.agent.state.thinkingLevel = level;
+      const previousLevel = this.agent.state.thinkingLevel as ThinkingLevel;
+      const thinkingLevel = normalizeThinkingLevelForModel(this.agent.state.model, level);
+      if (thinkingLevel === previousLevel) return;
+
+      await this.session.appendThinkingLevelChange(thinkingLevel);
+      this.agent.state.thinkingLevel = thinkingLevel;
       await this.extensionRunner?.emit({
         type: 'thinking_level_select',
-        level,
+        level: thinkingLevel,
         previousLevel,
       });
       this.emit({ type: 'state_change' });
-      this.emit({ type: 'thinking_level_changed', level });
+      this.emit({ type: 'thinking_level_changed', level: thinkingLevel });
     } catch (error) {
       this.logger.appendLine(
         `[scout] Thinking level select error: ${error instanceof Error ? error.message : String(error)}`,
@@ -2045,13 +2057,15 @@ export class AgentSession implements CoreDisposable {
       return;
     }
 
-    const thinkingLevel = hasThinkingEntry
+    const storedThinkingLevel = hasThinkingEntry
       ? (context.thinkingLevel as ThinkingLevel)
-      : (this.configManager.getDefaultThinkingLevel() ?? 'off');
+      : (this.configManager.getDefaultThinkingLevel() ?? DEFAULT_REASONING_THINKING_LEVEL);
+    const thinkingLevel = normalizeThinkingLevelForModel(model, storedThinkingLevel);
     await this.persistInitialSessionState({
       hasRestorableSessionState,
       hasThinkingEntry,
       model,
+      storedThinkingLevel,
       thinkingLevel,
     });
     this.rebuildToolRegistry(model);
@@ -2080,10 +2094,11 @@ export class AgentSession implements CoreDisposable {
     hasRestorableSessionState: boolean;
     hasThinkingEntry: boolean;
     model: Model<Api>;
+    storedThinkingLevel: ThinkingLevel;
     thinkingLevel: ThinkingLevel;
   }): Promise<void> {
     if (options.hasRestorableSessionState) {
-      if (!options.hasThinkingEntry) {
+      if (!options.hasThinkingEntry || options.storedThinkingLevel !== options.thinkingLevel) {
         await this.session.appendThinkingLevelChange(options.thinkingLevel);
       }
       return;

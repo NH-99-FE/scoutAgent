@@ -63,8 +63,6 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
     case 'notification':
       useUiStore.getState().actions.setNotification(message);
       break;
-    case 'thinking_level_changed':
-      break;
   }
 }
 
@@ -133,7 +131,6 @@ export const EXTENSION_EVENT_TYPES = new Set<string>([
   'auto_retry_end',
   'compaction_start',
   'compaction_end',
-  'thinking_level_changed',
   'tree_update',
   'task_history_update',
   'sessions_update',

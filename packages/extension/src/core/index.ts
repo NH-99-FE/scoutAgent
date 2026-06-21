@@ -49,6 +49,11 @@ export {
 } from './session-file.ts';
 export { ScoutResourceLoader, loadProjectContextFiles } from './resource-loader.ts';
 export { buildSystemPrompt } from './system-prompt.ts';
+export {
+  DEFAULT_REASONING_THINKING_LEVEL,
+  normalizeThinkingLevelForModel,
+  normalizeThinkingLevelForModelSwitch,
+} from './thinking-level.ts';
 export { loadSkills, formatSkillsForPrompt, type Skill } from './skills.ts';
 export { createSyntheticSourceInfo, type SourceInfo } from './source-info.ts';
 export type { CoreDisposable, CoreLogger } from './logger.ts';

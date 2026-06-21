@@ -4,13 +4,22 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConfigManager } from '../../src/config-manager.ts';
 
-function getConfiguration(settings: Record<string, unknown>) {
+function getConfiguration(
+  settings: Record<string, unknown>,
+  defaults: Record<string, unknown> = {},
+) {
   return () => ({
     get<T>(key: string): T | undefined {
-      return settings[key] as T | undefined;
+      return (settings[key] ?? defaults[key]) as T | undefined;
     },
     has: () => false,
-    inspect: () => undefined,
+    inspect<T>(key: string) {
+      return {
+        key,
+        defaultValue: defaults[key] as T | undefined,
+        globalValue: settings[key] as T | undefined,
+      };
+    },
     update: async () => undefined,
   });
 }
@@ -79,6 +88,29 @@ describe('ConfigManager', () => {
     });
   });
 
+  it('ignores contribution defaults when reading default thinking level', () => {
+    const manager = new ConfigManager({
+      cwd,
+      agentDir,
+      getConfiguration: getConfiguration({}, { defaultThinkingLevel: 'off' }),
+    });
+
+    expect(manager.getDefaultThinkingLevel()).toBeUndefined();
+  });
+
+  it('preserves explicit default thinking level settings', () => {
+    const manager = new ConfigManager({
+      cwd,
+      agentDir,
+      getConfiguration: getConfiguration(
+        { defaultThinkingLevel: 'off' },
+        { defaultThinkingLevel: 'medium' },
+      ),
+    });
+
+    expect(manager.getDefaultThinkingLevel()).toBe('off');
+  });
+
   it('loads custom OpenAI and Anthropic models but rejects unsupported providers', () => {
     fs.writeFileSync(
       path.join(cwd, '.scout', 'settings.json'),
@@ -91,6 +123,8 @@ describe('ConfigManager', () => {
             name: 'Project GPT',
             provider: 'openai',
             api: 'openai-responses',
+            reasoning: true,
+            thinkingLevelMap: { minimal: null, xhigh: 'max' },
             input: ['text'],
             cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             contextWindow: 1000,
@@ -117,5 +151,9 @@ describe('ConfigManager', () => {
 
     expect(manager.findModelByProvider('openai', 'project-gpt')?.name).toBe('Project GPT');
     expect(manager.findModelByProvider('openrouter', 'unsupported')).toBeUndefined();
+    expect(
+      manager.getScoutConfig().models.find((model) => model.id === 'project-gpt')
+        ?.supportedThinkingLevels,
+    ).toEqual(['off', 'low', 'medium', 'high', 'xhigh']);
   });
 });

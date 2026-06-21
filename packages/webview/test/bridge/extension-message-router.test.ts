@@ -41,7 +41,7 @@ describe('routeExtensionMessage', () => {
             provider: 'openai',
             id: 'gpt-test',
             name: 'GPT Test',
-            reasoning: true,
+            supportedThinkingLevels: ['off', 'low', 'medium', 'high'],
             input: ['text'],
             contextWindow: 1000,
           },

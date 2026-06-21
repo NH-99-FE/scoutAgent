@@ -76,8 +76,8 @@
             "high",
             "xhigh"
           ],
-          "default": "off",
-          "description": "Default thinking level for reasoning models"
+          "default": "medium",
+          "description": "Default thinking level for reasoning-capable models. Models without reasoning support always use off."
         },
         "scout-agent.transport": {
           "type": "string",

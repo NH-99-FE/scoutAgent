@@ -6,7 +6,16 @@
 
 // ---------- Thinking levels ----------
 
-export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+export type ThinkingStrengthLevel = Exclude<ThinkingLevel, 'off'>;
+export const THINKING_STRENGTH_LEVELS = [
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+] as const satisfies readonly ThinkingStrengthLevel[];
 
 // ---------- Webview surfaces ----------
 
@@ -40,7 +49,7 @@ export interface ScoutModelInfo {
   provider: string;
   id: string;
   name: string;
-  reasoning: boolean;
+  supportedThinkingLevels: ThinkingLevel[];
   input: Array<'text' | 'image'>;
   contextWindow: number;
 }
@@ -351,7 +360,7 @@ export const SCOUT_PROTOCOL = {
     kind: 'command',
     service: 'config',
     method: 'select_thinking',
-    emits: ['state_update', 'thinking_level_changed'],
+    emits: ['state_update'],
     surfaces: ['chat', 'settings'],
   },
   set_active_tools: {
@@ -944,13 +953,6 @@ export type ScoutRuntimeExtensionEvent =
   | ScoutCompactionStartEvent
   | ScoutCompactionEndEvent;
 
-// ---------- Thinking Level 事件 ----------
-
-export interface ScoutThinkingLevelChangedEvent {
-  type: 'thinking_level_changed';
-  level: ThinkingLevel;
-}
-
 export interface ScoutNotificationMessage {
   type: 'notification';
   level: 'info' | 'warning' | 'error';
@@ -982,7 +984,6 @@ export type ExtensionEventMessage =
   | { type: 'commands_update'; commands: ScoutCommandInfo[] }
   | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
   | ScoutNotificationMessage
-  | ScoutThinkingLevelChangedEvent
   | { type: 'tree_update'; tree: ScoutSessionTreeNode[]; leafId: string | null }
   | {
       type: 'task_history_update';

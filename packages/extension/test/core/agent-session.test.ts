@@ -135,6 +135,7 @@ describe('AgentSession', () => {
     const selectedModel = mockModel({
       id: 'metadata-only-selected-model',
       name: 'Metadata Only Selected Model',
+      reasoning: true,
     });
     registerModel(selectedModel, { sourceId: STREAM_OPTIONS_TEST_SOURCE });
     const backingSession = SessionManager.inMemory(tempDir);
@@ -178,7 +179,6 @@ describe('AgentSession', () => {
       session: backingSession,
       configManager: createConfigManagerWithValues(tempDir, {
         anthropicApiKey: 'test-key',
-        defaultThinkingLevel: 'medium',
       }),
       cwd: tempDir,
       logger: { appendLine: vi.fn() },
@@ -198,6 +198,144 @@ describe('AgentSession', () => {
     } finally {
       session.dispose();
     }
+  });
+
+  it('preserves restored off thinking for a thinking model that supports it', async () => {
+    const selectedModel = mockModel({
+      id: 'metadata-only-thinking-model',
+      name: 'Metadata Only Thinking Model',
+      reasoning: true,
+    });
+    registerModel(selectedModel, { sourceId: STREAM_OPTIONS_TEST_SOURCE });
+    const backingSession = SessionManager.inMemory(tempDir);
+    backingSession.appendModelChange(selectedModel.provider, selectedModel.id);
+    backingSession.appendThinkingLevelChange('off');
+    const session = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManagerWithValues(tempDir, {
+        anthropicApiKey: 'test-key',
+        defaultThinkingLevel: 'low',
+      }),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+
+    await session.initialize();
+    try {
+      const thinkingEntries = backingSession
+        .getEntries()
+        .filter((entry) => entry.type === 'thinking_level_change');
+
+      expect(session.thinkingLevel).toBe('off');
+      expect(thinkingEntries).toHaveLength(1);
+      expect(thinkingEntries.at(-1)).toMatchObject({ thinkingLevel: 'off' });
+      expect(backingSession.buildContext().thinkingLevel).toBe('off');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('normalizes thinking level when selecting a model', async () => {
+    const thinkingModel = mockModel({
+      id: 'manual-thinking-model',
+      name: 'Manual Thinking Model',
+      reasoning: true,
+    });
+    registerModel(thinkingModel, { sourceId: STREAM_OPTIONS_TEST_SOURCE });
+    const session = new AgentSession({
+      session: SessionManager.inMemory(tempDir),
+      configManager: createConfigManagerWithValues(tempDir, {
+        anthropicApiKey: 'test-key',
+        defaultThinkingLevel: 'low',
+      }),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel({ id: 'manual-fast-model', reasoning: false }),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    await session.setModel(thinkingModel.id, thinkingModel.provider);
+
+    expect(session.model).toMatchObject({ id: thinkingModel.id });
+    expect(session.thinkingLevel).toBe('low');
+    expect(session.sessionManager.buildContext()).toMatchObject({
+      model: { provider: thinkingModel.provider, modelId: thinkingModel.id },
+      thinkingLevel: 'low',
+    });
+  });
+
+  it('normalizes thinking level when cycling between model capabilities', async () => {
+    const fastModel = mockModel({ id: 'cycle-fast-model', reasoning: false });
+    const thinkingModel = mockModel({ id: 'cycle-thinking-model', reasoning: true });
+    const configManager = createConfigManagerWithValues(tempDir, {
+      anthropicApiKey: 'test-key',
+      defaultThinkingLevel: 'low',
+    });
+    vi.spyOn(configManager, 'getAvailableModels').mockReturnValue([
+      { id: fastModel.id, name: fastModel.name, provider: fastModel.provider, model: fastModel },
+      {
+        id: thinkingModel.id,
+        name: thinkingModel.name,
+        provider: thinkingModel.provider,
+        model: thinkingModel,
+      },
+    ]);
+    const session = new AgentSession({
+      session: SessionManager.inMemory(tempDir),
+      configManager,
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: fastModel,
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    await expect(session.cycleModel('forward')).resolves.toMatchObject({
+      model: { id: thinkingModel.id },
+      thinkingLevel: 'low',
+    });
+    expect(session.thinkingLevel).toBe('low');
+
+    await expect(session.cycleModel('forward')).resolves.toMatchObject({
+      model: { id: fastModel.id },
+      thinkingLevel: 'off',
+    });
+    expect(session.thinkingLevel).toBe('off');
+  });
+
+  it('normalizes manual thinking selection before writing runtime state', async () => {
+    const thinkingModel = mockModel({ id: 'thinking-select-model', reasoning: true });
+    const session = createSession(tempDir);
+    const events: unknown[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: thinkingModel,
+        thinkingLevel: 'high',
+        tools: [],
+      },
+    });
+
+    await session.setThinkingLevel('off');
+
+    expect(session.thinkingLevel).toBe('off');
+    expect(session.sessionManager.buildContext().thinkingLevel).toBe('off');
+    expect(events).toContainEqual({ type: 'thinking_level_changed', level: 'off' });
   });
 
   it('aborts and disconnects the current agent before manual compaction', async () => {

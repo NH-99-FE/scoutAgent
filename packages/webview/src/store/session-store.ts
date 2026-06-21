@@ -58,6 +58,8 @@ export const useSessionName = () => useSessionStore((state) => state.sessionName
 export const useSessionId = () => useSessionStore((state) => state.sessionId);
 export const useSessionFile = () => useSessionStore((state) => state.sessionFile);
 export const useSessionCwd = () => useSessionStore((state) => state.cwd);
+export const useCurrentModelProvider = () => useSessionStore((state) => state.modelProvider);
+export const useCurrentModelId = () => useSessionStore((state) => state.modelId);
 export const useCurrentModelLabel = () =>
   useSessionStore((state) => [state.modelProvider, state.modelId].filter(Boolean).join(' / '));
 export const useThinkingLevel = () => useSessionStore((state) => state.thinkingLevel);

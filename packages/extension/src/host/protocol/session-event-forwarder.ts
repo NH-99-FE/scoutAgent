@@ -203,10 +203,6 @@ export class SessionEventForwarder {
       });
     }
 
-    if (event.type === 'thinking_level_changed') {
-      this.publishEvent({ type: 'thinking_level_changed', level: event.level });
-    }
-
     if (event.type === 'state_change' || event.type === 'error') {
       if (event.type === 'error') {
         this.publishEvent({ type: 'notification', level: 'error', message: event.message });
