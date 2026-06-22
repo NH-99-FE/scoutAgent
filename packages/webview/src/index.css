@@ -252,6 +252,18 @@ body,
     outline-offset: 0 !important;
     box-shadow: none !important;
   }
+  .scout-model-menu:focus-visible,
+  .scout-model-menu
+    :where([data-slot='dropdown-menu-item'], [data-slot='dropdown-menu-radio-item']):focus-visible,
+  .scout-model-menu
+    :where(
+      [data-slot='dropdown-menu-item'],
+      [data-slot='dropdown-menu-radio-item']
+    )[data-highlighted] {
+    outline: none !important;
+    outline-offset: 0 !important;
+    box-shadow: none !important;
+  }
   body {
     @apply bg-background text-foreground;
   }
