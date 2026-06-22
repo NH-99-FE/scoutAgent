@@ -85,9 +85,7 @@ export function AssistantProcessBlock({
 
   if (entry.displayMode === 'live' && hasProcessContent) {
     return (
-      <div
-        className="text-muted-foreground/70 py-0.5 text-xs leading-5"
-      >
+      <div className="text-muted-foreground/70 text-xs leading-5">
         <ProcessPhaseList
           expansionScope={expansionScope}
           parentExpansionId={expansionId}
@@ -103,18 +101,14 @@ export function AssistantProcessBlock({
       if (suppressLifecycleOnlyProcess) return null;
       if (!summary.running) return null;
       return (
-        <div
-          className="text-muted-foreground/70 py-0.5 text-xs leading-5"
-        >
+        <div className="text-muted-foreground/70 text-xs leading-5">
           <InlineStatus running={summary.running} text={summary.label} tone={tone} />
         </div>
       );
     }
     if (suppressLifecycleOnlyProcess && !summary.running && !hasToolProcessContent) return null;
     return (
-      <div
-        className="text-muted-foreground/70 py-0.5 text-xs leading-5"
-      >
+      <div className="text-muted-foreground/70 text-xs leading-5">
         <ProcessPhaseList
           expansionScope={expansionScope}
           parentExpansionId={expansionId}
@@ -126,12 +120,10 @@ export function AssistantProcessBlock({
 
   return (
     <Collapsible open={open} onOpenChange={handleOpenChange}>
-      <div
-        className="text-muted-foreground/70 py-0.5 text-xs leading-5"
-      >
+      <div className="text-muted-foreground/70 text-xs leading-5">
         {leadingThinkingPhases.length > 0 ? (
           <ProcessPhaseList
-            className="mb-1 -ml-1"
+            className="mb-1"
             expansionScope={expansionScope}
             parentExpansionId={expansionId}
             phases={leadingThinkingPhases}
@@ -140,7 +132,7 @@ export function AssistantProcessBlock({
         <CollapsibleTrigger
           aria-label={`${open ? '收起' : '展开'}过程 ${triggerLabel}`}
           className={cn(
-            'group/process-trigger -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors disabled:pointer-events-none',
+            'group/process-trigger inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded text-left transition-colors disabled:pointer-events-none',
             entry.displayMode === 'compact' && 'w-full',
           )}
           disabled={!hasDetailProcessContent}
@@ -178,7 +170,7 @@ export function AssistantProcessBlock({
         {hasDetailProcessContent ? (
           <CollapsibleContent className="scout-process-collapse-content">
             <ProcessPhaseList
-              className="mt-1.5 -ml-1"
+              className="mt-1.5"
               expansionScope={expansionScope}
               hideToolIcons={entry.displayMode === 'compact'}
               parentExpansionId={expansionId}
@@ -368,7 +360,7 @@ function ToolActivityItem({
 
   if (!hasDetail) {
     return (
-      <div className="flex min-h-5 w-full min-w-0 items-center gap-1.5 px-1 py-0.5 text-left">
+      <div className="flex min-h-5 w-full min-w-0 items-center gap-1.5 text-left">
         <ToolActivitySummary display={display} hasDetail={false} hideIcon={hideIcon} />
       </div>
     );
@@ -378,7 +370,7 @@ function ToolActivityItem({
     <Collapsible open={open} onOpenChange={handleOpenChange}>
       <CollapsibleTrigger
         aria-label={formatToolDetailAriaLabel(open, display)}
-        className="group/tool-action flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left disabled:pointer-events-none"
+        className="group/tool-action flex min-h-5 w-full min-w-0 items-center gap-1.5 rounded text-left disabled:pointer-events-none"
         disabled={!hasDetail}
         type="button"
       >
@@ -669,7 +661,7 @@ function ThinkingActivityItem({ activity }: { activity: AssistantThinkingActivit
 
   if (activity.content.redacted) {
     return (
-      <div className="flex min-h-5 items-center gap-1.5 px-1 py-0.5">
+      <div className="flex min-h-5 items-center gap-1.5">
         <EyeOff className="size-3.5 shrink-0" />
         <span>思考内容已隐藏</span>
       </div>
@@ -683,7 +675,7 @@ function ThinkingActivityItem({ activity }: { activity: AssistantThinkingActivit
   return (
     <div
       aria-label={`思考过程 ${activity.messageKey}`}
-      className="text-foreground max-w-full min-w-0 px-1 py-0.5 text-xs leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+      className="text-foreground max-w-full min-w-0 text-xs leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
     >
       {text}
     </div>
@@ -700,12 +692,7 @@ function InlineStatus({
   running?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        'flex min-h-5 items-center px-1 py-0.5',
-        tone === 'error' && 'text-destructive',
-      )}
-    >
+    <div className={cn('flex min-h-5 items-center', tone === 'error' && 'text-destructive')}>
       <span className={cn(running && 'scout-running-text-shimmer')}>{text}</span>
     </div>
   );

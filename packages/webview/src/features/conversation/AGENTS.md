@@ -26,9 +26,9 @@
 ## 推导规则
 
 - `busyState.kind === 'agent'` 且本轮没有可观察 work trace：外层显示 `正在思考`。
-- 仅出现 `toolCall`、即使 `tool_execution_start` / partial / result / preview 等执行事实还未同步到 webview，本轮也进入 work trace：外层显示 `正在处理`，内层工具项显示 `正在运行 <目标>`。
+- 仅出现 `toolCall`、即使 `tool_execution_start` / partial / result / preview 等执行事实还未同步到 webview，本轮也进入 work trace：外层显示 `正在处理`，内层工具项显示动作式进行态，如 `正在阅读 <目标>`；bash 仍显示 `正在运行 <命令>`。
 - 出现 runtime `tool_running`、toolResult 或可见 tool preview 后，本轮继续保持 work trace，外层显示 `正在处理`。
-- 如果 turn 已经 `aborted` / `error`，裸 `toolCall` 不再使用 `正在运行`；内层应显示 `已停止 <目标>` 或 `运行失败 <目标>`，与外层 `已停止` / `处理失败` 对齐。
+- 如果 turn 已经 `aborted` / `error`，裸 `toolCall` 不再使用进行态；内层应显示动作式停止/失败状态，如 `已停止搜索 <目标>` 或 `搜索失败 <目标>`；bash 仍使用 `已停止 <命令>` / `运行失败 <命令>`，与外层 `已停止` / `处理失败` 对齐。
 - 一旦本轮进入过 work trace，运行中保持 `正在处理`，避免工具结果后模型继续输出时在 `正在思考` / `正在处理` 间来回跳。
 - turn 完成后按 `stopReason` 收束为 `已处理 / 已停止 / 处理失败`。
 - `errorMessage` 可以作为 status 明细展示，但只有 `stopReason === 'error'` 才让外层显示 `处理失败`。
@@ -37,7 +37,7 @@
 
 - 真实 thinking 明细只由 `content.type === 'thinking'` 决定。
 - 工具明细由 `toolCall + toolExecution + toolResult` 投影；active turn 中的 pending toolCall 也算外层 work trace。
-- 工具活动文案使用 `正在运行 <目标>` / `已运行 <目标>`，其中 active turn 里的 `正在运行` 覆盖 pending 与 running 两段，不使用 `等待...` 作为用户可见状态。
+- 工具活动文案按工具动作展示：非 bash 使用 `正在阅读 <目标>` / `已阅读 <目标>` 这类动作式文案；bash 使用 `正在运行 <命令>` / `已运行 <命令>`。其中 active turn 里的进行态覆盖 pending 与 running 两段，不使用 `等待...` 作为用户可见状态。
 - `AssistantProcessSummary.status` 是 UI 行为判断契约；`label` 只用于展示文案，不要用文案驱动样式或展开行为。
 - text/image 始终作为 assistant 正文展示，不塞进过程明细。
 - `phases` 是过程明细的唯一事实源，不要再维护 flattened `activities` 副本。

@@ -155,11 +155,15 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
+    const turnSummaryButton = screen.getByRole('button', { name: /收起回复 已处理/ });
+    expect(turnSummaryButton).toBeInTheDocument();
+    expect(turnSummaryButton.className).not.toContain('-ml-1');
+    expect(turnSummaryButton.className).not.toContain('px-1');
+    expect(turnSummaryButton.className).not.toContain('py-0.5');
     expect(container.querySelector('[data-assistant-turn-disclosure-icon]')).toBeTruthy();
     expect(screen.getByText('分析当前布局')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /收起回复 已处理/ }));
+    fireEvent.click(turnSummaryButton);
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
   });
 
@@ -221,7 +225,7 @@ describe('ConversationView', () => {
     });
 
     const text = screen.getByText('我先看一下文件');
-    const runningTool = screen.getByText('正在运行 读取 README.md');
+    const runningTool = screen.getByText('正在阅读 README.md');
 
     expect(screen.queryByRole('button', { name: /展开过程 已处理/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
@@ -287,7 +291,7 @@ describe('ConversationView', () => {
 
     expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(screen.getByText('分析当前布局')).toBeInTheDocument();
-    expect(screen.getByText('正在运行 读取 README.md')).toBeInTheDocument();
+    expect(screen.getByText('正在阅读 README.md')).toBeInTheDocument();
 
     rerender(
       <ConversationView
@@ -300,10 +304,10 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('文件读完了，继续分析')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
+      screen.queryByRole('button', { name: /展开过程 正在阅读 README\.md/ }),
     ).not.toBeInTheDocument();
     const thinking = screen.getByText('分析当前布局');
-    const runningTool = screen.getByText('正在运行 读取 README.md');
+    const runningTool = screen.getByText('正在阅读 README.md');
     expect(thinking.compareDocumentPosition(runningTool) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
@@ -343,9 +347,9 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('正在处理')).toBeInTheDocument();
     expect(screen.getByText('读完了，继续整理结论')).toBeInTheDocument();
-    expect(screen.getByText('正在运行 读取 README.md')).toBeInTheDocument();
+    expect(screen.getByText('正在阅读 README.md')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /展开过程 正在运行 读取 README\.md/ }),
+      screen.queryByRole('button', { name: /展开过程 正在阅读 README\.md/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
   });
@@ -990,8 +994,8 @@ describe('ConversationView', () => {
         errorNotice &&
         (assistantTurn.compareDocumentPosition(errorNotice) & Node.DOCUMENT_POSITION_FOLLOWING),
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(screen.getByText('已运行 读取 chapter.md').closest('.text-destructive')).toBeNull();
-    expect(screen.getByText('已运行 编辑 chapter.md').closest('.text-destructive')).toBeNull();
+    expect(screen.getByText('已阅读 chapter.md').closest('.text-destructive')).toBeNull();
+    expect(screen.getByText('已编辑 chapter.md').closest('.text-destructive')).toBeNull();
   });
 
   it('respects manual process expansion across streaming updates', () => {
@@ -1075,13 +1079,55 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('准备读取文件')).toBeInTheDocument();
-    expect(screen.getByText('已运行 读取 README.md')).toBeInTheDocument();
+    expect(screen.getByText('已阅读 README.md')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
+      screen.queryByRole('button', { name: /展开过程 已阅读 README\.md/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('文件内容')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /展开工具输出 read/ })).not.toBeInTheDocument();
     expect(screen.queryByText(/"path": "README.md"/)).not.toBeInTheDocument();
+  });
+
+  it('aligns the direct single-tool process row with the outer process block', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'read',
+                arguments: { path: 'README.md' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'read',
+            content: [{ type: 'text', text: '文件内容' }],
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const readActivity = screen.getByText('已阅读 README.md');
+    const activityRow = readActivity.closest('div');
+    const processList = readActivity.closest('[data-assistant-process-phase]')?.parentElement;
+
+    expect(activityRow?.className).not.toContain('px-0');
+    expect(activityRow?.className).not.toContain('px-1');
+    expect(activityRow?.className).not.toContain('py-0.5');
+    expect(processList?.className).not.toContain('-ml-1');
   });
 
   it('keeps read failures expandable without showing arguments', () => {
@@ -1116,9 +1162,9 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByText('运行失败 读取 missing.md')).toBeInTheDocument();
+    expect(screen.getByText('阅读失败 missing.md')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /展开过程 运行失败 读取 missing\.md/ }),
+      screen.queryByRole('button', { name: /展开过程 阅读失败 missing\.md/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/ENOENT/)).not.toBeInTheDocument();
 
@@ -1159,7 +1205,7 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByText('正在运行 写入 src/generated.ts')).toBeInTheDocument();
+    expect(screen.getByText('正在写入 src/generated.ts')).toBeInTheDocument();
     expect(screen.getByText('+3')).toBeInTheDocument();
     expect(screen.queryByText('-0')).not.toBeInTheDocument();
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
@@ -1199,7 +1245,7 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByText('正在运行 写入 src/generated.ts')).toBeInTheDocument();
+    expect(screen.getByText('正在写入 src/generated.ts')).toBeInTheDocument();
     expect(screen.getByText('+3')).toBeInTheDocument();
     expect(screen.queryByText('-0')).not.toBeInTheDocument();
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
@@ -1323,9 +1369,9 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByText('运行失败 写入 src/generated.ts')).toBeInTheDocument();
+    expect(screen.getByText('写入失败 src/generated.ts')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /展开过程 运行失败 写入 src\/generated\.ts/ }),
+      screen.queryByRole('button', { name: /展开过程 写入失败 src\/generated\.ts/ }),
     ).not.toBeInTheDocument();
     expect(screen.getByText('+2')).toBeInTheDocument();
     expect(screen.queryByText('-0')).not.toBeInTheDocument();
@@ -1529,6 +1575,42 @@ describe('ConversationView', () => {
     expect(
       screen.queryByRole('button', { name: /展开过程 已运行 pnpm test/ }),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps unknown tool summaries on the generic running wording', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'todo_write',
+                arguments: { items: ['review'] },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+      ],
+      toolExecutionsById: {
+        'tool-1': {
+          toolCallId: 'tool-1',
+          toolName: 'todo_write',
+          status: 'done',
+          result: {
+            content: [{ type: 'text', text: 'updated todos' }],
+          },
+          isError: false,
+        },
+      },
+    });
+
+    expect(screen.getByText('已运行 todo_write')).toBeInTheDocument();
+    expect(screen.queryByText('已todo_write')).not.toBeInTheDocument();
   });
 
   it('does not force scroll to bottom after the user scrolls away from the tail', () => {
@@ -1972,7 +2054,7 @@ describe('ConversationView', () => {
     expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(container.querySelector('[data-process-disclosure-icon]')).toBeNull();
     expect(screen.getByText('正在处理')).toBeInTheDocument();
-    expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
+    expect(screen.getByText('正在搜索 hello')).toBeInTheDocument();
     expect(screen.queryByText('匹配到 2 行')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 grep/ }));
@@ -2015,7 +2097,7 @@ describe('ConversationView', () => {
     });
 
     expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
-    expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
+    expect(screen.getByText('正在搜索 hello')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 grep/ }));
     expect(screen.getByText(/来自运行事实的部分输出/)).toBeInTheDocument();
@@ -2045,7 +2127,7 @@ describe('ConversationView', () => {
 
     expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
     expect(screen.queryByText('等待搜索 hello')).not.toBeInTheDocument();
-    expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
+    expect(screen.getByText('正在搜索 hello')).toBeInTheDocument();
   });
 
   it('does not show pending tool calls as running after the turn stops before execution', () => {
@@ -2073,12 +2155,12 @@ describe('ConversationView', () => {
 
     expect(screen.getByRole('button', { name: /收起回复 已停止/ })).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /收起过程 已停止 搜索 hello/ }),
+      screen.queryByRole('button', { name: /收起过程 已停止搜索 hello/ }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText('正在运行 搜索 hello')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在搜索 hello')).not.toBeInTheDocument();
     expect(screen.getByText('你停止了会话')).toBeInTheDocument();
     expect(screen.queryByText('Request was aborted')).not.toBeInTheDocument();
-    expect(screen.getByText('已停止 搜索 hello')).toBeInTheDocument();
+    expect(screen.getByText('已停止搜索 hello')).toBeInTheDocument();
   });
 
   it('does not show pending tool calls as running after the turn fails before execution', () => {
@@ -2106,10 +2188,10 @@ describe('ConversationView', () => {
 
     expect(screen.getByRole('button', { name: /收起回复 处理失败/ })).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /收起过程 运行失败 搜索 hello/ }),
+      screen.queryByRole('button', { name: /收起过程 搜索失败 hello/ }),
     ).not.toBeInTheDocument();
-    expect(screen.queryByText('正在运行 搜索 hello')).not.toBeInTheDocument();
-    expect(screen.getByText('运行失败 搜索 hello')).toBeInTheDocument();
+    expect(screen.queryByText('正在搜索 hello')).not.toBeInTheDocument();
+    expect(screen.getByText('搜索失败 hello')).toBeInTheDocument();
   });
 
   it('renders edit previews with change counts and an expandable diff', () => {
@@ -2152,7 +2234,7 @@ describe('ConversationView', () => {
     });
 
     expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
-    expect(screen.getByText('正在运行 编辑 src/app.ts')).toBeInTheDocument();
+    expect(screen.getByText('正在编辑 src/app.ts')).toBeInTheDocument();
     expect(screen.getByText('+1')).toBeInTheDocument();
     expect(screen.getByText('-1')).toBeInTheDocument();
 
@@ -2298,7 +2380,7 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('预览失败 编辑 src/app.ts')).toBeInTheDocument();
-    expect(screen.queryByText('运行失败 编辑 src/app.ts')).not.toBeInTheDocument();
+    expect(screen.queryByText('编辑失败 src/app.ts')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /展开编辑差异 src\/app\.ts/ }));
 
@@ -2341,9 +2423,9 @@ describe('ConversationView', () => {
     });
 
     expect(screen.queryByRole('button', { name: /收起过程 正在处理/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /正在运行 搜索 hello/ })).not.toBeInTheDocument();
-    expect(screen.getByText('正在运行 搜索 hello')).toBeInTheDocument();
-    expect(screen.queryByText('正在运行 搜索 hello 等 2 项')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /正在搜索 hello/ })).not.toBeInTheDocument();
+    expect(screen.getByText('正在搜索 hello')).toBeInTheDocument();
+    expect(screen.queryByText('正在搜索 hello 等 2 项')).not.toBeInTheDocument();
     expect(screen.getByText('分析搜索范围')).toBeInTheDocument();
     expect(screen.queryByText('匹配到 2 行')).not.toBeInTheDocument();
   });
@@ -2404,21 +2486,21 @@ describe('ConversationView', () => {
     });
 
     expect(
-      screen.queryByRole('button', { name: /展开过程 已运行 读取 README\.md/ }),
+      screen.queryByRole('button', { name: /展开过程 已阅读 README\.md/ }),
     ).not.toBeInTheDocument();
     expect(screen.getByText('根据文件内容继续分析')).toBeInTheDocument();
     const thinking = screen.getByText('先定位文件');
-    const readActivity = screen.getByText('已运行 读取 README.md');
+    const readActivity = screen.getByText('已阅读 README.md');
     expect(thinking.compareDocumentPosition(readActivity) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
       Node.DOCUMENT_POSITION_FOLLOWING,
     );
 
     expect(screen.getAllByText('先定位文件')).toHaveLength(1);
-    expect(screen.getByText('已运行 读取 README.md')).toBeInTheDocument();
+    expect(screen.getByText('已阅读 README.md')).toBeInTheDocument();
     expect(
       screen.getByText('先定位文件').closest('[data-assistant-process-phase]'),
     ).toHaveAttribute('data-assistant-process-phase', 'model_responding');
-    const readActivityLabels = screen.getAllByText('已运行 读取 README.md');
+    const readActivityLabels = screen.getAllByText('已阅读 README.md');
     expect(
       readActivityLabels[readActivityLabels.length - 1].closest('[data-assistant-process-phase]'),
     ).toHaveAttribute('data-assistant-process-phase', 'tool_processing');
@@ -2505,9 +2587,9 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByText('已运行 列出 src')).toBeInTheDocument();
+    expect(screen.getByText('已列出 src')).toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /展开过程 已运行 列出 src/ }),
+      screen.queryByRole('button', { name: /展开过程 已列出 src/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('处理了 1 项')).not.toBeInTheDocument();
   });
@@ -2606,7 +2688,7 @@ describe('ConversationView', () => {
 
     expect(screen.getByRole('button', { name: /展开过程 已完成 2 项/ })).toBeInTheDocument();
     expect(screen.queryByText('已运行 1 条命令')).not.toBeInTheDocument();
-    expect(screen.queryByText('已读取 1 个文件')).not.toBeInTheDocument();
+    expect(screen.queryByText('已阅读 1 个文件')).not.toBeInTheDocument();
   });
 
   it('collapses process summaries when the assistant turn closes', () => {

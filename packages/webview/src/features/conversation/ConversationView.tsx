@@ -463,7 +463,7 @@ function AssistantTurn({
   if (turnSummary.running) {
     return (
       <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
-        <div className="text-muted-foreground/80 mb-1 -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs leading-5">
+        <div className="text-muted-foreground/80 mb-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded text-left text-xs leading-5">
           <span className="min-w-0 truncate">{turnSummary.label}</span>
         </div>
         {content}
@@ -477,7 +477,7 @@ function AssistantTurn({
         aria-expanded={open}
         aria-label={`${open ? '收起' : '展开'}回复 ${turnSummary.label}`}
         className={cn(
-          'text-muted-foreground/80 hover:text-muted-foreground focus-visible:text-muted-foreground mb-1 -ml-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs leading-5 transition-colors',
+          'text-muted-foreground/80 hover:text-muted-foreground focus-visible:text-muted-foreground mb-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded text-left text-xs leading-5 transition-colors',
           turnSummary.tone === 'error' && 'text-destructive hover:text-destructive',
         )}
         type="button"
@@ -511,15 +511,18 @@ function AssistantTurnEntries({
       {row.entries.map((entry) =>
         entry.type === 'content' ? (
           <AssistantContentSegment entry={entry} key={entry.key} />
-        ) : showProcessEntries ? (
-          <AssistantProcessBlock
-            entry={entry}
-            expansionScope={expansionScope}
-            key={entry.key}
-            parentExpansionId={parentExpansionId}
-            suppressLifecycleOnlyProcess={row.isStreaming}
-          />
-        ) : null,
+        ) : (
+          <Collapsible key={entry.key} open={showProcessEntries}>
+            <CollapsibleContent className="scout-process-collapse-content">
+              <AssistantProcessBlock
+                entry={entry}
+                expansionScope={expansionScope}
+                parentExpansionId={parentExpansionId}
+                suppressLifecycleOnlyProcess={row.isStreaming}
+              />
+            </CollapsibleContent>
+          </Collapsible>
+        ),
       )}
     </>
   );

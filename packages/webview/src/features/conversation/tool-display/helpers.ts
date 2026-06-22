@@ -112,7 +112,7 @@ export function createFileEditDisplayFromPreview({
     detailTarget: fileEdit.path,
     summaryTitle: previewError
       ? `预览失败 编辑 ${fileEdit.path}`
-      : `${getToolStatusPrefix(status)} 编辑 ${fileEdit.path}`,
+      : formatToolExecutionSummary(status, toolName, { path: fileEdit.path }),
   };
 }
 
@@ -167,7 +167,7 @@ export function resolveToolActivitySummary(display: ToolDisplayResult): {
 export function formatToolActivitySummaryLabel(kind: string, count: number): string {
   if (kind === 'command') return `已运行 ${count} 条命令`;
   if (kind === 'edit') return `已编辑 ${count} 个文件`;
-  if (kind === 'read') return `已读取 ${count} 个文件`;
+  if (kind === 'read') return `已阅读 ${count} 个文件`;
   if (kind === 'search') return `已搜索 ${count} 次`;
   if (kind === 'list') return `已列出 ${count} 次`;
   return `处理了 ${count} 项`;
@@ -201,16 +201,24 @@ export function formatToolExecutionSummary(
   toolName: string,
   args: Record<string, unknown> | undefined,
 ): string {
-  return `${getToolStatusPrefix(status)} ${getToolActionLabel(toolName, args)}`;
+  if (toolName === 'bash') {
+    const command = getFirstArgText(args, ['command', 'cmd', 'script']) || '命令';
+    return `${getCommandStatusPrefix(status)} ${command}`;
+  }
+
+  const actionLabel = getToolActionLabel(toolName, args);
+  if (!actionLabel) return `${getCommandStatusPrefix(status)} ${toolName}`;
+  return formatActionStatusSummary(status, actionLabel);
 }
 
-function getToolActionLabel(toolName: string, args: Record<string, unknown> | undefined): string {
+function getToolActionLabel(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): string | undefined {
   const target = getFirstArgText(args, ['path', 'filePath', 'file', 'target', 'cwd', 'directory']);
-  const command = getFirstArgText(args, ['command', 'cmd', 'script']);
   const pattern = getFirstArgText(args, ['pattern', 'query', 'regex', 'term']);
 
-  if (toolName === 'bash') return command || '命令';
-  if (toolName === 'read') return target ? `读取 ${target}` : '读取文件';
+  if (toolName === 'read') return target ? `阅读 ${target}` : '阅读文件';
   if (toolName === 'grep') {
     if (pattern && target) return `搜索 ${pattern} in ${target}`;
     if (pattern) return `搜索 ${pattern}`;
@@ -222,10 +230,30 @@ function getToolActionLabel(toolName: string, args: Record<string, unknown> | un
   if (toolName === 'ls') return target ? `列出 ${target}` : '列出目录';
   if (toolName === 'edit') return target ? `编辑 ${target}` : '编辑文件';
   if (toolName === 'write') return target ? `写入 ${target}` : '写入文件';
-  return toolName;
+  return undefined;
 }
 
-function getToolStatusPrefix(status: ToolDisplayStatus): string {
+function formatActionStatusSummary(status: ToolDisplayStatus, actionLabel: string): string {
+  if (status === 'running' || status === 'pending') return `正在${actionLabel}`;
+  if (status === 'done') return `已${actionLabel}`;
+
+  const { target, verb } = splitActionLabel(actionLabel);
+  if (status === 'error') return target ? `${verb}失败 ${target}` : `${actionLabel}失败`;
+  if (status === 'stopped') return target ? `已停止${verb} ${target}` : `已停止${actionLabel}`;
+  return `正在${actionLabel}`;
+}
+
+function splitActionLabel(actionLabel: string): { target: string; verb: string } {
+  const trimmed = actionLabel.trim();
+  const firstSpaceIndex = trimmed.indexOf(' ');
+  if (firstSpaceIndex < 0) return { target: '', verb: trimmed };
+  return {
+    target: trimmed.slice(firstSpaceIndex + 1).trim(),
+    verb: trimmed.slice(0, firstSpaceIndex).trim(),
+  };
+}
+
+function getCommandStatusPrefix(status: ToolDisplayStatus): string {
   if (status === 'running') return '正在运行';
   if (status === 'done') return '已运行';
   if (status === 'error') return '运行失败';
