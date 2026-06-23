@@ -89,6 +89,7 @@ import {
   calculateContextTokens,
   collectEntriesForBranchSummary,
   compact as compactPreparedSession,
+  type CompactionPreparation,
   type CompactionResult,
   estimateContextTokens,
   generateBranchSummary,
@@ -147,11 +148,6 @@ function mergeHeaders(
 
 export type AgentSessionAgentEvent = AgentEvent & { willRetry?: boolean };
 
-export interface SessionAgentMessage {
-  message: AgentMessage;
-  entryId?: string;
-}
-
 interface PromptAcceptance {
   messages: Set<AgentMessage>;
   reject: (reason?: unknown) => void;
@@ -170,7 +166,13 @@ export type AgentSessionEvent =
   | { type: 'agent_event'; event: AgentSessionAgentEvent }
   | { type: 'state_change' }
   | { type: 'queue_change' }
+  /**
+   * 阻塞性失败。SessionEventForwarder 会自动转译为一条 'error' level 的 notification 推送给 webview。
+   * 如需发送非阻塞用户提示，请改用 'notification' 事件，不要与 'error' 同时 emit，避免双弹 toast。
+   */
   | { type: 'error'; message: string }
+  /** 用户级提示，渲染为 webview toast。与 'error' 互斥使用：一次只走一条路径。 */
+  | { type: 'notification'; level: 'info' | 'warning' | 'error'; message: string }
   | {
       type: 'auto_retry_start';
       attempt: number;
@@ -323,8 +325,8 @@ export class AgentSession implements CoreDisposable {
   /** Pi extension lifecycle turn index；agent_start 时重置，turn_end 后递增。 */
   private turnIndex = 0;
 
-  /** 从 session.buildContext() 缓存内部 AgentMessage；webview 协议转换由 host 负责。 */
-  private cachedMessages: SessionAgentMessage[] = [];
+  /** 从当前 session branch 缓存原始路径；provider runtime context 由 agent.state.messages 持有。 */
+  private cachedBranch: SessionTreeEntry[] = [];
   /** Pi 式运行态上下文由 agent.state.messages 持有。 */
 
   /** Agent 运行队列的宿主态策略：暂停、恢复和可见快照。 */
@@ -374,7 +376,7 @@ export class AgentSession implements CoreDisposable {
     await this.restoreActiveToolsFromBranch();
 
     await this.rebuildRuntime();
-    await this.rebuildCachedMessages();
+    await this.rebuildCachedSessionBranch();
   }
 
   // ---------- 属性 ----------
@@ -852,6 +854,27 @@ export class AgentSession implements CoreDisposable {
       );
       return;
     }
+    if (this._isStreaming) {
+      this.logger.appendLine('[scout] Manual compaction skipped: agent is streaming');
+      this.emit({
+        type: 'notification',
+        level: 'warning',
+        message: '请等待当前回复完成后再压缩',
+      });
+      return;
+    }
+    const settings = this.configManager.getCompactionSettings();
+    const branchEntries = await this.session.getBranch();
+    const preparation = prepareCompaction(branchEntries, settings);
+    if (!preparation) {
+      this.logger.appendLine('[scout] Manual compaction skipped: nothing to compact');
+      this.emit({
+        type: 'notification',
+        level: 'warning',
+        message: '当前没有可压缩的上下文',
+      });
+      return;
+    }
 
     const compactedAgent = this.agent;
     this.unsubscribeAgent?.();
@@ -870,11 +893,13 @@ export class AgentSession implements CoreDisposable {
       this.logger.appendLine('[scout] Running manual compaction');
       const result = await this.runCompactionCore({
         signal: abortController.signal,
-        settings: this.configManager.getCompactionSettings(),
+        settings,
+        branchEntries,
+        preparation,
         customInstructions,
       });
       await this.syncRuntimeMessagesFromSession();
-      await this.rebuildCachedMessages();
+      await this.rebuildCachedSessionBranch();
       this.emit({
         type: 'compaction_end',
         reason: 'manual',
@@ -997,7 +1022,7 @@ export class AgentSession implements CoreDisposable {
 
     await this.persistAgentMessage(bashMessage);
     this.appendRuntimeMessage(bashMessage);
-    await this.rebuildCachedMessages();
+    await this.rebuildCachedSessionBranch();
     this.emit({ type: 'state_change' });
   }
 
@@ -1008,7 +1033,7 @@ export class AgentSession implements CoreDisposable {
       await this.persistAgentMessage(message);
       this.appendRuntimeMessage(message);
     }
-    await this.rebuildCachedMessages();
+    await this.rebuildCachedSessionBranch();
     this.emit({ type: 'state_change' });
   }
 
@@ -1463,7 +1488,7 @@ export class AgentSession implements CoreDisposable {
       });
       if (!result.cancelled) {
         await this.syncRuntimeMessagesFromSession();
-        await this.rebuildCachedMessages();
+        await this.rebuildCachedSessionBranch();
         this.emit({ type: 'state_change' });
         this.emit({ type: 'tree_change' });
       }
@@ -1498,8 +1523,10 @@ export class AgentSession implements CoreDisposable {
 
   // ---------- 消息访问（单一来源） ----------
 
-  getSessionMessages(): SessionAgentMessage[] {
-    return this.cachedMessages;
+  getSessionBranch(): readonly SessionTreeEntry[] {
+    // 返回内部数组引用：rebuild 时整体替换为新数组，调用方只读使用；
+    // host 层依赖引用稳定做投影记忆化。
+    return this.cachedBranch;
   }
 
   createReplacedSessionContext(): ReplacedSessionContext {
@@ -1608,31 +1635,23 @@ export class AgentSession implements CoreDisposable {
 
   // ---------- 内部：消息缓存 ----------
 
-  /** 从 session.buildContext() 重建缓存，附加 entryId */
-  private async rebuildCachedMessages(): Promise<void> {
+  /**
+   * 从当前 session branch 重建宿主 raw branch 快照。
+   *
+   * 不变量：每次调用必须用一个**新数组引用**整体替换 `cachedBranch`，
+   * 切勿就地 mutate。host 层（SessionMessageProjectionCache）依赖
+   * 引用稳定性做投影记忆化——引用变 = 内容变 = cache 失效。
+   */
+  private async rebuildCachedSessionBranch(): Promise<void> {
     try {
-      const context: SessionContext = await this.session.buildContext();
-      const branch: SessionTreeEntry[] = await this.session.getBranch();
-
-      // 建立 AgentMessage → entryId 映射（基于对象引用同一性）
-      const entryIdByMessage = new Map<AgentMessage, string>();
-      for (const entry of branch) {
-        if (entry.type === 'message') {
-          entryIdByMessage.set((entry as MessageEntry).message, entry.id);
-        }
-      }
-
-      this.cachedMessages = context.messages.map((message) => ({
-        message,
-        entryId: entryIdByMessage.get(message),
-      }));
-
+      const next = await this.session.getBranch();
+      this.cachedBranch = next;
       this.cachedLeafId = await this.session.getLeafId();
     } catch (error) {
       this.logger.appendLine(
-        `[scout] rebuildCachedMessages failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[scout] rebuildCachedSessionBranch failed: ${error instanceof Error ? error.message : String(error)}`,
       );
-      this.cachedMessages = [];
+      this.cachedBranch = [];
     }
   }
 
@@ -2008,7 +2027,7 @@ export class AgentSession implements CoreDisposable {
       message.details,
     );
     this.appendRuntimeMessage(message);
-    await this.rebuildCachedMessages();
+    await this.rebuildCachedSessionBranch();
     this.emit({ type: 'state_change' });
   }
 
@@ -2275,7 +2294,7 @@ export class AgentSession implements CoreDisposable {
       const message = (enrichedEvent as { message?: AgentMessage }).message;
       if (message) {
         await this.persistAgentMessage(message);
-        await this.rebuildCachedMessages();
+        await this.rebuildCachedSessionBranch();
         this.acceptPromptMessage(message);
       }
       if (message?.role === 'assistant') {
@@ -2289,7 +2308,7 @@ export class AgentSession implements CoreDisposable {
     }
 
     if (type === 'agent_end') {
-      await this.rebuildCachedMessages();
+      await this.rebuildCachedSessionBranch();
       this.emit({ type: 'state_change' });
     }
 
@@ -2445,6 +2464,8 @@ export class AgentSession implements CoreDisposable {
     signal: AbortSignal;
     settings: ReturnType<ScoutCoreConfig['getCompactionSettings']>;
     customInstructions?: string;
+    branchEntries?: SessionTreeEntry[];
+    preparation?: CompactionPreparation;
   }): Promise<CompactionResult> {
     if (options.signal.aborted) throw new Error('Compaction aborted');
     const model = this.agent?.state.model;
@@ -2452,8 +2473,8 @@ export class AgentSession implements CoreDisposable {
     const auth = await this.getApiKeyAndHeaders(model);
     if (!auth) throw new Error('No auth available for compaction');
 
-    const branchEntries = await this.session.getBranch();
-    const preparation = prepareCompaction(branchEntries, options.settings);
+    const branchEntries = options.branchEntries ?? (await this.session.getBranch());
+    const preparation = options.preparation ?? prepareCompaction(branchEntries, options.settings);
     if (!preparation) throw new Error('Nothing to compact');
 
     const hookResult = await this.extensionRunner?.emitSessionBeforeCompact({
@@ -2669,7 +2690,7 @@ export class AgentSession implements CoreDisposable {
         // compact 会从 session 重建运行态；本次 retry 前再次清理尾部 error，保持 Pi runtime 语义。
         await this.removeLastRuntimeAssistantError();
       }
-      await this.rebuildCachedMessages();
+      await this.rebuildCachedSessionBranch();
       this.emit({
         type: 'compaction_end',
         reason,

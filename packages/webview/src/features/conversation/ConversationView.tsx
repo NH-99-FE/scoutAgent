@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  LoaderCircle,
   ThumbsDown,
   ThumbsUp,
 } from 'lucide-react';
@@ -354,7 +355,15 @@ function renderAssistantAbortedOutcomeRow(row: AssistantOutcomeConversationRow):
 function renderAssistantCompactingOutcomeRow(row: AssistantOutcomeConversationRow): ReactElement {
   return (
     <article className="max-w-full min-w-0 px-1 py-2.5" data-assistant-outcome-kind={row.kind}>
-      <AssistantOutcomeDivider row={row} />
+      <AssistantOutcomeDivider
+        row={row}
+        icon={
+          <LoaderCircle
+            aria-hidden="true"
+            className="size-3.5 shrink-0 animate-spin"
+          />
+        }
+      />
     </article>
   );
 }

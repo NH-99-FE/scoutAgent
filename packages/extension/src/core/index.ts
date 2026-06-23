@@ -3,12 +3,7 @@
 // 负责：导出与 Pi coding-agent core 对齐的核心运行态模块。
 // ============================================================
 
-export {
-  AgentSession,
-  type AgentSessionEvent,
-  type NavigateTreeResult,
-  type SessionAgentMessage,
-} from './agent-session.ts';
+export { AgentSession, type AgentSessionEvent, type NavigateTreeResult } from './agent-session.ts';
 export {
   AgentSessionRuntime,
   createAgentSessionRuntime,

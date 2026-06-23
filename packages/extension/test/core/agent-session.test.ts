@@ -14,7 +14,7 @@ import {
   type SimpleStreamOptions,
 } from '@scout-agent/ai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AgentSession } from '../../src/core/agent-session.ts';
+import { AgentSession, type AgentSessionEvent } from '../../src/core/agent-session.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
 import { createConfigManager, mockModel, userMessage, assistantMessage } from './test-utils.ts';
 import { ConfigManager } from '../../src/config-manager.ts';
@@ -22,10 +22,12 @@ import { ConfigManager } from '../../src/config-manager.ts';
 const STREAM_OPTIONS_TEST_SOURCE = 'agent-session-compaction-stream-options-test';
 const STREAM_OPTIONS_TEST_API = 'test-agent-session-compaction-api';
 
-function createSession(tempDir: string): AgentSession {
+function createSession(tempDir: string, configValues?: Record<string, unknown>): AgentSession {
   return new AgentSession({
     session: SessionManager.inMemory(tempDir),
-    configManager: createConfigManager(tempDir),
+    configManager: configValues
+      ? createConfigManagerWithValues(tempDir, configValues)
+      : createConfigManager(tempDir),
     cwd: tempDir,
     logger: { appendLine: vi.fn() },
     skills: [],
@@ -339,7 +341,9 @@ describe('AgentSession', () => {
   });
 
   it('aborts and disconnects the current agent before manual compaction', async () => {
-    const session = createSession(tempDir);
+    const session = createSession(tempDir, { 'compaction.keepRecentTokens': 1 });
+    session.sessionManager.appendMessage(userMessage('first prompt'));
+    session.sessionManager.appendMessage(assistantMessage('first response'));
     const order: string[] = [];
     const unsubscribe = vi.fn(() => order.push('unsubscribe'));
     const subscribe = vi.fn(() => {
@@ -372,13 +376,150 @@ describe('AgentSession', () => {
     (
       session as unknown as { syncRuntimeMessagesFromSession: unknown }
     ).syncRuntimeMessagesFromSession = vi.fn(async () => []);
-    (session as unknown as { rebuildCachedMessages: unknown }).rebuildCachedMessages = vi.fn(
-      async () => undefined,
-    );
+    (session as unknown as { rebuildCachedSessionBranch: unknown }).rebuildCachedSessionBranch =
+      vi.fn(async () => undefined);
 
     await session.compact();
 
     expect(order).toEqual(['unsubscribe', 'abort', 'compact', 'subscribe']);
+  });
+
+  it('skips manual compaction before the session has conversation messages', async () => {
+    const session = createSession(tempDir);
+    const abort = vi.fn();
+    const runCompactionCore = vi.fn();
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      abort,
+      hasQueuedMessages: vi.fn(() => false),
+      subscribe: vi.fn(() => vi.fn()),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { runCompactionCore: unknown }).runCompactionCore = runCompactionCore;
+
+    await session.compact();
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(runCompactionCore).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      type: 'notification',
+      level: 'warning',
+      message: '当前没有可压缩的上下文',
+    });
+  });
+
+  it('skips manual compaction when the branch only has metadata entries', async () => {
+    const session = createSession(tempDir);
+    const selectedModel = mockModel();
+    session.sessionManager.appendModelChange(selectedModel.provider, selectedModel.id);
+    session.sessionManager.appendThinkingLevelChange('off');
+    const abort = vi.fn();
+    const runCompactionCore = vi.fn();
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      abort,
+      hasQueuedMessages: vi.fn(() => false),
+      subscribe: vi.fn(() => vi.fn()),
+      state: {
+        messages: [],
+        model: selectedModel,
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { runCompactionCore: unknown }).runCompactionCore = runCompactionCore;
+
+    await session.compact();
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(runCompactionCore).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      type: 'notification',
+      level: 'warning',
+      message: '当前没有可压缩的上下文',
+    });
+  });
+
+  it('skips manual compaction when no messages would be summarized', async () => {
+    const session = createSession(tempDir);
+    session.sessionManager.appendMessage(userMessage('short prompt'));
+    session.sessionManager.appendMessage(assistantMessage('short response'));
+    const abort = vi.fn();
+    const runCompactionCore = vi.fn();
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      abort,
+      hasQueuedMessages: vi.fn(() => false),
+      subscribe: vi.fn(() => vi.fn()),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { runCompactionCore: unknown }).runCompactionCore = runCompactionCore;
+
+    await session.compact();
+
+    expect(abort).not.toHaveBeenCalled();
+    expect(runCompactionCore).not.toHaveBeenCalled();
+    expect(events).toContainEqual({
+      type: 'notification',
+      level: 'warning',
+      message: '当前没有可压缩的上下文',
+    });
+  });
+
+  it('allows manual compaction when custom context can be summarized', async () => {
+    const session = createSession(tempDir, { 'compaction.keepRecentTokens': 1 });
+    const customEntryId = session.sessionManager.appendCustomMessageEntry(
+      'hidden-style',
+      'style context',
+      false,
+    );
+    session.sessionManager.appendMessage(userMessage('prompt to summarize'));
+    session.sessionManager.appendMessage(assistantMessage('kept response'));
+    const abort = vi.fn();
+    const runCompactionCore = vi.fn(async () => ({
+      summary: 'summary',
+      firstKeptEntryId: customEntryId,
+      tokensBefore: 100,
+    }));
+    const syncRuntimeMessagesFromSession = vi.fn(async () => []);
+    const rebuildCachedSessionBranch = vi.fn(async () => undefined);
+    attachFakeAgent(session, {
+      abort,
+      hasQueuedMessages: vi.fn(() => false),
+      subscribe: vi.fn(() => vi.fn()),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { runCompactionCore: unknown }).runCompactionCore = runCompactionCore;
+    (
+      session as unknown as { syncRuntimeMessagesFromSession: unknown }
+    ).syncRuntimeMessagesFromSession = syncRuntimeMessagesFromSession;
+    (session as unknown as { rebuildCachedSessionBranch: unknown }).rebuildCachedSessionBranch =
+      rebuildCachedSessionBranch;
+
+    await session.compact();
+
+    expect(abort).toHaveBeenCalledOnce();
+    expect(runCompactionCore).toHaveBeenCalledOnce();
+    expect(syncRuntimeMessagesFromSession).toHaveBeenCalledOnce();
+    expect(rebuildCachedSessionBranch).toHaveBeenCalledOnce();
   });
 
   it('pauses queued follow-ups on abort without clearing them', async () => {
@@ -620,6 +761,7 @@ describe('AgentSession', () => {
     const values: Record<string, unknown> = {
       anthropicApiKey: 'test-key',
       defaultModel: `${model.provider}/${model.id}`,
+      'compaction.keepRecentTokens': 1,
     };
     const configManager = new ConfigManager({
       cwd: tempDir,
@@ -711,7 +853,7 @@ describe('AgentSession', () => {
     expect(result).toEqual({ cancelled: false, editorText: 'first draft' });
     expect(backingSession.getLeafId()).toBeNull();
     expect(runtimeMessages).toEqual([]);
-    expect(session.getSessionMessages()).toEqual([]);
+    expect(session.getSessionBranch()).toEqual([]);
   });
 
   it('reports session stats from the runtime context', async () => {
@@ -873,8 +1015,12 @@ describe('AgentSession', () => {
     ).toBe(true);
     expect(
       session
-        .getSessionMessages()
-        .some(({ message }) => getMessageText(message) === 'new session prompt'),
+        .getSessionBranch()
+        .some(
+          (entry) =>
+            entry.type === 'message' &&
+            getMessageText((entry as { message: AgentMessage }).message) === 'new session prompt',
+        ),
     ).toBe(true);
     expect(turnCompleted).toBe(false);
 

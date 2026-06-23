@@ -51,7 +51,7 @@ import {
   type CreateAgentSessionRuntimeFactory,
 } from '../core/agent-session-runtime.ts';
 import { AgentEventCorrelator } from './protocol/agent-event-correlator.ts';
-import { convertMessage } from './protocol/agent-event-mapper.ts';
+import { SessionMessageProjectionCache } from './protocol/session-message-projection-cache.ts';
 import {
   mapSessionTreeToScout,
   resolveVisibleSessionLeafId,
@@ -117,6 +117,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   /** 事件监听器列表（透传 AgentSession 事件） */
   private listeners: ((event: ScoutSessionEvent) => void)[] = [];
   private unsubscribeAgentSession?: () => void;
+
+  /** 投影记忆化：按 branch 引用稳定性缓存 ScoutMessage，AgentSession 切换时显式失效。 */
+  private readonly scoutMessagesCache = new SessionMessageProjectionCache();
 
   constructor(options: ExtensionSessionCoordinatorOptions) {
     this.cwd = options.cwd;
@@ -684,15 +687,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   // ---------- 消息访问 ----------
 
   getScoutMessages(): ScoutMessage[] {
-    return (this.agentSession?.getSessionMessages() ?? [])
-      .map(({ message, entryId }) => {
-        const scoutMessage = convertMessage(message);
-        if (scoutMessage) {
-          scoutMessage.entryId = entryId;
-        }
-        return scoutMessage;
-      })
-      .filter((message): message is ScoutMessage => message !== null);
+    return this.scoutMessagesCache.project(this.agentSession?.getSessionBranch());
   }
 
   // ---------- 事件订阅 ----------
@@ -732,6 +727,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     // 取消订阅旧的
     this.unsubscribeAgentSession?.();
     this.agentEventCorrelator.reset();
+    this.scoutMessagesCache.invalidate();
     if (disposePrevious) {
       this.agentSession?.dispose();
     }
@@ -760,6 +756,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.unsubscribeAgentSession = undefined;
     this.agentSession = undefined;
     this.agentEventCorrelator.reset();
+    this.scoutMessagesCache.invalidate();
   }
 
   private logReplacementTeardownError(error: unknown): void {
@@ -942,6 +939,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.sessionRuntime = undefined;
       this.agentSession = undefined;
       this.agentEventCorrelator.reset();
+      this.scoutMessagesCache.invalidate();
       this.listeners.length = 0;
       for (const d of this.disposables) {
         try {

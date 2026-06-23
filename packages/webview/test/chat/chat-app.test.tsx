@@ -323,6 +323,24 @@ describe('ChatApp', () => {
     expect(useUiStore.getState().notification).toBeUndefined();
   });
 
+  it('shows extension notifications in the chat surface', async () => {
+    routeDetailState();
+    render(<ChatApp />);
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'notification',
+        level: 'warning',
+        message: '当前没有可压缩的上下文',
+      });
+    });
+
+    expect(await screen.findByText('当前没有可压缩的上下文')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(useUiStore.getState().notification).toBeUndefined();
+    });
+  });
+
   it('opens slash commands and filters them by the typed query', () => {
     routeCommands([
       makeCommand('settings', 'builtin', 'Open Scout settings'),

@@ -203,6 +203,14 @@ export class SessionEventForwarder {
       });
     }
 
+    if (event.type === 'notification') {
+      this.publishEvent({
+        type: 'notification',
+        level: event.level,
+        message: event.message,
+      });
+    }
+
     if (event.type === 'state_change' || event.type === 'error') {
       if (event.type === 'error') {
         this.publishEvent({ type: 'notification', level: 'error', message: event.message });

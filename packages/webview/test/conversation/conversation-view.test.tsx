@@ -530,6 +530,9 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('正在压缩上下文')).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-assistant-outcome-kind="compacting"] .animate-spin'),
+    ).toBeTruthy();
     expect(screen.queryByText('上下文溢出恢复')).not.toBeInTheDocument();
     expect(screen.queryByText('正在思考')).not.toBeInTheDocument();
     expect(screen.queryByText('正在处理')).not.toBeInTheDocument();
@@ -882,6 +885,51 @@ describe('ConversationView', () => {
     expect(screen.getByText('Kept')).toBeInTheDocument();
     expect(outcome?.querySelector('[data-scout-markdown-content="true"]')).toBeTruthy();
   });
+
+  it('renders compacted markdown after the retained final message', () => {
+    const { container } = renderConversation({
+      items: [
+        {
+          key: 'user-kept',
+          message: {
+            role: 'user',
+            content: 'kept prompt',
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'assistant-kept',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'kept reply' }],
+            timestamp: 2,
+          },
+        },
+        {
+          key: 'compaction-1',
+          message: {
+            role: 'compactionSummary',
+            summary: '## Generated document\n\n- retained context',
+            tokensBefore: 1234,
+            timestamp: 3,
+          },
+        },
+      ],
+    });
+
+    const assistantText = screen.getByText('kept reply');
+    const outcome = container.querySelector('[data-assistant-outcome-kind="compacted"]');
+    const heading = screen.getByRole('heading', { name: 'Generated document' });
+
+    expect(outcome).toBeTruthy();
+    expect(
+      assistantText.compareDocumentPosition(outcome as Node) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(
+      (outcome as Node).compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it('shows failed turns only for assistant error stop reasons', () => {
     const { container } = renderConversation({
       items: [

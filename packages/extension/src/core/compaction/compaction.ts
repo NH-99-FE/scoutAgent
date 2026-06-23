@@ -402,30 +402,30 @@ const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize
 
 Use this EXACT format:
 
-## Goal
+## 目标
 [What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
 
-## Constraints & Preferences
+## 约束与偏好
 - [Any constraints, preferences, or requirements mentioned by user]
 - [Or "(none)" if none were mentioned]
 
-## Progress
-### Done
+## 进展
+### 已完成
 - [x] [Completed tasks/changes]
 
-### In Progress
+### 进行中
 - [ ] [Current work]
 
-### Blocked
+### 阻塞
 - [Issues preventing progress, if any]
 
-## Key Decisions
+## 关键决策
 - **[Decision]**: [Brief rationale]
 
-## Next Steps
+## 下一步
 1. [Ordered list of what should happen next]
 
-## Critical Context
+## 关键上下文
 - [Any data, examples, or references needed to continue]
 - [Or "(none)" if not applicable]
 
@@ -434,41 +434,47 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 const UPDATE_SUMMARIZATION_PROMPT = `The messages above are NEW conversation messages to incorporate into the existing summary provided in <previous-summary> tags.
 
 Update the existing structured summary with new information. RULES:
-- PRESERVE all existing information from the previous summary
+- If the previous summary uses English section titles, MAP each section to its Chinese
+  equivalent BEFORE merging, and emit only the Chinese titles in the final output:
+  Goal→目标, Constraints & Preferences→约束与偏好, Progress→进展, Done→已完成,
+  In Progress→进行中, Blocked→阻塞, Key Decisions→关键决策, Next Steps→下一步,
+  Critical Context→关键上下文, Original Request→目标, Early Progress→进展,
+  Context for Suffix→关键上下文.
+- PRESERVE all existing information from the previous summary (after mapping titles)
 - ADD new progress, decisions, and context from the new messages
-- UPDATE the Progress section: move items from "In Progress" to "Done" when completed
-- UPDATE "Next Steps" based on what was accomplished
+- UPDATE the 进展 section: move items from 进行中 to 已完成 when completed
+- UPDATE 下一步 based on what was accomplished
 - PRESERVE exact file paths, function names, and error messages
 - If something is no longer relevant, you may remove it
 
 Use this EXACT format:
 
-## Goal
+## 目标
 [Preserve existing goals, add new ones if the task expanded]
 
-## Constraints & Preferences
+## 约束与偏好
 - [Preserve existing, add new ones discovered]
 
-## Progress
-### Done
+## 进展
+### 已完成
 - [x] [Include previously done items AND newly completed items]
 
-### In Progress
+### 进行中
 - [ ] [Current work - update based on progress]
 
-### Blocked
+### 阻塞
 - [Current blockers - remove if resolved]
 
-## Key Decisions
+## 关键决策
 - **[Decision]**: [Brief rationale] (preserve all previous, add new)
 
-## Next Steps
+## 下一步
 1. [Update based on current state]
 
-## Critical Context
+## 关键上下文
 - [Preserve important context, add new if needed]
 
-Keep each section concise. Preserve exact file paths, function names, and error messages.`;
+Keep each section concise. Use the section titles exactly as shown. Preserve exact file paths, commands, code identifiers, function names, package names, API names, and error messages in their original form.`;
 
 function createSummarizationOptions(
   model: Model<Api>,
@@ -611,8 +617,6 @@ export function prepareCompaction(
   }
   const boundaryEnd = pathEntries.length;
 
-  const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
-
   const cutPoint = findCutPoint(pathEntries, boundaryStart, boundaryEnd, settings.keepRecentTokens);
   const firstKeptEntry = pathEntries[cutPoint.firstKeptEntryIndex];
   if (!firstKeptEntry?.id) {
@@ -633,6 +637,13 @@ export function prepareCompaction(
       if (msg) turnPrefixMessages.push(msg);
     }
   }
+  if (messagesToSummarize.length === 0 && turnPrefixMessages.length === 0) {
+    // 空集早退；放在 extractFileOperations 与 tokensBefore 之前，避免无用遍历。
+    return undefined;
+  }
+
+  const tokensBefore = estimateContextTokens(buildSessionContext(pathEntries).messages).tokens;
+
   const fileOps = extractFileOperations(messagesToSummarize, pathEntries, prevCompactionIndex);
   if (cutPoint.isSplitTurn) {
     for (const msg of turnPrefixMessages) {
@@ -656,13 +667,13 @@ const TURN_PREFIX_SUMMARIZATION_PROMPT = `This is the PREFIX of a turn that was 
 
 Summarize the prefix to provide context for the retained suffix:
 
-## Original Request
+## 原始请求
 [What did the user ask for in this turn?]
 
-## Early Progress
+## 早期进展
 - [Key decisions and work done in the prefix]
 
-## Context for Suffix
+## 后续上下文
 - [Information needed to understand the retained recent work]
 
 Be concise. Focus on what's needed to understand the kept suffix.`;

@@ -454,4 +454,21 @@ describe('SessionEventForwarder', () => {
       message: 'boom',
     });
   });
+
+  it('forwards non-error session notifications without refreshing state', () => {
+    const { forwarder, publishEvent, pushState } = makeForwarder();
+
+    forwarder.handle({
+      type: 'notification',
+      level: 'warning',
+      message: '当前没有可压缩的上下文',
+    } as ScoutSessionEvent);
+
+    expect(pushState).not.toHaveBeenCalled();
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'notification',
+      level: 'warning',
+      message: '当前没有可压缩的上下文',
+    });
+  });
 });

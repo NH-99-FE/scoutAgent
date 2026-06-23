@@ -90,6 +90,48 @@ describe('compaction token utilities', () => {
 });
 
 describe('prepareCompaction', () => {
+  it('does not prepare compaction when the retained suffix starts at the beginning', () => {
+    const entries = [
+      {
+        type: 'model_change',
+        id: 'model-entry',
+        parentId: null,
+        timestamp: '2025-01-01T00:00:00.000Z',
+        provider: 'openai',
+        modelId: 'test-model',
+      },
+      {
+        type: 'thinking_level_change',
+        id: 'thinking-entry',
+        parentId: 'model-entry',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        thinkingLevel: 'off',
+      },
+      {
+        type: 'message',
+        id: 'user-entry',
+        parentId: 'thinking-entry',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        message: userMessage('short prompt'),
+      },
+      {
+        type: 'message',
+        id: 'assistant-entry',
+        parentId: 'user-entry',
+        timestamp: '2025-01-01T00:00:00.000Z',
+        message: assistantMessage('short response'),
+      },
+    ] satisfies SessionTreeEntry[];
+
+    expect(
+      prepareCompaction(entries, {
+        enabled: true,
+        reserveTokens: 1000,
+        keepRecentTokens: 20000,
+      }),
+    ).toBeUndefined();
+  });
+
   it('selects a stable kept suffix and messages to summarize', () => {
     resetChain();
     const entries = [
