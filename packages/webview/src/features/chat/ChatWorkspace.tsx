@@ -10,7 +10,6 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Pencil,
-  Settings,
   SquarePen,
 } from 'lucide-react';
 import type { ScoutTaskItem } from '@scout-agent/shared';
@@ -35,6 +34,7 @@ import { useVisualBusyState, useVisualIsStreaming } from '@/store/runtime-overla
 import { useSessionFile, useSessionId, useSessionName } from '@/store/session-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
 import { ConversationView } from '@/features/conversation/ConversationView';
+import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
 import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
 import { useTaskHistoryPanel } from '@/features/tasks/use-task-history-panel';
 
@@ -106,13 +106,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
                   {isAgentRunning ? <LoaderCircle className="animate-spin" /> : <History />}
                 </IconButton>
               </span>
-              <IconButton
-                label="打开设置"
-                size="icon-xs"
-                onClick={protocolClient.openSettingsPanel}
-              >
-                <Settings />
-              </IconButton>
+              <SettingsActionsMenu />
               <IconButton label="新会话" size="icon-xs" onClick={onNewSession}>
                 <SquarePen />
               </IconButton>

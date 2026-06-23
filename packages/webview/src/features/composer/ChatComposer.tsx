@@ -2,11 +2,13 @@
 // Chat Composer — 底部输入与运行控制
 // ============================================================
 
-import { useEffect, useRef, useState } from 'react';
+import type { KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import type { ScoutImageContent } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
+import { useCommands } from '@/store/config-store';
 import { useComposerActions, useComposerImages, useComposerText } from '@/store/composer-store';
 import { useIsStreaming, useQueueState } from '@/store/conversation-store';
 import {
@@ -21,6 +23,12 @@ import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextare
 import { FollowUpQueuePanel } from './FollowUpQueuePanel';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
+import { SlashCommandMenu } from './SlashCommandMenu';
+import {
+  buildSlashCommandItems,
+  type SlashCommandMenuItem,
+} from './slash-command-options';
+import { getSlashCommandTrigger } from './use-slash-command-trigger';
 
 interface BaseChatComposerProps {
   draftSessionId?: string;
@@ -73,6 +81,11 @@ interface ComposerSubmitPayload {
   text: string;
 }
 
+interface SlashSelectionState {
+  key: string | null;
+  index: number;
+}
+
 const ABORT_CONFIRM_TIMEOUT_MS = 1800;
 const EMPTY_QUEUE_STATE = {
   messages: [],
@@ -112,10 +125,18 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const { mode, placeholder, sessionId, submitDisabled } = props;
   const [confirmAbort, setConfirmAbort] = useState(false);
   const [pendingSubmit, setPendingSubmit] = useState<PendingSubmit | null>(null);
+  const [selectionStart, setSelectionStart] = useState(0);
+  const [slashSelection, setSlashSelection] = useState<SlashSelectionState>({
+    key: null,
+    index: 0,
+  });
+  const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const submitBlockedRef = useRef(false);
   const images = useComposerImages(sessionId);
   const text = useComposerText(sessionId);
+  const commands = useCommands();
   const composerActions = useComposerActions();
   const runtimeOverlayActions = useRuntimeOverlayActions();
   const visualBusy = useVisualBusyState();
@@ -135,6 +156,25 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const canStop = isCurrentSessionMode && visualBusy.cancellable;
   const showStop = (visualIsStreaming || canStop) && !hasDraft;
   const hasPausedFollowUps = queueState.paused && queueState.followUps.length > 0;
+  const slashTrigger = getSlashCommandTrigger(text, selectionStart);
+  const slashKey = slashTrigger
+    ? `${slashTrigger.range.start}:${slashTrigger.range.end}:${slashTrigger.query}`
+    : null;
+  const slashItems = useMemo(
+    () =>
+      slashTrigger
+        ? buildSlashCommandItems({
+            allowExtensionCommands: !isStreaming,
+            commands,
+            query: slashTrigger.query,
+          })
+        : [],
+    [commands, isStreaming, slashTrigger],
+  );
+  const slashMenuOpen = slashTrigger !== null && slashKey !== dismissedSlashKey;
+  const slashActiveIndex = slashSelection.key === slashKey ? slashSelection.index : 0;
+  const boundedSlashActiveIndex =
+    slashItems.length === 0 ? 0 : Math.min(slashActiveIndex, slashItems.length - 1);
 
   useEffect(() => {
     if (!confirmAbort) return undefined;
@@ -243,10 +283,101 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     composerActions.addImages(sessionId, nextImages);
   };
 
+  const setComposerText = (nextText: string) => {
+    setDismissedSlashKey(null);
+    setSlashSelection({ key: null, index: 0 });
+    composerActions.setText(sessionId, nextText);
+  };
+
+  const focusTextareaAt = (position: number) => {
+    window.setTimeout(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(position, position);
+      setSelectionStart(position);
+    }, 0);
+  };
+
+  const replaceSlashToken = (replacement: string) => {
+    if (!slashTrigger) return;
+    const nextText =
+      text.slice(0, slashTrigger.range.start) + replacement + text.slice(slashTrigger.range.end);
+    const nextSelectionStart = slashTrigger.range.start + replacement.length;
+    composerActions.setText(sessionId, nextText);
+    focusTextareaAt(nextSelectionStart);
+  };
+
+  const clearSlashToken = () => {
+    if (!slashTrigger) return;
+    const nextText = text.slice(0, slashTrigger.range.start) + text.slice(slashTrigger.range.end);
+    composerActions.setText(sessionId, nextText);
+    focusTextareaAt(slashTrigger.range.start);
+  };
+
+  const selectSlashItem = (item: SlashCommandMenuItem) => {
+    if (item.command.source !== 'builtin') {
+      replaceSlashToken(`/${item.command.name} `);
+      return;
+    }
+    switch (item.builtinAction) {
+      case 'tree':
+        protocolClient.openTreePanel();
+        clearSlashToken();
+        return;
+      case 'compact':
+        protocolClient.compact();
+        clearSlashToken();
+        return;
+      default:
+        return;
+    }
+  };
+
+  const handleSlashKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (!slashMenuOpen) return false;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setDismissedSlashKey(slashKey);
+      return true;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setSlashSelection({
+        key: slashKey,
+        index: slashItems.length === 0 ? 0 : (boundedSlashActiveIndex + 1) % slashItems.length,
+      });
+      return true;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setSlashSelection({
+        key: slashKey,
+        index:
+          slashItems.length === 0
+            ? 0
+            : (boundedSlashActiveIndex - 1 + slashItems.length) % slashItems.length,
+      });
+      return true;
+    }
+    if (event.key === 'Enter') {
+      if (slashItems.length === 0) return false;
+      event.preventDefault();
+      selectSlashItem(slashItems[boundedSlashActiveIndex]);
+      return true;
+    }
+    return false;
+  };
+
   return (
     <>
       <div className="max-w-full min-w-0">
         {isCurrentSessionMode ? <FollowUpQueuePanel /> : null}
+        {slashMenuOpen ? (
+          <SlashCommandMenu
+            activeIndex={boundedSlashActiveIndex}
+            items={slashItems}
+            onSelect={selectSlashItem}
+          />
+        ) : null}
         <form
           className="border-border bg-background max-w-full min-w-0 overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
           onSubmit={(event) => {
@@ -256,8 +387,11 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
         >
           <ComposerTextarea
             placeholder={placeholder}
+            textareaRef={textareaRef}
             value={text}
-            onChange={(nextText) => composerActions.setText(sessionId, nextText)}
+            onChange={setComposerText}
+            onKeyDownCapture={handleSlashKeyDown}
+            onSelectionChange={setSelectionStart}
             onSubmit={submit}
             onCancel={requestKeyboardStop}
             isStreaming={isStreaming}

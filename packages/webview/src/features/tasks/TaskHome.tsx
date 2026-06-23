@@ -2,15 +2,15 @@
 // Task Home — 空会话任务入口
 // ============================================================
 
-import { History, Settings, SquarePen } from 'lucide-react';
+import { History, SquarePen } from 'lucide-react';
 import type { ScoutTaskItem } from '@scout-agent/shared';
 import { Button } from '@/components/ui/button';
-import { protocolClient } from '@/bridge/protocol-client';
 import { HeaderBar } from '@/components/common/HeaderBar';
 import { IconButton } from '@/components/common/IconButton';
 import { HOME_COMPOSER_SESSION_ID } from '@/store/composer-store';
 import { useRecentTasks } from '@/store/task-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
+import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
 import { TaskRow, TaskSearchPanel } from './TaskSearchPanel';
 import { useTaskHistoryPanel } from './use-task-history-panel';
 
@@ -58,13 +58,7 @@ export function TaskHome({
                   <History />
                 </IconButton>
               </span>
-              <IconButton
-                label="打开设置"
-                size="icon-xs"
-                onClick={protocolClient.openSettingsPanel}
-              >
-                <Settings />
-              </IconButton>
+              <SettingsActionsMenu />
               {/* TODO: 明确首页新会话动作后再接入，当前首页 composer 已承载新会话输入。 */}
               <IconButton label="新会话" size="icon-xs">
                 <SquarePen />

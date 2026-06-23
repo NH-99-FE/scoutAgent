@@ -132,6 +132,10 @@ function projectCommandResult(message: ScoutCommandResult): void {
     return;
   }
 
+  if (message.type === 'import_session_result' && !message.success && message.error === 'cancelled') {
+    return;
+  }
+
   if (!message.success) {
     useUiStore.getState().actions.setNotification({
       type: 'notification',

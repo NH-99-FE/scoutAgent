@@ -144,6 +144,8 @@ export const protocolClient = {
   requestSessions: () => sendRouted({ type: 'request_sessions' }, projectProtocolResponsePayload),
   openSettingsPanel: () =>
     sendRouted({ type: 'open_settings_panel' }, projectProtocolResponsePayload),
+  pickImportSession: () =>
+    sendRouted({ type: 'pick_import_session' }, projectProtocolResponsePayload),
   openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, projectProtocolResponsePayload),
   openTask: (task: ScoutTaskItem) => {
     discardProtocolRequest(pendingNewSessionRequestId);

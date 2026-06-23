@@ -4,6 +4,7 @@ import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectTaskHistoryResult as routeTaskHistoryResponse } from '@/bridge/protocol-response-projector';
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
+import { useConfigStore } from '@/store/config-store';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
@@ -12,11 +13,13 @@ import { useTaskStore } from '@/store/task-store';
 import { useUiStore } from '@/store/ui-store';
 import type {
   ScoutBusyState,
+  ScoutCommandInfo,
   ScoutImageContent,
   ScoutMessage,
   ScoutProtocolResponsePayload,
   ScoutTaskItem,
   ScoutWebviewState,
+  SourceInfo,
 } from '@scout-agent/shared';
 
 const postMessage = vi.fn();
@@ -24,6 +27,12 @@ const TEST_IMAGE: ScoutImageContent = {
   type: 'image',
   data: 'aW1hZ2U=',
   mimeType: 'image/png',
+};
+const TEST_SOURCE_INFO: SourceInfo = {
+  path: '<test>',
+  source: 'test',
+  scope: 'temporary',
+  origin: 'top-level',
 };
 const intersectionObservers: MockIntersectionObserver[] = [];
 
@@ -60,7 +69,15 @@ function makeState(
   overrides: Partial<
     Pick<
       ScoutWebviewState,
-      'isStreaming' | 'busyState' | 'queueState' | 'sessionId' | 'sessionName' | 'sessionFile'
+      | 'isStreaming'
+      | 'busyState'
+      | 'queueState'
+      | 'sessionId'
+      | 'sessionName'
+      | 'sessionFile'
+      | 'modelProvider'
+      | 'modelId'
+      | 'thinkingLevel'
     >
   > = {},
 ): ScoutWebviewState {
@@ -69,9 +86,9 @@ function makeState(
     isStreaming: overrides.isStreaming ?? false,
     busyState: overrides.busyState ?? ({ kind: 'idle', cancellable: false } as ScoutBusyState),
     queueState: overrides.queueState,
-    modelProvider: 'openai',
-    modelId: 'gpt-test',
-    thinkingLevel: 'off',
+    modelProvider: overrides.modelProvider ?? 'openai',
+    modelId: overrides.modelId ?? 'gpt-test',
+    thinkingLevel: overrides.thinkingLevel ?? 'off',
     tools: [],
     activeToolNames: [],
     commands: [],
@@ -178,6 +195,45 @@ function routeProtocolError(
   });
 }
 
+function makeCommand(
+  name: string,
+  source: ScoutCommandInfo['source'],
+  description?: string,
+): ScoutCommandInfo {
+  return {
+    name,
+    description,
+    source,
+    sourceInfo: TEST_SOURCE_INFO,
+  };
+}
+
+function routeCommands(commands: ScoutCommandInfo[]): void {
+  act(() => {
+    routeExtensionMessage({
+      type: 'commands_update',
+      commands,
+    });
+  });
+}
+
+function routeDetailState(overrides: Partial<ScoutWebviewState> = {}): void {
+  act(() => {
+    routeExtensionMessage({
+      type: 'state_update',
+      state: makeState([{ role: 'user', content: 'hello', timestamp: 1 }], overrides),
+    });
+  });
+}
+
+function typeComposerText(label: string, value: string): HTMLTextAreaElement {
+  const textarea = screen.getByLabelText(label) as HTMLTextAreaElement;
+  fireEvent.change(textarea, { target: { value } });
+  textarea.setSelectionRange(value.length, value.length);
+  fireEvent.select(textarea);
+  return textarea;
+}
+
 describe('ChatApp', () => {
   beforeAll(() => {
     Object.defineProperty(globalThis, 'acquireVsCodeApi', {
@@ -201,6 +257,7 @@ describe('ChatApp', () => {
 
   afterEach(() => {
     cleanup();
+    useConfigStore.getState().actions.reset();
     useComposerStore.getState().actions.reset();
     useConversationStore.getState().actions.reset();
     useRuntimeOverlayStore.getState().actions.reset();
@@ -238,6 +295,177 @@ describe('ChatApp', () => {
       text: '按钮发送',
     });
     expect(screen.getByLabelText('随心输入')).toHaveValue('');
+  });
+
+  it('opens settings actions from the header menu', () => {
+    render(<ChatApp />);
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: '设置' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Scout 设置' }));
+
+    expectPostedPayload('open_settings_panel', { type: 'open_settings_panel' });
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: '设置' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '导入会话' }));
+
+    expectPostedPayload('pick_import_session', { type: 'pick_import_session' });
+    routeProtocolResult(getLatestPostedProtocolRequest('pick_import_session'), {
+      type: 'import_session_result',
+      success: false,
+      error: 'cancelled',
+    });
+    expect(useUiStore.getState().notification).toBeUndefined();
+  });
+
+  it('opens slash commands and filters them by the typed query', () => {
+    routeCommands([
+      makeCommand('settings', 'builtin', 'Open Scout settings'),
+      makeCommand('compact', 'builtin', 'Manually compact the current session'),
+      makeCommand('review', 'prompt', 'Review pending changes'),
+      makeCommand('model', 'builtin', 'Change the active model'),
+      makeCommand('continue', 'builtin', 'Continue the current response'),
+    ]);
+    render(<ChatApp />);
+
+    typeComposerText('随心输入', '/');
+
+    expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /压缩/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /review/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /settings/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /model/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /continue/ })).not.toBeInTheDocument();
+
+    typeComposerText('随心输入', '/co');
+
+    expect(screen.getByRole('option', { name: /压缩/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /settings/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /review/ })).not.toBeInTheDocument();
+  });
+
+  it('hides extension slash commands while the current session is streaming', () => {
+    routeCommands([
+      makeCommand('tree', 'builtin', 'Open the conversation tree'),
+      makeCommand('deploy', 'extension', 'Run extension command'),
+      makeCommand('review', 'prompt', 'Review pending changes'),
+      makeCommand('docs', 'skill', 'Use docs skill'),
+    ]);
+    routeDetailState({ isStreaming: true });
+    render(<ChatApp />);
+
+    typeComposerText('要求后续变更', '/');
+
+    expect(screen.getByRole('option', { name: /会话树/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /review/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /docs/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /deploy/ })).not.toBeInTheDocument();
+  });
+
+  it('selects slash commands with the keyboard without sending the message', () => {
+    routeCommands([
+      makeCommand('tree', 'builtin', 'Open the conversation tree'),
+      makeCommand('review', 'prompt', 'Review pending changes'),
+    ]);
+    render(<ChatApp />);
+    const textarea = typeComposerText('随心输入', '/');
+
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    expect(textarea).toHaveValue('/review ');
+    expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
+  });
+
+  it('selects slash commands with pointer activation', () => {
+    routeCommands([makeCommand('review', 'prompt', 'Review pending changes')]);
+    render(<ChatApp />);
+    const textarea = typeComposerText('随心输入', '/');
+
+    const option = screen.getByRole('option', { name: /review/ });
+    fireEvent.mouseDown(option);
+    fireEvent.click(option);
+
+    expect(textarea).toHaveValue('/review ');
+    expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
+  });
+
+  it('does not handle tab while slash commands are open', () => {
+    routeCommands([makeCommand('tree', 'builtin', 'Open the conversation tree')]);
+    render(<ChatApp />);
+    const textarea = typeComposerText('随心输入', '/');
+
+    fireEvent.keyDown(textarea, { key: 'Tab' });
+
+    expect(textarea).toHaveValue('/');
+    expect(getPostedProtocolRequests('open_tree_panel')).toHaveLength(0);
+  });
+
+  it('resets slash command highlight to the first item when reopening from input', () => {
+    routeCommands([
+      makeCommand('tree', 'builtin', 'Open the conversation tree'),
+      makeCommand('compact', 'builtin', 'Manually compact the current session'),
+    ]);
+    render(<ChatApp />);
+    const textarea = typeComposerText('随心输入', '/');
+
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+    expect(screen.getByRole('option', { name: /压缩/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+
+    typeComposerText('随心输入', '');
+    typeComposerText('随心输入', '/');
+
+    expect(screen.getByRole('option', { name: /会话树/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+  });
+
+  it('executes supported builtin slash commands and clears the slash token', () => {
+    routeCommands([
+      makeCommand('tree', 'builtin', 'Open the conversation tree'),
+      makeCommand('compact', 'builtin', 'Manually compact the current session'),
+    ]);
+    routeDetailState();
+    render(<ChatApp />);
+
+    let textarea = typeComposerText('要求后续变更', '/tree');
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+    expectPostedPayload('open_tree_panel', { type: 'open_tree_panel' });
+    expect(textarea).toHaveValue('');
+
+    textarea = typeComposerText('要求后续变更', '/compact');
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+    expectPostedPayload('compact', { type: 'compact', customInstructions: undefined });
+    expect(textarea).toHaveValue('');
+
+  });
+
+  it('closes slash commands for arguments and escape while respecting composing input', () => {
+    routeCommands([makeCommand('review', 'prompt', 'Review pending changes')]);
+    render(<ChatApp />);
+    typeComposerText('随心输入', '/review ');
+
+    expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+
+    let textarea = typeComposerText('随心输入', '/');
+    expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+    fireEvent.keyUp(textarea, { key: 'Escape' });
+    expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+
+    textarea = typeComposerText('随心输入', '/');
+    fireEvent.keyDown(textarea, { key: 'Process' });
+    expect(textarea).toHaveValue('/');
+    expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
   });
 
   it('prevents duplicate new session submits while creation is pending', () => {

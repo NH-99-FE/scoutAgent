@@ -24,13 +24,18 @@ describe('UiProtocolService', () => {
 
     service.requestCommands(respond);
 
-    expect(respond).toHaveBeenCalledWith({
-      type: 'commands_result',
-      commands: expect.arrayContaining([
-        expect.objectContaining({ name: 'settings', source: 'builtin' }),
+    const response = respond.mock.calls[0]?.[0];
+    expect(response).toMatchObject({ type: 'commands_result' });
+    expect(response.commands).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'tree', source: 'builtin' }),
+        expect.objectContaining({ name: 'compact', source: 'builtin' }),
         expect.objectContaining({ name: 'custom', source: 'extension' }),
       ]),
-    });
+    );
+    expect(response.commands).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'settings', source: 'builtin' })]),
+    );
     expect(publishEvent).not.toHaveBeenCalled();
   });
 
