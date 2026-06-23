@@ -92,7 +92,7 @@ export function ModelStatusMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        className="scout-model-menu bg-background text-foreground w-52 rounded-lg p-2 shadow-sm"
+        className="bg-background text-foreground w-52 rounded-lg p-2 shadow-sm"
       >
         <ThinkingLevelSection
           activeModel={activeModel}

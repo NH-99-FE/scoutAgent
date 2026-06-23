@@ -1,6 +1,7 @@
 import * as React from 'react';
 
 import { cn } from '@/lib/utils';
+import { clearPointerFocus, markPointerFocus } from './focus';
 
 function Textarea({
   className,
@@ -16,11 +17,11 @@ function Textarea({
         className,
       )}
       onBlur={(event) => {
-        event.currentTarget.removeAttribute('data-scout-pointer-focus');
+        clearPointerFocus(event);
         onBlur?.(event);
       }}
       onPointerDown={(event) => {
-        event.currentTarget.setAttribute('data-scout-pointer-focus', 'true');
+        markPointerFocus(event);
         onPointerDown?.(event);
       }}
       {...props}

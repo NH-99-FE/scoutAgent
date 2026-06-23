@@ -246,20 +246,44 @@ body,
   .task-search-field:focus-within + div [data-slot='separator'] {
     background: var(--vscode-focusBorder, var(--border));
   }
-  textarea[data-scout-pointer-focus='true']:focus,
-  textarea[data-scout-pointer-focus='true']:focus-visible {
-    outline: none !important;
-    outline-offset: 0 !important;
-    box-shadow: none !important;
-  }
-  .scout-model-menu:focus-visible,
-  .scout-model-menu
-    :where([data-slot='dropdown-menu-item'], [data-slot='dropdown-menu-radio-item']):focus-visible,
-  .scout-model-menu
-    :where(
-      [data-slot='dropdown-menu-item'],
-      [data-slot='dropdown-menu-radio-item']
-    )[data-highlighted] {
+  [data-scout-pointer-focus='true']:focus,
+  [data-scout-pointer-focus='true']:focus-visible,
+  :where(
+    [data-slot='dropdown-menu-content'],
+    [data-slot='dropdown-menu-sub-content'],
+    [data-slot='dropdown-menu-item'],
+    [data-slot='dropdown-menu-checkbox-item'],
+    [data-slot='dropdown-menu-radio-item'],
+    [data-slot='dropdown-menu-sub-trigger'],
+    [data-slot='popover-content'],
+    [data-slot='dialog-content'],
+    [data-slot='tooltip-content'],
+    [data-slot='scroll-area-viewport']
+  ):focus,
+  :where(
+    [data-slot='dropdown-menu-content'],
+    [data-slot='dropdown-menu-sub-content'],
+    [data-slot='dropdown-menu-item'],
+    [data-slot='dropdown-menu-checkbox-item'],
+    [data-slot='dropdown-menu-radio-item'],
+    [data-slot='dropdown-menu-sub-trigger'],
+    [data-slot='popover-content'],
+    [data-slot='dialog-content'],
+    [data-slot='tooltip-content'],
+    [data-slot='scroll-area-viewport']
+  ):focus-visible,
+  :where(
+      [data-slot='dropdown-menu-trigger'],
+      [data-slot='popover-trigger'],
+      [data-slot='dialog-trigger'],
+      [data-slot='collapsible-trigger']
+    )[data-state='open']:focus,
+  :where(
+      [data-slot='dropdown-menu-trigger'],
+      [data-slot='popover-trigger'],
+      [data-slot='dialog-trigger'],
+      [data-slot='collapsible-trigger']
+    )[data-state='open']:focus-visible {
     outline: none !important;
     outline-offset: 0 !important;
     box-shadow: none !important;
