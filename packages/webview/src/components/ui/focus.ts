@@ -13,5 +13,6 @@ export function markPointerFocus<TElement extends HTMLElement>(
 }
 
 export function clearPointerFocus<TElement extends HTMLElement>(event: React.FocusEvent<TElement>) {
+  if (event.relatedTarget === null) return;
   event.currentTarget.removeAttribute(POINTER_FOCUS_ATTRIBUTE);
 }
