@@ -488,6 +488,32 @@ describe('routeExtensionMessage', () => {
     expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('new draft');
   });
 
+  it('stores fork composer command effect with the target session identity', () => {
+    projectProtocolResponsePayload({
+      type: 'fork_result',
+      success: true,
+      targetSessionId: 'fork-session-id',
+      selectedText: 'edit this prompt',
+    });
+
+    expect(useComposerStore.getState().pendingCommandEffect).toEqual({
+      kind: 'replace_text',
+      source: 'fork',
+      targetSessionId: 'fork-session-id',
+      text: 'edit this prompt',
+    });
+  });
+
+  it('does not create fork composer command effect without a target session identity', () => {
+    projectProtocolResponsePayload({
+      type: 'fork_result',
+      success: true,
+      selectedText: 'edit this prompt',
+    });
+
+    expect(useComposerStore.getState().pendingCommandEffect).toBeNull();
+  });
+
   it('ignores stale new session results', () => {
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
     useUiStore.getState().actions.beginNewSessionRequest();

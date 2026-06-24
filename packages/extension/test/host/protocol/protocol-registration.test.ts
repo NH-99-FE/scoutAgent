@@ -76,6 +76,10 @@ const PAYLOAD_CASES = [
     { type: 'fork_session', entryId: 'entry-1', position: 'at' },
     { service: 'tree', method: 'fork_session' },
   ),
+  protocolCase(
+    { type: 'request_fork_candidates', sessionId: 'session-1' },
+    { service: 'tree', method: 'request_fork_candidates' },
+  ),
   protocolCase({ type: 'request_tree' }, { service: 'tree', method: 'request_tree' }),
   protocolCase(
     { type: 'navigate_tree', targetId: 'entry-1', summarize: false },
@@ -215,6 +219,9 @@ function makeServices(): ScoutProtocolServices {
     },
     tree: {
       forkSession: vi.fn(async () => undefined),
+      requestForkCandidates: vi.fn(async (message, respond) => {
+        respond({ type: 'fork_candidates_result', sessionId: message.sessionId, candidates: [] });
+      }),
       requestTree: vi.fn(async () => undefined),
       navigateTree: vi.fn(async (_message, respond) => {
         respond({ type: 'navigate_tree_result', success: true });

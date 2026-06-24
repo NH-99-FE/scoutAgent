@@ -6,6 +6,7 @@ import {
   buildConversationRows,
   createConversationRowsProjector,
   type AssistantProcessActivity,
+  type ConversationViewItem,
 } from '@/features/conversation/conversation-view-model';
 import type {
   ConversationItem,
@@ -59,7 +60,7 @@ function renderConversation({
 }: {
   busyState?: ScoutBusyState;
   expansionScope?: string;
-  items: ConversationItem[];
+  items: ConversationViewItem[];
   isStreaming?: boolean;
   showScrollToBottomButton?: boolean;
   toolExecutionsById?: Record<string, ToolExecutionState>;
@@ -380,6 +381,74 @@ describe('ConversationView', () => {
     expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
     expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.getByText('上一轮思考')).toBeInTheDocument();
+  });
+
+  it('renders a derived-session origin notice from a UI-only conversation item', () => {
+    const items = [
+      {
+        key: 'user-0',
+        message: {
+          role: 'user' as const,
+          content: 'message 0',
+          entryId: 'fork-point',
+          timestamp: 1,
+        },
+      },
+    ];
+    const { container, rerender } = renderConversation({ items });
+    expect(container.querySelector('[data-assistant-outcome-kind="forked"]')).toBeNull();
+
+    rerender(
+      <ConversationView
+        busyState={IDLE_BUSY_STATE}
+        isStreaming={false}
+        items={[
+          ...items,
+          {
+            key: 'fork-origin:fork-point',
+            type: 'notice',
+            notice: { kind: 'fork_origin', text: '从对话中派生' },
+          },
+        ]}
+        toolExecutionsById={{}}
+        toolPreviewsById={{}}
+      />,
+    );
+
+    expect(container.querySelector('[data-assistant-outcome-kind="forked"]')).not.toBeNull();
+    expect(screen.getByText('从对话中派生')).toBeInTheDocument();
+  });
+
+  it('keeps an assistant reply visible when a derived-session notice is inserted', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'user-1',
+          message: {
+            role: 'user',
+            content: 'original prompt',
+            entryId: 'user-1-entry',
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'fork-origin:user-1-entry',
+          type: 'notice',
+          notice: { kind: 'fork_origin', text: '从对话中派生' },
+        },
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'visible model reply' }],
+            timestamp: 3,
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByText('从对话中派生')).toBeInTheDocument();
+    expect(screen.getByText('visible model reply')).toBeInTheDocument();
   });
 
   it('uses a wrapping boundary for user messages across sidebar widths', () => {

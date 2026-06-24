@@ -178,6 +178,7 @@ export class SessionProtocolService implements SessionProtocolHost {
         messageCount: session.messageCount,
         firstMessage: session.firstMessage,
         parentSessionPath: session.parentSessionPath,
+        forkPointEntryId: session.forkPointEntryId,
         isCurrent: session.path === this.sessionManager.sessionFile,
       }));
     } catch (error) {

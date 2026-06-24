@@ -133,6 +133,43 @@ describe('AgentSession', () => {
     }
   });
 
+  it('uses inherited runtime model and thinking level when initializing an empty replacement session', async () => {
+    const inheritedModel = mockModel({
+      provider: 'openai',
+      id: 'GPT-5.5',
+      name: 'Third Party GPT-5.5',
+      api: 'openai-completions',
+      reasoning: true,
+    });
+    const backingSession = SessionManager.inMemory(tempDir);
+    const session = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManagerWithValues(tempDir, {
+        openaiApiKey: 'test-key',
+        defaultThinkingLevel: 'medium',
+      }),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+      initialModel: inheritedModel,
+      initialThinkingLevel: 'off',
+      activeToolNames: ['read'],
+    });
+
+    await session.initialize();
+    try {
+      expect(session.model).toBe(inheritedModel);
+      expect(session.thinkingLevel).toBe('off');
+      expect(backingSession.buildContext()).toMatchObject({
+        model: { provider: 'openai', modelId: 'GPT-5.5' },
+        thinkingLevel: 'off',
+        messages: [],
+      });
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('restores selected model and thinking level from metadata-only session state', async () => {
     const selectedModel = mockModel({
       id: 'metadata-only-selected-model',

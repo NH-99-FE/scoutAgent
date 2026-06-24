@@ -2,6 +2,7 @@
 // Chat Workspace — 会话中页面布局
 // ============================================================
 
+import { useMemo } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -11,6 +12,7 @@ import {
   MoreHorizontal,
   Pencil,
   SquarePen,
+  Undo2,
 } from 'lucide-react';
 import type { ScoutTaskItem } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
@@ -31,9 +33,17 @@ import {
 } from '@/store/conversation-store';
 import { getConversationExpansionScope } from '@/store/conversation-expansion-store';
 import { useVisualBusyState, useVisualIsStreaming } from '@/store/runtime-overlay-store';
-import { useSessionFile, useSessionId, useSessionName } from '@/store/session-store';
+import {
+  useForkPointEntryId,
+  useParentSessionPath,
+  useSessionFile,
+  useSessionId,
+  useSessionName,
+} from '@/store/session-store';
+import { useUiActions } from '@/store/ui-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
 import { ConversationView } from '@/features/conversation/ConversationView';
+import { applyForkOriginNotice } from '@/features/conversation/conversation-notices';
 import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
 import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
 import { useTaskHistoryPanel } from '@/features/tasks/use-task-history-panel';
@@ -54,6 +64,8 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   const sessionFile = useSessionFile();
   const sessionId = useSessionId();
   const sessionName = useSessionName();
+  const parentSessionPath = useParentSessionPath();
+  const forkPointEntryId = useForkPointEntryId();
   const {
     isRendered: taskHistoryRendered,
     isOpen: taskHistoryOpen,
@@ -70,6 +82,15 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     setQuery: setTaskHistoryQuery,
   } = useTaskHistoryPanel();
   const title = sessionName || getConversationTitle(messages) || '当前会话';
+  const conversationViewItems = useMemo(
+    () =>
+      applyForkOriginNotice({
+        forkPointEntryId,
+        hasParentSession: Boolean(parentSessionPath),
+        items: conversationItems,
+      }),
+    [conversationItems, forkPointEntryId, parentSessionPath],
+  );
   const handleOpenTask = (task: ScoutTaskItem) => {
     if (task.isCurrent) {
       closeTaskHistory();
@@ -96,7 +117,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
           }
           actions={
             <>
-              <ConversationMoreMenu />
+              <ConversationMoreMenu parentSessionPath={parentSessionPath} />
               <span ref={taskHistoryTriggerRef} className="inline-flex">
                 <IconButton
                   label={isAgentRunning ? '正在回复' : '历史任务'}
@@ -140,7 +161,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         className="min-h-0 flex-1"
         expansionScope={getConversationExpansionScope({ sessionFile, sessionId })}
         isStreaming={isStreaming}
-        items={conversationItems}
+        items={conversationViewItems}
         showScrollToBottomButton
         toolExecutionsById={toolExecutionsById}
         toolPreviewsById={toolPreviewsById}
@@ -153,7 +174,15 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   );
 }
 
-function ConversationMoreMenu() {
+function ConversationMoreMenu({ parentSessionPath }: { parentSessionPath: string }) {
+  const uiActions = useUiActions();
+
+  const openParentSession = () => {
+    if (!parentSessionPath) return;
+    uiActions.beginOpenTask(parentSessionPath);
+    protocolClient.restoreSession(parentSessionPath);
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -172,6 +201,12 @@ function ConversationMoreMenu() {
           <Pencil />
           <span>重命名对话</span>
         </DropdownMenuItem>
+        {parentSessionPath ? (
+          <DropdownMenuItem className="text-[12px]" onSelect={openParentSession}>
+            <Undo2 />
+            <span>返回原会话</span>
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuItem className="text-[12px]" onSelect={protocolClient.openTreePanel}>
           <GitBranch />
           <span>查看会话树</span>

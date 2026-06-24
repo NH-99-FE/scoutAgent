@@ -78,6 +78,7 @@ const PAYLOAD_VALIDATORS = {
     requiredString('entryId'),
     requiredEnum('position', ['before', 'at']),
   ),
+  request_fork_candidates: combine(fields('type', 'sessionId'), requiredString('sessionId')),
   request_tree: fields('type'),
   navigate_tree: combine(
     fields('type', 'targetId', 'summarize', 'customInstructions', 'replaceInstructions', 'label'),

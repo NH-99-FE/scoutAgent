@@ -3,7 +3,7 @@
 // ============================================================
 
 import { cn } from '@/lib/utils';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ComposerFloatingPanel, ComposerFloatingPanelHint } from './ComposerFloatingPanel';
 import type { SlashCommandMenuItem } from './slash-command-options';
 
 interface SlashCommandMenuProps {
@@ -17,35 +17,21 @@ interface SlashCommandMenuProps {
 export function SlashCommandMenu({ activeIndex, items, onSelect }: SlashCommandMenuProps) {
   if (items.length === 0) {
     return (
-      <div
-        aria-label="Slash commands"
-        className="border-border bg-background text-muted-foreground mb-1.5 max-h-[min(280px,42vh)] overflow-hidden rounded-xl border px-3 py-2 text-xs shadow-sm"
-        role="listbox"
-      >
-        没有匹配的命令
-      </div>
+      <ComposerFloatingPanelHint label="Slash commands">没有匹配的命令</ComposerFloatingPanelHint>
     );
   }
 
   return (
-    <div
-      aria-label="Slash commands"
-      className="border-border bg-background mb-1.5 overflow-hidden rounded-xl border shadow-sm"
-      role="listbox"
-    >
-      <ScrollArea className="max-h-[min(280px,42vh)]" viewportClassName="max-h-[min(280px,42vh)]">
-        <div className="p-1.5">
-          {items.map((item, index) => (
-            <SlashCommandMenuRow
-              active={index === activeIndex}
-              item={item}
-              key={item.key}
-              onSelect={onSelect}
-            />
-          ))}
-        </div>
-      </ScrollArea>
-    </div>
+    <ComposerFloatingPanel label="Slash commands">
+      {items.map((item, index) => (
+        <SlashCommandMenuRow
+          active={index === activeIndex}
+          item={item}
+          key={item.key}
+          onSelect={onSelect}
+        />
+      ))}
+    </ComposerFloatingPanel>
   );
 }
 

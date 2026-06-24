@@ -215,6 +215,8 @@ export function createScoutProtocolHostServices(
     },
     tree: {
       forkSession: (message, respond) => bundle.tree.forkSession(message, respond),
+      requestForkCandidates: (message, respond) =>
+        bundle.tree.requestForkCandidates(message, respond),
       requestTree: (respond) => bundle.tree.requestTree(respond),
       navigateTree: (message, respond) => bundle.tree.navigateTree(message, respond),
       setLabel: (message, respond) => bundle.tree.setLabel(message, respond),

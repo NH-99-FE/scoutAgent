@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectTaskHistoryResult as routeTaskHistoryResponse } from '@/bridge/protocol-response-projector';
@@ -78,6 +78,8 @@ function makeState(
       | 'modelProvider'
       | 'modelId'
       | 'thinkingLevel'
+      | 'parentSessionPath'
+      | 'forkPointEntryId'
     >
   > = {},
 ): ScoutWebviewState {
@@ -95,6 +97,8 @@ function makeState(
     sessionId: overrides.sessionId ?? 'session-1',
     sessionName: overrides.sessionName ?? '检查未提交更改',
     sessionFile: overrides.sessionFile,
+    parentSessionPath: overrides.parentSessionPath,
+    forkPointEntryId: overrides.forkPointEntryId,
     cwd: '/workspace',
   };
 }
@@ -424,6 +428,134 @@ describe('ChatApp', () => {
     expect(getPostedProtocolRequests('open_tree_panel')).toHaveLength(0);
   });
 
+  it('closes slash commands when pressing outside the floating panel', () => {
+    routeCommands([makeCommand('tree', 'builtin', 'Open the conversation tree')]);
+    render(<ChatApp />);
+    typeComposerText('随心输入', '/');
+
+    expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+  });
+
+  it('closes fork candidates when pressing outside the floating panel', () => {
+    routeCommands([makeCommand('fork', 'builtin', 'Create a branch')]);
+    routeDetailState();
+    render(<ChatApp />);
+    typeComposerText('要求后续变更', '/');
+
+    fireEvent.click(screen.getByRole('option', { name: /分叉/ }));
+    expect(screen.getByRole('listbox', { name: 'Fork candidates' })).toBeInTheDocument();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByRole('listbox', { name: 'Fork candidates' })).not.toBeInTheDocument();
+  });
+
+  it('ignores fork candidate responses for another session', async () => {
+    routeCommands([makeCommand('fork', 'builtin', 'Create a branch')]);
+    routeDetailState({ sessionId: 'session-1' });
+    render(<ChatApp />);
+    typeComposerText('要求后续变更', '/');
+
+    let prefetchRequest = getLatestPostedProtocolRequest('request_fork_candidates');
+    await waitFor(() => {
+      prefetchRequest = getLatestPostedProtocolRequest('request_fork_candidates');
+      expect(prefetchRequest).toBeDefined();
+    });
+    expect(prefetchRequest?.payload).toEqual({
+      type: 'request_fork_candidates',
+      sessionId: 'session-1',
+    });
+
+    act(() => {
+      routeProtocolResult(prefetchRequest, {
+        type: 'fork_candidates_result',
+        sessionId: 'session-old',
+        candidates: [{ entryId: 'old-user', text: 'old session prompt' }],
+      });
+    });
+
+    fireEvent.click(screen.getByRole('option', { name: /分叉/ }));
+    expect(screen.queryByText('old session prompt')).not.toBeInTheDocument();
+
+    const requests = getPostedProtocolRequests('request_fork_candidates');
+    const forkPanelRequest = requests.at(-1);
+    expect(requests).toHaveLength(2);
+    act(() => {
+      routeProtocolResult(forkPanelRequest, {
+        type: 'fork_candidates_result',
+        sessionId: 'session-1',
+        candidates: [{ entryId: 'current-user', text: 'current session prompt' }],
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('current session prompt')).toBeInTheDocument();
+    });
+  });
+
+  it('refreshes fork candidates when the current branch gains a user message', async () => {
+    routeCommands([makeCommand('fork', 'builtin', 'Create a branch')]);
+    routeDetailState({ sessionId: 'session-1' });
+    render(<ChatApp />);
+    typeComposerText('要求后续变更', '/');
+
+    let firstRequest = getLatestPostedProtocolRequest('request_fork_candidates');
+    await waitFor(() => {
+      firstRequest = getLatestPostedProtocolRequest('request_fork_candidates');
+      expect(firstRequest).toBeDefined();
+    });
+    act(() => {
+      routeProtocolResult(firstRequest, {
+        type: 'fork_candidates_result',
+        sessionId: 'session-1',
+        candidates: [{ entryId: 'user-1', text: 'first prompt' }],
+      });
+    });
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState(
+          [
+            { role: 'user', content: 'hello', entryId: 'user-1', timestamp: 1 },
+            { role: 'user', content: 'new prompt', entryId: 'user-2', timestamp: 2 },
+          ],
+          { sessionId: 'session-1' },
+        ),
+      });
+    });
+
+    const requestsBeforeReopen = getPostedProtocolRequests('request_fork_candidates').length;
+    fireEvent.click(screen.getByRole('option', { name: /分叉/ }));
+    await waitFor(() => {
+      expect(getPostedProtocolRequests('request_fork_candidates')).toHaveLength(
+        requestsBeforeReopen + 1,
+      );
+    });
+
+    const refreshRequest = getLatestPostedProtocolRequest('request_fork_candidates');
+    act(() => {
+      routeProtocolResult(refreshRequest, {
+        type: 'fork_candidates_result',
+        sessionId: 'session-1',
+        candidates: [
+          { entryId: 'user-1', text: 'first prompt' },
+          { entryId: 'user-2', text: 'new prompt' },
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('listbox', { name: 'Fork candidates' })).getByText('new prompt'),
+      ).toBeInTheDocument();
+    });
+  });
+
   it('resets slash command highlight to the first item when reopening from input', () => {
     routeCommands([
       makeCommand('tree', 'builtin', 'Open the conversation tree'),
@@ -625,6 +757,55 @@ describe('ChatApp', () => {
 
     expect(useUiStore.getState().openingTaskSessionPath).toBeUndefined();
     expect(useUiStore.getState().chatView).toBe('home');
+  });
+
+  it('returns to the parent session through the shared open-session flow', () => {
+    routeDetailState({
+      sessionFile: '/sessions/fork.jsonl',
+      parentSessionPath: '/sessions/source.jsonl',
+    });
+
+    render(<ChatApp />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: '更多操作' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '返回原会话' }));
+
+    expectPostedPayload('restore_session', {
+      type: 'restore_session',
+      sessionId: '',
+      sessionPath: '/sessions/source.jsonl',
+    });
+    expect(useUiStore.getState().openingTaskSessionPath).toBe('/sessions/source.jsonl');
+    expect(useUiStore.getState().chatView).toBe('home');
+  });
+
+  it('clears parent session pending state when restore is cancelled', () => {
+    routeDetailState({
+      sessionFile: '/sessions/fork.jsonl',
+      parentSessionPath: '/sessions/source.jsonl',
+    });
+
+    render(<ChatApp />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: '更多操作' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '返回原会话' }));
+    const restoreMessage = getLatestPostedProtocolRequest('restore_session');
+
+    act(() => {
+      routeProtocolResult(restoreMessage, {
+        type: 'restore_session_result',
+        success: false,
+        error: 'cancelled',
+      });
+    });
+
+    expect(useUiStore.getState().openingTaskSessionPath).toBeUndefined();
+    expect(useUiStore.getState().chatView).toBe('home');
+    expect(useUiStore.getState().notification).toBeUndefined();
   });
 
   it('opens a task while a new session message is pending without applying stale creation results', () => {

@@ -16,6 +16,8 @@ interface SessionStore {
   sessionId: string;
   sessionName: string;
   sessionFile: string;
+  parentSessionPath: string;
+  forkPointEntryId: string;
   cwd: string;
   modelProvider: string;
   modelId: string;
@@ -28,6 +30,8 @@ const initialState = {
   sessionId: '',
   sessionName: '',
   sessionFile: '',
+  parentSessionPath: '',
+  forkPointEntryId: '',
   cwd: '',
   modelProvider: '',
   modelId: '',
@@ -42,6 +46,8 @@ export const useSessionStore = create<SessionStore>((set) => ({
         sessionId: state.sessionId ?? '',
         sessionName: state.sessionName ?? '',
         sessionFile: state.sessionFile ?? '',
+        parentSessionPath: state.parentSessionPath ?? '',
+        forkPointEntryId: state.forkPointEntryId ?? '',
         cwd: state.cwd ?? '',
         modelProvider: state.modelProvider,
         modelId: state.modelId,
@@ -57,6 +63,8 @@ export const useSessionCount = () => useSessionStore((state) => state.sessions.l
 export const useSessionName = () => useSessionStore((state) => state.sessionName);
 export const useSessionId = () => useSessionStore((state) => state.sessionId);
 export const useSessionFile = () => useSessionStore((state) => state.sessionFile);
+export const useParentSessionPath = () => useSessionStore((state) => state.parentSessionPath);
+export const useForkPointEntryId = () => useSessionStore((state) => state.forkPointEntryId);
 export const useSessionCwd = () => useSessionStore((state) => state.cwd);
 export const useCurrentModelProvider = () => useSessionStore((state) => state.modelProvider);
 export const useCurrentModelId = () => useSessionStore((state) => state.modelId);

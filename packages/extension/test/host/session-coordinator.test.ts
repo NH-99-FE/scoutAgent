@@ -63,6 +63,7 @@ function createFakeAgentSession(session: Session, calls: string[] = []): AgentSe
     leafId: session.getLeafId(),
     model: undefined,
     thinkingLevel: 'off',
+    getActiveToolNames: vi.fn(() => ['read']),
     isStreaming: false,
     emitSessionBeforeSwitch: vi.fn(async () => false),
     emitSessionShutdown: vi.fn(async () => undefined),
@@ -402,6 +403,76 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     expect(calls).toEqual(['create:startup', 'create:new', 'withSession', 'sendUserMessage']);
 
     await coordinator.disposeAsync();
+  });
+
+  it('extracts every user message from the root-to-leaf raw branch as fork candidates', () => {
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, agentDir),
+    });
+
+    // raw 分支按 root-to-leaf 排序：含压缩点之前的旧 user message + 结构化内容 user message。
+    // getForkCandidates 读取的是 raw branch（getSessionBranch），不经过压缩展示投影，
+    // 因此压缩点前的 'old prompt' 仍应作为候选返回。
+    const branch = [
+      {
+        type: 'message',
+        id: 'u1',
+        parentId: null,
+        timestamp: '2026-01-01T00:00:00.000Z',
+        message: userMessage('old prompt'),
+      },
+      {
+        type: 'message',
+        id: 'a1',
+        parentId: 'u1',
+        timestamp: '2026-01-01T00:00:01.000Z',
+        message: assistantMessage('reply'),
+      },
+      {
+        type: 'compaction',
+        id: 'c1',
+        parentId: 'a1',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        firstKeptEntryId: 'u2',
+        summary: 'summary',
+      },
+      {
+        type: 'message',
+        id: 'u2',
+        parentId: 'c1',
+        timestamp: '2026-01-01T00:00:03.000Z',
+        message: {
+          role: 'user' as const,
+          content: [
+            { type: 'text' as const, text: 'kept ' },
+            { type: 'image' as const, data: 'base64', mimeType: 'image/png' },
+            { type: 'text' as const, text: 'prompt' },
+          ],
+          timestamp: 4,
+        },
+      },
+    ];
+    (coordinator as unknown as { agentSession: unknown }).agentSession = {
+      getSessionBranch: () => branch,
+    };
+
+    expect(coordinator.getForkCandidates()).toEqual([
+      { entryId: 'u1', text: 'old prompt' },
+      { entryId: 'u2', text: 'kept prompt' },
+    ]);
+  });
+
+  it('returns no fork candidates when there is no active session', () => {
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, agentDir),
+    });
+    expect(coordinator.getForkCandidates()).toEqual([]);
   });
 });
 

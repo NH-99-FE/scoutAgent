@@ -209,6 +209,8 @@ export interface AgentSessionOptions {
   ) => Promise<LoadedScoutResources>;
   activeToolNames?: string[];
   includeAllExtensionTools?: boolean;
+  initialModel?: Model<Api>;
+  initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
 }
 
@@ -292,6 +294,8 @@ export class AgentSession implements CoreDisposable {
   private activeToolNames: string[];
   private activeToolsCustomized: boolean;
   private includeAllExtensionToolsOnInitialize: boolean;
+  private readonly initialModel?: Model<Api>;
+  private readonly initialThinkingLevel?: ThinkingLevel;
   private toolRegistry = new Map<string, ToolRegistryEntry>();
   private lastSystemPrompt = '';
 
@@ -342,6 +346,7 @@ export class AgentSession implements CoreDisposable {
   /** 缓存的 session 元数据 */
   private cachedSessionId?: string;
   private cachedParentSessionPath?: string;
+  private cachedForkPointEntryId?: string;
   private cachedLeafId?: string | null;
 
   /** 事件监听器列表 */
@@ -364,6 +369,8 @@ export class AgentSession implements CoreDisposable {
     this.activeToolNames = options.activeToolNames ?? [...DEFAULT_ACTIVE_TOOL_NAMES];
     this.activeToolsCustomized = options.activeToolNames !== undefined;
     this.includeAllExtensionToolsOnInitialize = options.includeAllExtensionTools ?? false;
+    this.initialModel = options.initialModel;
+    this.initialThinkingLevel = options.initialThinkingLevel;
   }
 
   // ---------- 初始化 ----------
@@ -373,6 +380,7 @@ export class AgentSession implements CoreDisposable {
     const metadata = (await this.session.getMetadata()) as JsonlSessionMetadata;
     this.cachedSessionId = metadata.id;
     this.cachedParentSessionPath = metadata.parentSessionPath;
+    this.cachedForkPointEntryId = metadata.forkPointEntryId;
     await this.restoreActiveToolsFromBranch();
 
     await this.rebuildRuntime();
@@ -400,6 +408,10 @@ export class AgentSession implements CoreDisposable {
 
   get parentSessionPath(): string | undefined {
     return this.cachedParentSessionPath;
+  }
+
+  get forkPointEntryId(): string | undefined {
+    return this.cachedForkPointEntryId;
   }
 
   get leafId(): string | null {
@@ -2069,7 +2081,9 @@ export class AgentSession implements CoreDisposable {
       }
     }
     if (!model) {
-      model = this.configManager.findDefaultModel();
+      const initialModelAvailable =
+        this.initialModel && this.configManager.hasConfiguredModelAuth(this.initialModel);
+      model = initialModelAvailable ? this.initialModel : this.configManager.findDefaultModel();
     }
     if (!model) {
       this.emit({ type: 'error', message: 'No model available.' });
@@ -2078,7 +2092,9 @@ export class AgentSession implements CoreDisposable {
 
     const storedThinkingLevel = hasThinkingEntry
       ? (context.thinkingLevel as ThinkingLevel)
-      : (this.configManager.getDefaultThinkingLevel() ?? DEFAULT_REASONING_THINKING_LEVEL);
+      : (this.initialThinkingLevel ??
+        this.configManager.getDefaultThinkingLevel() ??
+        DEFAULT_REASONING_THINKING_LEVEL);
     const thinkingLevel = normalizeThinkingLevelForModel(model, storedThinkingLevel);
     await this.persistInitialSessionState({
       hasRestorableSessionState,

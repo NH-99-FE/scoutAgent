@@ -265,6 +265,13 @@ function isPreviewForCurrentSession(
 
 export const useConversationMessages = () => useConversationStore((state) => state.messages);
 export const useConversationItems = () => useConversationStore((state) => state.conversationItems);
+export const useConversationForkCandidateVersion = () =>
+  useConversationStore((state) =>
+    state.messages
+      .filter((message) => message.role === 'user')
+      .map((message, index) => message.entryId ?? `user:${index}:${message.timestamp}`)
+      .join('\n'),
+  );
 export const useConversationMessageCount = () =>
   useConversationStore((state) => state.messages.length);
 export const useIsStreaming = () => useConversationStore((state) => state.isStreaming);

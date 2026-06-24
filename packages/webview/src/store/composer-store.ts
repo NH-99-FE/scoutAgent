@@ -10,6 +10,15 @@ interface ComposerDraft {
   text: string;
 }
 
+export interface ComposerReplaceTextEffect {
+  kind: 'replace_text';
+  source: 'fork';
+  targetSessionId: string;
+  text: string;
+}
+
+export type ComposerCommandEffect = ComposerReplaceTextEffect;
+
 interface ComposerActions {
   addImages: (sessionId: string, images: ScoutImageContent[]) => void;
   removeImage: (sessionId: string, index: number) => void;
@@ -19,6 +28,8 @@ interface ComposerActions {
   discardPendingDraft: (sessionId: string) => void;
   clearDraft: (sessionId: string) => void;
   clearText: (sessionId: string) => void;
+  setCommandEffect: (effect: ComposerCommandEffect) => void;
+  consumeCommandEffect: () => void;
   reset: () => void;
 }
 
@@ -26,6 +37,8 @@ interface ComposerStore {
   imagesBySessionId: Record<string, ScoutImageContent[]>;
   pendingDraftBySessionId: Record<string, ComposerDraft>;
   textBySessionId: Record<string, string>;
+  // 协议命令完成后要作用到 composer 的一次性 UI effect；由匹配的 composer 消费后清空
+  pendingCommandEffect: ComposerCommandEffect | null;
   actions: ComposerActions;
 }
 
@@ -37,6 +50,7 @@ const initialState = {
   imagesBySessionId: {} as Record<string, ScoutImageContent[]>,
   pendingDraftBySessionId: {} as Record<string, ComposerDraft>,
   textBySessionId: {} as Record<string, string>,
+  pendingCommandEffect: null as ComposerCommandEffect | null,
 };
 
 function getComposerSessionId(sessionId: string): string {
@@ -163,6 +177,11 @@ export const useComposerStore = create<ComposerStore>((set) => ({
         delete nextTextBySessionId[key];
         return { textBySessionId: nextTextBySessionId };
       }),
+    setCommandEffect: (effect) => set({ pendingCommandEffect: effect }),
+    consumeCommandEffect: () =>
+      set((state) =>
+        state.pendingCommandEffect === null ? state : { pendingCommandEffect: null },
+      ),
     reset: () => set(initialState),
   },
 }));
@@ -176,3 +195,6 @@ export const useComposerText = (sessionId: string) =>
   useComposerStore((state) => state.textBySessionId[getComposerSessionId(sessionId)] ?? '');
 
 export const useComposerActions = () => useComposerStore((state) => state.actions);
+
+export const usePendingComposerCommandEffect = () =>
+  useComposerStore((state) => state.pendingCommandEffect);

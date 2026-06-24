@@ -14,7 +14,10 @@ export {
   migrateSessionEntries,
   parseSessionEntries,
 } from '../session-manager.ts';
+export { extractSessionTextContent } from './content-text.ts';
+export type { SessionTextContent, SessionTextContentPart } from './content-text.ts';
 export type {
+  BranchedSessionResult,
   BranchSummaryEntry,
   CompactionEntry,
   CustomEntry,

@@ -18,7 +18,9 @@ import type {
   AssistantOutcomeConversationRow,
   AssistantOutcomeKind,
   BuildConversationRowsOptions,
+  ConversationNoticeItem,
   ConversationRow,
+  ConversationViewItem,
   SystemConversationRow,
 } from './conversation-row-types';
 import {
@@ -46,7 +48,9 @@ export type {
   AssistantTurnEntry,
   AssistantVisibleContent,
   BuildConversationRowsOptions,
+  ConversationNoticeItem,
   ConversationRow,
+  ConversationViewItem,
   SystemConversationRow,
   UserConversationRow,
 } from './conversation-row-types';
@@ -61,7 +65,12 @@ interface ProjectedSegment {
   signature: SegmentSignature;
 }
 
-type SegmentPlan = UserSegmentPlan | AssistantSegmentPlan | SystemSegmentPlan | RuntimeSegmentPlan;
+type SegmentPlan =
+  | UserSegmentPlan
+  | AssistantSegmentPlan
+  | SystemSegmentPlan
+  | ForkOriginSegmentPlan
+  | RuntimeSegmentPlan;
 
 interface SegmentSignature {
   kind: SegmentPlan['kind'];
@@ -104,6 +113,11 @@ interface SystemSegmentPlan extends SegmentBase {
   kind: 'system';
 }
 
+interface ForkOriginSegmentPlan extends SegmentBase {
+  item: ConversationNoticeItem;
+  kind: 'fork_origin';
+}
+
 interface RuntimeSegmentPlan extends SegmentBase {
   activity: Exclude<AssistantRuntimeActivity, 'idle'>;
   anchorKey?: string;
@@ -112,7 +126,12 @@ interface RuntimeSegmentPlan extends SegmentBase {
   timestamp: number;
 }
 
-type RawSegment = RawUserSegment | RawAssistantSegment | RawSystemSegment | RawRuntimeSegment;
+type RawSegment =
+  | RawUserSegment
+  | RawAssistantSegment
+  | RawSystemSegment
+  | RawForkOriginSegment
+  | RawRuntimeSegment;
 
 interface RawUserSegment {
   item: ConversationItem;
@@ -134,6 +153,12 @@ interface RawSystemSegment {
   item: ConversationItem;
   key: string;
   kind: 'system';
+}
+
+interface RawForkOriginSegment {
+  item: ConversationNoticeItem;
+  key: string;
+  kind: 'fork_origin';
 }
 
 interface RawRuntimeSegment {
@@ -207,9 +232,10 @@ function planConversationSegments({
   toolPreviewsById = {},
 }: BuildConversationRowsOptions): SegmentPlan[] {
   const isTurnStreaming = isStreaming && busyState.kind === 'agent';
+  const messageItems = items.filter(isMessageConversationItem);
   const pairingPlan = createToolResultPairingPlan(items, isTurnStreaming);
   const runtimeActivity = resolveRuntimeActivity({
-    items,
+    items: messageItems,
     streamingAssistantKey: pairingPlan.streamingAssistantKey,
     isTurnStreaming,
     toolExecutionsById,
@@ -225,7 +251,16 @@ function planConversationSegments({
     currentAssistant = undefined;
   };
 
-  for (const [itemIndex, item] of items.entries()) {
+  let messageItemIndex = 0;
+  for (const item of items) {
+    if (isConversationNoticeItem(item)) {
+      flushAssistant();
+      rawSegments.push({ kind: 'fork_origin', key: item.key, item });
+      continue;
+    }
+
+    const itemIndex = messageItemIndex;
+    messageItemIndex += 1;
     const { message } = item;
 
     if (message.role === 'user') {
@@ -279,15 +314,24 @@ function planConversationSegments({
   );
 }
 
+function isConversationNoticeItem(item: ConversationViewItem): item is ConversationNoticeItem {
+  return 'type' in item && item.type === 'notice';
+}
+
+function isMessageConversationItem(item: ConversationViewItem): item is ConversationItem {
+  return !isConversationNoticeItem(item);
+}
+
 function createToolResultPairingPlan(
-  items: ConversationItem[],
+  items: ConversationViewItem[],
   isTurnStreaming: boolean,
 ): ToolResultPairingPlan {
-  const index = buildConversationIndex(items, isTurnStreaming);
+  const messageItems = items.filter(isMessageConversationItem);
+  const index = buildConversationIndex(messageItems, isTurnStreaming);
   const pairedByAssistantItemKey = new Map<string, Map<string, ScoutToolResultMessage[]>>();
   const pairedResultsByAssistantItemKey = new Map<string, ScoutToolResultMessage[]>();
 
-  for (const [itemIndex, item] of items.entries()) {
+  for (const [itemIndex, item] of messageItems.entries()) {
     const { message } = item;
     if (message.role !== 'assistant') continue;
 
@@ -420,6 +464,13 @@ function createSegmentPlan(
     };
   }
 
+  if (segment.kind === 'fork_origin') {
+    return {
+      ...segment,
+      signature: createSignature('fork_origin', [segment.key, segment.item.notice.text], []),
+    };
+  }
+
   return {
     ...segment,
     isLatestAssistant: context.isLatestAssistant,
@@ -503,6 +554,16 @@ function projectSegment(
 
   if (segment.kind === 'runtime') {
     return projectRuntimeSegment(segment);
+  }
+
+  if (segment.kind === 'fork_origin') {
+    return [
+      createAssistantOutcomeRow({
+        key: `${segment.key}:outcome:forked`,
+        kind: 'forked',
+        text: segment.item.notice.text,
+      }),
+    ];
   }
 
   return projectAssistantSegment(segment, options);

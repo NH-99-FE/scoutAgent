@@ -11,7 +11,10 @@ import {
   createCompactionSummaryMessage,
   createCustomMessage,
 } from '@scout-agent/agent';
-import type { CompactionEntry, SessionTreeEntry } from '../../core/session/index.ts';
+import type {
+  CompactionEntry,
+  SessionTreeEntry,
+} from '../../core/session/index.ts';
 import { convertMessage } from './agent-event-mapper.ts';
 
 export function projectSessionBranchToScoutMessages(
@@ -103,7 +106,9 @@ function isDisplayableSessionMessageEntry(entry: SessionTreeEntry): boolean {
       role === 'custom'
     );
   }
-  return entry.type === 'branch_summary' || (entry.type === 'custom_message' && entry.display);
+  return (
+    entry.type === 'branch_summary' || (entry.type === 'custom_message' && entry.display)
+  );
 }
 
 function appendProjectedMessage(messages: ScoutMessage[], entry: SessionTreeEntry): void {

@@ -8,6 +8,7 @@ import { rmSync } from 'node:fs';
 import type {
   ScoutAgentEvent,
   ScoutCommandInfo,
+  ScoutForkCandidate,
   ScoutImageContent,
   ScoutMessage,
   ScoutQueueState,
@@ -20,6 +21,7 @@ import { ConfigManager } from '../config-manager.ts';
 import { readSessionFileInfo } from '../core/session-file.ts';
 import {
   SessionManager as CoreSessionManager,
+  extractSessionTextContent,
   type JsonlSessionMetadata,
   type Session,
   type SessionInfo,
@@ -148,6 +150,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   get parentSessionPath(): string | undefined {
     return this.agentSession?.parentSessionPath;
+  }
+
+  get forkPointEntryId(): string | undefined {
+    return this.agentSession?.forkPointEntryId;
   }
 
   get currentCwd(): string {
@@ -690,6 +696,25 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return this.scoutMessagesCache.project(this.agentSession?.getSessionBranch());
   }
 
+  /**
+   * 提取当前 session 全部历史 user message 作为 fork 候选。
+   * 数据源为 raw 分支（root→leaf 完整路径），不经过压缩展示投影——
+   * 因此压缩后仍可 fork 到压缩点之前的旧消息。
+   */
+  getForkCandidates(): ScoutForkCandidate[] {
+    const branch = this.agentSession?.getSessionBranch();
+    if (!branch) return [];
+    const candidates: ScoutForkCandidate[] = [];
+    for (const entry of branch) {
+      if (entry.type !== 'message' || entry.message.role !== 'user') continue;
+      candidates.push({
+        entryId: entry.id,
+        text: extractSessionTextContent(entry.message.content),
+      });
+    }
+    return candidates;
+  }
+
   // ---------- 事件订阅 ----------
 
   subscribe(listener: (event: ScoutSessionEvent) => void): () => void {
@@ -795,6 +820,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       firstMessage: info.firstMessage,
       allMessagesText: info.allMessagesText,
       parentSessionPath: info.parentSessionPath,
+      forkPointEntryId: info.forkPointEntryId,
     };
   }
 
@@ -836,6 +862,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     cwd,
     activeToolNames,
     includeAllExtensionTools,
+    initialModel,
+    initialThinkingLevel,
     sessionStartEvent,
   }) => {
     const runtimeCwd = cwd ?? this.cwd;
@@ -852,6 +880,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       logger: this.outputChannel,
       activeToolNames,
       includeAllExtensionTools,
+      initialModel,
+      initialThinkingLevel,
       sessionStartEvent,
     });
 

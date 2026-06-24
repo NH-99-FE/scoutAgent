@@ -13,6 +13,7 @@ export interface SessionFileInfo {
   cwd?: string;
   createdAt?: string;
   parentSessionPath?: string;
+  forkPointEntryId?: string;
 }
 
 interface SessionHeader {
@@ -22,6 +23,7 @@ interface SessionHeader {
   timestamp?: string;
   cwd?: string;
   parentSession?: string;
+  forkPointEntryId?: string;
 }
 
 // ---------- 读取 ----------
@@ -63,6 +65,8 @@ export function readSessionFileInfo(filePath: string): SessionFileInfo {
     cwd: typeof header.cwd === 'string' ? header.cwd : undefined,
     createdAt: typeof header.timestamp === 'string' ? header.timestamp : undefined,
     parentSessionPath: typeof header.parentSession === 'string' ? header.parentSession : undefined,
+    forkPointEntryId:
+      typeof header.forkPointEntryId === 'string' ? header.forkPointEntryId : undefined,
   };
 }
 

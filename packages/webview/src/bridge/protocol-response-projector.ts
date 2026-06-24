@@ -58,6 +58,9 @@ export function projectProtocolResponsePayload(
       break;
     case 'file_mentions_result':
       break;
+    case 'fork_candidates_result':
+      // fork 候选由发起方在 onResponse 回调中直接消费，无需投影到 store
+      break;
     default:
       projectCommandResult(payload);
       break;
@@ -93,14 +96,12 @@ function applyStateSnapshotToStores(state: ScoutWebviewState): void {
 
 function projectCommandResult(message: ScoutCommandResult): void {
   if (message.type === 'open_task_result') {
-    if (!message.success) {
-      useUiStore.getState().actions.completeOpenTask(message.success);
-      useUiStore.getState().actions.setNotification({
-        type: 'notification',
-        level: 'error',
-        message: message.error ?? 'Open task failed',
-      });
-    }
+    projectOpenSessionResult(message, 'Open task failed');
+    return;
+  }
+
+  if (message.type === 'restore_session_result') {
+    projectOpenSessionResult(message, 'Restore session failed');
     return;
   }
 
@@ -132,6 +133,27 @@ function projectCommandResult(message: ScoutCommandResult): void {
     return;
   }
 
+  if (message.type === 'fork_result') {
+    if (message.success) {
+      // fork 成功：把被选用户消息文本回填到目标新会话 composer
+      if (message.selectedText && message.targetSessionId) {
+        useComposerStore.getState().actions.setCommandEffect({
+          kind: 'replace_text',
+          source: 'fork',
+          targetSessionId: message.targetSessionId,
+          text: message.selectedText,
+        });
+      }
+    } else if (message.error !== 'cancelled') {
+      useUiStore.getState().actions.setNotification({
+        type: 'notification',
+        level: 'error',
+        message: message.error ?? 'Fork failed',
+      });
+    }
+    return;
+  }
+
   if (message.type === 'import_session_result' && !message.success && message.error === 'cancelled') {
     return;
   }
@@ -143,4 +165,18 @@ function projectCommandResult(message: ScoutCommandResult): void {
       message: message.error ?? 'Request failed',
     });
   }
+}
+
+function projectOpenSessionResult(
+  message: Extract<ScoutCommandResult, { type: 'open_task_result' | 'restore_session_result' }>,
+  fallbackMessage: string,
+): void {
+  if (message.success) return;
+  useUiStore.getState().actions.completeOpenTask(false);
+  if (message.error === 'cancelled') return;
+  useUiStore.getState().actions.setNotification({
+    type: 'notification',
+    level: 'error',
+    message: message.error ?? fallbackMessage,
+  });
 }

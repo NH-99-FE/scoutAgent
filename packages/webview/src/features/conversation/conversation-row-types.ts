@@ -18,6 +18,19 @@ import type {
 } from '@/store/conversation-store';
 import type { ToolDisplayResult } from './tool-display';
 
+export type ConversationViewItem = ConversationItem | ConversationNoticeItem;
+
+export interface ConversationNoticeItem {
+  key: string;
+  type: 'notice';
+  notice: ForkOriginConversationNotice;
+}
+
+export interface ForkOriginConversationNotice {
+  kind: 'fork_origin';
+  text: string;
+}
+
 export type AssistantVisibleContent = ScoutTextContent | ScoutImageContent;
 
 export type ConversationRow =
@@ -43,7 +56,7 @@ export interface AssistantConversationRow {
   isStreaming: boolean;
 }
 
-export type AssistantOutcomeKind = 'aborted' | 'error' | 'compacting' | 'compacted';
+export type AssistantOutcomeKind = 'aborted' | 'error' | 'compacting' | 'compacted' | 'forked';
 
 export type AssistantOutcomeConversationRow =
   | AssistantSimpleOutcomeConversationRow
@@ -171,7 +184,7 @@ export interface SystemConversationRow {
 }
 
 export interface BuildConversationRowsOptions {
-  items: ConversationItem[];
+  items: ConversationViewItem[];
   isStreaming: boolean;
   busyState: ScoutBusyState;
   toolExecutionsById: Record<string, ToolExecutionState>;

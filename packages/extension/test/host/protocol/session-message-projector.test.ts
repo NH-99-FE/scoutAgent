@@ -185,4 +185,5 @@ describe('session message projector', () => {
       },
     ]);
   });
+
 });

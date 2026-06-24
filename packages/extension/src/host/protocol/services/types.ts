@@ -121,6 +121,10 @@ export interface TreeProtocolHost {
     respond: ProtocolResponder,
   ) => Promise<void>;
   requestTree: (respond: ProtocolResponder) => Promise<void>;
+  requestForkCandidates: (
+    message: ProtocolPayload<'request_fork_candidates'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
   navigateTree: (
     message: ProtocolPayload<'navigate_tree'>,
     respond: ProtocolResponder,

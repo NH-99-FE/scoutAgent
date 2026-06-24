@@ -135,6 +135,12 @@ export function registerScoutProtocolServices(
     fork_session: async (message, context) => {
       await services.tree.forkSession(payload<'fork_session'>(message), context.respond);
     },
+    request_fork_candidates: async (message, context) => {
+      await services.tree.requestForkCandidates(
+        payload<'request_fork_candidates'>(message),
+        context.respond,
+      );
+    },
     request_tree: async (_message, context) => {
       await services.tree.requestTree(context.respond);
     },

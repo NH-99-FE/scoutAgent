@@ -42,26 +42,56 @@ export class TreeProtocolService implements TreeProtocolHost {
     message: ProtocolPayload<'fork_session'>,
     respond: ProtocolResponder,
   ): Promise<void> {
+    let result: Awaited<ReturnType<ExtensionSessionCoordinator['fork']>>;
     try {
-      const result = await this.sessionManager.fork(message.entryId, message.position);
-      respond({
-        type: 'fork_result',
-        success: !result.cancelled,
-        error: result.cancelled ? 'cancelled' : undefined,
-      });
-      if (!result.cancelled) {
-        this.sessionIndex.invalidate();
-        await this.pushState();
-        await this.pushTreeData();
-        await this.requestSessions();
-      }
+      result = await this.sessionManager.fork(message.entryId, message.position);
     } catch (error) {
       respond({
         type: 'fork_result',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });
+      return;
     }
+
+    respond({
+      type: 'fork_result',
+      success: !result.cancelled,
+      error: result.cancelled ? 'cancelled' : undefined,
+      targetSessionId: result.cancelled ? undefined : this.sessionManager.sessionId,
+      selectedText: result.cancelled ? undefined : result.selectedText,
+    });
+
+    if (result.cancelled) return;
+
+    try {
+      this.sessionIndex.invalidate();
+      await this.pushState();
+      await this.pushTreeData();
+      await this.requestSessions();
+    } catch (error) {
+      this.publishEvent({
+        type: 'notification',
+        level: 'error',
+        message: `Fork succeeded, but refresh failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      });
+    }
+  }
+
+  async requestForkCandidates(
+    message: ProtocolPayload<'request_fork_candidates'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    const sessionId = message.sessionId;
+    const candidates =
+      sessionId === this.sessionManager.sessionId ? this.sessionManager.getForkCandidates() : [];
+    respond({
+      type: 'fork_candidates_result',
+      sessionId,
+      candidates,
+    });
   }
 
   async requestTree(respond: ProtocolResponder): Promise<void> {

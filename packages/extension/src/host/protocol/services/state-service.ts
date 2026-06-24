@@ -96,6 +96,7 @@ export class StateProtocolService implements StateProtocolHost {
       sessionName,
       sessionFile: this.sessionManager.sessionFile,
       parentSessionPath: this.sessionManager.parentSessionPath,
+      forkPointEntryId: this.sessionManager.forkPointEntryId,
       leafId,
       contextUsage: sessionStats?.contextUsage,
       sessionStats,

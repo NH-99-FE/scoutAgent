@@ -2,12 +2,12 @@
 // Slash Command Options — 命令候选纯数据推导
 // ============================================================
 
-import { FileText, GitBranch, Lollipop, Plug, Sparkles, type LucideIcon } from 'lucide-react';
+import { FileText, GitBranch, Lollipop, Plug, Sparkles, Split, type LucideIcon } from 'lucide-react';
 import type { ScoutCommandInfo } from '@scout-agent/shared';
 
 // ---------- 类型 ----------
 
-export type SlashBuiltinAction = 'tree' | 'compact';
+export type SlashBuiltinAction = 'tree' | 'compact' | 'fork';
 
 export interface SlashCommandMenuItem {
   type: 'command';
@@ -23,14 +23,16 @@ export interface SlashCommandMenuItem {
 
 export function buildSlashCommandItems(options: {
   allowExtensionCommands?: boolean;
+  allowForkCommand?: boolean;
   commands: ScoutCommandInfo[];
   query: string;
 }): SlashCommandMenuItem[] {
   const allowExtensionCommands = options.allowExtensionCommands ?? true;
+  const allowForkCommand = options.allowForkCommand ?? true;
   const query = options.query.trim().toLowerCase();
   const commandItems = options.commands
     .filter((command) => allowExtensionCommands || command.source !== 'extension')
-    .map(toSlashCommandItem)
+    .map((command) => toSlashCommandItem(command, { allowForkCommand }))
     .filter((item): item is SlashCommandMenuItem => item !== null);
 
   if (!query) return commandItems;
@@ -45,9 +47,12 @@ export function buildSlashCommandItems(options: {
   });
 }
 
-function toSlashCommandItem(command: ScoutCommandInfo): SlashCommandMenuItem | null {
+function toSlashCommandItem(
+  command: ScoutCommandInfo,
+  options: { allowForkCommand: boolean },
+): SlashCommandMenuItem | null {
   if (command.source === 'builtin') {
-    return toBuiltinCommandItem(command);
+    return toBuiltinCommandItem(command, options);
   }
 
   const iconBySource: Record<Exclude<ScoutCommandInfo['source'], 'builtin'>, LucideIcon> = {
@@ -66,9 +71,13 @@ function toSlashCommandItem(command: ScoutCommandInfo): SlashCommandMenuItem | n
   };
 }
 
-function toBuiltinCommandItem(command: ScoutCommandInfo): SlashCommandMenuItem | null {
+function toBuiltinCommandItem(
+  command: ScoutCommandInfo,
+  options: { allowForkCommand: boolean },
+): SlashCommandMenuItem | null {
   const action = getSupportedBuiltinAction(command.name);
   if (!action) return null;
+  if (action === 'fork' && !options.allowForkCommand) return null;
   const meta = BUILTIN_META[action];
 
   return {
@@ -83,7 +92,7 @@ function toBuiltinCommandItem(command: ScoutCommandInfo): SlashCommandMenuItem |
 }
 
 function getSupportedBuiltinAction(name: string): SlashBuiltinAction | undefined {
-  if (name === 'tree' || name === 'compact') {
+  if (name === 'tree' || name === 'compact' || name === 'fork') {
     return name;
   }
   return undefined;
@@ -119,5 +128,10 @@ const BUILTIN_META: Record<
     icon: Lollipop,
     label: '压缩',
     description: '压缩当前会话',
+  },
+  fork: {
+    icon: Split,
+    label: '分叉',
+    description: '从历史消息创建分支',
   },
 };

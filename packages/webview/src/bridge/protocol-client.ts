@@ -3,6 +3,7 @@
 // ============================================================
 
 import type {
+  ScoutForkCandidate,
   ScoutProtocolResponsePayload,
   ScoutImageContent,
   ScoutTaskHistoryPurpose,
@@ -45,6 +46,12 @@ interface RequestTaskHistoryOptions {
   scope?: 'workspace' | 'all';
   purpose?: ScoutTaskHistoryPurpose;
 }
+
+type OpenSessionPayload = Extract<
+  WebviewRequestPayload,
+  { type: 'open_task' | 'restore_session' }
+>;
+type OpenSessionFailureType = 'open_task_result' | 'restore_session_result';
 
 let pendingNewSessionRequestId: string | undefined;
 let pendingOpenTaskRequestId: string | undefined;
@@ -128,11 +135,55 @@ function requestTaskHistory({
   return nextQueryToken;
 }
 
+function openSessionByPath(
+  payload: OpenSessionPayload,
+  failureType: OpenSessionFailureType,
+): void {
+  discardProtocolRequest(pendingNewSessionRequestId);
+  pendingNewSessionRequestId = undefined;
+  discardProtocolRequest(pendingOpenTaskRequestId);
+  pendingOpenTaskRequestId = undefined;
+
+  let requestId = '';
+  requestId = sendRouted(
+    payload,
+    (response) => {
+      if (pendingOpenTaskRequestId === requestId) {
+        pendingOpenTaskRequestId = undefined;
+      }
+      projectProtocolResponsePayload(response);
+    },
+    (message) => {
+      if (pendingOpenTaskRequestId === requestId) {
+        pendingOpenTaskRequestId = undefined;
+      }
+      projectProtocolResponsePayload({
+        type: failureType,
+        sessionPath: payload.sessionPath,
+        success: false,
+        error: message,
+      });
+    },
+  );
+  pendingOpenTaskRequestId = requestId;
+}
+
 export const protocolClient = {
   ready: () => sendRouted({ type: 'ready' }, projectProtocolResponsePayload),
   requestState: () => sendRouted({ type: 'request_state' }, projectProtocolResponsePayload),
   requestConfig: () => sendRouted({ type: 'request_config' }, projectProtocolResponsePayload),
   requestTree: () => sendRouted({ type: 'request_tree' }, projectProtocolResponsePayload),
+  forkSession: (entryId: string) =>
+    sendRouted({ type: 'fork_session', entryId, position: 'before' }, projectProtocolResponsePayload),
+  requestForkCandidates: (
+    sessionId: string,
+    onResult: (candidates: ScoutForkCandidate[], responseSessionId: string) => void,
+  ) =>
+    sendRouted({ type: 'request_fork_candidates', sessionId }, (payload) => {
+      if (payload.type === 'fork_candidates_result') {
+        onResult(payload.candidates, payload.sessionId);
+      }
+    }),
   requestTasks: (limit?: number): string =>
     requestTaskHistory({
       query: '',
@@ -142,30 +193,25 @@ export const protocolClient = {
     }),
   requestTaskHistory,
   requestSessions: () => sendRouted({ type: 'request_sessions' }, projectProtocolResponsePayload),
+  restoreSession: (sessionPath: string) =>
+    openSessionByPath(
+      { type: 'restore_session', sessionId: '', sessionPath },
+      'restore_session_result',
+    ),
   openSettingsPanel: () =>
     sendRouted({ type: 'open_settings_panel' }, projectProtocolResponsePayload),
   pickImportSession: () =>
     sendRouted({ type: 'pick_import_session' }, projectProtocolResponsePayload),
   openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, projectProtocolResponsePayload),
   openTask: (task: ScoutTaskItem) => {
-    discardProtocolRequest(pendingNewSessionRequestId);
-    pendingNewSessionRequestId = undefined;
-    pendingOpenTaskRequestId = sendRouted(
+    openSessionByPath(
       {
         type: 'open_task',
         taskId: task.id,
         sessionPath: task.sessionPath,
         cwdOverride: task.cwd,
       },
-      projectProtocolResponsePayload,
-      (message) => {
-        projectProtocolResponsePayload({
-          type: 'open_task_result',
-          sessionPath: task.sessionPath,
-          success: false,
-          error: message,
-        });
-      },
+      'open_task_result',
     );
   },
   userMessage: (text: string, deliverAs?: 'steer' | 'followUp', options?: UserMessageOptions) => {

@@ -17,6 +17,8 @@ import type {
 } from './agent-session-runtime.ts';
 import type { Session } from './session/index.ts';
 import type { CoreLogger } from './logger.ts';
+import type { Api, Model } from '@scout-agent/ai';
+import type { ThinkingLevel } from '@scout-agent/agent';
 
 // ---------- 类型 ----------
 
@@ -43,6 +45,8 @@ export interface CreateAgentSessionFromServicesOptions {
   logger: CoreLogger;
   activeToolNames?: string[];
   includeAllExtensionTools?: boolean;
+  initialModel?: Model<Api>;
+  initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
 }
 
@@ -129,6 +133,8 @@ export async function createAgentSessionFromServices(
       options.services.resourceLoader.extendResources(resources),
     activeToolNames: options.activeToolNames,
     includeAllExtensionTools: options.includeAllExtensionTools,
+    initialModel: options.initialModel,
+    initialThinkingLevel: options.initialThinkingLevel,
     sessionStartEvent: options.sessionStartEvent,
   });
 

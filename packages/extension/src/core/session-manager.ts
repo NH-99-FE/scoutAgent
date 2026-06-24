@@ -38,11 +38,13 @@ export interface SessionHeader {
   timestamp: string;
   cwd: string;
   parentSession?: string;
+  forkPointEntryId?: string;
 }
 
 export interface NewSessionOptions {
   id?: string;
   parentSession?: string;
+  forkPointEntryId?: string;
 }
 
 export interface SessionEntryBase {
@@ -181,6 +183,8 @@ export interface SessionInfo {
   name?: string;
   /** Path to the parent session (if this session was forked). */
   parentSessionPath?: string;
+  /** Entry id in this session path where fork-origin UI should be anchored. */
+  forkPointEntryId?: string;
   created: Date;
   modified: Date;
   messageCount: number;
@@ -199,6 +203,15 @@ export interface JsonlSessionMetadata {
   firstMessage?: string;
   allMessagesText?: string;
   parentSessionPath?: string;
+  forkPointEntryId?: string;
+}
+
+export interface BranchedSessionResult {
+  forkPointEntryId?: string;
+  parentSessionPath?: string;
+  persisted: boolean;
+  sessionFile?: string;
+  sessionId: string;
 }
 
 export type ReadonlySessionManager = Pick<
@@ -483,7 +496,7 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
   // Validate session header
   if (entries.length === 0) return entries;
   const header = entries[0];
-  if (header.type !== 'session' || typeof (header as any).id !== 'string') {
+  if (header.type !== 'session' || typeof header.id !== 'string') {
     return [];
   }
 
@@ -628,6 +641,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
     const cwd =
       typeof (header as SessionHeader).cwd === 'string' ? (header as SessionHeader).cwd : '';
     const parentSessionPath = (header as SessionHeader).parentSession;
+    const forkPointEntryId = (header as SessionHeader).forkPointEntryId;
 
     const modified = getSessionModifiedDate(entries, header as SessionHeader, stats.mtime);
 
@@ -637,6 +651,7 @@ async function buildSessionInfo(filePath: string): Promise<SessionInfo | null> {
       cwd,
       name,
       parentSessionPath,
+      forkPointEntryId,
       created: new Date((header as SessionHeader).timestamp),
       modified,
       messageCount,
@@ -817,6 +832,7 @@ export class SessionManager {
       timestamp,
       cwd: this.cwd,
       parentSession: options?.parentSession,
+      forkPointEntryId: options?.forkPointEntryId,
     };
     this.fileEntries = [header];
     this.byId.clear();
@@ -886,6 +902,7 @@ export class SessionManager {
       cwd: header?.cwd ?? this.cwd,
       path: this.sessionFile ?? '',
       parentSessionPath: header?.parentSession,
+      forkPointEntryId: header?.forkPointEntryId,
     };
   }
 
@@ -1308,6 +1325,14 @@ export class SessionManager {
    * Returns the new session file path, or undefined if not persisting.
    */
   createBranchedSession(leafId: string): string | undefined {
+    return this.replaceWithBranchedSession(leafId).sessionFile;
+  }
+
+  /**
+   * Replace this manager with a session containing only the path from root to the
+   * specified leaf. Persisted sessions receive a new file and parent pointer.
+   */
+  replaceWithBranchedSession(leafId: string): BranchedSessionResult {
     const previousSessionFile = this.sessionFile;
     const path = this.getBranch(leafId);
     if (path.length === 0) {
@@ -1316,6 +1341,7 @@ export class SessionManager {
 
     // Filter out LabelEntry from path - we'll recreate them from the resolved map
     const pathWithoutLabels = path.filter((e) => e.type !== 'label');
+    const forkPointEntryId = pathWithoutLabels[pathWithoutLabels.length - 1]?.id;
 
     const newSessionId = createSessionId();
     const timestamp = new Date().toISOString();
@@ -1329,6 +1355,7 @@ export class SessionManager {
       timestamp,
       cwd: this.cwd,
       parentSession: this.persist ? previousSessionFile : undefined,
+      forkPointEntryId,
     };
 
     // Collect labels for entries in the path
@@ -1379,7 +1406,13 @@ export class SessionManager {
         this.flushed = false;
       }
 
-      return newSessionFile;
+      return {
+        forkPointEntryId,
+        parentSessionPath: previousSessionFile,
+        persisted: true,
+        sessionFile: newSessionFile,
+        sessionId: newSessionId,
+      };
     }
 
     // In-memory mode: replace current session with the path + labels
@@ -1400,7 +1433,13 @@ export class SessionManager {
     this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
     this.sessionId = newSessionId;
     this._buildIndex();
-    return undefined;
+    return {
+      forkPointEntryId,
+      parentSessionPath: undefined,
+      persisted: false,
+      sessionFile: undefined,
+      sessionId: newSessionId,
+    };
   }
 
   /**

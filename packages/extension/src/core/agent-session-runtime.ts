@@ -7,7 +7,10 @@ import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import type { AgentSession } from './agent-session.ts';
 import type { JsonlSessionMetadata, Session } from './session/index.ts';
-import { SessionManager as CoreSessionManager } from './session/index.ts';
+import {
+  SessionManager as CoreSessionManager,
+  extractSessionTextContent,
+} from './session/index.ts';
 import type {
   NewSessionReplacementOptions,
   ReplacedSessionContext,
@@ -16,6 +19,8 @@ import type {
 } from './extensions/index.ts';
 import { readSessionFileInfo } from './session-file.ts';
 import { assertSessionCwdExists } from './session-cwd.ts';
+import type { Api, Model } from '@scout-agent/ai';
+import type { ThinkingLevel } from '@scout-agent/agent';
 
 // ---------- 类型 ----------
 
@@ -31,6 +36,8 @@ export interface CreateAgentSessionRuntimeOptions {
   cwd?: string;
   activeToolNames?: string[];
   includeAllExtensionTools?: boolean;
+  initialModel?: Model<Api>;
+  initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
 }
 
@@ -56,15 +63,12 @@ interface AgentSessionRuntimeOptions {
   modelFallbackMessage?: string;
 }
 
-// ---------- 辅助 ----------
+type ReplacementRuntimeState = Pick<
+  CreateAgentSessionRuntimeOptions,
+  'activeToolNames' | 'initialModel' | 'initialThinkingLevel'
+>;
 
-function extractTextContent(content: string | Array<{ type: string; text?: string }>): string {
-  if (typeof content === 'string') return content;
-  return content
-    .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-    .map((part) => part.text)
-    .join('');
-}
+// ---------- 辅助 ----------
 
 function getSessionFile(session: Session): string | undefined {
   return session.getSessionFile();
@@ -78,6 +82,14 @@ function getSessionOpenCwdOverride(
   if (cwdOverride) return cwdOverride;
   const sessionCwd = readSessionFileInfo(sessionPath).cwd;
   return sessionCwd?.trim() ? undefined : fallbackCwd;
+}
+
+function getReplacementRuntimeState(session: AgentSession): ReplacementRuntimeState {
+  return {
+    activeToolNames: session.getActiveToolNames(),
+    initialModel: session.model,
+    initialThinkingLevel: session.thinkingLevel,
+  };
 }
 
 export class SessionImportFileNotFoundError extends Error {
@@ -196,6 +208,7 @@ export class AgentSessionRuntime {
     reason: 'new' | 'resume' | 'fork' | 'reload',
     previousSessionFile: string | undefined,
     options?: SessionReplacementOptions,
+    replacementRuntimeState?: ReplacementRuntimeState,
   ): Promise<AgentSessionReplacementResult> {
     await this.teardownCurrent(reason, getSessionFile(session));
     const sessionStartEvent: SessionStartEvent = {
@@ -206,6 +219,7 @@ export class AgentSessionRuntime {
     const result = await this.createRuntime({
       session,
       cwd,
+      ...replacementRuntimeState,
       sessionStartEvent,
     });
     this.apply(result, cwd);
@@ -236,6 +250,7 @@ export class AgentSessionRuntime {
 
     const previousSessionFile = this.session.sessionFile;
     const currentSession = this.session.sessionManager;
+    const replacementRuntimeState = getReplacementRuntimeState(this.session);
     const session = currentSession.isPersisted()
       ? CoreSessionManager.create(this.cwd, currentSession.getSessionDir(), {
           parentSession: options?.parentSession,
@@ -253,6 +268,7 @@ export class AgentSessionRuntime {
     const result = await this.createRuntime({
       session,
       cwd: this.cwd,
+      ...replacementRuntimeState,
       sessionStartEvent,
     });
     this.apply(result, this.cwd);
@@ -300,7 +316,7 @@ export class AgentSessionRuntime {
         throw new Error(`Invalid entry ID for forking before: ${entryId}`);
       }
       targetLeafId = selectedEntry.parentId;
-      selectedText = extractTextContent(selectedEntry.message.content);
+      selectedText = extractSessionTextContent(selectedEntry.message.content);
     }
 
     const previousSessionFile = this.session.sessionFile;
@@ -322,11 +338,11 @@ export class AgentSessionRuntime {
         sessionDir,
         currentSession.getCwd(),
       );
-      const forkedSessionFile = nextSession.createBranchedSession(targetLeafId);
-      if (!forkedSessionFile) throw new Error('Failed to create forked session');
+      const forkedSession = nextSession.replaceWithBranchedSession(targetLeafId);
+      if (!forkedSession.sessionFile) throw new Error('Failed to create forked session');
     } else {
       nextSession = currentSession;
-      nextSession.createBranchedSession(targetLeafId);
+      nextSession.replaceWithBranchedSession(targetLeafId);
     }
 
     const result = await this.replaceWith(
@@ -335,6 +351,7 @@ export class AgentSessionRuntime {
       'fork',
       previousSessionFile,
       options,
+      getReplacementRuntimeState(this.session),
     );
     return { ...result, selectedText };
   }

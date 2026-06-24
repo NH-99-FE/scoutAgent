@@ -9,8 +9,17 @@ import type { ScoutImageContent } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
 import { useCommands } from '@/store/config-store';
-import { useComposerActions, useComposerImages, useComposerText } from '@/store/composer-store';
-import { useIsStreaming, useQueueState } from '@/store/conversation-store';
+import {
+  useComposerActions,
+  useComposerImages,
+  useComposerText,
+  usePendingComposerCommandEffect,
+} from '@/store/composer-store';
+import {
+  useConversationForkCandidateVersion,
+  useIsStreaming,
+  useQueueState,
+} from '@/store/conversation-store';
 import {
   useRuntimeOverlayActions,
   useVisualBusyState,
@@ -21,6 +30,7 @@ import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
 import { ApprovalModeMenu } from './ApprovalModeMenu';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
 import { FollowUpQueuePanel } from './FollowUpQueuePanel';
+import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
 import { SlashCommandMenu } from './SlashCommandMenu';
@@ -28,6 +38,7 @@ import {
   buildSlashCommandItems,
   type SlashCommandMenuItem,
 } from './slash-command-options';
+import { useForkCandidateMenu } from './use-fork-candidate-menu';
 import { getSlashCommandTrigger } from './use-slash-command-trigger';
 
 interface BaseChatComposerProps {
@@ -131,6 +142,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     index: 0,
   });
   const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
+  const floatingPanelRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const submitBlockedRef = useRef(false);
@@ -138,11 +150,13 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const text = useComposerText(sessionId);
   const commands = useCommands();
   const composerActions = useComposerActions();
+  const pendingCommandEffect = usePendingComposerCommandEffect();
   const runtimeOverlayActions = useRuntimeOverlayActions();
   const visualBusy = useVisualBusyState();
   const currentSessionStreaming = useIsStreaming();
   const currentSessionVisualStreaming = useVisualIsStreaming();
   const currentSessionQueueState = useQueueState();
+  const currentSessionForkCandidateVersion = useConversationForkCandidateVersion();
   const isCurrentSessionMode = mode === 'currentSession';
   const isStreaming = isCurrentSessionMode ? currentSessionStreaming : false;
   const visualIsStreaming = isCurrentSessionMode ? currentSessionVisualStreaming : false;
@@ -165,16 +179,41 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
       slashTrigger
         ? buildSlashCommandItems({
             allowExtensionCommands: !isStreaming,
+            allowForkCommand: isCurrentSessionMode,
             commands,
             query: slashTrigger.query,
           })
         : [],
-    [commands, isStreaming, slashTrigger],
+    [commands, isCurrentSessionMode, isStreaming, slashTrigger],
   );
   const slashMenuOpen = slashTrigger !== null && slashKey !== dismissedSlashKey;
   const slashActiveIndex = slashSelection.key === slashKey ? slashSelection.index : 0;
   const boundedSlashActiveIndex =
     slashItems.length === 0 ? 0 : Math.min(slashActiveIndex, slashItems.length - 1);
+  // 命令菜单里出现 fork 项时即预取候选，避免点开分叉菜单后再经历一次加载态导致高度跳变
+  const forkItemVisible = slashMenuOpen && slashItems.some((item) => item.builtinAction === 'fork');
+  const forkMenu = useForkCandidateMenu({
+    branchVersion: isCurrentSessionMode ? currentSessionForkCandidateVersion : '',
+    prefetch: forkItemVisible,
+    sessionId,
+  });
+
+  useEffect(() => {
+    if (!forkMenu.open && !slashMenuOpen) return undefined;
+    const closeFloatingPanelOnOutsidePointerDown = (event: PointerEvent) => {
+      const panel = floatingPanelRef.current;
+      if (event.target instanceof Node && panel?.contains(event.target)) return;
+      if (forkMenu.open) {
+        forkMenu.close();
+        return;
+      }
+      setDismissedSlashKey(slashKey);
+    };
+    document.addEventListener('pointerdown', closeFloatingPanelOnOutsidePointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', closeFloatingPanelOnOutsidePointerDown);
+    };
+  }, [forkMenu, slashKey, slashMenuOpen]);
 
   useEffect(() => {
     if (!confirmAbort) return undefined;
@@ -297,6 +336,18 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     }, 0);
   };
 
+  // fork 完成后回填被选用户消息文本到当前激活会话的 composer
+  useEffect(() => {
+    if (pendingCommandEffect == null) return;
+    if (pendingCommandEffect.targetSessionId !== sessionId) return;
+    if (pendingCommandEffect.kind === 'replace_text') {
+      composerActions.setText(sessionId, pendingCommandEffect.text);
+      composerActions.consumeCommandEffect();
+      focusTextareaAt(pendingCommandEffect.text.length);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCommandEffect, sessionId]);
+
   const replaceSlashToken = (replacement: string) => {
     if (!slashTrigger) return;
     const nextText =
@@ -327,12 +378,17 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
         protocolClient.compact();
         clearSlashToken();
         return;
+      case 'fork':
+        forkMenu.openMenu();
+        clearSlashToken();
+        return;
       default:
         return;
     }
   };
 
   const handleSlashKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (forkMenu.handleKeyDown(event)) return true;
     if (!slashMenuOpen) return false;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -371,12 +427,23 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     <>
       <div className="max-w-full min-w-0">
         {isCurrentSessionMode ? <FollowUpQueuePanel /> : null}
-        {slashMenuOpen ? (
-          <SlashCommandMenu
-            activeIndex={boundedSlashActiveIndex}
-            items={slashItems}
-            onSelect={selectSlashItem}
-          />
+        {forkMenu.open ? (
+          <div ref={floatingPanelRef}>
+            <ForkCandidateMenu
+              activeIndex={forkMenu.activeIndex}
+              candidates={forkMenu.candidates}
+              onHover={forkMenu.onHover}
+              onSelect={forkMenu.confirm}
+            />
+          </div>
+        ) : slashMenuOpen ? (
+          <div ref={floatingPanelRef}>
+            <SlashCommandMenu
+              activeIndex={boundedSlashActiveIndex}
+              items={slashItems}
+              onSelect={selectSlashItem}
+            />
+          </div>
         ) : null}
         <form
           className="border-border bg-background max-w-full min-w-0 overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"

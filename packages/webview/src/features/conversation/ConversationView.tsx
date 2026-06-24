@@ -13,6 +13,7 @@ import {
   Copy,
   ExternalLink,
   LoaderCircle,
+  Split,
   ThumbsDown,
   ThumbsUp,
 } from 'lucide-react';
@@ -29,7 +30,6 @@ import {
   useConversationExpansionStore,
 } from '@/store/conversation-expansion-store';
 import type {
-  ConversationItem,
   ToolCallPreviewState,
   ToolExecutionState,
 } from '@/store/conversation-store';
@@ -40,6 +40,7 @@ import {
   type AssistantOutcomeConversationRow,
   type AssistantVisibleContent,
   type ConversationRow,
+  type ConversationViewItem,
   type SystemConversationRow,
 } from './conversation-view-model';
 import { AssistantProcessBlock } from './AssistantProcessBlock';
@@ -55,7 +56,7 @@ import { useConversationAutoScroll } from './use-conversation-auto-scroll';
 interface ConversationViewProps {
   busyState: ScoutBusyState;
   expansionScope?: string;
-  items: ConversationItem[];
+  items: ConversationViewItem[];
   isStreaming: boolean;
   toolExecutionsById: Record<string, ToolExecutionState>;
   toolPreviewsById?: Record<string, ToolCallPreviewState>;
@@ -76,17 +77,22 @@ export function ConversationView({
   showScrollToBottomButton = false,
 }: ConversationViewProps) {
   const projector = useMemo(() => createConversationRowsProjector(), []);
-  const rows = useMemo(
-    () =>
-      projector.project({
-        items,
-        isStreaming,
-        busyState,
-        toolExecutionsById,
-        toolPreviewsById,
-      }),
-    [projector, items, isStreaming, busyState, toolExecutionsById, toolPreviewsById],
-  );
+  const rows = useMemo(() => {
+    return projector.project({
+      items,
+      isStreaming,
+      busyState,
+      toolExecutionsById,
+      toolPreviewsById,
+    });
+  }, [
+    projector,
+    items,
+    isStreaming,
+    busyState,
+    toolExecutionsById,
+    toolPreviewsById,
+  ]);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const virtualRows = useConversationVirtualRows({
     isStreaming,
@@ -332,10 +338,20 @@ const ASSISTANT_OUTCOME_RENDERERS: Record<
   compacted: { render: renderAssistantCompactedOutcomeRow },
   compacting: { render: renderAssistantCompactingOutcomeRow },
   error: { render: renderAssistantErrorOutcomeRow },
+  forked: { render: renderAssistantForkedOutcomeRow },
 };
 
 function AssistantOutcomeRow({ row }: { row: AssistantOutcomeConversationRow }) {
   return ASSISTANT_OUTCOME_RENDERERS[row.kind].render(row);
+}
+
+// 派生（fork）会话来源提示：与压缩提示同款分隔行，仅展示来源，不含动作。
+function renderAssistantForkedOutcomeRow(row: AssistantOutcomeConversationRow): ReactElement {
+  return (
+    <article className="max-w-full min-w-0 px-1 py-2.5" data-assistant-outcome-kind={row.kind}>
+      <AssistantOutcomeDivider row={row} icon={<Split className="size-3.5 shrink-0" />} />
+    </article>
+  );
 }
 
 function renderAssistantAbortedOutcomeRow(row: AssistantOutcomeConversationRow): ReactElement {

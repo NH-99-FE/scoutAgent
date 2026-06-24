@@ -36,6 +36,7 @@ shared（纯契约）← ai（能力层）← agent（业务层）← extension/
 - compact、navigateTree、restore 后必须由 extension 从 session context 重建 `agent.state.messages`。
 - session tree 低层必须保留 Pi append-only raw leaf 语义：除显式 `leaf` pointer entry 会把 raw leaf 设置为 `targetId` 外，其他 append-only entry（如 `label`、`session_info`、`model_change`、`thinking_level_change`、`custom`）都可以成为 raw leaf；但 host/webview 协议层必须输出 visible leaf，不得把隐藏 metadata id 暴露为 UI 可高亮 leaf。
 - Webview tree 可见 entry 必须显式白名单化：默认只展示 `message`、`compaction`、`branch_summary`、`display: true` 的 `custom_message`；新增 entry 类型时必须明确它是否进入 webview tree。
+- 新增 session tree entry 类型时必须同时明确四类语义并补回归测试：是否进入 provider/runtime context、是否参与 compaction/branch summary、是否进入 host→webview 可见投影、是否可能成为 raw leaf 以及对应 visible leaf 解析规则。若只是为了 webview 展示提示，应优先使用已有持久 metadata（如 `parentSession`、`forkPointEntryId`）派生 UI-only 行，避免把纯展示语义下沉为新的 session tree entry。
 - 修复问题时优先保持 Pi 的结构语义一致；如果发现当前实现需要兼容补丁，应优先考虑上移或重构职责边界。
 - 开发完成后必须清理死代码、旧 mock、旧测试语义，避免测试继续暗示错误职责。
 

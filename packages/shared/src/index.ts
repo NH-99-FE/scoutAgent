@@ -105,6 +105,7 @@ export interface ScoutSessionListItem {
   messageCount?: number;
   firstMessage?: string;
   parentSessionPath?: string;
+  forkPointEntryId?: string;
   isCurrent?: boolean;
 }
 
@@ -214,6 +215,7 @@ export type WebviewRequestPayload =
   | { type: 'open_settings_panel' }
   | { type: 'open_tree_panel' }
   | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
+  | { type: 'request_fork_candidates'; sessionId: string }
   | { type: 'request_tree' }
   | {
       type: 'navigate_tree';
@@ -405,7 +407,14 @@ export const SCOUT_PROTOCOL = {
     method: 'fork_session',
     response: 'fork_result',
     emits: ['state_update', 'tree_update', 'sessions_update'],
-    surfaces: ['tree'],
+    surfaces: ['chat', 'tree'],
+  },
+  request_fork_candidates: {
+    kind: 'query',
+    service: 'tree',
+    method: 'request_fork_candidates',
+    response: 'fork_candidates_result',
+    surfaces: ['chat', 'tree'],
   },
   request_tree: {
     kind: 'query',
@@ -682,6 +691,7 @@ export interface ScoutWebviewState {
   sessionName?: string;
   sessionFile?: string;
   parentSessionPath?: string;
+  forkPointEntryId?: string;
   leafId?: string | null;
   contextUsage?: ScoutContextUsage;
   sessionStats?: ScoutSessionStats;
@@ -815,26 +825,54 @@ export interface ScoutTaskHistoryResult {
   nextOffset: number;
 }
 
-export interface ScoutCommandResult {
-  type:
-    | 'fork_result'
-    | 'new_session_result'
-    | 'open_task_result'
-    | 'open_settings_panel_result'
-    | 'open_tree_panel_result'
-    | 'restore_session_result'
-    | 'import_session_result'
-    | 'export_session_result'
-    | 'navigate_tree_result'
-    | 'label_result'
-    | 'set_session_name_result'
-    | 'reload_result'
-    | 'delete_session_result';
+export type ScoutGenericCommandResultType =
+  | 'new_session_result'
+  | 'open_task_result'
+  | 'open_settings_panel_result'
+  | 'open_tree_panel_result'
+  | 'restore_session_result'
+  | 'import_session_result'
+  | 'export_session_result'
+  | 'navigate_tree_result'
+  | 'label_result'
+  | 'set_session_name_result'
+  | 'reload_result'
+  | 'delete_session_result';
+
+interface ScoutCommandResultBase {
   success: boolean;
   error?: string;
   sessionPath?: string;
   path?: string;
   editorText?: string;
+}
+
+export type ScoutGenericCommandResult = {
+  [TType in ScoutGenericCommandResultType]: ScoutCommandResultBase & { type: TType };
+}[ScoutGenericCommandResultType];
+
+export interface ScoutForkResult {
+  type: 'fork_result';
+  success: boolean;
+  error?: string;
+  // fork_result 专用：目标会话与被选中的用户消息文本，用于回填到新会话 composer
+  targetSessionId?: string;
+  selectedText?: string;
+}
+
+export type ScoutCommandResult = ScoutGenericCommandResult | ScoutForkResult;
+
+// fork 候选：从当前 session raw entries 中提取的全部历史 user message。
+// 数据源为完整分支（root→leaf），不受压缩展示投影影响。
+export interface ScoutForkCandidate {
+  entryId: string;
+  text: string;
+}
+
+export interface ScoutForkCandidatesResult {
+  type: 'fork_candidates_result';
+  sessionId: string;
+  candidates: ScoutForkCandidate[];
 }
 
 export type ScoutProtocolResponsePayload =
@@ -847,6 +885,7 @@ export type ScoutProtocolResponsePayload =
   | ScoutSessionsResult
   | ScoutFileMentionsResult
   | ScoutTaskHistoryResult
+  | ScoutForkCandidatesResult
   | ScoutCommandResult;
 
 export type ScoutProtocolResponsePayloadType = ScoutProtocolResponsePayload['type'];
