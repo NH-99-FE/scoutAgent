@@ -21,6 +21,14 @@ describe('ChatComposer command effects', () => {
     await waitFor(() => {
       expect(screen.getByPlaceholderText('要求后续变更')).toHaveValue('edit this prompt');
     });
+    const textarea = screen.getByPlaceholderText('要求后续变更');
+    await waitFor(() => {
+      expect(textarea).toHaveFocus();
+      expect(textarea).toHaveAttribute(
+        'data-scout-suppress-focus-outline',
+        'true',
+      );
+    });
     expect(useComposerStore.getState().pendingCommandEffect).toBeNull();
   });
 

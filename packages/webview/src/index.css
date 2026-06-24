@@ -246,8 +246,8 @@ body,
   .task-search-field:focus-within + div [data-slot='separator'] {
     background: var(--vscode-focusBorder, var(--border));
   }
-  [data-scout-pointer-focus='true']:focus,
-  [data-scout-pointer-focus='true']:focus-visible,
+  [data-scout-suppress-focus-outline='true']:focus,
+  [data-scout-suppress-focus-outline='true']:focus-visible,
   :where(
     [data-slot='dropdown-menu-content'],
     [data-slot='dropdown-menu-sub-content'],

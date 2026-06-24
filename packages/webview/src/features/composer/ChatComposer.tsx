@@ -8,6 +8,7 @@ import { Plus, X } from 'lucide-react';
 import type { ScoutImageContent } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
+import { markProgrammaticFocus } from '@/components/ui/focus';
 import { useCommands } from '@/store/config-store';
 import {
   useComposerActions,
@@ -330,8 +331,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
   const focusTextareaAt = (position: number) => {
     window.setTimeout(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(position, position);
+      const textarea = textareaRef.current;
+      markProgrammaticFocus(textarea);
+      textarea?.focus();
+      textarea?.setSelectionRange(position, position);
       setSelectionStart(position);
     }, 0);
   };
