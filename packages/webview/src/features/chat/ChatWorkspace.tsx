@@ -2,7 +2,7 @@
 // Chat Workspace — 会话中页面布局
 // ============================================================
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -55,6 +55,7 @@ interface ChatWorkspaceProps {
 }
 
 export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspaceProps) {
+  const [pendingScrollToBottomKey, setPendingScrollToBottomKey] = useState(0);
   const messages = useConversationMessages();
   const conversationItems = useConversationItems();
   const isStreaming = useVisualIsStreaming();
@@ -98,6 +99,9 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     }
     closeTaskHistory();
     onOpenTask(task);
+  };
+  const requestScrollToBottom = () => {
+    setPendingScrollToBottomKey((key) => key + 1);
   };
   const isAgentRunning = busyState.kind === 'agent';
 
@@ -160,6 +164,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         busyState={busyState}
         className="min-h-0 flex-1"
         expansionScope={getConversationExpansionScope({ sessionFile, sessionId })}
+        forceScrollToBottomKey={pendingScrollToBottomKey}
         isStreaming={isStreaming}
         items={conversationViewItems}
         showScrollToBottomButton
@@ -168,7 +173,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
       />
 
       <footer className="bg-background max-w-full min-w-0 shrink-0 px-3 pt-1 pb-3">
-        <ChatComposer placeholder="要求后续变更" />
+        <ChatComposer placeholder="要求后续变更" onMessageSent={requestScrollToBottom} />
       </footer>
     </main>
   );

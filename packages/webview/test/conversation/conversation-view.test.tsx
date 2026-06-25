@@ -52,6 +52,7 @@ const fireEvent = {
 function renderConversation({
   busyState,
   expansionScope,
+  forceScrollToBottomKey,
   items,
   isStreaming = false,
   showScrollToBottomButton = false,
@@ -60,6 +61,7 @@ function renderConversation({
 }: {
   busyState?: ScoutBusyState;
   expansionScope?: string;
+  forceScrollToBottomKey?: unknown;
   items: ConversationViewItem[];
   isStreaming?: boolean;
   showScrollToBottomButton?: boolean;
@@ -71,6 +73,7 @@ function renderConversation({
     <ConversationView
       busyState={resolvedBusyState}
       expansionScope={expansionScope}
+      forceScrollToBottomKey={forceScrollToBottomKey}
       isStreaming={isStreaming}
       items={items}
       showScrollToBottomButton={showScrollToBottomButton}
@@ -784,6 +787,40 @@ describe('ConversationView', () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
+  it('scrolls to the bottom when an explicit force scroll key changes', () => {
+    const items = makeUserConversationItems(4);
+    const { rerender } = renderConversation({
+      forceScrollToBottomKey: 0,
+      items,
+      showScrollToBottomButton: true,
+    });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = setViewportScrollMetrics(scrollContainer, {
+      clientHeight: 400,
+      scrollHeight: 1000,
+      scrollTop: 100,
+    });
+
+    fireEvent.scroll(scrollContainer);
+    expect(screen.getByRole('button', { name: '滚动到底部' })).toBeInTheDocument();
+
+    scrollTo.mockClear();
+    rerender(
+      <ConversationView
+        busyState={IDLE_BUSY_STATE}
+        forceScrollToBottomKey={1}
+        isStreaming={false}
+        items={items}
+        showScrollToBottomButton
+        toolExecutionsById={{}}
+      />,
+    );
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 600, behavior: 'auto' });
+    expect(scrollContainer.scrollTop).toBe(600);
+    expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
+  });
+
   it('keeps virtualized conversations pinned while the user is near the bottom', () => {
     const firstItems = makeUserConversationItems(160);
     const nextItems = makeUserConversationItems(160, { 159: 'updated tail message' });
@@ -1109,7 +1146,7 @@ describe('ConversationView', () => {
     expect(
       assistantTurn &&
         errorNotice &&
-        (assistantTurn.compareDocumentPosition(errorNotice) & Node.DOCUMENT_POSITION_FOLLOWING),
+        assistantTurn.compareDocumentPosition(errorNotice) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.getByText('已阅读 chapter.md').closest('.text-destructive')).toBeNull();
     expect(screen.getByText('已编辑 chapter.md').closest('.text-destructive')).toBeNull();
@@ -2705,9 +2742,7 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('已列出 src')).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /展开过程 已列出 src/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开过程 已列出 src/ })).not.toBeInTheDocument();
     expect(screen.queryByText('处理了 1 项')).not.toBeInTheDocument();
   });
 

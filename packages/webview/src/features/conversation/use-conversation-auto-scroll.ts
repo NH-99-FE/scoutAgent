@@ -18,6 +18,7 @@ const SCROLLABLE_OVERFLOW_VALUES = new Set(['auto', 'scroll', 'overlay']);
 interface UseConversationAutoScrollOptions {
   contentKey: unknown;
   contentLayoutKey?: unknown;
+  forceScrollToBottomKey?: unknown;
   getScrollMetrics?: (element: HTMLElement) => ConversationScrollMetrics;
   runtimeStatusKey: string;
   scrollToBottomOverride?: () => void;
@@ -43,6 +44,7 @@ export interface ConversationScrollMetrics {
 export function useConversationAutoScroll({
   contentKey,
   contentLayoutKey,
+  forceScrollToBottomKey,
   getScrollMetrics,
   runtimeStatusKey,
   scrollToBottomOverride,
@@ -61,6 +63,7 @@ export function useConversationAutoScroll({
   );
   const shouldStickToBottomRef = useRef(true);
   const hasAutoScrolledRef = useRef(false);
+  const lastForceScrollToBottomKeyRef = useRef(forceScrollToBottomKey);
   const lastTouchClientYRef = useRef<number | null>(null);
   const scheduledScrollRef = useRef<number | null>(null);
   const [isScrollToBottomVisible, setIsScrollToBottomVisible] = useState(false);
@@ -213,6 +216,15 @@ export function useConversationAutoScroll({
     updateScrollState,
     writeScrollToBottom,
   ]);
+
+  useLayoutEffect(() => {
+    if (forceScrollToBottomKey === undefined) return;
+    if (Object.is(lastForceScrollToBottomKeyRef.current, forceScrollToBottomKey)) return;
+
+    lastForceScrollToBottomKeyRef.current = forceScrollToBottomKey;
+    cancelScheduledScroll();
+    writeScrollToBottom();
+  }, [cancelScheduledScroll, forceScrollToBottomKey, writeScrollToBottom]);
 
   const viewportHandlers: ConversationViewportHandlers = {
     onScroll: handleScroll,

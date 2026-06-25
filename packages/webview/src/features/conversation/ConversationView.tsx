@@ -29,10 +29,7 @@ import {
   useConversationExpansionOpen,
   useConversationExpansionStore,
 } from '@/store/conversation-expansion-store';
-import type {
-  ToolCallPreviewState,
-  ToolExecutionState,
-} from '@/store/conversation-store';
+import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
 import {
   createConversationRowsProjector,
   type AssistantContentEntry,
@@ -61,6 +58,7 @@ interface ConversationViewProps {
   toolExecutionsById: Record<string, ToolExecutionState>;
   toolPreviewsById?: Record<string, ToolCallPreviewState>;
   className?: string;
+  forceScrollToBottomKey?: unknown;
   showScrollToBottomButton?: boolean;
 }
 
@@ -74,6 +72,7 @@ export function ConversationView({
   toolExecutionsById,
   toolPreviewsById = EMPTY_TOOL_PREVIEWS,
   className,
+  forceScrollToBottomKey,
   showScrollToBottomButton = false,
 }: ConversationViewProps) {
   const projector = useMemo(() => createConversationRowsProjector(), []);
@@ -85,14 +84,7 @@ export function ConversationView({
       toolExecutionsById,
       toolPreviewsById,
     });
-  }, [
-    projector,
-    items,
-    isStreaming,
-    busyState,
-    toolExecutionsById,
-    toolPreviewsById,
-  ]);
+  }, [projector, items, isStreaming, busyState, toolExecutionsById, toolPreviewsById]);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const virtualRows = useConversationVirtualRows({
     isStreaming,
@@ -104,6 +96,7 @@ export function ConversationView({
     useConversationAutoScroll({
       contentKey: rows,
       contentLayoutKey: virtualRows.scrollLayoutKey,
+      forceScrollToBottomKey,
       getScrollMetrics: virtualRows.getScrollMetrics,
       runtimeStatusKey,
       scrollToBottomOverride: virtualRows.scrollToBottomOverride,
@@ -276,7 +269,6 @@ function getRuntimeInlineDisplay(
   return null;
 }
 
-
 function getRuntimeStatusKey(busyState: ScoutBusyState): string {
   if (busyState.kind === 'retry') {
     return [
@@ -373,12 +365,7 @@ function renderAssistantCompactingOutcomeRow(row: AssistantOutcomeConversationRo
     <article className="max-w-full min-w-0 px-1 py-2.5" data-assistant-outcome-kind={row.kind}>
       <AssistantOutcomeDivider
         row={row}
-        icon={
-          <LoaderCircle
-            aria-hidden="true"
-            className="size-3.5 shrink-0 animate-spin"
-          />
-        }
+        icon={<LoaderCircle aria-hidden="true" className="size-3.5 shrink-0 animate-spin" />}
       />
     </article>
   );

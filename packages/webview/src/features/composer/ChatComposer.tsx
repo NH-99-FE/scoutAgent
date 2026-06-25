@@ -35,15 +35,13 @@ import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
 import { SlashCommandMenu } from './SlashCommandMenu';
-import {
-  buildSlashCommandItems,
-  type SlashCommandMenuItem,
-} from './slash-command-options';
+import { buildSlashCommandItems, type SlashCommandMenuItem } from './slash-command-options';
 import { useForkCandidateMenu } from './use-fork-candidate-menu';
 import { getSlashCommandTrigger } from './use-slash-command-trigger';
 
 interface BaseChatComposerProps {
   draftSessionId?: string;
+  onMessageSent?: () => void;
   placeholder: string;
   submitDisabled?: boolean;
 }
@@ -63,6 +61,7 @@ interface NewSessionChatComposerProps extends BaseChatComposerProps {
 type ChatComposerProps = CurrentSessionChatComposerProps | NewSessionChatComposerProps;
 
 interface BaseChatComposerSessionProps {
+  onMessageSent?: () => void;
   placeholder: string;
   sessionId: string;
   submitDisabled: boolean;
@@ -117,6 +116,7 @@ export function ChatComposer(props: ChatComposerProps) {
         placeholder={props.placeholder}
         sessionId={composerSessionId}
         submitDisabled={props.submitDisabled}
+        onMessageSent={props.onMessageSent}
         onBeginNewSessionRequest={props.onBeginNewSessionRequest}
       />
     );
@@ -129,12 +129,13 @@ export function ChatComposer(props: ChatComposerProps) {
       placeholder={props.placeholder}
       sessionId={composerSessionId}
       submitDisabled={props.submitDisabled ?? false}
+      onMessageSent={props.onMessageSent}
     />
   );
 }
 
 function ChatComposerSession(props: ChatComposerSessionProps) {
-  const { mode, placeholder, sessionId, submitDisabled } = props;
+  const { mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
   const [confirmAbort, setConfirmAbort] = useState(false);
   const [pendingSubmit, setPendingSubmit] = useState<PendingSubmit | null>(null);
   const [selectionStart, setSelectionStart] = useState(0);
@@ -252,6 +253,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
       ...options,
       images: payload.images,
     });
+    onMessageSent?.();
     composerActions.clearDraft(sessionId);
     setPendingSubmit(null);
   };
