@@ -311,6 +311,18 @@ body,
   will-change: opacity, transform;
 }
 
+.task-row-fork-marker {
+  opacity: 0;
+}
+
+.task-row[data-forked='true']:hover .task-row-fork-marker {
+  opacity: 1;
+}
+
+.task-row[data-forked='true']:hover .task-row-metadata {
+  opacity: 0;
+}
+
 .scout-conversation-viewport > div {
   display: block !important;
   width: 100%;

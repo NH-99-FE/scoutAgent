@@ -2,11 +2,13 @@
 // Task Search Panel — 任务历史搜索面板
 // ============================================================
 
-import { Search } from 'lucide-react';
+import { LoaderCircle, Search, Split } from 'lucide-react';
 import type { ScoutTaskItem } from '@scout-agent/shared';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { useVisualBusyState, useVisualIsStreaming } from '@/store/runtime-overlay-store';
+import { useSessionFile } from '@/store/session-store';
 import { cn } from '@/lib/utils';
 
 interface TaskSearchPanelProps {
@@ -102,12 +104,19 @@ export function TaskRow({
   onOpen: (task: ScoutTaskItem) => void;
 }) {
   const isCurrent = showCurrentState && task.isCurrent === true;
+  const isForked = Boolean(task.parentSessionPath);
+  const sessionFile = useSessionFile();
+  const isStreaming = useVisualIsStreaming();
+  const busyState = useVisualBusyState();
+  const isCurrentTask = task.isCurrent === true || task.sessionPath === sessionFile;
+  const isReplying = isCurrentTask && isStreaming && busyState.kind === 'agent';
 
   return (
     <button
       aria-current={isCurrent ? 'page' : undefined}
+      data-forked={isForked ? 'true' : undefined}
       className={cn(
-        'flex h-6.5 w-full items-center gap-2 rounded px-2 text-left outline-none',
+        'task-row grid h-6.5 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded px-2 text-left outline-none',
         isCurrent ? 'bg-muted dark:bg-muted/50' : 'hover:bg-muted dark:hover:bg-muted/50',
       )}
       type="button"
@@ -118,7 +127,28 @@ export function TaskRow({
       <span className="text-foreground/90 min-w-0 flex-1 truncate text-[13px] font-medium">
         {task.title}
       </span>
-      <span className="text-muted-foreground shrink-0 text-[12px]">{formatRelativeTime(task)}</span>
+      <span className="relative inline-flex h-full shrink-0 items-center justify-end">
+        {isForked ? (
+          <span
+            aria-hidden="true"
+            className="task-row-fork-marker text-muted-foreground pointer-events-none absolute top-1/2 right-0 flex size-3.5 -translate-y-1/2 items-center justify-center transition-opacity"
+            title="分叉会话"
+          >
+            <Split className="size-3" />
+          </span>
+        ) : null}
+        <span className="task-row-metadata inline-flex shrink-0 items-center gap-1 transition-opacity">
+          <span className="text-muted-foreground shrink-0 text-[12px]">
+            {formatRelativeTime(task)}
+          </span>
+          {isReplying ? (
+            <LoaderCircle
+              aria-label="当前会话正在回复"
+              className="text-muted-foreground size-3 shrink-0 animate-spin"
+            />
+          ) : null}
+        </span>
+      </span>
     </button>
   );
 }
