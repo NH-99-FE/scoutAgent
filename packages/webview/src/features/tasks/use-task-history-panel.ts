@@ -3,6 +3,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ScoutTaskItem } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { useIntersectionLoadMore } from '@/hooks/use-intersection-load-more';
 import {
@@ -27,9 +28,14 @@ export function useTaskHistoryPanel() {
   const triggerRef = useRef<HTMLSpanElement>(null);
   const closeTimerRef = useRef<number | undefined>(undefined);
   const searchTimerRef = useRef<number | undefined>(undefined);
-  const lastRequestedQueryRef = useRef<string | undefined>(undefined);
+  // 已请求第一页所用的 query 与 recent 快照基线。两个 effect 都在发请求后写入，
+  // 互相看到对方刚发的请求就不再重复——搜索归搜索、recent 刷新归 recent 刷新，
+  // 不会在清空搜索词等时机各自再发一次。
+  const requestedQueryRef = useRef<string | undefined>(undefined);
+  const requestedRecentKeyRef = useRef<string | undefined>(undefined);
   const recentTasks = useRecentTasks();
   const historyTasks = useHistoryTasks();
+  const recentTasksKey = getRecentTasksKey(recentTasks);
   const query = useTaskHistoryQuery();
   const pending = useTaskHistoryPending();
   const loadingMore = useTaskHistoryLoadingMore();
@@ -51,11 +57,22 @@ export function useTaskHistoryPanel() {
         offset,
         seedTasks,
       });
-      if (offset === 0) {
-        lastRequestedQueryRef.current = searchQuery;
-      }
     },
     [taskActions],
+  );
+
+  // 两个 effect 共用的去抖发起器：把上一个待发请求覆盖掉，200ms 后发第一页。
+  const scheduleFirstPage = useCallback(
+    (searchQuery: string, seedTasks?: ScoutTaskItem[]) => {
+      if (searchTimerRef.current !== undefined) {
+        window.clearTimeout(searchTimerRef.current);
+      }
+      searchTimerRef.current = window.setTimeout(() => {
+        searchTimerRef.current = undefined;
+        startSearch(searchQuery, 0, seedTasks);
+      }, TASK_HISTORY_SEARCH_DEBOUNCE_MS);
+    },
+    [startSearch],
   );
 
   useEffect(() => {
@@ -76,8 +93,8 @@ export function useTaskHistoryPanel() {
     }
     setIsRendered(true);
     setIsOpen(true);
-    startSearch('', 0, recentTasks);
-  }, [recentTasks, startSearch]);
+    // 第一页请求由下方的搜索 effect 驱动，open 只负责开面板。
+  }, []);
 
   const close = useCallback(() => {
     setIsOpen(false);
@@ -92,7 +109,8 @@ export function useTaskHistoryPanel() {
       closeTimerRef.current = undefined;
       setIsRendered(false);
       taskActions.resetHistory();
-      lastRequestedQueryRef.current = undefined;
+      requestedQueryRef.current = undefined;
+      requestedRecentKeyRef.current = undefined;
     }, TASK_HISTORY_PANEL_EXIT_MS);
   }, [taskActions]);
 
@@ -131,23 +149,32 @@ export function useTaskHistoryPanel() {
     [taskActions],
   );
 
+  // 搜索：query 变化（含面板打开时的空查询）请求第一页。
+  // 首次（基线为 undefined）立即发，让用户点开即见内容；后续输入走 debounce。
+  // 空查询用 recentTasks 作为 seed 立即填充，请求回来再替换。
+  // 不在 cleanup 里清 timer——本 effect 也依赖 recentTasks，cleanup 清 timer 会
+  // 让搜索中到达的 recent 推送取消待发请求；待发请求只在真正重排时被覆盖。
   useEffect(() => {
-    if (!isOpen || query === lastRequestedQueryRef.current) return;
-    if (searchTimerRef.current !== undefined) {
-      window.clearTimeout(searchTimerRef.current);
+    if (!isOpen) return;
+    if (requestedQueryRef.current === query) return;
+    const isFirstFire = requestedQueryRef.current === undefined;
+    requestedQueryRef.current = query;
+    requestedRecentKeyRef.current = recentTasksKey;
+    if (isFirstFire) {
+      startSearch(query, 0, query === '' ? recentTasks : undefined);
+      return;
     }
-    searchTimerRef.current = window.setTimeout(() => {
-      searchTimerRef.current = undefined;
-      startSearch(query, 0);
-    }, TASK_HISTORY_SEARCH_DEBOUNCE_MS);
+    scheduleFirstPage(query, query === '' ? recentTasks : undefined);
+  }, [isOpen, query, recentTasks, recentTasksKey, scheduleFirstPage, startSearch]);
 
-    return () => {
-      if (searchTimerRef.current !== undefined) {
-        window.clearTimeout(searchTimerRef.current);
-        searchTimerRef.current = undefined;
-      }
-    };
-  }, [isOpen, query, startSearch]);
+  // recent 刷新：仅当空查询且面板打开时，后台新会话（recentTasksKey 变化）刷新第一页。
+  // 非空搜索与 recent 无关——最近会话本就不在搜索结果里，故此 effect 直接跳过。
+  useEffect(() => {
+    if (!isOpen || query !== '') return;
+    if (requestedRecentKeyRef.current === recentTasksKey) return;
+    requestedRecentKeyRef.current = recentTasksKey;
+    scheduleFirstPage('', recentTasks);
+  }, [isOpen, query, recentTasks, recentTasksKey, scheduleFirstPage]);
 
   const loadMore = useCallback(() => {
     if (!isOpen || pending || loadingMore || !hasMore) return;
@@ -177,4 +204,18 @@ export function useTaskHistoryPanel() {
     toggle,
     setQuery,
   };
+}
+
+function getRecentTasksKey(tasks: ScoutTaskItem[]): string {
+  return tasks
+    .map((task) =>
+      [
+        task.sessionPath,
+        task.sessionId,
+        task.title,
+        task.modifiedAt ?? '',
+        task.isCurrent === true ? '1' : '0',
+      ].join('|'),
+    )
+    .join('\n');
 }
