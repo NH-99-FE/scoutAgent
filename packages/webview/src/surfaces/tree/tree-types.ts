@@ -10,12 +10,21 @@ export type SummaryMode = 'none' | 'summary' | 'custom';
 export interface FlatTreeNode {
   node: ScoutSessionTreeNode;
   parentId: string | null;
+  searchableText: string;
 }
 
 export interface VisibleTreeNode extends FlatTreeNode {
   foldable: boolean;
+  graph: TreeGraphState;
   indent: number;
   isLast: boolean;
+}
+
+export interface TreeGraphState {
+  activeLanes: number[];
+  hasVisibleChildren: boolean;
+  isBranchPoint: boolean;
+  parentIndent: number | null;
 }
 
 export interface LabelDraftState {

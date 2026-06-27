@@ -4,6 +4,7 @@ import type { ScoutSessionTreeNode, ScoutSessionTreeNodeKind } from '@scout-agen
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { TreeApp } from '@/surfaces/tree/TreeApp';
+import { TREE_SEARCH_DEBOUNCE_MS } from '@/surfaces/tree/use-tree-panel-controller';
 import { useSessionStore } from '@/store/session-store';
 import { useTreeStore } from '@/store/tree-store';
 
@@ -141,6 +142,7 @@ describe('TreeApp', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
   });
 
   it('renders Pi-visible tree nodes without ids, timestamps, or metric strips', () => {
@@ -179,15 +181,25 @@ describe('TreeApp', () => {
     expect(screen.queryByText(/助手：runtime context restored/)).not.toBeInTheDocument();
   });
 
-  it('searches formatted tool result text and structured tool call metadata', () => {
+  it('debounces searches over formatted tool result text and structured tool call metadata', () => {
+    vi.useFakeTimers();
     renderTreeApp();
     const search = screen.getByLabelText('搜索会话节点');
 
     fireEvent.change(search, { target: { value: 'agent-session.ts' } });
+    expect(screen.getAllByText(/用户：fix retry after overflow/).length).toBeGreaterThan(0);
+    act(() => {
+      vi.advanceTimersByTime(TREE_SEARCH_DEBOUNCE_MS);
+    });
     expect(screen.getAllByText('[read: agent-session.ts:1360-1420]').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/用户：fix retry after overflow/)).not.toBeInTheDocument();
 
     fireEvent.change(search, { target: { value: 'read 1360' } });
+    act(() => {
+      vi.advanceTimersByTime(TREE_SEARCH_DEBOUNCE_MS);
+    });
     expect(screen.getAllByText('[read: agent-session.ts:1360-1420]').length).toBeGreaterThan(0);
+    vi.useRealTimers();
   });
 
   it('keeps only refresh and reveal actions in the toolbar menu', () => {
@@ -223,6 +235,58 @@ describe('TreeApp', () => {
     fireEvent.click(within(foldedUserRow!).getByLabelText('展开分支'));
 
     expect(screen.getAllByText(/助手：runtime context restored/).length).toBeGreaterThan(0);
+  });
+
+  it('highlights the folded branch anchor', () => {
+    renderTreeApp();
+
+    const userRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/用户：fix retry after overflow/));
+    expect(userRow).toBeDefined();
+
+    fireEvent.click(within(userRow!).getByLabelText('折叠分支'));
+
+    const foldedUserRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/用户：fix retry after overflow/));
+    expect(foldedUserRow).toHaveClass('scout-fold-anchor-highlight', 'ring-2', 'ring-primary/25');
+
+    fireEvent.click(within(foldedUserRow!).getByLabelText('展开分支'));
+    expect(foldedUserRow).not.toHaveClass('scout-fold-anchor-highlight');
+  });
+
+  it('clears folded branches when the search query changes', () => {
+    renderTreeApp();
+
+    const userRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/用户：fix retry after overflow/));
+    expect(userRow).toBeDefined();
+
+    fireEvent.click(within(userRow!).getByLabelText('折叠分支'));
+    expect(screen.queryByText(/助手：runtime context restored/)).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('搜索会话节点'), { target: { value: 'runtime' } });
+
+    expect(screen.getAllByText(/助手：runtime context restored/).length).toBeGreaterThan(0);
+  });
+
+  it('clears folded branches when the filter mode changes', () => {
+    renderTreeApp();
+
+    const userRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/用户：fix retry after overflow/));
+    expect(userRow).toBeDefined();
+
+    fireEvent.click(within(userRow!).getByLabelText('折叠分支'));
+    expect(screen.queryByText(/助手：runtime context restored/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '无工具' }));
+
+    expect(screen.getAllByText(/助手：runtime context restored/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('[read: agent-session.ts:1360-1420]')).not.toBeInTheDocument();
   });
 
   it('does not select a row when keyboard events originate from the fold button', () => {

@@ -2,8 +2,9 @@
 // Tree Panel Controller — 会话树面板状态与协议动作
 // ============================================================
 
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { protocolClient } from '@/bridge/protocol-client';
+import { useDebouncedValue } from '@/hooks/use-debounced-value';
 import { useTree, useTreeLeafId } from '@/store/tree-store';
 import {
   buildVisibleNodes,
@@ -13,6 +14,8 @@ import {
   isVisibleDescendant,
 } from './tree-model';
 import type { FilterMode, LabelDraftState, SummaryDraftState, SummaryMode } from './tree-types';
+
+export const TREE_SEARCH_DEBOUNCE_MS = 160;
 
 export function useTreePanelController() {
   const tree = useTree();
@@ -25,12 +28,13 @@ export function useTreePanelController() {
   const [labelDraft, setLabelDraft] = useState<LabelDraftState | null>(null);
   const [labelSavedNodeId, setLabelSavedNodeId] = useState<string | null>(null);
   const labelSaveSeqRef = useRef(0);
+  const debouncedQuery = useDebouncedValue(query, TREE_SEARCH_DEBOUNCE_MS);
 
   const flatNodes = useMemo(() => flattenTree(tree), [tree]);
   const nodeById = useMemo(() => indexNodes(flatNodes), [flatNodes]);
   const visibleNodes = useMemo(
-    () => buildVisibleNodes(flatNodes, foldedIds, filterMode, query),
-    [filterMode, flatNodes, foldedIds, query],
+    () => buildVisibleNodes(flatNodes, foldedIds, filterMode, debouncedQuery),
+    [debouncedQuery, filterMode, flatNodes, foldedIds],
   );
   const effectiveSelectedId = getEffectiveSelectedId(selectedId, leafId, visibleNodes);
   const selectedNode = effectiveSelectedId ? nodeById.get(effectiveSelectedId)?.node : undefined;
@@ -46,12 +50,15 @@ export function useTreePanelController() {
     selectedNode && labelDraft?.nodeId === selectedNode.id
       ? labelDraft.value
       : (selectedNode?.label ?? '');
-  const effectiveSummaryDraft =
-    selectedNode && summaryDraft?.nodeId === selectedNode.id
-      ? summaryDraft
-      : { nodeId: selectedNode?.id ?? '', mode: 'none' as const, customInstructions: '' };
+  const effectiveSummaryDraft = useMemo(
+    () =>
+      selectedNode && summaryDraft?.nodeId === selectedNode.id
+        ? summaryDraft
+        : { nodeId: selectedNode?.id ?? '', mode: 'none' as const, customInstructions: '' },
+    [selectedNode, summaryDraft],
+  );
 
-  const toggleFold = (entryId: string) => {
+  const toggleFold = useCallback((entryId: string) => {
     const shouldFold = !foldedIds.has(entryId);
     if (
       shouldFold &&
@@ -70,17 +77,31 @@ export function useTreePanelController() {
       }
       return next;
     });
-  };
+  }, [effectiveSelectedId, foldedIds, visibleNodes]);
 
-  const revealCurrentLeaf = () => {
+  const updateQuery = useCallback((value: string) => {
+    if (value !== query) {
+      setFoldedIds(new Set());
+    }
+    setQuery(value);
+  }, [query]);
+
+  const updateFilterMode = useCallback((mode: FilterMode) => {
+    if (mode !== filterMode) {
+      setFoldedIds(new Set());
+    }
+    setFilterMode(mode);
+  }, [filterMode]);
+
+  const revealCurrentLeaf = useCallback(() => {
     if (!leafId) return;
     setSelectedId(leafId);
     setQuery('');
     setFilterMode('default');
     setFoldedIds(new Set());
-  };
+  }, [leafId]);
 
-  const saveLabel = () => {
+  const saveLabel = useCallback(() => {
     if (!selectedNode) return;
     const nodeId = selectedNode.id;
     const label = effectiveLabelDraft.trim() || undefined;
@@ -94,9 +115,9 @@ export function useTreePanelController() {
       if (!nodeByIdRef.current.has(nodeId)) return;
       setLabelSavedNodeId(nodeId);
     });
-  };
+  }, [effectiveLabelDraft, selectedNode]);
 
-  const navigateToSelectedNode = () => {
+  const navigateToSelectedNode = useCallback(() => {
     if (!selectedNode) return;
     protocolClient.navigateTree({
       targetId: selectedNode.id,
@@ -106,31 +127,31 @@ export function useTreePanelController() {
           ? effectiveSummaryDraft.customInstructions.trim() || undefined
           : undefined,
     });
-  };
+  }, [effectiveSummaryDraft, selectedNode]);
 
-  const updateCustomInstructions = (value: string) => {
+  const updateCustomInstructions = useCallback((value: string) => {
     if (!selectedNode) return;
     setSummaryDraft({
       nodeId: selectedNode.id,
       mode: 'custom',
       customInstructions: value,
     });
-  };
+  }, [selectedNode]);
 
-  const updateLabelDraft = (value: string) => {
+  const updateLabelDraft = useCallback((value: string) => {
     if (!selectedNode) return;
     setLabelDraft({ nodeId: selectedNode.id, value });
     setLabelSavedNodeId(null);
-  };
+  }, [selectedNode]);
 
-  const updateSummaryMode = (mode: SummaryMode) => {
+  const updateSummaryMode = useCallback((mode: SummaryMode) => {
     if (!selectedNode) return;
     setSummaryDraft({
       nodeId: selectedNode.id,
       mode,
       customInstructions: mode === 'custom' ? effectiveSummaryDraft.customInstructions : '',
     });
-  };
+  }, [effectiveSummaryDraft.customInstructions, selectedNode]);
 
   return {
     effectiveLabelDraft,
@@ -147,8 +168,8 @@ export function useTreePanelController() {
     refreshTree: protocolClient.requestTree,
     revealCurrentLeaf,
     saveLabel,
-    setFilterMode,
-    setQuery,
+    setFilterMode: updateFilterMode,
+    setQuery: updateQuery,
     setSelectedId,
     toggleFold,
     updateCustomInstructions,

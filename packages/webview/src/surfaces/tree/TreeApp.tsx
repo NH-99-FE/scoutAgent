@@ -2,18 +2,44 @@
 // Tree App — 独立会话树导航面板
 // ============================================================
 
+import { useCallback, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { NodeInspector } from './NodeInspector';
 import { TreeActionsMenu } from './TreeActionsMenu';
-import { TreeRow } from './TreeRow';
+import { TreeList } from './TreeList';
 import { FILTERS } from './tree-types';
 import { useTreePanelController } from './use-tree-panel-controller';
 
 export function TreeApp() {
   const controller = useTreePanelController();
+  const [highlightedFoldAnchorId, setHighlightedFoldAnchorId] = useState<string | null>(null);
+  const { setSelectedId, toggleFold } = controller;
+
+  const handleSelectNode = useCallback(
+    (nodeId: string) => {
+      setSelectedId(nodeId);
+    },
+    [setSelectedId],
+  );
+
+  const handleToggleFoldNode = useCallback(
+    (nodeId: string, folded: boolean) => {
+      if (!folded) {
+        setHighlightedFoldAnchorId(nodeId);
+      } else {
+        setHighlightedFoldAnchorId((current) => (current === nodeId ? null : current));
+      }
+      toggleFold(nodeId);
+    },
+    [toggleFold],
+  );
+
+  const handleFoldAnchorHighlightEnd = useCallback((nodeId: string) => {
+    setHighlightedFoldAnchorId((current) => (current === nodeId ? null : current));
+  }, []);
 
   return (
     <main className="bg-tree-background text-foreground flex h-screen min-h-0 flex-col overflow-hidden">
@@ -62,20 +88,16 @@ export function TreeApp() {
                 暂无会话树节点
               </div>
             ) : (
-              <div className="space-y-0.5" role="tree">
-                {controller.visibleNodes.map((entry) => (
-                  <TreeRow
-                    key={entry.node.id}
-                    current={entry.node.id === controller.leafId}
-                    entry={entry}
-                    folded={controller.foldedIds.has(entry.node.id)}
-                    foldable={entry.foldable}
-                    selected={entry.node.id === controller.effectiveSelectedId}
-                    onSelect={() => controller.setSelectedId(entry.node.id)}
-                    onToggleFold={() => controller.toggleFold(entry.node.id)}
-                  />
-                ))}
-              </div>
+              <TreeList
+                effectiveSelectedId={controller.effectiveSelectedId}
+                foldedIds={controller.foldedIds}
+                highlightedFoldAnchorId={highlightedFoldAnchorId}
+                leafId={controller.leafId}
+                visibleNodes={controller.visibleNodes}
+                onFoldAnchorHighlightEnd={handleFoldAnchorHighlightEnd}
+                onSelectNode={handleSelectNode}
+                onToggleFoldNode={handleToggleFoldNode}
+              />
             )}
           </ScrollArea>
         </div>

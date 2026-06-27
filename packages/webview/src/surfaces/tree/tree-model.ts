@@ -17,7 +17,7 @@ export function flattenTree(
 ): FlatTreeNode[] {
   const result: FlatTreeNode[] = [];
   for (const node of nodes) {
-    result.push({ node, parentId });
+    result.push({ node, parentId, searchableText: getSearchableText(node) });
     result.push(...flattenTree(node.children, node.id));
   }
   return result;
@@ -48,8 +48,7 @@ export function buildVisibleNodes(
   const baseFiltered = flatNodes.filter((entry) => {
     if (!passesFilter(entry.node, filterMode)) return false;
     if (tokens.length === 0) return true;
-    const text = getSearchableText(entry.node);
-    return tokens.every((token) => text.includes(token));
+    return tokens.every((token) => entry.searchableText.includes(token));
   });
   const baseVisibleIndex = buildVisibleIndex(baseFiltered, nodeById);
   const foldableIds = new Set(
@@ -64,24 +63,41 @@ export function buildVisibleNodes(
   const visibleIndex = buildVisibleIndex(filtered, nodeById);
 
   const result: VisibleTreeNode[] = [];
-  const visit = (entries: FlatTreeNode[], indent: number) => {
+  const visit = (
+    entries: FlatTreeNode[],
+    indent: number,
+    activeLanes: Set<number>,
+    parentIndent: number | null,
+  ) => {
     entries.forEach((entry, index) => {
       const children = visibleIndex.childrenByParentId.get(entry.node.id) ?? [];
       const hasMultipleChildren = children.length > 1;
+      const isLast = index === entries.length - 1;
       const visibleEntry: VisibleTreeNode = {
         ...entry,
         foldable: foldableIds.has(entry.node.id),
+        graph: {
+          activeLanes: Array.from(activeLanes).sort((left, right) => left - right),
+          hasVisibleChildren: children.length > 0,
+          isBranchPoint: hasMultipleChildren,
+          parentIndent,
+        },
         parentId: visibleIndex.parentById.get(entry.node.id) ?? null,
         indent,
-        isLast: index === entries.length - 1,
+        isLast,
       };
       result.push(visibleEntry);
       const childIndent = hasMultipleChildren ? indent + 1 : indent;
-      visit(children, childIndent);
+      const childActiveLanes = new Set(activeLanes);
+      if (parentIndent !== null && indent > parentIndent) {
+        if (isLast) childActiveLanes.delete(parentIndent);
+        else childActiveLanes.add(parentIndent);
+      }
+      visit(children, childIndent, childActiveLanes, indent);
     });
   };
 
-  visit(visibleIndex.childrenByParentId.get(null) ?? [], 0);
+  visit(visibleIndex.childrenByParentId.get(null) ?? [], 0, new Set(), null);
   return result;
 }
 
