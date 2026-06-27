@@ -533,6 +533,8 @@ describe('AgentSession', () => {
     }));
     const syncRuntimeMessagesFromSession = vi.fn(async () => []);
     const rebuildCachedSessionBranch = vi.fn(async () => undefined);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
     attachFakeAgent(session, {
       abort,
       hasQueuedMessages: vi.fn(() => false),
@@ -557,6 +559,45 @@ describe('AgentSession', () => {
     expect(runCompactionCore).toHaveBeenCalledOnce();
     expect(syncRuntimeMessagesFromSession).toHaveBeenCalledOnce();
     expect(rebuildCachedSessionBranch).toHaveBeenCalledOnce();
+    expect(events).toContainEqual({ type: 'tree_change' });
+  });
+
+  it('emits tree changes after auto compaction succeeds', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      hasQueuedMessages: vi.fn(() => false),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    const runCompactionCore = vi.fn(async () => ({
+      summary: 'summary',
+      firstKeptEntryId: 'entry-1',
+      tokensBefore: 100,
+    }));
+    (session as unknown as { runCompactionCore: unknown }).runCompactionCore = runCompactionCore;
+    (
+      session as unknown as { syncRuntimeMessagesFromSession: unknown }
+    ).syncRuntimeMessagesFromSession = vi.fn(async () => []);
+    (session as unknown as { rebuildCachedSessionBranch: unknown }).rebuildCachedSessionBranch =
+      vi.fn(async () => undefined);
+    (
+      session as unknown as { hasContinuationPendingMessages: unknown }
+    ).hasContinuationPendingMessages = vi.fn(() => false);
+
+    const runAutoCompaction = (
+      session as unknown as { runAutoCompaction: (reason: 'threshold') => Promise<boolean> }
+    ).runAutoCompaction.bind(session);
+
+    await expect(runAutoCompaction('threshold')).resolves.toBe(false);
+
+    expect(runCompactionCore).toHaveBeenCalledOnce();
+    expect(events).toContainEqual({ type: 'tree_change' });
   });
 
   it('pauses queued follow-ups on abort without clearing them', async () => {
@@ -893,6 +934,21 @@ describe('AgentSession', () => {
     expect(session.getSessionBranch()).toEqual([]);
   });
 
+  it('propagates label write failures without emitting duplicate user-visible errors', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+
+    await expect(session.setLabel('missing-entry', 'Pinned')).rejects.toThrow(
+      'Entry missing-entry not found',
+    );
+
+    expect(events).not.toContainEqual({
+      type: 'error',
+      message: 'Set label failed: Entry missing-entry not found',
+    });
+  });
+
   it('reports session stats from the runtime context', async () => {
     const session = createSession(tempDir);
     attachFakeAgent(session, {
@@ -1065,6 +1121,44 @@ describe('AgentSession', () => {
     await started.turn;
 
     expect(turnCompleted).toBe(true);
+  });
+
+  it('emits tree changes when session messages are persisted', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    const handleAgentEvent = (
+      session as unknown as {
+        handleAgentEvent: (event: unknown) => Promise<void>;
+      }
+    ).handleAgentEvent.bind(session);
+
+    await handleAgentEvent({ type: 'message_end', message: userMessage('new prompt') });
+
+    expect(events).toContainEqual({ type: 'tree_change' });
+    events.length = 0;
+
+    await session.recordBashResult('echo ok', {
+      output: 'ok',
+      exitCode: 0,
+      cancelled: false,
+      truncated: false,
+    });
+
+    expect(events).toContainEqual({ type: 'tree_change' });
+    events.length = 0;
+
+    await session.sendMessage('custom note');
+
+    expect(events).toContainEqual({ type: 'tree_change' });
   });
 
   it('queues streaming prompts through the requested runtime agent queue', async () => {

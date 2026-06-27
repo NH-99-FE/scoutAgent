@@ -77,10 +77,26 @@ export interface ScoutDiagnostic {
 export type ScoutSessionTreeNodeKind =
   | 'user'
   | 'assistant'
+  | 'bashExecution'
   | 'toolResult'
   | 'compaction'
   | 'branchSummary'
   | 'custom';
+
+export type ScoutSessionTreeToolArgument =
+  | string
+  | number
+  | boolean
+  | null
+  | ScoutSessionTreeToolArgument[]
+  | { [key: string]: ScoutSessionTreeToolArgument };
+
+export interface ScoutSessionTreeToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, ScoutSessionTreeToolArgument>;
+  truncated: boolean;
+}
 
 export interface ScoutSessionTreeNode {
   id: string;
@@ -89,6 +105,9 @@ export interface ScoutSessionTreeNode {
   type: string;
   kind?: ScoutSessionTreeNodeKind;
   role?: string;
+  toolCall?: ScoutSessionTreeToolCall;
+  stopReason?: string;
+  errorMessage?: string;
   label?: string;
   labelTimestamp?: string;
   preview?: string;

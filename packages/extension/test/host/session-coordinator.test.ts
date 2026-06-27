@@ -7,6 +7,7 @@ import { ConfigManager } from '../../src/config-manager.ts';
 import type { AgentSession } from '../../src/core/agent-session.ts';
 import {
   mapSessionTreeToScout,
+  projectSessionTreeToScout,
   resolveVisibleSessionLeafId,
 } from '../../src/host/protocol/session-tree-mapper.ts';
 import type { Session, SessionTreeNode } from '../../src/core/session/index.ts';
@@ -180,6 +181,57 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     expect(steer).toHaveBeenCalledWith('turn now');
     expect(followUp).toHaveBeenCalledWith('after turn');
     expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it('returns protocol-projected tree data with a visible leaf id', async () => {
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, agentDir),
+    });
+    const rawTree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-tool-call',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', {
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'read-1',
+                    name: 'read',
+                    arguments: { path: 'src/a.ts' },
+                  },
+                ],
+                stopReason: 'toolUse',
+              }),
+            },
+            children: [],
+          },
+        ],
+      },
+    ];
+    (coordinator as unknown as { agentSession: unknown }).agentSession = {
+      getTree: vi.fn(async () => rawTree),
+      leafId: 'assistant-tool-call',
+    };
+
+    const result = await coordinator.getTreeData();
+
+    expect(result.tree[0]!.children).toEqual([]);
+    expect(result.leafId).toBe('root');
   });
 
   it('serializes session replacement operations', async () => {
@@ -523,6 +575,9 @@ describe('session tree mapper', () => {
         type: 'message',
         kind: 'user',
         role: 'user',
+        toolCall: undefined,
+        stopReason: undefined,
+        errorMessage: undefined,
         label: 'Root',
         labelTimestamp: undefined,
         preview: 'root prompt',
@@ -534,6 +589,9 @@ describe('session tree mapper', () => {
             type: 'message',
             kind: 'assistant',
             role: 'assistant',
+            toolCall: undefined,
+            stopReason: 'stop',
+            errorMessage: undefined,
             label: undefined,
             labelTimestamp: undefined,
             preview: 'assistant reply',
@@ -544,6 +602,607 @@ describe('session tree mapper', () => {
     ]);
     expect(resolveVisibleSessionLeafId(tree, 'label-meta')).toBe('root');
     expect(resolveVisibleSessionLeafId(tree, 'assistant')).toBe('assistant');
+  });
+
+  it('does not expose assistant tool-call placeholders as visible tree nodes', () => {
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-tool-call',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', {
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'read-1',
+                    name: 'read',
+                    arguments: { path: 'src/a.ts' },
+                  },
+                ],
+                stopReason: 'toolUse',
+              }),
+            },
+            children: [],
+          },
+        ],
+      },
+    ];
+
+    const projection = projectSessionTreeToScout(tree, 'assistant-tool-call');
+
+    expect(projection.tree[0]!.children).toEqual([]);
+    expect(projection.leafId).toBe('root');
+  });
+
+  it('does not expose empty non-failure assistant messages as visible tree nodes', () => {
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-empty',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', { content: [], stopReason: 'stop' }),
+            },
+            children: [],
+          },
+        ],
+      },
+    ];
+
+    const projection = projectSessionTreeToScout(tree, 'assistant-empty');
+
+    expect(projection.tree[0]!.children).toEqual([]);
+    expect(projection.leafId).toBe('root');
+  });
+
+  it('uses the first non-empty assistant text line as the visible preview', () => {
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-text',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('\n\nreal text\nsecond line'),
+            },
+            children: [],
+          },
+        ],
+      },
+    ];
+
+    const projection = projectSessionTreeToScout(tree, 'assistant-text');
+
+    expect(projection.tree[0]!.children[0]).toMatchObject({
+      id: 'assistant-text',
+      preview: 'real text',
+    });
+    expect(projection.leafId).toBe('assistant-text');
+  });
+
+  it('uses later non-empty assistant text blocks when earlier text blocks are empty', () => {
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-text-block',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', {
+                content: [
+                  { type: 'text', text: '\n  \n' },
+                  {
+                    type: 'toolCall',
+                    id: 'read-1',
+                    name: 'read',
+                    arguments: { path: 'src/a.ts' },
+                  },
+                  { type: 'text', text: '\nreal text from later block\nsecond line' },
+                ],
+              }),
+            },
+            children: [],
+          },
+        ],
+      },
+    ];
+
+    const projection = projectSessionTreeToScout(tree, 'assistant-text-block');
+
+    expect(projection.tree[0]!.children[0]).toMatchObject({
+      id: 'assistant-text-block',
+      preview: 'real text from later block',
+    });
+    expect(projection.leafId).toBe('assistant-text-block');
+  });
+
+  it('projects bash execution messages with command previews', () => {
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'bash-execution',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: {
+                role: 'bashExecution',
+                command: 'echo ok',
+                output: 'ok',
+                exitCode: 0,
+                cancelled: false,
+                truncated: false,
+                timestamp: 2,
+              },
+            },
+            children: [],
+          },
+        ],
+      },
+    ];
+
+    const projection = projectSessionTreeToScout(tree, 'bash-execution');
+
+    expect(projection.tree[0]!.children[0]).toMatchObject({
+      id: 'bash-execution',
+      kind: 'bashExecution',
+      role: 'bashExecution',
+      preview: 'echo ok',
+    });
+    expect(projection.leafId).toBe('bash-execution');
+  });
+
+  it('maps tool result metadata from the matching assistant tool calls', () => {
+    const toolCalls = [
+      {
+        type: 'toolCall' as const,
+        id: 'read-1',
+        name: 'read',
+        arguments: { path: 'src/a.ts', offset: 2, limit: 4 },
+      },
+      { type: 'toolCall' as const, id: 'write-1', name: 'write', arguments: { path: 'src/b.ts' } },
+      { type: 'toolCall' as const, id: 'edit-1', name: 'edit', arguments: { path: 'src/c.ts' } },
+      {
+        type: 'toolCall' as const,
+        id: 'bash-1',
+        name: 'bash',
+        arguments: {
+          command: 'pnpm test -- --runInBand with a very long suffix that is truncated',
+        },
+      },
+      {
+        type: 'toolCall' as const,
+        id: 'grep-1',
+        name: 'grep',
+        arguments: { pattern: 'needle', path: 'src' },
+      },
+      {
+        type: 'toolCall' as const,
+        id: 'find-1',
+        name: 'find',
+        arguments: { pattern: '*.ts', path: 'packages' },
+      },
+      {
+        type: 'toolCall' as const,
+        id: 'ls-1',
+        name: 'ls',
+        arguments: { path: 'packages/webview' },
+      },
+      {
+        type: 'toolCall' as const,
+        id: 'custom-1',
+        name: 'custom_tool',
+        arguments: { alpha: 'abcdefghijklmnopqrstuvwxyz', beta: 123 },
+      },
+    ];
+    const toolResultNodes = toolCalls.map((toolCall) => ({
+      entry: {
+        type: 'message' as const,
+        id: `result-${toolCall.id}`,
+        parentId: 'assistant',
+        timestamp: '2026-01-01T00:00:02.000Z',
+        message: {
+          role: 'toolResult' as const,
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          content: [{ type: 'text' as const, text: 'raw tool output should not be tree preview' }],
+          isError: false,
+          timestamp: 3,
+        },
+      },
+      children: [],
+    }));
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', { content: toolCalls, stopReason: 'toolUse' }),
+            },
+            children: toolResultNodes,
+          },
+        ],
+      },
+    ];
+
+    const mappedToolResults = mapSessionTreeToScout(tree)[0]!.children.map((node) => ({
+      preview: node.preview,
+      toolCall: node.toolCall,
+    }));
+
+    expect(mappedToolResults).toEqual([
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'read-1',
+          name: 'read',
+          arguments: { path: 'src/a.ts', offset: 2, limit: 4 },
+          truncated: false,
+        },
+      },
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'write-1',
+          name: 'write',
+          arguments: { path: 'src/b.ts' },
+          truncated: false,
+        },
+      },
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'edit-1',
+          name: 'edit',
+          arguments: { path: 'src/c.ts' },
+          truncated: false,
+        },
+      },
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'bash-1',
+          name: 'bash',
+          arguments: {
+            command: 'pnpm test -- --runInBand with a very long suffix that is truncated',
+          },
+          truncated: false,
+        },
+      },
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'grep-1',
+          name: 'grep',
+          arguments: { pattern: 'needle', path: 'src' },
+          truncated: false,
+        },
+      },
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'find-1',
+          name: 'find',
+          arguments: { pattern: '*.ts', path: 'packages' },
+          truncated: false,
+        },
+      },
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'ls-1',
+          name: 'ls',
+          arguments: { path: 'packages/webview' },
+          truncated: false,
+        },
+      },
+      {
+        preview: undefined,
+        toolCall: {
+          id: 'custom-1',
+          name: 'custom_tool',
+          arguments: { alpha: 'abcdefghijklmnopqrstuvwxyz', beta: 123 },
+          truncated: false,
+        },
+      },
+    ]);
+  });
+
+  it('pairs duplicate tool call ids by branch order instead of a global id map', () => {
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-1',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', {
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'duplicate-tool',
+                    name: 'bash',
+                    arguments: { command: 'printf first' },
+                  },
+                ],
+                stopReason: 'toolUse',
+              }),
+            },
+            children: [
+              {
+                entry: {
+                  type: 'message',
+                  id: 'tool-result-1',
+                  parentId: 'assistant-1',
+                  timestamp: '2026-01-01T00:00:02.000Z',
+                  message: {
+                    role: 'toolResult',
+                    toolCallId: 'duplicate-tool',
+                    toolName: 'bash',
+                    content: [{ type: 'text', text: 'first output' }],
+                    isError: false,
+                    timestamp: 3,
+                  },
+                },
+                children: [
+                  {
+                    entry: {
+                      type: 'message',
+                      id: 'assistant-2',
+                      parentId: 'tool-result-1',
+                      timestamp: '2026-01-01T00:00:03.000Z',
+                      message: assistantMessage('', {
+                        content: [
+                          {
+                            type: 'toolCall',
+                            id: 'duplicate-tool',
+                            name: 'bash',
+                            arguments: { command: 'printf second' },
+                          },
+                        ],
+                        stopReason: 'toolUse',
+                      }),
+                    },
+                    children: [
+                      {
+                        entry: {
+                          type: 'message',
+                          id: 'tool-result-2',
+                          parentId: 'assistant-2',
+                          timestamp: '2026-01-01T00:00:04.000Z',
+                          message: {
+                            role: 'toolResult',
+                            toolCallId: 'duplicate-tool',
+                            toolName: 'bash',
+                            content: [{ type: 'text', text: 'second output' }],
+                            isError: false,
+                            timestamp: 5,
+                          },
+                        },
+                        children: [],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const mapped = mapSessionTreeToScout(tree);
+    const toolResultArgs = [
+      mapped[0]!.children[0]!.toolCall?.arguments,
+      mapped[0]!.children[0]!.children[0]!.toolCall?.arguments,
+    ];
+
+    expect(toolResultArgs).toEqual([{ command: 'printf first' }, { command: 'printf second' }]);
+  });
+
+  it('limits serialized tool arguments without formatting tool-specific UI copy', () => {
+    const longCommand = 'x'.repeat(520);
+    const largeObject = Object.fromEntries(
+      Array.from({ length: 24 }, (_, index) => [`key${index}`, index]),
+    );
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', {
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'bash-1',
+                    name: 'bash',
+                    arguments: {
+                      command: longCommand,
+                      nested: largeObject,
+                    },
+                  },
+                ],
+                stopReason: 'toolUse',
+              }),
+            },
+            children: [
+              {
+                entry: {
+                  type: 'message',
+                  id: 'result-bash-1',
+                  parentId: 'assistant',
+                  timestamp: '2026-01-01T00:00:02.000Z',
+                  message: {
+                    role: 'toolResult',
+                    toolCallId: 'bash-1',
+                    toolName: 'bash',
+                    content: [{ type: 'text', text: 'output' }],
+                    isError: false,
+                    timestamp: 3,
+                  },
+                },
+                children: [],
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const mappedToolResult = mapSessionTreeToScout(tree)[0]!.children[0]!;
+
+    expect(mappedToolResult.preview).toBeUndefined();
+    expect(mappedToolResult.toolCall).toEqual({
+      id: 'bash-1',
+      name: 'bash',
+      arguments: {
+        command: longCommand.slice(0, 500),
+        nested: Object.fromEntries(
+          Array.from({ length: 20 }, (_, index) => [`key${index}`, index]),
+        ),
+      },
+      truncated: true,
+    });
+  });
+
+  it('preserves assistant failure metadata for tree filtering', () => {
+    const tree: SessionTreeNode[] = [
+      {
+        entry: {
+          type: 'message',
+          id: 'root',
+          parentId: null,
+          timestamp: '2026-01-01T00:00:00.000Z',
+          message: userMessage('root prompt'),
+        },
+        children: [
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-error',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:01.000Z',
+              message: assistantMessage('', {
+                content: [],
+                stopReason: 'error',
+                errorMessage: 'provider exploded\ntry again',
+              }),
+            },
+            children: [],
+          },
+          {
+            entry: {
+              type: 'message',
+              id: 'assistant-aborted',
+              parentId: 'root',
+              timestamp: '2026-01-01T00:00:02.000Z',
+              message: assistantMessage('', { content: [], stopReason: 'aborted' }),
+            },
+            children: [],
+          },
+        ],
+      },
+    ];
+
+    const failureSummaries = mapSessionTreeToScout(tree)[0]!.children.map((node) => ({
+      id: node.id,
+      preview: node.preview,
+      stopReason: node.stopReason,
+      errorMessage: node.errorMessage,
+    }));
+
+    expect(failureSummaries).toEqual([
+      {
+        id: 'assistant-error',
+        preview: undefined,
+        stopReason: 'error',
+        errorMessage: 'provider exploded\ntry again',
+      },
+      {
+        id: 'assistant-aborted',
+        preview: undefined,
+        stopReason: 'aborted',
+        errorMessage: undefined,
+      },
+    ]);
   });
 
   it('resolves hidden session metadata leaves to the nearest visible ancestor', () => {
@@ -625,6 +1284,9 @@ describe('session tree mapper', () => {
         type: 'message',
         kind: 'user',
         role: 'user',
+        toolCall: undefined,
+        stopReason: undefined,
+        errorMessage: undefined,
         label: undefined,
         labelTimestamp: undefined,
         preview: 'root prompt',
@@ -636,6 +1298,9 @@ describe('session tree mapper', () => {
             type: 'message',
             kind: 'assistant',
             role: 'assistant',
+            toolCall: undefined,
+            stopReason: 'stop',
+            errorMessage: undefined,
             label: undefined,
             labelTimestamp: undefined,
             preview: 'assistant reply',
@@ -699,6 +1364,9 @@ describe('session tree mapper', () => {
         type: 'message',
         kind: 'user',
         role: 'user',
+        toolCall: undefined,
+        stopReason: undefined,
+        errorMessage: undefined,
         label: undefined,
         labelTimestamp: undefined,
         preview: 'root prompt',
@@ -710,6 +1378,9 @@ describe('session tree mapper', () => {
             type: 'custom_message',
             kind: 'custom',
             role: undefined,
+            toolCall: undefined,
+            stopReason: undefined,
+            errorMessage: undefined,
             label: undefined,
             labelTimestamp: undefined,
             preview: 'visible content',

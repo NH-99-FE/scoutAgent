@@ -920,6 +920,7 @@ export class AgentSession implements CoreDisposable {
         willRetry: false,
       });
       this.emit({ type: 'state_change' });
+      this.emit({ type: 'tree_change' });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       const aborted = abortController.signal.aborted;
@@ -1036,6 +1037,7 @@ export class AgentSession implements CoreDisposable {
     this.appendRuntimeMessage(bashMessage);
     await this.rebuildCachedSessionBranch();
     this.emit({ type: 'state_change' });
+    this.emit({ type: 'tree_change' });
   }
 
   private async flushPendingBashMessages(): Promise<void> {
@@ -1047,6 +1049,7 @@ export class AgentSession implements CoreDisposable {
     }
     await this.rebuildCachedSessionBranch();
     this.emit({ type: 'state_change' });
+    this.emit({ type: 'tree_change' });
   }
 
   async sendUserMessage(
@@ -1525,7 +1528,7 @@ export class AgentSession implements CoreDisposable {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.appendLine(`[scout] Set label failed: ${errorMessage}`);
-      this.emit({ type: 'error', message: `Set label failed: ${errorMessage}` });
+      throw error;
     }
   }
 
@@ -2041,6 +2044,7 @@ export class AgentSession implements CoreDisposable {
     this.appendRuntimeMessage(message);
     await this.rebuildCachedSessionBranch();
     this.emit({ type: 'state_change' });
+    this.emit({ type: 'tree_change' });
   }
 
   private async promptCustomMessage(message: CustomMessage): Promise<void> {
@@ -2317,6 +2321,9 @@ export class AgentSession implements CoreDisposable {
         this.lastAssistantMessage = message as AssistantMessage;
       }
       this.emit({ type: 'state_change' });
+      if (message) {
+        this.emit({ type: 'tree_change' });
+      }
     }
 
     if (type === 'turn_end') {
@@ -2715,6 +2722,7 @@ export class AgentSession implements CoreDisposable {
         willRetry,
       });
       this.emit({ type: 'state_change' });
+      this.emit({ type: 'tree_change' });
 
       if (willRetry) {
         this.logger.appendLine('[scout] Retrying after overflow compaction');

@@ -55,7 +55,7 @@ import {
 import { AgentEventCorrelator } from './protocol/agent-event-correlator.ts';
 import { SessionMessageProjectionCache } from './protocol/session-message-projection-cache.ts';
 import {
-  mapSessionTreeToScout,
+  projectSessionTreeToScout,
   resolveVisibleSessionLeafId,
 } from './protocol/session-tree-mapper.ts';
 import {
@@ -649,16 +649,13 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   async getTree(): Promise<ScoutSessionTreeNode[]> {
     if (!this.agentSession) return [];
-    return mapSessionTreeToScout(await this.agentSession.getTree());
+    return projectSessionTreeToScout(await this.agentSession.getTree(), null).tree;
   }
 
   async getTreeData(): Promise<{ tree: ScoutSessionTreeNode[]; leafId: string | null }> {
     if (!this.agentSession) return { tree: [], leafId: null };
     const rawTree = await this.agentSession.getTree();
-    return {
-      tree: mapSessionTreeToScout(rawTree),
-      leafId: resolveVisibleSessionLeafId(rawTree, this.agentSession.leafId),
-    };
+    return projectSessionTreeToScout(rawTree, this.agentSession.leafId);
   }
 
   async getVisibleLeafId(): Promise<string | null> {
@@ -684,8 +681,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   async setLabel(entryId: string, label?: string): Promise<void> {
     if (!this.agentSession) {
-      this.emit({ type: 'error', message: 'No active session' });
-      return;
+      throw new Error('No active session for label update');
     }
     return this.agentSession.setLabel(entryId, label);
   }
