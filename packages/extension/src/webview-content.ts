@@ -10,6 +10,7 @@ import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 
 const DEV_SERVER_URL = 'http://localhost:5173';
 const THEME_VARIABLES = [
+  '--vscode-tab-activeBackground',
   '--vscode-sideBar-background',
   '--vscode-editor-background',
   '--vscode-foreground',

@@ -6,6 +6,7 @@ type ScoutThemeKind = 'light' | 'dark' | 'high-contrast';
 
 const THEME_CLASSES = ['vscode-light', 'vscode-dark', 'vscode-high-contrast'] as const;
 const THEME_VARIABLES = [
+  '--vscode-tab-activeBackground',
   '--vscode-sideBar-background',
   '--vscode-editor-background',
   '--vscode-foreground',

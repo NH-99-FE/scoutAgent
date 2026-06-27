@@ -39,6 +39,7 @@
     var(--vscode-editor-background, var(--scout-fallback-background))
   );
   --foreground: var(--vscode-foreground, var(--scout-fallback-foreground));
+  --tree-background: var(--vscode-tab-activeBackground, var(--background));
   --card: var(
     --vscode-editorWidget-background,
     var(--vscode-sideBar-background, var(--scout-fallback-surface))
@@ -119,6 +120,7 @@ html.vscode-high-contrast {
     var(--vscode-editor-background, var(--scout-fallback-background))
   );
   --foreground: var(--vscode-foreground, var(--scout-fallback-foreground));
+  --tree-background: var(--vscode-tab-activeBackground, var(--background));
   --card: var(
     --vscode-editorWidget-background,
     var(--vscode-sideBar-background, var(--scout-fallback-surface))
@@ -214,6 +216,7 @@ body,
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  --color-tree-background: var(--tree-background);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
