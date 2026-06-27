@@ -38,6 +38,14 @@ const THEME_VARIABLES = [
   '--vscode-charts-red',
 ];
 
+const STARTUP_BACKGROUND =
+  'var(--vscode-sideBar-background, var(--vscode-editor-background, #252526))';
+
+const STARTUP_THEME_STYLE = `<style data-scout-startup-theme>
+    :root { color: var(--vscode-foreground); background: ${STARTUP_BACKGROUND}; }
+    html, body, #root, #scout-webview-frame { background: ${STARTUP_BACKGROUND}; }
+  </style>`;
+
 export function configureScoutWebview(extensionUri: vscode.Uri, webview: vscode.Webview): void {
   const localRoot = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
   webview.options = {
@@ -82,9 +90,11 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${devOrigin}; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
   <title>${getSurfaceTitle(surface)}</title>
+  ${STARTUP_THEME_STYLE}
   <style>
-    body { margin: 0; padding: 0; overflow: hidden; height: 100vh; }
-    iframe { width: 100%; height: 100%; border: none; }
+    body { margin: 0; padding: 0; overflow: hidden; height: 100vh; color: var(--vscode-foreground); }
+    iframe { width: 100%; height: 100%; border: none; opacity: 0; background: ${STARTUP_BACKGROUND}; }
+    iframe[data-scout-ready="true"] { opacity: 1; }
   </style>
 </head>
 <body>
@@ -140,6 +150,7 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
         if (event.source === frame.contentWindow) {
           if (event.origin !== devOrigin) return;
           if (event.data?.type === 'scout_theme_ready') {
+            frame.dataset.scoutReady = 'true';
             postTheme();
             return;
           }
@@ -192,7 +203,12 @@ function getLocalHtml(
 }
 
 function injectSurface(html: string, surface: ScoutWebviewSurface): string {
-  const script = `<script>window.__SCOUT_WEBVIEW_SURFACE__=${JSON.stringify(surface)};</script>`;
+  const script = `${STARTUP_THEME_STYLE}<script>window.__SCOUT_WEBVIEW_SURFACE__=${JSON.stringify(surface)};</script>`;
+  const headOpen = html.match(/<head[^>]*>/i);
+  if (headOpen?.index !== undefined) {
+    const insertAt = headOpen.index + headOpen[0].length;
+    return `${html.slice(0, insertAt)}${script}${html.slice(insertAt)}`;
+  }
   if (html.includes('</head>')) {
     return html.replace('</head>', `${script}</head>`);
   }
