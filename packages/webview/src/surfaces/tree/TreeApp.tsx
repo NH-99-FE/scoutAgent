@@ -1,70 +1,100 @@
 // ============================================================
-// Tree App — 会话树面板骨架
+// Tree App — 独立会话树导航面板
 // ============================================================
 
-import { GitBranch, RefreshCw } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
-import { protocolClient } from '@/bridge/protocol-client';
-import { useTree, useTreeEditorText, useTreeLeafId, useTreeNodeCount } from '@/store/tree-store';
+import { Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { cn } from '@/lib/utils';
+import { NodeInspector } from './NodeInspector';
+import { TreeActionsMenu } from './TreeActionsMenu';
+import { TreeRow } from './TreeRow';
+import { FILTERS } from './tree-types';
+import { useTreePanelController } from './use-tree-panel-controller';
 
 export function TreeApp() {
-  const tree = useTree();
-  const nodeCount = useTreeNodeCount();
-  const leafId = useTreeLeafId();
-  const editorText = useTreeEditorText();
+  const controller = useTreePanelController();
 
   return (
-    <main className="bg-background text-foreground min-h-screen">
-      <header className="border-border flex items-center justify-between border-b px-4 py-3">
-        <div className="min-w-0">
-          <h1 className="truncate text-base font-semibold">Scout Tree</h1>
-          <p className="text-muted-foreground truncate text-xs">{leafId || 'No active leaf'}</p>
+    <main className="bg-tree-background text-foreground flex h-screen min-h-0 flex-col overflow-hidden">
+      <section className="flex shrink-0 flex-wrap items-center gap-2 px-4 py-2">
+        <div className="relative min-w-56 flex-1">
+          <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2" />
+          <Input
+            aria-label="搜索会话节点"
+            className="h-7 rounded-full pl-8 text-xs"
+            placeholder="搜索会话节点"
+            value={controller.query}
+            onChange={(event) => controller.setQuery(event.target.value)}
+          />
         </div>
-        <Button size="sm" variant="outline" onClick={protocolClient.requestTree}>
-          <RefreshCw />
-          Refresh
-        </Button>
-      </header>
-
-      <section className="border-border bg-border grid grid-cols-2 gap-px border-b text-xs">
-        <Metric label="Nodes" value={String(nodeCount)} />
-        <Metric label="Draft" value={editorText ? 'ready' : 'empty'} />
+        <div className="border-border flex overflow-hidden rounded-full border">
+          {FILTERS.map((filter) => (
+            <button
+              key={filter.mode}
+              className={cn(
+                'border-border h-7 border-r px-2.5 text-xs first:rounded-l-full last:rounded-r-full last:border-r-0',
+                controller.filterMode === filter.mode
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted text-muted-foreground',
+              )}
+              type="button"
+              onClick={() => controller.setFilterMode(filter.mode)}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
+        <TreeActionsMenu
+          onRefresh={controller.refreshTree}
+          onRevealCurrentLeaf={controller.revealCurrentLeaf}
+        />
       </section>
 
-      <section className="px-4 py-4">
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <GitBranch className="size-4" />
-          Branches
+      <section className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
+        <div className="bg-tree-background min-h-0 p-3">
+          <ScrollArea
+            className="border-border bg-card h-full min-h-0 rounded-md border shadow-sm"
+            viewportClassName="p-2"
+          >
+            {controller.visibleNodes.length === 0 ? (
+              <div className="text-muted-foreground px-2 py-8 text-center text-sm">
+                暂无会话树节点
+              </div>
+            ) : (
+              <div className="space-y-0.5" role="tree">
+                {controller.visibleNodes.map((entry) => (
+                  <TreeRow
+                    key={entry.node.id}
+                    current={entry.node.id === controller.leafId}
+                    entry={entry}
+                    folded={controller.foldedIds.has(entry.node.id)}
+                    foldable={entry.foldable}
+                    selected={entry.node.id === controller.effectiveSelectedId}
+                    onSelect={() => controller.setSelectedId(entry.node.id)}
+                    onToggleFold={() => controller.toggleFold(entry.node.id)}
+                  />
+                ))}
+              </div>
+            )}
+          </ScrollArea>
         </div>
-        <Separator className="my-3" />
-        <div className="grid gap-2">
-          {tree.length === 0 ? (
-            <p className="text-muted-foreground text-sm">No tree data</p>
-          ) : (
-            tree.map((node) => (
-              <TreeNodePreview key={node.id} label={node.label ?? node.preview ?? node.id} />
-            ))
-          )}
-        </div>
+
+        <aside className="bg-tree-background min-h-0 p-3">
+          <NodeInspector
+            customInstructions={controller.effectiveSummaryDraft.customInstructions}
+            labelSaved={controller.selectedNode?.id === controller.labelSavedNodeId}
+            labelDraft={controller.effectiveLabelDraft}
+            node={controller.selectedNode}
+            summaryMode={controller.effectiveSummaryDraft.mode}
+            onCustomInstructionsChange={controller.updateCustomInstructions}
+            onLabelDraftChange={controller.updateLabelDraft}
+            onNavigate={controller.navigateToSelectedNode}
+            onSaveLabel={controller.saveLabel}
+            onSummaryModeChange={controller.updateSummaryMode}
+          />
+        </aside>
       </section>
     </main>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-background px-4 py-2">
-      <p className="text-muted-foreground">{label}</p>
-      <p className="mt-0.5 truncate font-medium">{value}</p>
-    </div>
-  );
-}
-
-function TreeNodePreview({ label }: { label: string }) {
-  return (
-    <div className="border-border min-w-0 rounded-md border px-3 py-2 text-sm">
-      <p className="truncate">{label}</p>
-    </div>
   );
 }

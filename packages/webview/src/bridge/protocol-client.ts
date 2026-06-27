@@ -34,6 +34,14 @@ interface ContinueSessionOptions {
   preserveFollowUpQueue?: boolean;
 }
 
+interface NavigateTreeOptions {
+  targetId: string;
+  summarize: boolean;
+  customInstructions?: string;
+}
+
+type LabelResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'label_result' }>;
+
 interface PromoteFollowUpOptions extends ContinueSessionOptions {
   resume?: boolean;
 }
@@ -47,10 +55,7 @@ interface RequestTaskHistoryOptions {
   purpose?: ScoutTaskHistoryPurpose;
 }
 
-type OpenSessionPayload = Extract<
-  WebviewRequestPayload,
-  { type: 'open_task' | 'restore_session' }
->;
+type OpenSessionPayload = Extract<WebviewRequestPayload, { type: 'open_task' | 'restore_session' }>;
 type OpenSessionFailureType = 'open_task_result' | 'restore_session_result';
 
 let pendingNewSessionRequestId: string | undefined;
@@ -135,10 +140,7 @@ function requestTaskHistory({
   return nextQueryToken;
 }
 
-function openSessionByPath(
-  payload: OpenSessionPayload,
-  failureType: OpenSessionFailureType,
-): void {
+function openSessionByPath(payload: OpenSessionPayload, failureType: OpenSessionFailureType): void {
   discardProtocolRequest(pendingNewSessionRequestId);
   pendingNewSessionRequestId = undefined;
   discardProtocolRequest(pendingOpenTaskRequestId);
@@ -173,8 +175,21 @@ export const protocolClient = {
   requestState: () => sendRouted({ type: 'request_state' }, projectProtocolResponsePayload),
   requestConfig: () => sendRouted({ type: 'request_config' }, projectProtocolResponsePayload),
   requestTree: () => sendRouted({ type: 'request_tree' }, projectProtocolResponsePayload),
+  navigateTree: ({ targetId, summarize, customInstructions }: NavigateTreeOptions) => {
+    const payload: WebviewRequestPayload = { type: 'navigate_tree', targetId, summarize };
+    if (customInstructions) payload.customInstructions = customInstructions;
+    return sendRouted(payload, projectProtocolResponsePayload);
+  },
+  setLabel: (entryId: string, label?: string, onResult?: (payload: LabelResultPayload) => void) =>
+    sendRouted({ type: 'set_label', entryId, label }, (payload) => {
+      projectProtocolResponsePayload(payload);
+      if (payload.type === 'label_result') onResult?.(payload);
+    }),
   forkSession: (entryId: string) =>
-    sendRouted({ type: 'fork_session', entryId, position: 'before' }, projectProtocolResponsePayload),
+    sendRouted(
+      { type: 'fork_session', entryId, position: 'before' },
+      projectProtocolResponsePayload,
+    ),
   requestForkCandidates: (
     sessionId: string,
     onResult: (candidates: ScoutForkCandidate[], responseSessionId: string) => void,
