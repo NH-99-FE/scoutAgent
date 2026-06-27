@@ -64,7 +64,7 @@ export function buildVisibleNodes(
   const visibleIndex = buildVisibleIndex(filtered, nodeById);
 
   const result: VisibleTreeNode[] = [];
-  const visit = (entries: FlatTreeNode[], indent: number, justBranched: boolean) => {
+  const visit = (entries: FlatTreeNode[], indent: number) => {
     entries.forEach((entry, index) => {
       const children = visibleIndex.childrenByParentId.get(entry.node.id) ?? [];
       const hasMultipleChildren = children.length > 1;
@@ -76,12 +76,12 @@ export function buildVisibleNodes(
         isLast: index === entries.length - 1,
       };
       result.push(visibleEntry);
-      const childIndent = hasMultipleChildren || (justBranched && indent > 0) ? indent + 1 : indent;
-      visit(children, childIndent, hasMultipleChildren);
+      const childIndent = hasMultipleChildren ? indent + 1 : indent;
+      visit(children, childIndent);
     });
   };
 
-  visit(visibleIndex.childrenByParentId.get(null) ?? [], 0, false);
+  visit(visibleIndex.childrenByParentId.get(null) ?? [], 0);
   return result;
 }
 

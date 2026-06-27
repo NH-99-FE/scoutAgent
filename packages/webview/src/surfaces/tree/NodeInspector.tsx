@@ -52,8 +52,7 @@ export function NodeInspector({
             <TreeNodeIcon className="text-muted-foreground size-4" node={node} />
           </span>
           <div className="min-w-0">
-            <h2 className="truncate text-sm leading-5 font-medium">{formatNodeLine(node)}</h2>
-            <p className="text-muted-foreground text-xs leading-4">{formatNodeKind(node)}</p>
+            <h2 className="truncate text-sm leading-5 font-medium">{formatNodeKind(node)}</h2>
           </div>
         </div>
       </div>

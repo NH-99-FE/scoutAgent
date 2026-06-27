@@ -48,11 +48,11 @@ export function TreeRow({
         }
       }}
     >
-      <div className="flex min-w-0 items-center gap-1.5">
+      <div className="grid min-w-0 grid-cols-[1.25rem_0.875rem_minmax(0,1fr)] items-center gap-1.5">
         <button
           aria-label={folded ? '展开分支' : '折叠分支'}
           className={cn(
-            'text-muted-foreground hover:text-foreground flex size-5 items-center justify-center rounded-sm',
+            'text-muted-foreground hover:text-foreground flex size-5 shrink-0 items-center justify-center rounded-sm',
             !foldable && 'invisible',
           )}
           tabIndex={foldable ? 0 : -1}
