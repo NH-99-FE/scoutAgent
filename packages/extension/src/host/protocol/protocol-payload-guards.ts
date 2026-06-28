@@ -3,7 +3,9 @@
 // 负责：在 host 边界拒绝字段类型错误、未知字段和非法枚举值。
 // ============================================================
 
+import { SCOUT_MODEL_PROVIDERS, SCOUT_SETTINGS_SCOPES, THINKING_LEVELS } from '@scout-agent/shared';
 import type { ScoutProtocolPayloadType, WebviewRequestPayload } from '@scout-agent/shared';
+import { validateRuntimeSettingsPatch } from '../../runtime-settings-schema.ts';
 
 // ---------- 类型 ----------
 
@@ -14,6 +16,7 @@ export interface ProtocolPayloadGuardResult {
 }
 
 type PayloadValidator = (payload: Record<string, unknown>) => string | undefined;
+const SCOUT_MODEL_PROVIDER_SET = new Set<string>(SCOUT_MODEL_PROVIDERS);
 
 // ---------- 校验入口 ----------
 
@@ -38,6 +41,8 @@ const PAYLOAD_VALIDATORS = {
   ready: fields('type'),
   request_state: fields('type'),
   request_config: fields('type'),
+  request_custom_models: fields('type'),
+  request_runtime_settings: fields('type'),
   request_context_usage: fields('type'),
   user_message: combine(
     fields('type', 'text', 'images', 'deliverAs', 'clearFollowUpQueue'),
@@ -64,10 +69,19 @@ const PAYLOAD_VALIDATORS = {
     requiredString('provider'),
     requiredString('modelId'),
   ),
-  select_thinking: combine(
-    fields('type', 'level'),
-    requiredEnum('level', ['off', 'minimal', 'low', 'medium', 'high', 'xhigh']),
+  set_default_model: combine(
+    fields('type', 'provider', 'modelId', 'scope'),
+    requiredString('provider'),
+    requiredString('modelId'),
+    requiredEnum('scope', SCOUT_SETTINGS_SCOPES),
   ),
+  save_custom_models: combine(fields('type', 'settings'), requiredCustomModelsSettings('settings')),
+  save_runtime_settings: combine(
+    fields('type', 'scope', 'patch'),
+    requiredEnum('scope', SCOUT_SETTINGS_SCOPES),
+    requiredRuntimeSettingsPatch('patch'),
+  ),
+  select_thinking: combine(fields('type', 'level'), requiredEnum('level', THINKING_LEVELS)),
   set_active_tools: combine(fields('type', 'toolNames'), requiredStringArray('toolNames')),
   clear_conversation: fields('type'),
   reload_resources: fields('type'),
@@ -204,6 +218,66 @@ function requiredStringArray(key: string): PayloadValidator {
       : `${key} must be a string array`;
 }
 
+function requiredCustomModelsSettings(key: string): PayloadValidator {
+  return (payload) => {
+    const settings = payload[key];
+    if (!isRecord(settings)) return `${key} must be an object`;
+    const fieldError = fields('providers')(settings);
+    if (fieldError) return `${key}.${fieldError}`;
+    if (!isRecord(settings.providers)) return `${key}.providers must be an object`;
+    for (const [provider, config] of Object.entries(settings.providers)) {
+      if (!SCOUT_MODEL_PROVIDER_SET.has(provider)) {
+        return `${key}.providers.${provider} must be one of ${SCOUT_MODEL_PROVIDERS.join(', ')}`;
+      }
+      const providerError = validateCustomModelsProvider(config, `${key}.providers.${provider}`);
+      if (providerError) return providerError;
+    }
+    return undefined;
+  };
+}
+
+function validateCustomModelsProvider(value: unknown, label: string): string | undefined {
+  if (!isRecord(value)) return `${label} must be an object`;
+  const fieldError = fields(
+    'apiKey',
+    'baseUrl',
+    'api',
+    'headers',
+    'compat',
+    'models',
+    'modelOverrides',
+  )(value);
+  if (fieldError) return `${label}.${fieldError}`;
+  if (value.apiKey !== undefined && typeof value.apiKey !== 'string') {
+    return `${label}.apiKey must be a string when provided`;
+  }
+  if (value.baseUrl !== undefined && typeof value.baseUrl !== 'string') {
+    return `${label}.baseUrl must be a string when provided`;
+  }
+  if (value.api !== undefined && typeof value.api !== 'string') {
+    return `${label}.api must be a string when provided`;
+  }
+  if (value.headers !== undefined && !isRecord(value.headers)) {
+    return `${label}.headers must be an object when provided`;
+  }
+  if (value.compat !== undefined && !isRecord(value.compat)) {
+    return `${label}.compat must be an object when provided`;
+  }
+  if (value.models !== undefined && !Array.isArray(value.models)) {
+    return `${label}.models must be an array when provided`;
+  }
+  if (value.modelOverrides !== undefined && !isRecord(value.modelOverrides)) {
+    return `${label}.modelOverrides must be an object when provided`;
+  }
+  return undefined;
+}
+
+function requiredRuntimeSettingsPatch(key: string): PayloadValidator {
+  return (payload) => {
+    return validateRuntimeSettingsPatch(payload[key]);
+  };
+}
+
 function requiredEnum(key: string, values: readonly string[]): PayloadValidator {
   return (payload) =>
     typeof payload[key] === 'string' && values.includes(payload[key])
@@ -243,5 +317,5 @@ function isKnownPayloadType(type: string): type is ScoutProtocolPayloadType {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

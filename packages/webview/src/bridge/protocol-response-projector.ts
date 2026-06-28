@@ -41,6 +41,9 @@ export function projectProtocolResponsePayload(
     case 'config_result':
       useConfigStore.getState().actions.setConfig(payload.config);
       break;
+    case 'custom_models_result':
+    case 'runtime_settings_result':
+      break;
     case 'commands_result':
       useConfigStore.getState().actions.setCommands(payload.commands);
       break;
@@ -154,7 +157,11 @@ function projectCommandResult(message: ScoutCommandResult): void {
     return;
   }
 
-  if (message.type === 'import_session_result' && !message.success && message.error === 'cancelled') {
+  if (
+    message.type === 'import_session_result' &&
+    !message.success &&
+    message.error === 'cancelled'
+  ) {
     return;
   }
 

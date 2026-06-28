@@ -26,22 +26,28 @@ function createOutputChannel() {
   };
 }
 
-function createConfiguredConfigManager(cwd: string, agentDir: string): ConfigManager {
-  const values: Record<string, unknown> = {
-    anthropicApiKey: 'test-key',
-    defaultModel: 'claude-sonnet-4-20250514',
-  };
+function createConfiguredConfigManager(cwd: string, userConfigDir: string): ConfigManager {
+  fs.writeFileSync(
+    path.join(userConfigDir, 'settings.json'),
+    JSON.stringify({
+      defaultProvider: 'anthropic',
+      defaultModel: 'claude-sonnet-4-20250514',
+    }),
+    'utf-8',
+  );
+  fs.writeFileSync(
+    path.join(userConfigDir, 'models.json'),
+    JSON.stringify({
+      providers: {
+        anthropic: { apiKey: 'test-key' },
+      },
+    }),
+    'utf-8',
+  );
 
   return new ConfigManager({
     cwd,
-    agentDir,
-    getConfiguration: () =>
-      ({
-        get: <T>(key: string) => values[key] as T,
-        has: (key: string) => key in values,
-        inspect: () => undefined,
-        update: async () => undefined,
-      }) as never,
+    userConfigDir,
   });
 }
 
@@ -86,13 +92,16 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
   let tempDir: string;
   let cwd: string;
   let agentDir: string;
+  let userConfigDir: string;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-session-coordinator-test-'));
     cwd = path.join(tempDir, 'project');
     agentDir = path.join(tempDir, 'agent');
+    userConfigDir = path.join(tempDir, 'user-config');
     fs.mkdirSync(path.join(cwd, '.scout', 'extensions'), { recursive: true });
     fs.mkdirSync(agentDir, { recursive: true });
+    fs.mkdirSync(userConfigDir, { recursive: true });
   });
 
   afterEach(() => {
@@ -114,7 +123,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     let setupSawParentSession: string | undefined;
     let withSessionEntries: unknown[] = [];
@@ -163,7 +172,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     const prompt = vi.fn();
     const steer = vi.fn();
@@ -188,7 +197,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     const rawTree: SessionTreeNode[] = [
       {
@@ -239,7 +248,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     const releaseNewSession = createDeferred();
     const calls: string[] = [];
@@ -292,7 +301,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     const releaseBlockingNewSession = createDeferred();
     const calls: string[] = [];
@@ -367,7 +376,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     const calls: string[] = [];
     const fakeRuntime = {
@@ -413,7 +422,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     const releaseStartup = createDeferred();
     const calls: string[] = [];
@@ -462,7 +471,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
 
     // raw 分支按 root-to-leaf 排序：含压缩点之前的旧 user message + 结构化内容 user message。
@@ -522,7 +531,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       cwd,
       agentDir,
       outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, agentDir),
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
     });
     expect(coordinator.getForkCandidates()).toEqual([]);
   });

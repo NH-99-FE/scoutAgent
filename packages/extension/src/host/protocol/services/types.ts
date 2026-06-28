@@ -69,7 +69,21 @@ export interface StateProtocolHost {
 export interface ConfigProtocolHost {
   pushConfig: (surface?: ScoutWebviewSurface) => void;
   requestConfig: (respond: ProtocolResponder) => void;
+  requestCustomModels: (respond: ProtocolResponder) => void;
+  requestRuntimeSettings: (respond: ProtocolResponder) => void;
   setModel: (message: ProtocolPayload<'select_model'>) => Promise<void>;
+  setDefaultModel: (
+    message: ProtocolPayload<'set_default_model'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+  saveCustomModels: (
+    message: ProtocolPayload<'save_custom_models'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+  saveRuntimeSettings: (
+    message: ProtocolPayload<'save_runtime_settings'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
   setThinkingLevel: (message: ProtocolPayload<'select_thinking'>) => Promise<void>;
   setActiveTools: (message: ProtocolPayload<'set_active_tools'>) => void;
   reloadResources: (respond: ProtocolResponder) => Promise<void>;

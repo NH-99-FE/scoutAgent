@@ -19,6 +19,14 @@ const ROUTE_CASES = [
   protocolCase({ type: 'request_state' }, { service: 'state', method: 'request_state' }),
   protocolCase({ type: 'request_config' }, { service: 'config', method: 'request_config' }),
   protocolCase(
+    { type: 'request_custom_models' },
+    { service: 'config', method: 'request_custom_models' },
+  ),
+  protocolCase(
+    { type: 'request_runtime_settings' },
+    { service: 'config', method: 'request_runtime_settings' },
+  ),
+  protocolCase(
     { type: 'request_context_usage' },
     { service: 'state', method: 'request_context_usage' },
   ),
@@ -45,6 +53,52 @@ const ROUTE_CASES = [
   protocolCase(
     { type: 'select_model', provider: 'anthropic', modelId: 'claude-test' },
     { service: 'config', method: 'select_model' },
+  ),
+  protocolCase(
+    { type: 'set_default_model', provider: 'anthropic', modelId: 'claude-test', scope: 'global' },
+    { service: 'config', method: 'set_default_model' },
+  ),
+  protocolCase(
+    {
+      type: 'save_custom_models',
+      settings: {
+        providers: {
+          openai: {
+            apiKey: '',
+            baseUrl: 'https://api.openai.com/v1',
+            api: 'openai-completions',
+            models: [
+              {
+                id: 'gpt-test',
+                name: 'GPT Test',
+                api: 'openai-completions',
+                baseUrl: 'https://api.openai.com/v1',
+                reasoning: false,
+                input: ['text'],
+                contextWindow: 1000,
+                maxTokens: 100,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              },
+            ],
+            modelOverrides: {},
+          },
+        },
+      },
+    },
+    { service: 'config', method: 'save_custom_models' },
+  ),
+  protocolCase(
+    {
+      type: 'save_runtime_settings',
+      scope: 'global',
+      patch: {
+        operations: [
+          { op: 'set', path: 'defaultProvider', value: 'openai' },
+          { op: 'set', path: 'defaultModel', value: 'gpt-test' },
+        ],
+      },
+    },
+    { service: 'config', method: 'save_runtime_settings' },
   ),
   protocolCase(
     { type: 'select_thinking', level: 'off' },

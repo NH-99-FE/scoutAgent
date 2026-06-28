@@ -188,7 +188,13 @@ export function createScoutProtocolHostServices(
     config: {
       pushConfig: (surface) => bundle.config.pushConfig(surface),
       requestConfig: (respond) => bundle.config.requestConfig(respond),
+      requestCustomModels: (respond) => bundle.config.requestCustomModels(respond),
+      requestRuntimeSettings: (respond) => bundle.config.requestRuntimeSettings(respond),
       setModel: (message) => bundle.config.setModel(message),
+      setDefaultModel: (message, respond) => bundle.config.setDefaultModel(message, respond),
+      saveCustomModels: (message, respond) => bundle.config.saveCustomModels(message, respond),
+      saveRuntimeSettings: (message, respond) =>
+        bundle.config.saveRuntimeSettings(message, respond),
       setThinkingLevel: (message) => bundle.config.setThinkingLevel(message),
       setActiveTools: (message) => bundle.config.setActiveTools(message),
       reloadResources: (respond) => bundle.config.reloadResources(respond),

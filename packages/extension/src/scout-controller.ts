@@ -7,6 +7,7 @@
 import * as vscode from 'vscode';
 import type { ExtensionMessage, WebviewMessage } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
+import { getDefaultUserConfigDir } from './settings-manager.ts';
 import { ExtensionSessionCoordinator } from './host/session-coordinator.ts';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 import { WebviewSurfaceRegistry } from './host/webview-surface-registry.ts';
@@ -51,7 +52,11 @@ export class ScoutController implements vscode.Disposable {
     this.outputChannel = options.outputChannel;
     this.cwd = options.cwd;
     this.agentDir = this.resolveAgentDir();
-    this.configManager = new ConfigManager({ cwd: this.cwd, agentDir: this.agentDir });
+    const userConfigDir = getDefaultUserConfigDir();
+    this.configManager = new ConfigManager({
+      cwd: this.cwd,
+      userConfigDir,
+    });
 
     this.sessionManager = new ExtensionSessionCoordinator({
       cwd: this.cwd,
@@ -86,13 +91,6 @@ export class ScoutController implements vscode.Disposable {
     // 监听 ExtensionSessionCoordinator 事件
     this.unsubscribeSession = this.sessionManager.subscribe((event) =>
       this.protocolHostServices.sessionEventForwarder.handle(event),
-    );
-
-    // 监听配置变更
-    this.disposables.push(
-      this.configManager.onDidChangeSettings(() => {
-        this.protocolHostServices.state.pushConfig();
-      }),
     );
   }
 

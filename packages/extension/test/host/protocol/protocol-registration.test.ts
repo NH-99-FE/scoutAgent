@@ -5,6 +5,7 @@ import {
   type WebviewRequestPayload,
 } from '@scout-agent/shared';
 import { ProtocolServer } from '../../../src/host/protocol/protocol-server.ts';
+import { validateWebviewRequestPayload } from '../../../src/host/protocol/protocol-payload-guards.ts';
 import {
   registerScoutProtocolServices,
   type ScoutProtocolServices,
@@ -29,6 +30,14 @@ const PAYLOAD_CASES = [
   protocolCase({ type: 'ready' }, { service: 'lifecycle', method: 'ready' }),
   protocolCase({ type: 'request_state' }, { service: 'state', method: 'request_state' }),
   protocolCase({ type: 'request_config' }, { service: 'config', method: 'request_config' }),
+  protocolCase(
+    { type: 'request_custom_models' },
+    { service: 'config', method: 'request_custom_models' },
+  ),
+  protocolCase(
+    { type: 'request_runtime_settings' },
+    { service: 'config', method: 'request_runtime_settings' },
+  ),
   protocolCase(
     { type: 'request_context_usage' },
     { service: 'state', method: 'request_context_usage' },
@@ -56,6 +65,52 @@ const PAYLOAD_CASES = [
   protocolCase(
     { type: 'select_model', provider: 'anthropic', modelId: 'claude-test' },
     { service: 'config', method: 'select_model' },
+  ),
+  protocolCase(
+    { type: 'set_default_model', provider: 'anthropic', modelId: 'claude-test', scope: 'global' },
+    { service: 'config', method: 'set_default_model' },
+  ),
+  protocolCase(
+    {
+      type: 'save_custom_models',
+      settings: {
+        providers: {
+          openai: {
+            apiKey: '',
+            baseUrl: 'https://api.openai.com/v1',
+            api: 'openai-completions',
+            models: [
+              {
+                id: 'gpt-test',
+                name: 'GPT Test',
+                api: 'openai-completions',
+                baseUrl: 'https://api.openai.com/v1',
+                reasoning: false,
+                input: ['text'],
+                contextWindow: 1000,
+                maxTokens: 100,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              },
+            ],
+            modelOverrides: {},
+          },
+        },
+      },
+    },
+    { service: 'config', method: 'save_custom_models' },
+  ),
+  protocolCase(
+    {
+      type: 'save_runtime_settings',
+      scope: 'global',
+      patch: {
+        operations: [
+          { op: 'set', path: 'defaultProvider', value: 'openai' },
+          { op: 'set', path: 'defaultModel', value: 'gpt-test' },
+        ],
+      },
+    },
+    { service: 'config', method: 'save_runtime_settings' },
   ),
   protocolCase(
     { type: 'select_thinking', level: 'off' },
@@ -160,7 +215,66 @@ function makeServices(): ScoutProtocolServices {
     config: {
       pushConfig: vi.fn(),
       requestConfig: vi.fn(),
+      requestCustomModels: vi.fn((respond) => {
+        respond({
+          type: 'custom_models_result',
+          settings: {
+            modelsPath: '/home/me/.scout/agent/models.json',
+            providerMetadata: {
+              openai: {
+                provider: 'openai',
+                defaultBaseUrl: 'https://api.openai.com/v1',
+                defaultApi: 'openai-completions',
+                supportedApis: ['openai-completions', 'openai-responses'],
+              },
+              anthropic: {
+                provider: 'anthropic',
+                defaultBaseUrl: 'https://api.anthropic.com',
+                defaultApi: 'anthropic-messages',
+                supportedApis: ['anthropic-messages'],
+              },
+            },
+            providers: {
+              openai: {
+                apiKey: '',
+                baseUrl: 'https://api.openai.com/v1',
+                api: 'openai-completions',
+                models: [],
+                modelOverrides: {},
+              },
+              anthropic: {
+                apiKey: '',
+                baseUrl: 'https://api.anthropic.com',
+                api: 'anthropic-messages',
+                models: [],
+                modelOverrides: {},
+              },
+            },
+          },
+        });
+      }),
+      requestRuntimeSettings: vi.fn((respond) => {
+        respond({
+          type: 'runtime_settings_result',
+          settings: {
+            globalSettingsPath: '/home/me/.scout/agent/settings.json',
+            projectSettingsPath: '/workspace/.scout/settings.json',
+            global: {},
+            project: {},
+            effective: {},
+          },
+        });
+      }),
       setModel: vi.fn(async () => undefined),
+      setDefaultModel: vi.fn(async (_message, respond) => {
+        respond({ type: 'set_default_model_result', success: true });
+      }),
+      saveCustomModels: vi.fn(async (_message, respond) => {
+        respond({ type: 'save_custom_models_result', success: true });
+      }),
+      saveRuntimeSettings: vi.fn(async (_message, respond) => {
+        respond({ type: 'save_runtime_settings_result', success: true });
+      }),
       setThinkingLevel: vi.fn(async () => undefined),
       setActiveTools: vi.fn(),
       reloadResources: vi.fn(async (respond) => {
@@ -271,5 +385,66 @@ describe('registerScoutProtocolServices', () => {
         .find((message) => message.type === 'protocol_response' && message.error);
       expect(errorResponse).toBeUndefined();
     }
+  });
+
+  it('rejects custom model snapshot fields at the protocol boundary', () => {
+    const payload = {
+      type: 'save_custom_models',
+      settings: {
+        modelsPath: '/home/me/.scout/agent/models.json',
+        providerMetadata: {},
+        providers: {},
+      },
+    };
+
+    expect(validateWebviewRequestPayload(payload).error).toContain(
+      'settings.modelsPath is not a protocol field',
+    );
+  });
+
+  it('lets manager-level custom model validation pass thin protocol shape validation', () => {
+    const payload = {
+      type: 'save_custom_models',
+      settings: {
+        providers: {
+          openai: {
+            apiKey: '',
+            baseUrl: 'https://api.openai.com/v1',
+            api: 'anthropic-messages',
+            models: [
+              {
+                id: 'gpt-test',
+                name: 'GPT Test',
+                api: 'anthropic-messages',
+                baseUrl: 'https://api.openai.com/v1',
+                reasoning: false,
+                input: ['text'],
+                contextWindow: 0,
+                maxTokens: 100,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+              },
+            ],
+            modelOverrides: {},
+          },
+        },
+      },
+    };
+
+    expect(validateWebviewRequestPayload(payload)).toMatchObject({ ok: true, error: '' });
+  });
+
+  it('rejects invalid runtime setting patch values at the protocol boundary', () => {
+    const payload = {
+      type: 'save_runtime_settings',
+      scope: 'global',
+      patch: {
+        operations: [{ op: 'set', path: 'defaultProvider', value: 'openrouter' }],
+      },
+    };
+
+    expect(validateWebviewRequestPayload(payload)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('defaultProvider must be one of openai, anthropic'),
+    });
   });
 });

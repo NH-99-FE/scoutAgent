@@ -53,8 +53,91 @@ export class ConfigProtocolService implements ConfigProtocolHost {
     return this.configManager.getScoutConfig();
   }
 
+  requestCustomModels(respond: ProtocolResponder): void {
+    respond({
+      type: 'custom_models_result',
+      settings: this.configManager.getCustomModelsSettings(),
+    });
+  }
+
+  requestRuntimeSettings(respond: ProtocolResponder): void {
+    respond({ type: 'runtime_settings_result', settings: this.configManager.getRuntimeSettings() });
+  }
+
   async setModel(message: ProtocolPayload<'select_model'>): Promise<void> {
     await this.sessionManager.setModel(message.modelId, message.provider);
+  }
+
+  async setDefaultModel(
+    message: ProtocolPayload<'set_default_model'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    try {
+      this.configManager.setDefaultModel(message.provider, message.modelId, message.scope);
+      await this.sessionManager.setModel(message.modelId, message.provider);
+      respond({ type: 'set_default_model_result', success: true });
+      this.pushConfig();
+      await this.pushState();
+      await this.pushTreeData();
+    } catch (error) {
+      respond({
+        type: 'set_default_model_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async saveCustomModels(
+    message: ProtocolPayload<'save_custom_models'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    let settings: ReturnType<ConfigManager['saveCustomModels']>;
+    try {
+      settings = this.configManager.saveCustomModels(message.settings);
+    } catch (error) {
+      respond({
+        type: 'save_custom_models_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    const reload = await this.reloadAfterPersist();
+    respond({
+      type: 'save_custom_models_result',
+      success: true,
+      error: reload.error,
+      settings,
+    });
+    await this.pushAfterPersist(reload.succeeded);
+  }
+
+  async saveRuntimeSettings(
+    message: ProtocolPayload<'save_runtime_settings'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    let settings: ReturnType<ConfigManager['saveRuntimeSettings']>;
+    try {
+      settings = this.configManager.saveRuntimeSettings(message.scope, message.patch);
+    } catch (error) {
+      respond({
+        type: 'save_runtime_settings_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    const reload = await this.reloadAfterPersist();
+    respond({
+      type: 'save_runtime_settings_result',
+      success: true,
+      error: reload.error,
+      settings,
+    });
+    await this.pushAfterPersist(reload.succeeded);
   }
 
   async setThinkingLevel(message: ProtocolPayload<'select_thinking'>): Promise<void> {
@@ -86,6 +169,31 @@ export class ConfigProtocolService implements ConfigProtocolHost {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+  }
+
+  private async reloadAfterPersist(): Promise<{ succeeded: boolean; error?: string }> {
+    try {
+      const result = await this.sessionManager.reload();
+      if (result.cancelled) {
+        return { succeeded: false, error: 'Runtime reload cancelled after saving settings' };
+      }
+      return { succeeded: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        succeeded: false,
+        error: `Runtime reload failed after saving settings: ${message}`,
+      };
+    }
+  }
+
+  private async pushAfterPersist(reloadSucceeded: boolean): Promise<void> {
+    this.pushConfig();
+    if (reloadSucceeded) {
+      this.requestCommandsCallback();
+      await this.pushState();
+      await this.pushTreeData();
     }
   }
 }

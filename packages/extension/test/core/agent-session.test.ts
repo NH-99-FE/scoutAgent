@@ -69,17 +69,69 @@ function createConfigManagerWithValues(
   cwd: string,
   values: Record<string, unknown>,
 ): ConfigManager {
+  const userConfigDir = path.join(cwd, '.test-scout-agent-values');
+  fs.mkdirSync(userConfigDir, { recursive: true });
+  const settings: Record<string, unknown> = {};
+  const providers: Record<string, Record<string, unknown>> = {};
+
+  for (const [key, value] of Object.entries(values)) {
+    if (key === 'openaiProviderApiKey' && typeof value === 'string') {
+      providers.openai = { ...(providers.openai ?? {}), apiKey: value };
+      continue;
+    }
+    if (key === 'anthropicProviderApiKey' && typeof value === 'string') {
+      providers.anthropic = { ...(providers.anthropic ?? {}), apiKey: value };
+      continue;
+    }
+    if (key === 'defaultModel' && typeof value === 'string') {
+      const [provider, modelId] = value.includes('/') ? value.split('/', 2) : ['', value];
+      if (provider === 'openai' || provider === 'anthropic') settings.defaultProvider = provider;
+      settings.defaultModel = modelId;
+      continue;
+    }
+    if (key === 'extensionPaths') {
+      settings.extensions = value;
+      continue;
+    }
+    if (key.includes('.')) {
+      setNestedSetting(settings, key, value);
+      continue;
+    }
+    settings[key] = value;
+  }
+
+  if (Object.keys(settings).length > 0) {
+    fs.writeFileSync(
+      path.join(userConfigDir, 'settings.json'),
+      `${JSON.stringify(settings, null, 2)}\n`,
+      'utf-8',
+    );
+  }
+  if (Object.keys(providers).length > 0) {
+    fs.writeFileSync(
+      path.join(userConfigDir, 'models.json'),
+      `${JSON.stringify({ providers }, null, 2)}\n`,
+      'utf-8',
+    );
+  }
+
   return new ConfigManager({
     cwd,
-    agentDir: cwd,
-    getConfiguration: () =>
-      ({
-        get: <T>(key: string) => values[key] as T,
-        has: (key: string) => key in values,
-        inspect: () => undefined,
-        update: async () => undefined,
-      }) as never,
+    userConfigDir,
   });
+}
+
+function setNestedSetting(target: Record<string, unknown>, key: string, value: unknown): void {
+  const parts = key.split('.');
+  let current = target;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (!next || typeof next !== 'object' || Array.isArray(next)) {
+      current[part] = {};
+    }
+    current = current[part] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1]!] = value;
 }
 
 describe('AgentSession', () => {
@@ -101,7 +153,7 @@ describe('AgentSession', () => {
     const session = new AgentSession({
       session: backingSession,
       configManager: createConfigManagerWithValues(tempDir, {
-        anthropicApiKey: 'test-key',
+        anthropicProviderApiKey: 'test-key',
         defaultThinkingLevel: 'high',
       }),
       cwd: tempDir,
@@ -145,7 +197,7 @@ describe('AgentSession', () => {
     const session = new AgentSession({
       session: backingSession,
       configManager: createConfigManagerWithValues(tempDir, {
-        openaiApiKey: 'test-key',
+        openaiProviderApiKey: 'test-key',
         defaultThinkingLevel: 'medium',
       }),
       cwd: tempDir,
@@ -183,7 +235,7 @@ describe('AgentSession', () => {
     const session = new AgentSession({
       session: backingSession,
       configManager: createConfigManagerWithValues(tempDir, {
-        anthropicApiKey: 'test-key',
+        anthropicProviderApiKey: 'test-key',
         defaultThinkingLevel: 'low',
       }),
       cwd: tempDir,
@@ -217,7 +269,7 @@ describe('AgentSession', () => {
     const session = new AgentSession({
       session: backingSession,
       configManager: createConfigManagerWithValues(tempDir, {
-        anthropicApiKey: 'test-key',
+        anthropicProviderApiKey: 'test-key',
       }),
       cwd: tempDir,
       logger: { appendLine: vi.fn() },
@@ -252,7 +304,7 @@ describe('AgentSession', () => {
     const session = new AgentSession({
       session: backingSession,
       configManager: createConfigManagerWithValues(tempDir, {
-        anthropicApiKey: 'test-key',
+        anthropicProviderApiKey: 'test-key',
         defaultThinkingLevel: 'low',
       }),
       cwd: tempDir,
@@ -285,7 +337,7 @@ describe('AgentSession', () => {
     const session = new AgentSession({
       session: SessionManager.inMemory(tempDir),
       configManager: createConfigManagerWithValues(tempDir, {
-        anthropicApiKey: 'test-key',
+        anthropicProviderApiKey: 'test-key',
         defaultThinkingLevel: 'low',
       }),
       cwd: tempDir,
@@ -315,7 +367,7 @@ describe('AgentSession', () => {
     const fastModel = mockModel({ id: 'cycle-fast-model', reasoning: false });
     const thinkingModel = mockModel({ id: 'cycle-thinking-model', reasoning: true });
     const configManager = createConfigManagerWithValues(tempDir, {
-      anthropicApiKey: 'test-key',
+      anthropicProviderApiKey: 'test-key',
       defaultThinkingLevel: 'low',
     });
     vi.spyOn(configManager, 'getAvailableModels').mockReturnValue([
@@ -837,21 +889,11 @@ describe('AgentSession', () => {
     registerModel(model, { sourceId: STREAM_OPTIONS_TEST_SOURCE });
 
     const values: Record<string, unknown> = {
-      anthropicApiKey: 'test-key',
+      anthropicProviderApiKey: 'test-key',
       defaultModel: `${model.provider}/${model.id}`,
       'compaction.keepRecentTokens': 1,
     };
-    const configManager = new ConfigManager({
-      cwd: tempDir,
-      agentDir: tempDir,
-      getConfiguration: () =>
-        ({
-          get: <T>(key: string) => values[key] as T,
-          has: (key: string) => key in values,
-          inspect: () => undefined,
-          update: async () => undefined,
-        }) as never,
-    });
+    const configManager = createConfigManagerWithValues(tempDir, values);
     const backingSession = SessionManager.inMemory(tempDir);
     backingSession.appendMessage(userMessage('first prompt'));
     backingSession.appendMessage(assistantMessage('first response'));

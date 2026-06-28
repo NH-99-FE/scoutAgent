@@ -1,14 +1,21 @@
 // ============================================================
-// 配置管理器 — VS Code settings + 项目级 .scout/settings.json + 模型解析
+// 配置管理器 — SettingsManager + ModelsConfigManager + 模型解析门面
 // ============================================================
 
-import * as vscode from 'vscode';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { getSupportedThinkingLevels } from '@scout-agent/ai';
 import type { Model, Api, ThinkingBudgets, Transport } from '@scout-agent/ai';
-import { THINKING_LEVELS } from '@scout-agent/shared';
-import type { ScoutConfig, ThinkingLevel } from '@scout-agent/shared';
+import { SCOUT_MODEL_PROVIDERS, THINKING_LEVELS } from '@scout-agent/shared';
+import type {
+  ScoutConfig,
+  ScoutCustomModelsSaveSettings,
+  ScoutCustomModelsSettings,
+  ScoutModelProvider,
+  ScoutRuntimeSettingsPatch,
+  ScoutSettingsScope,
+  ThinkingLevel,
+} from '@scout-agent/shared';
+import { SettingsManager } from './settings-manager.ts';
+import { ModelsConfigManager } from './models-config-manager.ts';
 import { ScoutModelRegistry } from './core/model-registry.ts';
 import { ScoutModelResolver, type ModelResolution } from './core/model-resolver.ts';
 import type { CompactionSettings } from './core/compaction/index.ts';
@@ -21,182 +28,32 @@ import type {
 } from './core/config.ts';
 import type { QueueMode } from '@scout-agent/agent';
 
-const SECTION = 'scout-agent';
-const VALID_TRANSPORTS: Transport[] = ['sse', 'websocket', 'websocket-cached', 'auto'];
-const VALID_THINKING_LEVEL_SET: ReadonlySet<string> = new Set(THINKING_LEVELS);
-
-function isThinkingLevel(level: string | undefined): level is ThinkingLevel {
-  return typeof level === 'string' && VALID_THINKING_LEVEL_SET.has(level);
-}
+const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
+const SCOUT_MODEL_PROVIDER_SET = new Set<string>(SCOUT_MODEL_PROVIDERS);
 
 export interface ConfigManagerOptions {
   cwd: string;
-  agentDir: string;
-  getConfiguration?: (section: string) => vscode.WorkspaceConfiguration;
-}
-
-// ---------- 深度合并 ----------
-
-/**
- * 简单深度合并：对象递归合并，原生类型和数组后者覆盖。
- */
-function deepMerge<T extends object>(base: T, override: Partial<T>): T {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result: Record<string, any> = { ...base };
-  for (const key of Object.keys(override as Record<string, unknown>)) {
-    const baseVal = (base as Record<string, unknown>)[key];
-    const overVal = (override as Record<string, unknown>)[key];
-    if (
-      overVal !== undefined &&
-      overVal !== null &&
-      typeof overVal === 'object' &&
-      !Array.isArray(overVal) &&
-      typeof baseVal === 'object' &&
-      baseVal !== null &&
-      !Array.isArray(baseVal)
-    ) {
-      result[key] = deepMerge(baseVal as object, overVal as Partial<object>);
-    } else if (overVal !== undefined) {
-      result[key] = overVal;
-    }
-  }
-  return result as T;
-}
-
-// ---------- 项目级配置 ----------
-
-interface ProjectSettings {
-  [key: string]: unknown;
-}
-
-function loadJsonObject(path: string): Record<string, unknown> {
-  if (!existsSync(path)) return {};
-  try {
-    const content = readFileSync(path, 'utf-8');
-    const parsed = JSON.parse(content);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function loadProjectSettings(cwd: string): ProjectSettings {
-  return loadJsonObject(join(cwd, '.scout', 'settings.json'));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
-}
-
-function readNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
-}
-
-function readCost(value: unknown): Model<Api>['cost'] | undefined {
-  if (!isRecord(value)) return undefined;
-  const input = readNumber(value.input);
-  const output = readNumber(value.output);
-  const cacheRead = readNumber(value.cacheRead);
-  const cacheWrite = readNumber(value.cacheWrite);
-  if (
-    input === undefined ||
-    output === undefined ||
-    cacheRead === undefined ||
-    cacheWrite === undefined
-  ) {
-    return undefined;
-  }
-  return { input, output, cacheRead, cacheWrite };
-}
-
-function parseConfiguredModel(value: unknown): Model<Api> | undefined {
-  if (!isRecord(value)) return undefined;
-  const id = typeof value.id === 'string' ? value.id.trim() : '';
-  const name = typeof value.name === 'string' ? value.name.trim() : id;
-  const provider = typeof value.provider === 'string' ? value.provider.trim() : '';
-  if (!id || !name || (provider !== 'anthropic' && provider !== 'openai')) return undefined;
-
-  const api =
-    typeof value.api === 'string'
-      ? value.api
-      : provider === 'anthropic'
-        ? 'anthropic-messages'
-        : 'openai-completions';
-  if (provider === 'anthropic' && api !== 'anthropic-messages') return undefined;
-  if (provider === 'openai' && api !== 'openai-completions' && api !== 'openai-responses') {
-    return undefined;
-  }
-
-  const baseUrl =
-    typeof value.baseUrl === 'string' && value.baseUrl.trim()
-      ? value.baseUrl.trim()
-      : provider === 'anthropic'
-        ? 'https://api.anthropic.com'
-        : 'https://api.openai.com/v1';
-  const input: Array<'text' | 'image'> = isStringArray(value.input)
-    ? value.input.filter((item): item is 'text' | 'image' => item === 'text' || item === 'image')
-    : ['text'];
-  const cost = readCost(value.cost);
-  const contextWindow = readNumber(value.contextWindow);
-  const maxTokens = readNumber(value.maxTokens);
-  if (!cost || !contextWindow || !maxTokens || input.length === 0) return undefined;
-
-  const model: Model<Api> = {
-    id,
-    name,
-    api,
-    provider,
-    baseUrl,
-    reasoning: typeof value.reasoning === 'boolean' ? value.reasoning : false,
-    input,
-    cost,
-    contextWindow,
-    maxTokens,
-  };
-
-  if (isRecord(value.thinkingLevelMap)) {
-    model.thinkingLevelMap = value.thinkingLevelMap as Model<Api>['thinkingLevelMap'];
-  }
-  if (isRecord(value.headers)) {
-    model.headers = value.headers as Record<string, string>;
-  }
-  if (isRecord(value.compat)) {
-    model.compat = value.compat as Model<Api>['compat'];
-  }
-  return model;
-}
-
-function parseConfiguredModels(value: unknown): Model<Api>[] {
-  const rawModels = Array.isArray(value)
-    ? value
-    : isRecord(value) && Array.isArray(value.models)
-      ? value.models
-      : [];
-  return rawModels.flatMap((item) => {
-    const model = parseConfiguredModel(item);
-    return model ? [model] : [];
-  });
+  userConfigDir?: string;
 }
 
 // ---------- ConfigManager ----------
 
 export class ConfigManager implements ScoutCoreConfig {
   readonly cwd: string;
-  readonly agentDir: string;
-  private readonly _getConfiguration: (section: string) => vscode.WorkspaceConfiguration;
+  private readonly settingsManager: SettingsManager;
+  private readonly modelsConfigManager: ModelsConfigManager;
   private readonly modelRegistry: ScoutModelRegistry;
   private readonly modelResolver: ScoutModelResolver;
-  private projectSettings: ProjectSettings;
 
   constructor(options: ConfigManagerOptions) {
     this.cwd = options.cwd;
-    this.agentDir = options.agentDir;
-    this._getConfiguration = options.getConfiguration ?? vscode.workspace.getConfiguration;
-    this.projectSettings = loadProjectSettings(this.cwd);
+    this.settingsManager = new SettingsManager({
+      cwd: this.cwd,
+      userConfigDir: options.userConfigDir,
+    });
+    this.modelsConfigManager = new ModelsConfigManager({
+      userConfigDir: options.userConfigDir,
+    });
     this.modelRegistry = new ScoutModelRegistry({
       hasApiKey: (provider) => !!this.getApiKey(provider),
     });
@@ -205,143 +62,132 @@ export class ConfigManager implements ScoutCoreConfig {
   }
 
   reload(): void {
-    this.projectSettings = loadProjectSettings(this.cwd);
+    this.settingsManager.reload();
+    this.modelsConfigManager.reload();
     this.reloadCustomModels();
   }
 
-  // ---------- 配置读取（VS Code settings + 项目级合并） ----------
+  // ---------- 设置页协议数据 ----------
 
-  private config(): vscode.WorkspaceConfiguration {
-    return this._getConfiguration(SECTION);
+  getCustomModelsSettings(): ScoutCustomModelsSettings {
+    return this.modelsConfigManager.getSettings();
   }
 
-  /** 获取配置值，优先使用项目级设置，回退到 VS Code settings */
-  private getSetting<T>(key: string, vscodeDefault?: T): T | undefined {
-    // 项目级设置优先
-    if (key in this.projectSettings) {
-      return this.projectSettings[key] as T;
+  saveCustomModels(settings: ScoutCustomModelsSaveSettings): ScoutCustomModelsSettings {
+    const normalized = this.modelsConfigManager.save(settings);
+    this.reloadCustomModels();
+    return normalized;
+  }
+
+  getRuntimeSettings(): ReturnType<SettingsManager['getSnapshot']> {
+    return this.settingsManager.getSnapshot();
+  }
+
+  saveRuntimeSettings(
+    scope: ScoutSettingsScope,
+    patch: ScoutRuntimeSettingsPatch,
+  ): ReturnType<SettingsManager['getSnapshot']> {
+    const snapshot = this.settingsManager.save(scope, patch);
+    return snapshot;
+  }
+
+  setDefaultModel(provider: string, modelId: string, scope: ScoutSettingsScope = 'global'): void {
+    const model = this.modelRegistry.getModel(provider, modelId);
+    if (!model) {
+      throw new Error(`Model not found: ${provider}/${modelId}`);
     }
-    // 回退到 VS Code settings
-    return this.config().get<T>(key) ?? vscodeDefault;
-  }
-
-  /** 获取用户显式配置值，忽略 VS Code contribution default。 */
-  private getExplicitSetting<T>(key: string): T | undefined {
-    if (key in this.projectSettings) {
-      return this.projectSettings[key] as T;
+    if (!this.modelRegistry.hasConfiguredAuth(model)) {
+      throw new Error(`Model auth is not configured: ${provider}/${modelId}`);
     }
 
-    const config = this.config();
-    const inspected = config.inspect<T>(key);
-    if (!inspected) return config.get<T>(key);
+    if (!isScoutModelProvider(model.provider)) {
+      throw new Error(`Unsupported model provider: ${model.provider}`);
+    }
 
-    return inspected.workspaceFolderValue ?? inspected.workspaceValue ?? inspected.globalValue;
+    this.settingsManager.save(scope, {
+      operations: [
+        { op: 'set', path: 'defaultProvider', value: model.provider },
+        { op: 'set', path: 'defaultModel', value: modelId },
+      ],
+    });
   }
+
+  // ---------- Core 配置读取 ----------
 
   getApiKey(provider: string): string | undefined {
-    switch (provider) {
-      case 'anthropic':
-        return this.getSetting<string>('anthropicApiKey') || undefined;
-      case 'openai':
-        return this.getSetting<string>('openaiApiKey') || undefined;
-      default:
-        return undefined;
-    }
+    return this.modelsConfigManager.getApiKey(provider);
   }
 
   getShellPath(): string | undefined {
-    return this.getSetting<string>('shellPath') || undefined;
+    return this.settingsManager.getEffectiveSettings().shellPath;
   }
 
   getDefaultModel(): string | undefined {
-    return this.getSetting<string>('defaultModel') || undefined;
+    const settings = this.settingsManager.getEffectiveSettings();
+    if (settings.defaultProvider && settings.defaultModel) {
+      return `${settings.defaultProvider}/${settings.defaultModel}`;
+    }
+    return settings.defaultModel;
   }
 
   getDefaultThinkingLevel(): ThinkingLevel | undefined {
-    const level = this.getExplicitSetting<string>('defaultThinkingLevel');
-    if (!level) return undefined;
-    return isThinkingLevel(level) ? level : undefined;
+    return this.settingsManager.getEffectiveSettings().defaultThinkingLevel;
   }
 
   getCompactionSettings(): CompactionSettings {
-    const projectCompaction = this.projectSettings.compaction as
-      | Record<string, unknown>
-      | undefined;
-    const vscodeSettings: CompactionSettings = {
-      enabled: this.config().get<boolean>('compaction.enabled') ?? true,
-      reserveTokens: this.config().get<number>('compaction.reserveTokens') ?? 16384,
-      keepRecentTokens: this.config().get<number>('compaction.keepRecentTokens') ?? 20000,
+    const compaction = this.settingsManager.getEffectiveSettings().compaction;
+    return {
+      enabled: compaction?.enabled ?? true,
+      reserveTokens: compaction?.reserveTokens ?? 16384,
+      keepRecentTokens: compaction?.keepRecentTokens ?? 20000,
     };
-
-    if (projectCompaction) {
-      return deepMerge(vscodeSettings, projectCompaction as Partial<CompactionSettings>);
-    }
-
-    return vscodeSettings;
   }
 
   getBranchSummarySettings(): BranchSummarySettings {
-    const projectBranchSummary = this.projectSettings.branchSummary as
-      | Record<string, unknown>
-      | undefined;
-    const vscodeSettings: BranchSummarySettings = {
-      reserveTokens: this.config().get<number>('branchSummary.reserveTokens') ?? 16384,
-      skipPrompt: this.config().get<boolean>('branchSummary.skipPrompt') ?? false,
+    const branchSummary = this.settingsManager.getEffectiveSettings().branchSummary;
+    return {
+      reserveTokens: branchSummary?.reserveTokens ?? 16384,
+      skipPrompt: branchSummary?.skipPrompt ?? false,
     };
-
-    if (projectBranchSummary) {
-      return deepMerge(vscodeSettings, projectBranchSummary as Partial<BranchSummarySettings>);
-    }
-
-    return vscodeSettings;
   }
 
   getSteeringMode(): QueueMode {
-    return this.getSetting<QueueMode>('steeringMode') ?? 'one-at-a-time';
+    return this.settingsManager.getEffectiveSettings().steeringMode ?? 'one-at-a-time';
   }
 
   getFollowUpMode(): QueueMode {
-    return this.getSetting<QueueMode>('followUpMode') ?? 'one-at-a-time';
+    return this.settingsManager.getEffectiveSettings().followUpMode ?? 'one-at-a-time';
   }
 
   getRetrySettings(): RetrySettings {
+    const retry = this.settingsManager.getEffectiveSettings().retry;
     return {
-      enabled: this.getSetting<boolean>('retry.enabled', true) ?? true,
-      maxRetries: this.getSetting<number>('retry.maxRetries', 3) ?? 3,
-      baseDelayMs: this.getSetting<number>('retry.baseDelayMs', 2000) ?? 2000,
+      enabled: retry?.enabled ?? true,
+      maxRetries: retry?.maxRetries ?? 3,
+      baseDelayMs: retry?.baseDelayMs ?? 2000,
     };
   }
 
   getProviderRetrySettings(): ProviderRetrySettings {
-    const projectRetry = this.projectSettings.retry as Record<string, unknown> | undefined;
-    const projectProvider = projectRetry?.provider as Record<string, unknown> | undefined;
+    const provider = this.settingsManager.getEffectiveSettings().retry?.provider;
     return {
-      timeoutMs:
-        (projectProvider?.timeoutMs as number | undefined) ??
-        this.config().get<number>('retry.provider.timeoutMs'),
-      maxRetries:
-        (projectProvider?.maxRetries as number | undefined) ??
-        this.config().get<number>('retry.provider.maxRetries'),
-      maxRetryDelayMs:
-        (projectProvider?.maxRetryDelayMs as number | undefined) ??
-        this.config().get<number>('retry.provider.maxRetryDelayMs') ??
-        60000,
+      timeoutMs: provider?.timeoutMs,
+      maxRetries: provider?.maxRetries,
+      maxRetryDelayMs: provider?.maxRetryDelayMs ?? 60000,
     };
   }
 
   getTransport(): Transport {
-    const transport = this.getSetting<Transport>('transport', 'auto') ?? 'auto';
-    return VALID_TRANSPORTS.includes(transport) ? transport : 'auto';
+    return (this.settingsManager.getEffectiveSettings().transport ?? 'auto') as Transport;
   }
 
   getThinkingBudgets(): ThinkingBudgets | undefined {
-    const budgets = this.getSetting<ThinkingBudgets>('thinkingBudgets');
-    if (!budgets || typeof budgets !== 'object') return undefined;
-    return budgets;
+    const budgets = this.settingsManager.getEffectiveSettings().thinkingBudgets;
+    return budgets && typeof budgets === 'object' ? (budgets as ThinkingBudgets) : undefined;
   }
 
   getWebSocketConnectTimeoutMs(): number | undefined {
-    return this.getSetting<number>('websocketConnectTimeoutMs');
+    return this.settingsManager.getEffectiveSettings().websocketConnectTimeoutMs;
   }
 
   getStreamOptions(): ScoutStreamOptions {
@@ -357,24 +203,19 @@ export class ConfigManager implements ScoutCoreConfig {
   }
 
   getExtensionPaths(): string[] {
-    return this.getSetting<string[]>('extensionPaths') ?? [];
+    return this.settingsManager.getEffectiveSettings().extensions ?? [];
   }
 
   private reloadCustomModels(): void {
-    const projectModels = parseConfiguredModels(this.projectSettings.models);
-    const modelsFile = loadJsonObject(join(this.cwd, '.scout', 'models.json'));
-    const fileModels = parseConfiguredModels(modelsFile);
-    this.modelRegistry.setCustomModels([...projectModels, ...fileModels]);
+    this.modelRegistry.setCustomModels(this.modelsConfigManager.getConfiguredModels());
   }
 
   // ---------- 模型解析 ----------
 
-  /** 获取所有可用模型（已配置 API key 的） */
   getAvailableModels(): { id: string; name: string; provider: string; model: Model<Api> }[] {
     return this.modelResolver.getAvailableModels();
   }
 
-  /** 查找默认模型 */
   findDefaultModel(): Model<Api> | undefined {
     return this.resolveDefaultModel().model;
   }
@@ -383,17 +224,14 @@ export class ConfigManager implements ScoutCoreConfig {
     return this.modelResolver.resolveDefaultModel(this.getDefaultModel());
   }
 
-  /** 按 modelId 或 provider/modelId 查找模型，用于用户输入等宽松场景。 */
   findModel(modelId: string): Model<Api> | undefined {
     return this.modelResolver.findModel(modelId);
   }
 
-  /** 按 provider + modelId 精确查找模型，用于 session 恢复等持久化场景。 */
   findModelByProvider(provider: string, modelId: string): Model<Api> | undefined {
     return this.modelRegistry.getModel(provider, modelId);
   }
 
-  /** 获取 Webview 配置 */
   getScoutConfig(): ScoutConfig {
     const available = this.getAvailableModels();
     const defaultModel = this.findDefaultModel();
@@ -415,14 +253,12 @@ export class ConfigManager implements ScoutCoreConfig {
   hasConfiguredModelAuth(model: Model<Api>): boolean {
     return this.modelRegistry.hasConfiguredAuth(model);
   }
+}
 
-  // ---------- 配置变更监听 ----------
+function isThinkingLevel(level: string): level is ThinkingLevel {
+  return THINKING_LEVEL_SET.has(level);
+}
 
-  onDidChangeSettings(callback: () => void): vscode.Disposable {
-    return vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration(SECTION)) {
-        callback();
-      }
-    });
-  }
+function isScoutModelProvider(provider: string): provider is ScoutModelProvider {
+  return SCOUT_MODEL_PROVIDER_SET.has(provider);
 }

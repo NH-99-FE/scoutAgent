@@ -246,7 +246,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       if (!model) {
         this.emit({
           type: 'error',
-          message: 'No model available. Please configure an API key in VS Code settings.',
+          message:
+            'No model available. Configure a provider API key in Scout Settings > Model Management.',
         });
         return { cancelled: true };
       }

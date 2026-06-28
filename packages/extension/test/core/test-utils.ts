@@ -1,3 +1,5 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { AgentMessage } from '@scout-agent/agent';
 import type { AssistantMessage, Model, Usage } from '@scout-agent/ai';
 import type { Api } from '@scout-agent/ai';
@@ -56,15 +58,25 @@ export function mockModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
 }
 
 export function createConfigManager(cwd: string): ConfigManager {
+  const userConfigDir = path.join(cwd, '.test-scout-agent');
+  fs.mkdirSync(userConfigDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(userConfigDir, 'models.json'),
+    JSON.stringify(
+      {
+        providers: {
+          openai: { apiKey: 'test-key' },
+          anthropic: { apiKey: 'test-key' },
+        },
+      },
+      null,
+      2,
+    ),
+    'utf-8',
+  );
   return new ConfigManager({
     cwd,
-    agentDir: cwd,
-    getConfiguration: () => ({
-      get: () => undefined,
-      has: () => false,
-      inspect: () => undefined,
-      update: async () => undefined,
-    }),
+    userConfigDir,
   });
 }
 

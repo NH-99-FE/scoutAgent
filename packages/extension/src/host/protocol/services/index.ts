@@ -57,8 +57,29 @@ export function registerScoutProtocolServices(
     request_config: (_message, context) => {
       services.config.requestConfig(context.respond);
     },
+    request_custom_models: (_message, context) => {
+      services.config.requestCustomModels(context.respond);
+    },
+    request_runtime_settings: (_message, context) => {
+      services.config.requestRuntimeSettings(context.respond);
+    },
     select_model: async (message) => {
       await services.config.setModel(payload<'select_model'>(message));
+    },
+    set_default_model: async (message, context) => {
+      await services.config.setDefaultModel(payload<'set_default_model'>(message), context.respond);
+    },
+    save_custom_models: async (message, context) => {
+      await services.config.saveCustomModels(
+        payload<'save_custom_models'>(message),
+        context.respond,
+      );
+    },
+    save_runtime_settings: async (message, context) => {
+      await services.config.saveRuntimeSettings(
+        payload<'save_runtime_settings'>(message),
+        context.respond,
+      );
     },
     select_thinking: async (message) => {
       await services.config.setThinkingLevel(payload<'select_thinking'>(message));

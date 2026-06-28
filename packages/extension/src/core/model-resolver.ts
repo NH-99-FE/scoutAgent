@@ -3,9 +3,10 @@
 // ============================================================
 
 import type { Api, Model } from '@scout-agent/ai';
+import { THINKING_LEVELS } from '@scout-agent/shared';
 import type { AvailableModel, ScoutModelRegistry } from './model-registry.ts';
 
-const THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
 
 // ---------- 类型 ----------
 
@@ -67,7 +68,7 @@ export class ScoutModelResolver {
     const colonIndex = reference.lastIndexOf(':');
     if (colonIndex === -1) return undefined;
     const suffix = reference.slice(colonIndex + 1);
-    if (!THINKING_LEVELS.has(suffix)) return undefined;
+    if (!THINKING_LEVEL_SET.has(suffix)) return undefined;
     return this.findModelReference(reference.slice(0, colonIndex));
   }
 
