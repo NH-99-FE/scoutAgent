@@ -1,0 +1,4 @@
+interface:
+  display_name: "Scout Git Commit"
+  short_description: "Review, validate, and commit Scout changes"
+  default_prompt: "Use $scout-git-commit to review my changes, run the right checks, and create a compliant Scout commit."
