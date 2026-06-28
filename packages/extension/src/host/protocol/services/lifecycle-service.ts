@@ -53,7 +53,9 @@ export class LifecycleProtocolService implements LifecycleProtocolHost {
 
   async ready(surface: ScoutWebviewSurface, respond: ProtocolResponder): Promise<void> {
     this.logReady(surface);
-    await this.sessionManager.initialize();
+    if (surface !== 'settings') {
+      await this.sessionManager.initialize();
+    }
     const result: ScoutBootstrapResult = {
       type: 'bootstrap_result',
       surface,

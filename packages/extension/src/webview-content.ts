@@ -6,6 +6,10 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import {
+  EXTENSION_TO_WEBVIEW_MESSAGE_TYPES,
+  WEBVIEW_TO_EXTENSION_MESSAGE_TYPES,
+} from '@scout-agent/shared';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 
 const DEV_SERVER_URL = 'http://localhost:5173';
@@ -37,7 +41,6 @@ const THEME_VARIABLES = [
   '--vscode-charts-orange',
   '--vscode-charts-red',
 ];
-
 const STARTUP_BACKGROUND =
   'var(--vscode-sideBar-background, var(--vscode-editor-background, #252526))';
 
@@ -105,6 +108,8 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
       const vscode = acquireVsCodeApi();
       const devOrigin = ${JSON.stringify(devOrigin)};
       const devUrl = ${JSON.stringify(url)};
+      const webviewToExtensionTypes = new Set(${JSON.stringify(WEBVIEW_TO_EXTENSION_MESSAGE_TYPES)});
+      const extensionToWebviewTypes = new Set(${JSON.stringify(EXTENSION_TO_WEBVIEW_MESSAGE_TYPES)});
       const getTheme = () => {
         const className = [
           document.documentElement.className,
@@ -136,7 +141,10 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
           devOrigin,
         );
       };
-      frame.src = getFrameUrl();
+      const isMessageObject = (value) =>
+        value !== null && typeof value === 'object' && typeof value.type === 'string';
+      const isFrameMessage = (event) =>
+        event.source === frame.contentWindow && event.origin === devOrigin;
       frame.addEventListener('load', postTheme);
       new MutationObserver(postTheme).observe(document.documentElement, {
         attributes: true,
@@ -147,18 +155,23 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
         attributeFilter: ['class'],
       });
       window.addEventListener('message', (event) => {
-        if (event.source === frame.contentWindow) {
-          if (event.origin !== devOrigin) return;
-          if (event.data?.type === 'scout_theme_ready') {
+        if (!isMessageObject(event.data)) return;
+        if (isFrameMessage(event)) {
+          if (event.data.type === 'scout_theme_ready') {
             frame.dataset.scoutReady = 'true';
             postTheme();
             return;
           }
-          vscode.postMessage(event.data);
+          if (webviewToExtensionTypes.has(event.data.type)) {
+            vscode.postMessage(event.data);
+          }
           return;
         }
-        frame.contentWindow?.postMessage(event.data, devOrigin);
+        if (extensionToWebviewTypes.has(event.data.type)) {
+          frame.contentWindow?.postMessage(event.data, devOrigin);
+        }
       });
+      frame.src = getFrameUrl();
     })();
   </script>
 </body>

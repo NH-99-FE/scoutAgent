@@ -99,4 +99,39 @@ describe('LifecycleProtocolService', () => {
       }),
     );
   });
+
+  it('responds to settings ready without initializing the chat runtime', async () => {
+    const sessionManager = makeSessionManager();
+    const getSessions = vi.fn(async () => []);
+    const getRecentTasks = vi.fn(async () => []);
+    const getTreeResult = vi.fn(async () => ({
+      type: 'tree_result' as const,
+      tree: [],
+      leafId: null,
+    }));
+    const respond = vi.fn();
+    const service = new LifecycleProtocolService({
+      sessionManager,
+      getConfig: makeConfig,
+      getState: vi.fn(async () => makeState()),
+      getCommands: () => [],
+      getSessions,
+      getRecentTasks,
+      getTreeResult,
+      logReady: vi.fn(),
+    });
+
+    await service.ready('settings', respond);
+
+    expect(sessionManager.initialize).not.toHaveBeenCalled();
+    expect(getSessions).not.toHaveBeenCalled();
+    expect(getRecentTasks).not.toHaveBeenCalled();
+    expect(getTreeResult).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'bootstrap_result',
+        surface: 'settings',
+      }),
+    );
+  });
 });

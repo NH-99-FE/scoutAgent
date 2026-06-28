@@ -4,10 +4,27 @@ import { ScoutWebviewPanelManager } from '../../src/webview-panel-manager.ts';
 import type { ScoutController } from '../../src/scout-controller.ts';
 
 function makeWebview() {
+  let html = '';
+  let listener: ((message: unknown) => void) | undefined;
+  let messageOnHtmlSet: unknown;
   return {
     options: {},
-    html: '',
-    onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
+    get html() {
+      return html;
+    },
+    set html(value: string) {
+      html = value;
+      if (messageOnHtmlSet !== undefined) {
+        listener?.(messageOnHtmlSet);
+      }
+    },
+    emitMessageOnHtmlSet(message: unknown) {
+      messageOnHtmlSet = message;
+    },
+    onDidReceiveMessage: vi.fn((callback: (message: unknown) => void) => {
+      listener = callback;
+      return { dispose: vi.fn() };
+    }),
     postMessage: vi.fn(),
     asWebviewUri: vi.fn((uri) => uri),
   };
@@ -61,6 +78,38 @@ describe('ScoutWebviewPanelManager', () => {
     expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1);
     expect(panel.reveal).toHaveBeenCalledWith(vscode.ViewColumn.Active);
     expect(controller.bindWebview).toHaveBeenCalledWith(panel.webview, 'tree');
+  });
+
+  it('binds a panel webview before assigning html so startup requests are not dropped', async () => {
+    const panel = makePanel();
+    panel.webview.emitMessageOnHtmlSet({
+      type: 'protocol_request',
+      requestId: 'settings-startup',
+      service: 'config',
+      method: 'request_custom_models',
+      payload: { type: 'request_custom_models' },
+    });
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never);
+    const receivedMessages: unknown[] = [];
+    const controller = {
+      bindWebview: vi.fn((webview: ReturnType<typeof makeWebview>) => {
+        webview.onDidReceiveMessage((message) => receivedMessages.push(message));
+        return { dispose: vi.fn() };
+      }),
+    } as unknown as ScoutController;
+    const manager = new ScoutWebviewPanelManager(vscode.Uri.file('/ext'), false, controller);
+
+    await manager.openSettingsPanel();
+
+    expect(receivedMessages).toEqual([
+      {
+        type: 'protocol_request',
+        requestId: 'settings-startup',
+        service: 'config',
+        method: 'request_custom_models',
+        payload: { type: 'request_custom_models' },
+      },
+    ]);
   });
 
   it('reveals a pending tree panel instead of creating a duplicate while html is loading', async () => {

@@ -142,9 +142,9 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
       if (pendingState.disposed || this.getState(spec.surface) !== pendingState) {
         return;
       }
-      panel.webview.html = html;
       const webviewBinding = this.controller.bindWebview(panel.webview, spec.surface);
       pendingState.webviewBinding = webviewBinding;
+      panel.webview.html = html;
       this.setState(spec.surface, {
         status: 'ready',
         binding: { panel, webviewBinding, disposeListener },

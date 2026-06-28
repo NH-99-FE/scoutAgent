@@ -30,16 +30,17 @@ export class ScoutSidebarProvider implements vscode.WebviewViewProvider {
     this._view = webviewView;
 
     configureScoutWebview(this._extensionUri, webviewView.webview);
-    webviewView.webview.html = await getScoutWebviewHtml(
+    const html = await getScoutWebviewHtml(
       this._extensionUri,
       webviewView.webview,
       this._isDev,
       'chat',
     );
 
-    // 将 chat surface 绑定到 controller，并在 view 重建时释放旧绑定。
+    // 将 chat surface 绑定到 controller 后再写入 HTML，避免 webview 启动脚本的首批请求丢失。
     this._binding?.dispose();
     this._binding = this._controller.bindWebview(webviewView.webview, 'chat');
+    webviewView.webview.html = html;
     webviewView.onDidDispose(() => {
       this._binding?.dispose();
       this._binding = undefined;
