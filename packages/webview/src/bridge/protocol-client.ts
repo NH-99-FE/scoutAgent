@@ -3,9 +3,12 @@
 // ============================================================
 
 import type {
+  ScoutCustomModelsSaveSettings,
   ScoutForkCandidate,
   ScoutProtocolResponsePayload,
   ScoutImageContent,
+  ScoutRuntimeSettingsPatch,
+  ScoutSettingsScope,
   ScoutTaskHistoryPurpose,
   ScoutTaskItem,
   ThinkingLevel,
@@ -41,6 +44,26 @@ interface NavigateTreeOptions {
 }
 
 type LabelResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'label_result' }>;
+type SetDefaultModelResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'set_default_model_result' }
+>;
+type CustomModelsResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'custom_models_result' }
+>;
+type SaveCustomModelsResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'save_custom_models_result' }
+>;
+type RuntimeSettingsResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'runtime_settings_result' }
+>;
+type SaveRuntimeSettingsResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'save_runtime_settings_result' }
+>;
 
 interface PromoteFollowUpOptions extends ContinueSessionOptions {
   resume?: boolean;
@@ -174,6 +197,36 @@ export const protocolClient = {
   ready: () => sendRouted({ type: 'ready' }, projectProtocolResponsePayload),
   requestState: () => sendRouted({ type: 'request_state' }, projectProtocolResponsePayload),
   requestConfig: () => sendRouted({ type: 'request_config' }, projectProtocolResponsePayload),
+  requestCustomModels: (
+    onResult?: (payload: CustomModelsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'request_custom_models' },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'custom_models_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  requestRuntimeSettings: (
+    onResult?: (payload: RuntimeSettingsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'request_runtime_settings' },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'runtime_settings_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
   requestTree: () => sendRouted({ type: 'request_tree' }, projectProtocolResponsePayload),
   navigateTree: ({ targetId, summarize, customInstructions }: NavigateTreeOptions) => {
     const payload: WebviewRequestPayload = { type: 'navigate_tree', targetId, summarize };
@@ -278,6 +331,49 @@ export const protocolClient = {
   clearConversation: () => send({ type: 'clear_conversation' }),
   selectModel: (provider: string, modelId: string) =>
     send({ type: 'select_model', provider, modelId }),
+  setDefaultModel: (
+    provider: string,
+    modelId: string,
+    scope: ScoutSettingsScope,
+    onResult?: (payload: SetDefaultModelResultPayload) => void,
+  ) =>
+    sendRouted({ type: 'set_default_model', provider, modelId, scope }, (payload) => {
+      projectProtocolResponsePayload(payload);
+      if (payload.type === 'set_default_model_result') onResult?.(payload);
+    }),
+  saveCustomModels: (
+    settings: ScoutCustomModelsSaveSettings,
+    onResult?: (payload: SaveCustomModelsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'save_custom_models', settings },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'save_custom_models_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  saveRuntimeSettings: (
+    scope: ScoutSettingsScope,
+    patch: ScoutRuntimeSettingsPatch,
+    onResult?: (payload: SaveRuntimeSettingsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'save_runtime_settings', scope, patch },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'save_runtime_settings_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
   selectThinking: (level: ThinkingLevel) => send({ type: 'select_thinking', level }),
   requestCommands: () => sendRouted({ type: 'request_commands' }, projectProtocolResponsePayload),
   requestFileMentions: (query: string, limit?: number) =>

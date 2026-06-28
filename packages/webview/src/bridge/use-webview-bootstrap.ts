@@ -2,7 +2,7 @@
 // Webview Bootstrap — 注册协议路由并发送启动请求
 // ============================================================
 
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { protocolClient } from './protocol-client';
 import { getWebviewSurface, type WebviewSurface } from './surface';
 import { startExtensionMessageRouter } from './extension-message-router';
@@ -12,7 +12,7 @@ import { useUiStore } from '@/store/ui-store';
 export function useWebviewBootstrap(): WebviewSurface {
   const surface = getWebviewSurface();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     useUiStore.getState().actions.setSurface(surface);
     const stopThemeSync = startWebviewThemeSync();
     const stopRouter = startExtensionMessageRouter();

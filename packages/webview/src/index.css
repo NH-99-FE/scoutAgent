@@ -497,6 +497,19 @@ body,
   animation: scout-process-collapse-up 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
+.scout-settings-collapse-content {
+  overflow: hidden;
+  transform-origin: top;
+}
+
+.scout-settings-collapse-content[data-state='open'] {
+  animation: scout-settings-collapse-down 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scout-settings-collapse-content[data-state='closed'] {
+  animation: scout-settings-collapse-up 140ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
 .scout-fold-anchor-highlight {
   animation: scout-fold-anchor-highlight 1.2s ease-out both;
 }
@@ -549,6 +562,32 @@ body,
   }
 }
 
+@keyframes scout-settings-collapse-down {
+  from {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scout-settings-collapse-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
 @keyframes scout-fold-anchor-highlight {
   0% {
     background-color: color-mix(in srgb, var(--primary) 16%, transparent);
@@ -580,7 +619,9 @@ body,
   .task-history-panel-shell[data-state='open'],
   .task-history-panel-shell[data-state='closed'],
   .scout-process-collapse-content[data-state='open'],
-  .scout-process-collapse-content[data-state='closed'] {
+  .scout-process-collapse-content[data-state='closed'],
+  .scout-settings-collapse-content[data-state='open'],
+  .scout-settings-collapse-content[data-state='closed'] {
     animation: none;
   }
   .scout-fold-anchor-highlight {
