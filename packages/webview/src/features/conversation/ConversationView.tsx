@@ -3,7 +3,7 @@
 // ============================================================
 
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import {
   Archive,
   ArrowDown,
@@ -60,6 +60,8 @@ interface ConversationViewProps {
   className?: string;
   forceScrollToBottomKey?: unknown;
   showScrollToBottomButton?: boolean;
+  tailContent?: ReactNode;
+  tailContentKey?: unknown;
 }
 
 const EMPTY_TOOL_PREVIEWS: Record<string, ToolCallPreviewState> = {};
@@ -74,6 +76,8 @@ export function ConversationView({
   className,
   forceScrollToBottomKey,
   showScrollToBottomButton = false,
+  tailContent,
+  tailContentKey,
 }: ConversationViewProps) {
   const projector = useMemo(() => createConversationRowsProjector(), []);
   const rows = useMemo(() => {
@@ -101,6 +105,7 @@ export function ConversationView({
       runtimeStatusKey,
       scrollToBottomOverride: virtualRows.scrollToBottomOverride,
       showScrollToBottomButton,
+      tailContentKey,
       viewportRef: scrollContainerRef,
     });
 
@@ -122,12 +127,14 @@ export function ConversationView({
             expansionScope={expansionScope}
             rowVirtualizer={virtualRows.rowVirtualizer}
             rows={rows}
+            tailContent={tailContent}
           />
         ) : (
           <StaticConversationRows
             busyState={busyState}
             expansionScope={expansionScope}
             rows={rows}
+            tailContent={tailContent}
           />
         )}
       </ScrollArea>
@@ -142,10 +149,12 @@ function StaticConversationRows({
   busyState,
   expansionScope,
   rows,
+  tailContent,
 }: {
   busyState: ScoutBusyState;
   expansionScope: string;
   rows: ConversationRow[];
+  tailContent?: ReactNode;
 }) {
   return (
     <div
@@ -155,6 +164,7 @@ function StaticConversationRows({
       {rows.map((row) => (
         <ConversationRowItem expansionScope={expansionScope} key={row.key} row={row} />
       ))}
+      {tailContent}
       <RuntimeInlineStatus busyState={busyState} />
       <div aria-hidden="true" className="scout-conversation-bottom-anchor h-px shrink-0" />
     </div>
@@ -166,11 +176,13 @@ function VirtualConversationRows({
   expansionScope,
   rows,
   rowVirtualizer,
+  tailContent,
 }: {
   busyState: ScoutBusyState;
   expansionScope: string;
   rows: ConversationRow[];
   rowVirtualizer: ConversationRowVirtualizer;
+  tailContent?: ReactNode;
 }) {
   return (
     <div
@@ -199,6 +211,7 @@ function VirtualConversationRows({
           );
         })}
       </div>
+      {tailContent}
       <RuntimeInlineStatus busyState={busyState} />
       <div aria-hidden="true" className="scout-conversation-bottom-anchor h-px shrink-0" />
     </div>

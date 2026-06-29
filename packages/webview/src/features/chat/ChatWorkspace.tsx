@@ -40,13 +40,14 @@ import {
   useSessionId,
   useSessionName,
 } from '@/store/session-store';
-import { useUiActions } from '@/store/ui-store';
+import { useExtensionUIRequests, useUiActions } from '@/store/ui-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
 import { ConversationView } from '@/features/conversation/ConversationView';
 import { applyForkOriginNotice } from '@/features/conversation/conversation-notices';
 import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
 import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
 import { useTaskHistoryPanel } from '@/features/tasks/use-task-history-panel';
+import { ExtensionUIRequestsPanel } from './ExtensionUIRequestsPanel';
 
 interface ChatWorkspaceProps {
   onBack: () => void;
@@ -62,6 +63,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   const toolExecutionsById = useToolExecutionsById();
   const toolPreviewsById = useToolPreviewsById();
   const busyState = useVisualBusyState();
+  const extensionUIRequests = useExtensionUIRequests();
   const sessionFile = useSessionFile();
   const sessionId = useSessionId();
   const sessionName = useSessionName();
@@ -91,6 +93,10 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         items: conversationItems,
       }),
     [conversationItems, forkPointEntryId, parentSessionPath],
+  );
+  const extensionUIRequestsKey = useMemo(
+    () => extensionUIRequests.map((request) => request.id).join(':'),
+    [extensionUIRequests],
   );
   const handleOpenTask = (task: ScoutTaskItem) => {
     if (task.isCurrent) {
@@ -168,6 +174,8 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         isStreaming={isStreaming}
         items={conversationViewItems}
         showScrollToBottomButton
+        tailContent={<ExtensionUIRequestsPanel requests={extensionUIRequests} />}
+        tailContentKey={extensionUIRequestsKey}
         toolExecutionsById={toolExecutionsById}
         toolPreviewsById={toolPreviewsById}
       />

@@ -102,12 +102,28 @@ describe('App bootstrap', () => {
         type: 'bootstrap_result',
         surface: 'chat',
         config: makeConfig(),
-        state: makeState(),
+        state: {
+          ...makeState(),
+          extensionUIRequests: [
+            {
+              type: 'extension_ui_request',
+              id: 'ui-1',
+              method: 'select',
+              title: '危险命令',
+              options: ['Yes', 'No'],
+              variant: 'danger',
+              body: { kind: 'code', text: '/bin/rm -rf tmp' },
+            },
+          ],
+        },
         commands: [],
       });
     });
 
     expect(screen.getByLabelText('随心输入')).toBeInTheDocument();
+    expect(useUiStore.getState().extensionUIRequests).toEqual([
+      expect.objectContaining({ id: 'ui-1', method: 'select', variant: 'danger' }),
+    ]);
   });
 
   it('shows the surface skeleton before non-chat surface state arrives', () => {

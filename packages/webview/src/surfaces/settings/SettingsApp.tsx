@@ -4,24 +4,36 @@
 
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { Check, PackagePlus, PanelLeft, RefreshCw, Save, SlidersHorizontal } from 'lucide-react';
+import {
+  Check,
+  PackagePlus,
+  PanelLeft,
+  Plug,
+  RefreshCw,
+  Save,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { ExtensionsTab } from './ExtensionsTab';
 import { ModelManagementTab } from './ModelManagementTab';
 import { RuntimeSettingsTab } from './RuntimeSettingsTab';
 import { useCustomModelsController } from './custom-models-state';
+import { useExtensionSettingsController } from './extension-settings-state';
 import { useRuntimeSettingsController } from './runtime-settings-state';
 
-type SettingsTab = 'models' | 'runtime';
+type SettingsTab = 'models' | 'runtime' | 'extensions';
 
 export function SettingsApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('models');
   const customModels = useCustomModelsController();
   const runtimeSettings = useRuntimeSettingsController();
-  const activeController = activeTab === 'models' ? customModels : runtimeSettings;
-  const title = activeTab === 'models' ? '模型管理' : '运行设置';
+  const extensions = useExtensionSettingsController();
+  const activeController =
+    activeTab === 'models' ? customModels : activeTab === 'runtime' ? runtimeSettings : extensions;
+  const title = activeTab === 'models' ? '模型管理' : activeTab === 'runtime' ? '运行设置' : '扩展';
 
   return (
     <div
@@ -70,8 +82,10 @@ export function SettingsApp() {
         <ScrollArea className="min-h-0 flex-1">
           {activeTab === 'models' ? (
             <ModelManagementTab controller={customModels} />
-          ) : (
+          ) : activeTab === 'runtime' ? (
             <RuntimeSettingsTab controller={runtimeSettings} />
+          ) : (
+            <ExtensionsTab controller={extensions} />
           )}
         </ScrollArea>
       </main>
@@ -116,6 +130,13 @@ function SettingsSidebar({
           icon={<SlidersHorizontal className="size-4 shrink-0" />}
           label="运行设置"
           onClick={() => onSelectTab('runtime')}
+        />
+        <SidebarButton
+          active={activeTab === 'extensions'}
+          collapsed={collapsed}
+          icon={<Plug className="size-4 shrink-0" />}
+          label="扩展"
+          onClick={() => onSelectTab('extensions')}
         />
       </nav>
     </aside>

@@ -3,7 +3,11 @@
 // ============================================================
 
 import { create } from 'zustand';
-import type { ScoutDiagnostic, ScoutNotificationMessage } from '@scout-agent/shared';
+import type {
+  ScoutDiagnostic,
+  ScoutExtensionUIRequest,
+  ScoutNotificationMessage,
+} from '@scout-agent/shared';
 import type { WebviewSurface } from '@/bridge/surface';
 
 export type ChatView = 'auto' | 'home' | 'detail';
@@ -20,6 +24,9 @@ interface UiActions {
   setChatView: (view: ChatView) => void;
   setSurface: (surface: WebviewSurface) => void;
   setNotification: (notification: ScoutNotificationMessage | undefined) => void;
+  setExtensionUIRequests: (requests: ScoutExtensionUIRequest[]) => void;
+  addExtensionUIRequest: (request: ScoutExtensionUIRequest) => void;
+  removeExtensionUIRequest: (id: string) => void;
   setDiagnostics: (diagnostics: ScoutDiagnostic[]) => void;
   reset: () => void;
 }
@@ -32,6 +39,7 @@ interface UiStore {
   openingTaskSessionPath: string | undefined;
   surface: WebviewSurface;
   notification: ScoutNotificationMessage | undefined;
+  extensionUIRequests: ScoutExtensionUIRequest[];
   diagnostics: ScoutDiagnostic[];
   actions: UiActions;
 }
@@ -44,6 +52,7 @@ const initialState = {
   openingTaskSessionPath: undefined as string | undefined,
   surface: 'chat' as WebviewSurface,
   notification: undefined as ScoutNotificationMessage | undefined,
+  extensionUIRequests: [] as ScoutExtensionUIRequest[],
   diagnostics: [] as ScoutDiagnostic[],
 };
 
@@ -94,6 +103,18 @@ export const useUiStore = create<UiStore>((set) => ({
     setChatView: (view) => set({ chatView: view }),
     setSurface: (surface) => set({ surface }),
     setNotification: (notification) => set({ notification }),
+    setExtensionUIRequests: (requests) => set({ extensionUIRequests: requests }),
+    addExtensionUIRequest: (request) =>
+      set((state) => ({
+        extensionUIRequests: [
+          ...state.extensionUIRequests.filter((existing) => existing.id !== request.id),
+          request,
+        ],
+      })),
+    removeExtensionUIRequest: (id) =>
+      set((state) => ({
+        extensionUIRequests: state.extensionUIRequests.filter((request) => request.id !== id),
+      })),
     setDiagnostics: (diagnostics) => set({ diagnostics }),
     reset: () => set(initialState),
   },
@@ -106,5 +127,6 @@ export const useNewSessionPending = () => useUiStore((state) => state.newSession
 export const useOpeningTaskSessionPath = () => useUiStore((state) => state.openingTaskSessionPath);
 export const useSurface = () => useUiStore((state) => state.surface);
 export const useNotification = () => useUiStore((state) => state.notification);
+export const useExtensionUIRequests = () => useUiStore((state) => state.extensionUIRequests);
 export const useDiagnostics = () => useUiStore((state) => state.diagnostics);
 export const useUiActions = () => useUiStore((state) => state.actions);

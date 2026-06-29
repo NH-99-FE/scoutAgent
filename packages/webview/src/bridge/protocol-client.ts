@@ -4,6 +4,8 @@
 
 import type {
   ScoutCustomModelsSaveSettings,
+  ScoutExtensionScope,
+  ScoutExtensionTemplateId,
   ScoutForkCandidate,
   ScoutProtocolResponsePayload,
   ScoutImageContent,
@@ -61,9 +63,18 @@ type RuntimeSettingsResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'runtime_settings_result' }
 >;
+type ExtensionsResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'extensions_result' }>;
 type SaveRuntimeSettingsResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'save_runtime_settings_result' }
+>;
+type CreateExtensionFromTemplateResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'create_extension_from_template_result' }
+>;
+type OpenExtensionFileResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'open_extension_file_result' }
 >;
 
 interface PromoteFollowUpOptions extends ContinueSessionOptions {
@@ -194,6 +205,12 @@ function openSessionByPath(payload: OpenSessionPayload, failureType: OpenSession
   pendingOpenTaskRequestId = requestId;
 }
 
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type ExtensionUIResponsePayload = DistributiveOmit<
+  Extract<WebviewRequestPayload, { type: 'extension_ui_response' }>,
+  'type'
+>;
+
 export const protocolClient = {
   ready: () =>
     sendRouted({ type: 'ready' }, projectProtocolResponsePayload, (message) => {
@@ -225,6 +242,21 @@ export const protocolClient = {
       (payload) => {
         projectProtocolResponsePayload(payload);
         if (payload.type === 'runtime_settings_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  requestExtensions: (
+    onResult?: (payload: ExtensionsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'request_extensions' },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'extensions_result') onResult?.(payload);
       },
       (message) => {
         reportProtocolError(message);
@@ -378,8 +410,43 @@ export const protocolClient = {
         onError?.(message);
       },
     ),
+  createExtensionFromTemplate: (
+    templateId: ScoutExtensionTemplateId,
+    scope: Exclude<ScoutExtensionScope, 'configured'>,
+    onResult?: (payload: CreateExtensionFromTemplateResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'create_extension_from_template', templateId, scope },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'create_extension_from_template_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  openExtensionFile: (
+    path: string,
+    onResult?: (payload: OpenExtensionFileResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'open_extension_file', path },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'open_extension_file_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
   selectThinking: (level: ThinkingLevel) => send({ type: 'select_thinking', level }),
   requestCommands: () => sendRouted({ type: 'request_commands' }, projectProtocolResponsePayload),
+  extensionUIResponse: (payload: ExtensionUIResponsePayload) =>
+    send({ type: 'extension_ui_response', ...payload }),
   requestFileMentions: (query: string, limit?: number) =>
     sendRouted({ type: 'request_file_mentions', query, limit }, projectProtocolResponsePayload),
 };

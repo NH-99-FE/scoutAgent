@@ -11,6 +11,7 @@ export function SettingsSurfaceSkeleton() {
         <SkeletonBlock className="size-8 rounded-full" />
         <SkeletonBlock className="mt-3 h-9 w-full rounded-full" />
         <SkeletonBlock className="h-9 w-full rounded-full" />
+        <SkeletonBlock className="h-9 w-full rounded-full" />
       </aside>
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">

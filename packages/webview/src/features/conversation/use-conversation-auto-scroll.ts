@@ -23,6 +23,7 @@ interface UseConversationAutoScrollOptions {
   runtimeStatusKey: string;
   scrollToBottomOverride?: () => void;
   showScrollToBottomButton: boolean;
+  tailContentKey?: unknown;
   viewportRef?: RefObject<HTMLDivElement | null>;
 }
 
@@ -49,6 +50,7 @@ export function useConversationAutoScroll({
   runtimeStatusKey,
   scrollToBottomOverride,
   showScrollToBottomButton,
+  tailContentKey,
   viewportRef,
 }: UseConversationAutoScrollOptions) {
   const viewportElementRef = useRef<HTMLDivElement | null>(null);
@@ -213,6 +215,7 @@ export function useConversationAutoScroll({
     contentLayoutKey,
     runtimeStatusKey,
     schedulePinnedScrollToBottom,
+    tailContentKey,
     updateScrollState,
     writeScrollToBottom,
   ]);

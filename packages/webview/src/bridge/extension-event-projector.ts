@@ -38,6 +38,7 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
       useTreeStore.getState().actions.applyState(message.state);
       useUiStore.getState().actions.resolveOpenTask(message.state.sessionFile);
       useUiStore.getState().actions.setDiagnostics(message.state.diagnostics ?? []);
+      useUiStore.getState().actions.setExtensionUIRequests(message.state.extensionUIRequests ?? []);
       break;
     case 'queue_update':
       useConversationStore.getState().actions.applyQueueState(message.queueState);
@@ -62,6 +63,12 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
       break;
     case 'notification':
       useUiStore.getState().actions.setNotification(message);
+      break;
+    case 'extension_ui_request':
+      useUiStore.getState().actions.addExtensionUIRequest(message);
+      break;
+    case 'extension_ui_request_closed':
+      useUiStore.getState().actions.removeExtensionUIRequest(message.id);
       break;
   }
 }
@@ -127,6 +134,8 @@ export const EXTENSION_EVENT_TYPES = new Set<string>([
   'commands_update',
   'context_usage_update',
   'notification',
+  'extension_ui_request',
+  'extension_ui_request_closed',
   'auto_retry_start',
   'auto_retry_end',
   'compaction_start',

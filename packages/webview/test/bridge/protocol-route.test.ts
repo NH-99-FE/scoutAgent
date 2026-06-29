@@ -27,6 +27,10 @@ const ROUTE_CASES = [
     { service: 'config', method: 'request_runtime_settings' },
   ),
   protocolCase(
+    { type: 'request_extensions' },
+    { service: 'extensions', method: 'request_extensions' },
+  ),
+  protocolCase(
     { type: 'request_context_usage' },
     { service: 'state', method: 'request_context_usage' },
   ),
@@ -113,6 +117,14 @@ const ROUTE_CASES = [
     { service: 'session', method: 'clear_conversation' },
   ),
   protocolCase({ type: 'reload_resources' }, { service: 'config', method: 'reload_resources' }),
+  protocolCase(
+    { type: 'create_extension_from_template', templateId: 'permission-gate', scope: 'project' },
+    { service: 'extensions', method: 'create_extension_from_template' },
+  ),
+  protocolCase(
+    { type: 'open_extension_file', path: '/workspace/.scout/extensions/permission-gate.ts' },
+    { service: 'extensions', method: 'open_extension_file' },
+  ),
   protocolCase({ type: 'open_settings_panel' }, { service: 'ui', method: 'open_settings_panel' }),
   protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),
   protocolCase(
@@ -138,6 +150,10 @@ const ROUTE_CASES = [
   ),
   protocolCase({ type: 'continue_session' }, { service: 'session', method: 'continue_session' }),
   protocolCase({ type: 'request_commands' }, { service: 'ui', method: 'request_commands' }),
+  protocolCase(
+    { type: 'extension_ui_response', id: 'approval-1', action: 'confirm' },
+    { service: 'ui', method: 'extension_ui_response' },
+  ),
   protocolCase(
     { type: 'request_file_mentions', query: 'src', limit: 10 },
     { service: 'mention', method: 'request_file_mentions' },

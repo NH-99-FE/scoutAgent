@@ -28,7 +28,6 @@ import {
 } from '@/store/runtime-overlay-store';
 import { useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
-import { ApprovalModeMenu } from './ApprovalModeMenu';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
 import { FollowUpQueuePanel } from './FollowUpQueuePanel';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
@@ -517,8 +516,6 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
               >
                 <Plus />
               </IconButton>
-
-              <ApprovalModeMenu />
             </div>
 
             <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">

@@ -44,6 +44,7 @@ export function projectProtocolResponsePayload(
       break;
     case 'custom_models_result':
     case 'runtime_settings_result':
+    case 'extensions_result':
       break;
     case 'commands_result':
       useConfigStore.getState().actions.setCommands(payload.commands);
@@ -100,6 +101,7 @@ function applyStateSnapshotToStores(state: ScoutWebviewState): void {
   useTreeStore.getState().actions.applyState(state);
   useUiStore.getState().actions.resolveOpenTask(state.sessionFile);
   useUiStore.getState().actions.setDiagnostics(state.diagnostics ?? []);
+  useUiStore.getState().actions.setExtensionUIRequests(state.extensionUIRequests ?? []);
 }
 
 function projectCommandResult(message: ScoutCommandResult): void {
