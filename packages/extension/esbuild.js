@@ -45,6 +45,7 @@ const copyWebviewPlugin = {
         return;
       }
 
+      fs.rmSync(dest, { recursive: true, force: true });
       fs.cpSync(src, dest, { recursive: true });
       process.stdout.write('[copy-webview] copied webview dist -> dist/webview\n');
     });

@@ -14,7 +14,7 @@ shared（纯契约）← ai（能力层）← agent（业务层）← extension/
 ```
 
 - 依赖方向始终向上。禁止反向依赖、跨层依赖、循环依赖。
-- Extension ↔ Webview 只通过 shared 消息协议通信，协议源在 `packages/shared/src/index.ts`，`packages/shared/types.ts` 仅作兼容导出；内部类型不得泄露到 postMessage 通道。
+- Extension ↔ Webview 只通过 shared 消息协议通信，协议源在 `packages/shared/src/index.ts`，消费者统一使用 `@scout-agent/shared` 主入口；内部类型不得泄露到 postMessage 通道。
 
 ## Pi 对齐原则
 
@@ -49,7 +49,7 @@ Scout 的分层应按 Pi 的实际代码结构理解：
 - `agent`：agent 基础运行层。负责 `Agent`、`AgentState`、`agent.state.messages`、Agent loop、工具调用、`AgentMessage`/`AgentEvent`、`AgentHarness` direct-loop API、session tree、compaction、branch summary、provider payload/response lifecycle。不得承接 extension/session 的 UI 状态和宿主级 retry 编排。
 - `extension/core`：Pi coding-agent core 对齐层。负责 AgentSession、AgentSessionRuntime、provider runtime context 同步、retry/overflow recovery、auto/manual compaction、extension hooks、resource loading、session manager、session tree/navigation/label。不得感知 VS Code webview 协议。
 - `extension/host`：宿主与协议适配层。负责 VS Code 生命周期、配置入口、会话协调、webview 消息映射、ScoutSessionTreeNode 映射、visible leaf 解析、导入/恢复/列表等宿主态交互。
-- `webview`：表现层。只消费 `shared/types.ts` 协议展示状态和发送用户意图，不直接感知 agent/extension 内部类型。
+- `webview`：表现层。只消费 `@scout-agent/shared` 协议展示状态和发送用户意图，不直接感知 agent/extension 内部类型。
 
 ### 状态归属
 

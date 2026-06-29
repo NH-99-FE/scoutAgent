@@ -14,7 +14,7 @@ shared（纯契约）← ai（能力层）← agent（业务层）← extension/
 ```
 
 - 依赖方向始终向上。禁止反向依赖、跨层依赖、循环依赖。
-- Extension ↔ Webview 只通过 shared 消息协议通信，协议源在 `packages/shared/src/index.ts`，`packages/shared/types.ts` 仅作兼容导出；内部类型不得泄露到 postMessage 通道。
+- Extension ↔ Webview 只通过 shared 消息协议通信，协议源在 `packages/shared/src/index.ts`，消费者统一使用 `@scout-agent/shared` 主入口；内部类型不得泄露到 postMessage 通道。
 - Webview/Extension 协议边界见 `docs/webview-protocol.md`。
 
 ## 核心模式

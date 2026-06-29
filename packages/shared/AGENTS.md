@@ -12,9 +12,8 @@
 
 ## 文件分工
 
-- `src/index.ts` 是包的唯一公开出口。新增对外契约必须在这里同步导出，并区分 `export {}` 与 `export type {}`。
-- `types.ts` 只是历史兼容出口，保持 `export type * from './src/index.ts'` 语义，不在这里新增值导出或业务说明。
-- `src/protocol.ts` 是协议聚合出口，面向协议相关消费者；不要让消费者直接拼装跨文件的内部路径依赖。
+- `src/index.ts` 是包的唯一公开出口。新增对外契约必须在这里同步导出，并区分 `export {}` 与 `export type {}`；消费者统一从 `@scout-agent/shared` 导入。
+- `src/protocol.ts` 是包内协议聚合模块，由 `src/index.ts` 统一公开；消费者不得绕过 `@scout-agent/shared` 主入口直接依赖内部路径。
 - `src/protocol-core.ts` 放跨协议复用的基础结构，例如 surface、source、tool、command、diagnostic、session tree 可见节点、session/task/file mention 摘要。
 - `src/protocol-state.ts` 放 Webview 状态快照、消息内容块、队列、busy state、上下文用量和工具预览等状态契约。
 - `src/protocol-requests.ts` 放 Webview→Extension 的 payload union、transport envelope、cancel/control message 和 `SCOUT_PROTOCOL` 路由表。
@@ -75,7 +74,7 @@
 - 新增类型使用 `interface` 表达对象结构，使用 `type` 表达联合、别名和字面量集合。
 - 类型导入一律使用 `import type`。
 - 常量命名使用 `SCOUT_*` 或领域内稳定大写名；事件类型、payload type、role、kind 字符串使用 `snake_case` 或当前文件既有风格。
-- 文件保持 kebab-case。新增文件必须通过 `src/index.ts` 或 `src/protocol.ts` 明确纳入公开出口。
+- 文件保持 kebab-case。新增公开契约必须通过 `src/index.ts` 明确纳入包主入口；协议分组可先汇总到 `src/protocol.ts`，再由 `src/index.ts` 导出。
 - 文件头继续使用 `// ============================================================` 与中文概述，分节使用 `// ----------`。
 
 ## 测试与验证
