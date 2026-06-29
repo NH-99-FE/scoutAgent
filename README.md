@@ -14,6 +14,7 @@ packages/
 ```
 
 Webview 与 Extension 通信边界见 [docs/webview-protocol.md](docs/webview-protocol.md)。
+扩展 API 与当前支持的 UI 子集见 [docs/extension-api.md](docs/extension-api.md)。
 
 ## 开发
 
