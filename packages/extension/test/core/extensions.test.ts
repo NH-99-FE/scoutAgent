@@ -11,6 +11,7 @@ import {
   ScoutExtensionRunner,
   type ScoutExtension,
 } from '../../src/core/extensions/index.ts';
+import permissionGateExtension from '../../../../examples/extensions/permission-gate.ts';
 import {
   createConfigManager,
   createExtensionActions,
@@ -159,6 +160,138 @@ describe('ScoutExtensionRunner', () => {
       'first',
       'second',
     ]);
+  });
+
+  it('exposes UI context to tool_call handlers', async () => {
+    const runtime = createExtensionRuntime();
+    const extension = await loadExtensionFromFactory(
+      async (scout) => {
+        scout.on('tool_call', async (_event, ctx) => {
+          const context = ctx as { hasUI: boolean; ui: { confirm: () => Promise<boolean> } };
+          const confirmed = await context.ui.confirm();
+          return confirmed && context.hasUI ? undefined : { block: true, reason: 'no ui' };
+        });
+      },
+      runtime,
+      undefined,
+      '<ui-test>',
+    );
+    const runner = createRunner([extension]);
+
+    expect(
+      await runner.emitToolCall({
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        toolName: 'bash',
+        input: { command: 'echo ok' },
+      }),
+    ).toEqual({ block: true, reason: 'no ui' });
+
+    runner.setUIContext({
+      confirm: async () => true,
+      input: async () => undefined,
+      notify: () => undefined,
+      select: async () => 'Yes',
+    });
+
+    expect(
+      await runner.emitToolCall({
+        type: 'tool_call',
+        toolCallId: 'call-2',
+        toolName: 'bash',
+        input: { command: 'echo ok' },
+      }),
+    ).toBeUndefined();
+  });
+
+  it('runs the permission gate example with Pi-style patterns', async () => {
+    const runtime = createExtensionRuntime();
+    const extension = await loadExtensionFromFactory(
+      permissionGateExtension,
+      runtime,
+      undefined,
+      '<example:permission-gate>',
+    );
+    const runner = createRunner([extension]);
+
+    for (const command of [
+      'rm test.md',
+      'rm -f test.md',
+      'chmod 755 tmp',
+      'chmod 775 tmp',
+      'rm -- -rf',
+    ]) {
+      expect(
+        await runner.emitToolCall({
+          type: 'tool_call',
+          toolCallId: command,
+          toolName: 'bash',
+          input: { command },
+        }),
+      ).toBeUndefined();
+    }
+
+    for (const command of [
+      'rm -r tmp',
+      'rm -rf tmp',
+      'rm --recursive tmp',
+      'sudo echo ok',
+      'chmod 777 tmp',
+      'chmod 0777 tmp',
+      'chmod 00777 tmp',
+      'chown user 777',
+      'chown user 0777',
+    ]) {
+      expect(
+        await runner.emitToolCall({
+          type: 'tool_call',
+          toolCallId: command,
+          toolName: 'bash',
+          input: { command },
+        }),
+      ).toEqual({
+        block: true,
+        reason: 'Dangerous command blocked (no UI for confirmation)',
+      });
+    }
+
+    const select = vi.fn(async () => 'Yes');
+    runner.setUIContext({
+      confirm: async () => true,
+      input: async () => undefined,
+      notify: () => undefined,
+      select,
+    });
+    const abortController = new AbortController();
+    runner.bindCore(createExtensionActions(), {
+      ...createExtensionContextActions(),
+      getSignal: () => abortController.signal,
+    });
+
+    expect(
+      await runner.emitToolCall({
+        type: 'tool_call',
+        toolCallId: 'allowed',
+        toolName: 'bash',
+        input: { command: 'sudo rm -rf tmp' },
+      }),
+    ).toBeUndefined();
+    expect(select).toHaveBeenCalledWith('危险命令', ['Yes', 'No'], {
+      body: { kind: 'code', text: 'sudo rm -rf tmp' },
+      signal: abortController.signal,
+      timeout: 300000,
+      variant: 'danger',
+    });
+
+    select.mockResolvedValue('No');
+    expect(
+      await runner.emitToolCall({
+        type: 'tool_call',
+        toolCallId: 'blocked',
+        toolName: 'bash',
+        input: { command: 'sudo echo ok' },
+      }),
+    ).toEqual({ block: true, reason: 'Blocked by user' });
   });
 
   it('applies message_end replacement in-place across later handlers', async () => {

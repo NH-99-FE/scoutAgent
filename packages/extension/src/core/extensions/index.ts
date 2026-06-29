@@ -55,6 +55,8 @@ export type {
   UserBashEvent,
   InputEvent,
   InputSource,
+  ExtensionUIDialogOptions,
+  ExtensionUIContext,
   ModelSelectSource,
   ScoutExtensionContext,
   ReplacedSessionContext,
@@ -90,6 +92,9 @@ export {
   createExtensionRuntime,
   loadExtensionFromFactory,
   loadExtensions,
+  resolveExtensionEntries,
+  discoverExtensionsInDir,
   discoverAndLoadExtensions,
+  type DiscoveredExtensionEntry,
 } from './loader.ts';
 export { ScoutExtensionRunner, type ScoutExtensionErrorListener } from './runner.ts';

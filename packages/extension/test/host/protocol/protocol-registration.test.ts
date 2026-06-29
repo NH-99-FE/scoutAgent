@@ -39,6 +39,10 @@ const PAYLOAD_CASES = [
     { service: 'config', method: 'request_runtime_settings' },
   ),
   protocolCase(
+    { type: 'request_extensions' },
+    { service: 'extensions', method: 'request_extensions' },
+  ),
+  protocolCase(
     { type: 'request_context_usage' },
     { service: 'state', method: 'request_context_usage' },
   ),
@@ -125,6 +129,14 @@ const PAYLOAD_CASES = [
     { service: 'session', method: 'clear_conversation' },
   ),
   protocolCase({ type: 'reload_resources' }, { service: 'config', method: 'reload_resources' }),
+  protocolCase(
+    { type: 'create_extension_from_template', templateId: 'permission-gate', scope: 'project' },
+    { service: 'extensions', method: 'create_extension_from_template' },
+  ),
+  protocolCase(
+    { type: 'open_extension_file', path: '/workspace/.scout/extensions/permission-gate.ts' },
+    { service: 'extensions', method: 'open_extension_file' },
+  ),
   protocolCase({ type: 'open_settings_panel' }, { service: 'ui', method: 'open_settings_panel' }),
   protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),
   protocolCase(
@@ -150,6 +162,10 @@ const PAYLOAD_CASES = [
   ),
   protocolCase({ type: 'continue_session' }, { service: 'session', method: 'continue_session' }),
   protocolCase({ type: 'request_commands' }, { service: 'ui', method: 'request_commands' }),
+  protocolCase(
+    { type: 'extension_ui_response', id: 'approval-1', action: 'confirm' },
+    { service: 'ui', method: 'extension_ui_response' },
+  ),
   protocolCase(
     { type: 'request_file_mentions', query: 'src', limit: 10 },
     { service: 'mention', method: 'request_file_mentions' },
@@ -347,8 +363,40 @@ function makeServices(): ScoutProtocolServices {
     mention: {
       requestFileMentions: vi.fn(async () => undefined),
     },
+    extensions: {
+      requestExtensions: vi.fn(async (respond) => {
+        respond({
+          type: 'extensions_result',
+          settings: {
+            projectDir: '/workspace/.scout/extensions',
+            globalDir: '/home/me/.scout/agent/extensions',
+            configuredPaths: [],
+            templates: [
+              {
+                id: 'permission-gate',
+                label: 'Permission Gate',
+                path: '/workspace/.scout/extensions/permission-gate.ts',
+                exists: false,
+              },
+            ],
+            extensions: [],
+          },
+        });
+      }),
+      createExtensionFromTemplate: vi.fn(async (_message, respond) => {
+        respond({
+          type: 'create_extension_from_template_result',
+          success: true,
+          path: '/workspace/.scout/extensions/permission-gate.ts',
+        });
+      }),
+      openExtensionFile: vi.fn(async (message, respond) => {
+        respond({ type: 'open_extension_file_result', success: true, path: message.path });
+      }),
+    },
     ui: {
       requestCommands: vi.fn(),
+      extensionUIResponse: vi.fn(),
       openSettingsPanel: vi.fn(async (respond) => {
         respond({ type: 'open_settings_panel_result', success: true });
       }),
@@ -431,6 +479,39 @@ describe('registerScoutProtocolServices', () => {
     };
 
     expect(validateWebviewRequestPayload(payload)).toMatchObject({ ok: true, error: '' });
+  });
+
+  it('validates extension UI response actions at the protocol boundary', () => {
+    for (const payload of [
+      { type: 'extension_ui_response', id: 'approval-1', action: 'confirm' },
+      { type: 'extension_ui_response', id: 'approval-1', action: 'cancel' },
+      { type: 'extension_ui_response', id: 'approval-1', action: 'select', value: 'Yes' },
+      { type: 'extension_ui_response', id: 'approval-1', action: 'input', value: 'Scout' },
+    ]) {
+      expect(validateWebviewRequestPayload(payload)).toMatchObject({ ok: true, error: '' });
+    }
+
+    expect(
+      validateWebviewRequestPayload({
+        type: 'extension_ui_response',
+        id: 'approval-1',
+        action: 'select',
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: 'extension_ui_response.value must be a string',
+    });
+    expect(
+      validateWebviewRequestPayload({
+        type: 'extension_ui_response',
+        id: 'approval-1',
+        action: 'cancel',
+        value: 'ignored',
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: 'extension_ui_response.value is not allowed for this action',
+    });
   });
 
   it('rejects invalid runtime setting patch values at the protocol boundary', () => {

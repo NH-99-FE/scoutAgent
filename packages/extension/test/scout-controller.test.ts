@@ -11,6 +11,7 @@ import { SessionIndex } from '../src/host/session-index.ts';
 import type { ScoutProtocolHostServices } from '../src/host/protocol/scout-protocol-host-services.ts';
 import { SessionProtocolService } from '../src/host/protocol/services/session-service.ts';
 import { TaskProtocolService } from '../src/host/protocol/services/task-service.ts';
+import { getDefaultUserConfigDir } from '../src/settings-manager.ts';
 
 function createDeferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -102,6 +103,16 @@ function resolveRoute(payload: WebviewRequestPayload): {
 }
 
 describe('ScoutController webview surfaces', () => {
+  it('uses the user agent directory for global resources', () => {
+    const controller = makeController();
+    const internals = controller as unknown as { agentDir: string };
+
+    expect(internals.agentDir).toBe(getDefaultUserConfigDir());
+    expect(internals.agentDir).not.toBe('/workspace/.scout');
+
+    controller.dispose();
+  });
+
   it('handles control abort messages without routing through the protocol server', () => {
     const controller = makeController();
     const internals = controller as unknown as {

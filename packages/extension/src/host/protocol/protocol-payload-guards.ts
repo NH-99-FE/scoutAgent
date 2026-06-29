@@ -43,6 +43,7 @@ const PAYLOAD_VALIDATORS = {
   request_config: fields('type'),
   request_custom_models: fields('type'),
   request_runtime_settings: fields('type'),
+  request_extensions: fields('type'),
   request_context_usage: fields('type'),
   user_message: combine(
     fields('type', 'text', 'images', 'deliverAs', 'clearFollowUpQueue'),
@@ -85,6 +86,13 @@ const PAYLOAD_VALIDATORS = {
   set_active_tools: combine(fields('type', 'toolNames'), requiredStringArray('toolNames')),
   clear_conversation: fields('type'),
   reload_resources: fields('type'),
+  create_extension_from_template: combine(
+    fields('type', 'templateId', 'scope', 'overwrite'),
+    requiredEnum('templateId', ['permission-gate']),
+    requiredEnum('scope', ['project', 'global']),
+    optionalBoolean('overwrite'),
+  ),
+  open_extension_file: combine(fields('type', 'path'), requiredString('path')),
   open_settings_panel: fields('type'),
   open_tree_panel: fields('type'),
   fork_session: combine(
@@ -113,6 +121,12 @@ const PAYLOAD_VALIDATORS = {
     optionalBoolean('preserveFollowUpQueue'),
   ),
   request_commands: fields('type'),
+  extension_ui_response: combine(
+    fields('type', 'id', 'action', 'value'),
+    requiredString('id'),
+    requiredEnum('action', ['confirm', 'select', 'input', 'cancel']),
+    extensionUIResponseValue(),
+  ),
   request_file_mentions: combine(
     fields('type', 'query', 'limit'),
     requiredString('query'),
@@ -201,6 +215,15 @@ function optionalBoolean(key: string): PayloadValidator {
     payload[key] === undefined || typeof payload[key] === 'boolean'
       ? undefined
       : `${key} must be a boolean when provided`;
+}
+
+function extensionUIResponseValue(): PayloadValidator {
+  return (payload) => {
+    if (payload.action === 'select' || payload.action === 'input') {
+      return typeof payload.value === 'string' ? undefined : 'value must be a string';
+    }
+    return payload.value === undefined ? undefined : 'value is not allowed for this action';
+  };
 }
 
 function optionalInteger(key: string): PayloadValidator {

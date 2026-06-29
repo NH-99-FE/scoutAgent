@@ -11,6 +11,10 @@ import type {
 } from './protocol-core.ts';
 import type { ScoutProtocolResponsePayload } from './protocol-results.ts';
 import type {
+  ScoutExtensionUIRequest,
+  ScoutExtensionUIRequestClosedEvent,
+} from './protocol-extension-ui.ts';
+import type {
   ScoutBusyState,
   ScoutConfig,
   ScoutContextUsage,
@@ -154,6 +158,8 @@ export type ExtensionEventMessage =
   | { type: 'commands_update'; commands: ScoutCommandInfo[] }
   | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
   | ScoutNotificationMessage
+  | ScoutExtensionUIRequest
+  | ScoutExtensionUIRequestClosedEvent
   | { type: 'tree_update'; tree: ScoutSessionTreeNode[]; leafId: string | null }
   | {
       type: 'task_history_update';
@@ -182,6 +188,8 @@ export const EXTENSION_TO_WEBVIEW_MESSAGE_TYPES = [
   'task_history_update',
   'sessions_update',
   'notification',
+  'extension_ui_request',
+  'extension_ui_request_closed',
   'auto_retry_start',
   'auto_retry_end',
   'compaction_start',

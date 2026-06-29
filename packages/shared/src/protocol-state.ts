@@ -4,6 +4,7 @@
 
 import type { ScoutModelInfo, ThinkingLevel } from './models.ts';
 import type { ScoutCommandInfo, ScoutDiagnostic, ToolInfo } from './protocol-core.ts';
+import type { ScoutExtensionUIRequest } from './protocol-extension-ui.ts';
 
 // ---------- 消息内容块 ----------
 
@@ -161,6 +162,7 @@ export interface ScoutWebviewState {
   contextUsage?: ScoutContextUsage;
   sessionStats?: ScoutSessionStats;
   diagnostics?: ScoutDiagnostic[];
+  extensionUIRequests?: ScoutExtensionUIRequest[];
   modelFallbackMessage?: string;
 }
 

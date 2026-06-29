@@ -333,8 +333,9 @@ export interface InputEvent {
 }
 
 /**
- * Fired before a tool executes. `input` is mutable: mutate in place to patch
- * arguments before execution. Later handlers observe earlier mutations.
+ * Fired before a tool executes. `input` is mutable within the extension hook
+ * pipeline: later handlers observe earlier mutations, but mutations are not
+ * written back to the actual tool execution arguments.
  */
 export interface ToolCallEvent {
   type: 'tool_call';
@@ -573,6 +574,30 @@ export interface NewSessionReplacementOptions extends SessionReplacementOptions 
   setup?: (sessionManager: Session) => Promise<void>;
 }
 
+// ---------- 扩展 UI ----------
+
+export interface ExtensionUIDialogOptions {
+  timeout?: number;
+  signal?: AbortSignal;
+  variant?: 'default' | 'danger';
+  body?: { kind: 'text' | 'code'; text: string };
+}
+
+export interface ExtensionUIContext {
+  select(
+    title: string,
+    options: string[],
+    opts?: ExtensionUIDialogOptions,
+  ): Promise<string | undefined>;
+  confirm(title: string, message: string, opts?: ExtensionUIDialogOptions): Promise<boolean>;
+  input(
+    title: string,
+    placeholder?: string,
+    opts?: ExtensionUIDialogOptions,
+  ): Promise<string | undefined>;
+  notify(message: string, type?: 'info' | 'warning' | 'error'): void;
+}
+
 // ---------- 扩展上下文 ----------
 
 /**
@@ -584,6 +609,8 @@ export interface ScoutExtensionContext {
   readonly sessionManager: ReadonlySessionManager;
   readonly configManager: ScoutCoreConfig;
   readonly model: Model<Api> | undefined;
+  readonly hasUI: boolean;
+  readonly ui: ExtensionUIContext;
   isIdle(): boolean;
   readonly signal: AbortSignal | undefined;
   abort(): void;

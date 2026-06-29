@@ -59,6 +59,17 @@ describe('StateProtocolService', () => {
         },
       ],
       getBusyState: () => ({ kind: 'agent', label: 'Working', cancellable: true }),
+      getExtensionUIRequests: () => [
+        {
+          type: 'extension_ui_request',
+          id: 'ui-1',
+          method: 'select',
+          title: '危险命令',
+          options: ['Yes', 'No'],
+          variant: 'danger',
+          body: { kind: 'code', text: 'rm -rf tmp' },
+        },
+      ],
       publishEvent,
     });
 
@@ -81,6 +92,13 @@ describe('StateProtocolService', () => {
             maxTokens: 200,
             percentage: 50,
           },
+          extensionUIRequests: [
+            expect.objectContaining({
+              id: 'ui-1',
+              method: 'select',
+              variant: 'danger',
+            }),
+          ],
           leafId: 'visible-leaf',
           modelId: 'gpt-test',
           modelProvider: 'openai',
@@ -100,6 +118,7 @@ describe('StateProtocolService', () => {
       configManager,
       getCommands: () => [],
       getBusyState: () => ({ kind: 'idle', cancellable: false }),
+      getExtensionUIRequests: () => [],
       publishEvent,
     });
     const respond = vi.fn();

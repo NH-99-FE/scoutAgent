@@ -2,9 +2,16 @@
 // UI protocol service — 宿主 UI 面板与命令查询请求
 // ============================================================
 
-import type { ExtensionEventMessage, ScoutCommandInfo } from '@scout-agent/shared';
+import type {
+  ExtensionEventMessage,
+  ScoutCommandInfo,
+  ScoutExtensionUIRequest,
+  ScoutExtensionUIRequestClosedReason,
+} from '@scout-agent/shared';
+import type { ExtensionUIContext } from '../../../core/extensions/index.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
-import type { ProtocolResponder, UiProtocolHost } from './types.ts';
+import type { ProtocolPayload, ProtocolResponder, UiProtocolHost } from './types.ts';
+import { ExtensionUIRequestBroker } from './extension-ui-request-broker.ts';
 
 // ---------- 常量 ----------
 
@@ -97,16 +104,39 @@ export class UiProtocolService implements UiProtocolHost {
   ) => void;
   private readonly openSettingsPanelCallback?: () => void | Promise<void>;
   private readonly openTreePanelCallback?: () => void | Promise<void>;
+  private readonly extensionUIBroker: ExtensionUIRequestBroker;
 
   constructor(options: UiProtocolServiceOptions) {
     this.getExtensionCommands = options.getExtensionCommands;
     this.publishEvent = options.publishEvent;
     this.openSettingsPanelCallback = options.openSettingsPanel;
     this.openTreePanelCallback = options.openTreePanel;
+    this.extensionUIBroker = new ExtensionUIRequestBroker({
+      publishEvent: (message) => this.publishEvent(message),
+      notify: (message, type = 'info') => {
+        this.publishEvent({ type: 'notification', level: type, message });
+      },
+    });
   }
 
   requestCommands(respond: ProtocolResponder): void {
     respond({ type: 'commands_result', commands: this.getCommands() });
+  }
+
+  createExtensionUIContext(): ExtensionUIContext {
+    return this.extensionUIBroker.createContext();
+  }
+
+  extensionUIResponse(message: ProtocolPayload<'extension_ui_response'>): void {
+    this.extensionUIBroker.respond(message);
+  }
+
+  cancelExtensionUIRequests(reason: ScoutExtensionUIRequestClosedReason = 'cancelled'): void {
+    this.extensionUIBroker.cancelAll(reason);
+  }
+
+  getPendingExtensionUIRequests(): ScoutExtensionUIRequest[] {
+    return this.extensionUIBroker.getPendingRequests();
   }
 
   pushCommands(surface?: ScoutWebviewSurface): void {

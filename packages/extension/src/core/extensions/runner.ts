@@ -15,6 +15,7 @@ import type {
   ScoutExtensionCommandContext,
   ScoutExtensionContextActions,
   ScoutExtensionError,
+  ExtensionUIContext,
   ScoutExtensionRuntime,
   BeforeAgentStartEvent,
   BeforeAgentStartEventResult,
@@ -109,6 +110,13 @@ interface ResourcesDiscoverCombinedResult {
   themePaths: Array<{ path: string; extensionPath: string }>;
 }
 
+const noOpUIContext: ExtensionUIContext = {
+  select: async () => undefined,
+  confirm: async () => false,
+  input: async () => undefined,
+  notify: () => {},
+};
+
 // ---------- ScoutExtensionRunner ----------
 
 export class ScoutExtensionRunner {
@@ -119,6 +127,7 @@ export class ScoutExtensionRunner {
   private configManager: ScoutCoreConfig;
   private errorListeners: Set<ScoutExtensionErrorListener> = new Set();
   private commandDiagnostics: ResourceDiagnostic[] = [];
+  private uiContext: ExtensionUIContext | undefined;
 
   // bindCore 注入的上下文动作
   private getModelFn: () => Model<Api> | undefined = () => undefined;
@@ -201,6 +210,10 @@ export class ScoutExtensionRunner {
     this.navigateTreeFn = contextActions.navigateTree;
   }
 
+  setUIContext(uiContext: ExtensionUIContext | undefined): void {
+    this.uiContext = uiContext;
+  }
+
   // ---------- 上下文创建 ----------
 
   /**
@@ -227,6 +240,14 @@ export class ScoutExtensionRunner {
       get model() {
         runner.assertActive();
         return getModel();
+      },
+      get hasUI() {
+        runner.assertActive();
+        return runner.uiContext !== undefined;
+      },
+      get ui() {
+        runner.assertActive();
+        return runner.uiContext ?? noOpUIContext;
       },
       isIdle: () => {
         runner.assertActive();

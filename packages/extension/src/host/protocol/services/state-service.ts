@@ -6,6 +6,7 @@ import type {
   ExtensionEventMessage,
   ScoutBusyState,
   ScoutCommandInfo,
+  ScoutExtensionUIRequest,
   ScoutWebviewState,
 } from '@scout-agent/shared';
 import type { ConfigManager } from '../../../config-manager.ts';
@@ -20,6 +21,7 @@ export interface StateProtocolServiceOptions {
   configManager: ConfigManager;
   getCommands: () => ScoutCommandInfo[];
   getBusyState: () => ScoutBusyState;
+  getExtensionUIRequests: () => ScoutExtensionUIRequest[];
   publishEvent: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
 }
 
@@ -30,6 +32,7 @@ export class StateProtocolService implements StateProtocolHost {
   private readonly configManager: ConfigManager;
   private readonly getCommands: () => ScoutCommandInfo[];
   private readonly getBusyState: () => ScoutBusyState;
+  private readonly getExtensionUIRequests: () => ScoutExtensionUIRequest[];
   private readonly publishEvent: (
     message: ExtensionEventMessage,
     surface?: ScoutWebviewSurface,
@@ -40,6 +43,7 @@ export class StateProtocolService implements StateProtocolHost {
     this.configManager = options.configManager;
     this.getCommands = options.getCommands;
     this.getBusyState = options.getBusyState;
+    this.getExtensionUIRequests = options.getExtensionUIRequests;
     this.publishEvent = options.publishEvent;
   }
 
@@ -101,6 +105,7 @@ export class StateProtocolService implements StateProtocolHost {
       contextUsage: sessionStats?.contextUsage,
       sessionStats,
       diagnostics: [...this.sessionManager.diagnostics],
+      extensionUIRequests: this.getExtensionUIRequests(),
       modelFallbackMessage: this.sessionManager.modelFallbackMessage,
     };
   }

@@ -75,6 +75,14 @@ describe('createAgentSessionServices', () => {
     });
 
     expect(services.extensionRunner.getRegisteredCommands()).toEqual([]);
+    await expect(
+      services.extensionRunner.emitToolCall({
+        type: 'tool_call',
+        toolCallId: 'call-1',
+        toolName: 'bash',
+        input: { command: 'sudo echo ok' },
+      }),
+    ).resolves.toBeUndefined();
 
     const result = await createAgentSessionFromServices({
       services,

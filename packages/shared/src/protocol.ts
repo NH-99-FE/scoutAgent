@@ -37,6 +37,14 @@ export type {
 } from './protocol-core.ts';
 
 export type {
+  ScoutExtensionListItem,
+  ScoutExtensionsSettings,
+  ScoutExtensionScope,
+  ScoutExtensionTemplateInfo,
+  ScoutExtensionTemplateId,
+} from './protocol-extensions.ts';
+
+export type {
   ScoutAssistantMessage,
   ScoutBranchSummaryMessage,
   ScoutBusyKind,
@@ -72,6 +80,7 @@ export type {
   ScoutConfigResult,
   ScoutContextUsageResult,
   ScoutCustomModelsResult,
+  ScoutExtensionsResult,
   ScoutFileMentionsResult,
   ScoutForkCandidate,
   ScoutForkCandidatesResult,
@@ -90,6 +99,12 @@ export type {
 } from './protocol-results.ts';
 
 export { EXTENSION_TO_WEBVIEW_MESSAGE_TYPES } from './protocol-events.ts';
+export type {
+  ScoutExtensionUIRequest,
+  ScoutExtensionUIRequestClosedEvent,
+  ScoutExtensionUIRequestClosedReason,
+} from './protocol-extension-ui.ts';
+
 export type {
   ExtensionEventMessage,
   ExtensionMessage,

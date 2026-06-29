@@ -8,6 +8,7 @@ import type { ScoutDomainEventType } from './protocol-events.ts';
 import type { ScoutProtocolResponsePayloadType } from './protocol-results.ts';
 import type { ScoutImageContent } from './protocol-state.ts';
 import type { ScoutTaskHistoryPurpose, ScoutWebviewSurface } from './protocol-core.ts';
+import type { ScoutExtensionScope, ScoutExtensionTemplateId } from './protocol-extensions.ts';
 
 // ---------- Webview 到 Extension ----------
 
@@ -19,6 +20,7 @@ export type ScoutProtocolService =
   | 'task'
   | 'tree'
   | 'mention'
+  | 'extensions'
   | 'ui';
 
 export type ScoutProtocolKind = 'lifecycle' | 'query' | 'command';
@@ -68,6 +70,7 @@ export type WebviewRequestPayload =
   | { type: 'request_config' }
   | { type: 'request_custom_models' }
   | { type: 'request_runtime_settings' }
+  | { type: 'request_extensions' }
   | { type: 'request_context_usage' }
   | {
       type: 'user_message';
@@ -101,6 +104,13 @@ export type WebviewRequestPayload =
   | { type: 'set_active_tools'; toolNames: string[] }
   | { type: 'clear_conversation' }
   | { type: 'reload_resources' }
+  | {
+      type: 'create_extension_from_template';
+      templateId: ScoutExtensionTemplateId;
+      scope: Exclude<ScoutExtensionScope, 'configured'>;
+      overwrite?: boolean;
+    }
+  | { type: 'open_extension_file'; path: string }
   | { type: 'open_settings_panel' }
   | { type: 'open_tree_panel' }
   | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
@@ -118,6 +128,10 @@ export type WebviewRequestPayload =
   | { type: 'set_session_name'; name: string }
   | { type: 'continue_session'; preserveFollowUpQueue?: boolean }
   | { type: 'request_commands' }
+  | { type: 'extension_ui_response'; id: string; action: 'confirm' }
+  | { type: 'extension_ui_response'; id: string; action: 'select'; value: string }
+  | { type: 'extension_ui_response'; id: string; action: 'input'; value: string }
+  | { type: 'extension_ui_response'; id: string; action: 'cancel' }
   | { type: 'request_file_mentions'; query: string; limit?: number }
   | {
       type: 'request_task_history';
@@ -179,6 +193,13 @@ export const SCOUT_PROTOCOL = {
     service: 'config',
     method: 'request_runtime_settings',
     response: 'runtime_settings_result',
+    surfaces: ['settings'],
+  },
+  request_extensions: {
+    kind: 'query',
+    service: 'extensions',
+    method: 'request_extensions',
+    response: 'extensions_result',
     surfaces: ['settings'],
   },
   request_context_usage: {
@@ -314,6 +335,21 @@ export const SCOUT_PROTOCOL = {
     emits: ['config_update', 'commands_update', 'state_update', 'tree_update'],
     surfaces: ['chat', 'settings'],
   },
+  create_extension_from_template: {
+    kind: 'command',
+    service: 'extensions',
+    method: 'create_extension_from_template',
+    response: 'create_extension_from_template_result',
+    emits: ['config_update', 'commands_update', 'state_update', 'tree_update'],
+    surfaces: ['settings'],
+  },
+  open_extension_file: {
+    kind: 'command',
+    service: 'extensions',
+    method: 'open_extension_file',
+    response: 'open_extension_file_result',
+    surfaces: ['settings'],
+  },
   open_settings_panel: {
     kind: 'command',
     service: 'ui',
@@ -394,6 +430,12 @@ export const SCOUT_PROTOCOL = {
     method: 'request_commands',
     response: 'commands_result',
     surfaces: ['chat', 'settings'],
+  },
+  extension_ui_response: {
+    kind: 'command',
+    service: 'ui',
+    method: 'extension_ui_response',
+    surfaces: ['chat', 'settings', 'tree'],
   },
   request_file_mentions: {
     kind: 'query',

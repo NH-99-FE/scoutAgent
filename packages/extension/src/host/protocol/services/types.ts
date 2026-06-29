@@ -153,8 +153,21 @@ export interface MentionProtocolHost {
   ) => Promise<void>;
 }
 
+export interface ExtensionManagementProtocolHost {
+  requestExtensions: (respond: ProtocolResponder) => Promise<void>;
+  createExtensionFromTemplate: (
+    message: ProtocolPayload<'create_extension_from_template'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+  openExtensionFile: (
+    message: ProtocolPayload<'open_extension_file'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+}
+
 export interface UiProtocolHost {
   requestCommands: (respond: ProtocolResponder) => void;
+  extensionUIResponse: (message: ProtocolPayload<'extension_ui_response'>) => void;
   openSettingsPanel: (respond: ProtocolResponder) => Promise<void>;
   openTreePanel: (respond: ProtocolResponder) => Promise<void>;
 }

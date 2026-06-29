@@ -12,6 +12,7 @@ import { DomainEventPublisher } from './domain-event-publisher.ts';
 import { SessionEventForwarder } from './session-event-forwarder.ts';
 import { type ScoutProtocolServices } from './services/index.ts';
 import { ConfigProtocolService } from './services/config-service.ts';
+import { ExtensionManagementProtocolService } from './services/extension-management-service.ts';
 import { LifecycleProtocolService } from './services/lifecycle-service.ts';
 import { MentionProtocolService } from './services/mention-service.ts';
 import { SessionProtocolService } from './services/session-service.ts';
@@ -24,11 +25,13 @@ import { UiProtocolService } from './services/ui-service.ts';
 
 export interface ScoutProtocolHostServicesOptions {
   cwd: string;
+  agentDir: string;
   sessionManager: ExtensionSessionCoordinator;
   configManager: ConfigManager;
   sessionIndex: SessionIndex;
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
+  openTextFile?: (filePath: string) => Promise<void>;
   postMessage: (message: ExtensionMessage, surface?: ScoutWebviewSurface) => void;
   showErrorMessage?: (message: string) => void;
   log: (message: string) => void;
@@ -38,6 +41,7 @@ export interface ScoutProtocolHostServices {
   lifecycle: LifecycleProtocolService;
   state: StateProtocolService;
   config: ConfigProtocolService;
+  extensions: ExtensionManagementProtocolService;
   session: SessionProtocolService;
   task: TaskProtocolService;
   tree: TreeProtocolService;
@@ -75,12 +79,17 @@ export function createScoutProtocolHostServices(
     openSettingsPanel: options.openSettingsPanel,
     openTreePanel: options.openTreePanel,
   });
+  options.sessionManager.setExtensionUIContext(
+    bundle.ui.createExtensionUIContext(),
+    (reason) => bundle.ui.cancelExtensionUIRequests(reason),
+  );
 
   bundle.state = new StateProtocolService({
     sessionManager: options.sessionManager,
     configManager: options.configManager,
     getCommands: () => bundle.ui.getCommands(),
     getBusyState: () => bundle.sessionEventForwarder.getBusyState(),
+    getExtensionUIRequests: () => bundle.ui.getPendingExtensionUIRequests(),
     publishEvent: (message, surface) => bundle.eventPublisher.publish(message, surface),
   });
 
@@ -124,6 +133,18 @@ export function createScoutProtocolHostServices(
     sessionManager: options.sessionManager,
     configManager: options.configManager,
     sessionIndex: options.sessionIndex,
+    pushConfig: (surface) => bundle.state.pushConfig(surface),
+    requestCommands: (surface) => bundle.ui.pushCommands(surface),
+    pushState: (surface) => bundle.state.pushState(surface),
+    pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
+  });
+
+  bundle.extensions = new ExtensionManagementProtocolService({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    sessionManager: options.sessionManager,
+    configManager: options.configManager,
+    openTextFile: options.openTextFile,
     pushConfig: (surface) => bundle.state.pushConfig(surface),
     requestCommands: (surface) => bundle.ui.pushCommands(surface),
     pushState: (surface) => bundle.state.pushState(surface),
@@ -204,6 +225,12 @@ export function createScoutProtocolHostServices(
       setActiveTools: (message) => bundle.config.setActiveTools(message),
       reloadResources: (respond) => bundle.config.reloadResources(respond),
     },
+    extensions: {
+      requestExtensions: (respond) => bundle.extensions.requestExtensions(respond),
+      createExtensionFromTemplate: (message, respond) =>
+        bundle.extensions.createExtensionFromTemplate(message, respond),
+      openExtensionFile: (message, respond) => bundle.extensions.openExtensionFile(message, respond),
+    },
     session: {
       userMessage: (message) => bundle.session.userMessage(message),
       newSessionMessage: (message, respond) => bundle.session.newSessionMessage(message, respond),
@@ -238,6 +265,7 @@ export function createScoutProtocolHostServices(
     },
     ui: {
       requestCommands: (respond) => bundle.ui.requestCommands(respond),
+      extensionUIResponse: (message) => bundle.ui.extensionUIResponse(message),
       openSettingsPanel: (respond) => bundle.ui.openSettingsPanel(respond),
       openTreePanel: (respond) => bundle.ui.openTreePanel(respond),
     },

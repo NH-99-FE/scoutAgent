@@ -7,11 +7,14 @@ import {
   type ScoutProtocolHostServices,
 } from '../../../src/host/protocol/scout-protocol-host-services.ts';
 import type { TaskProtocolService } from '../../../src/host/protocol/services/task-service.ts';
+import type { UiProtocolService } from '../../../src/host/protocol/services/ui-service.ts';
 
 function makeSessionManager(): ExtensionSessionCoordinator {
   return {
     sessionFile: '/workspace/.scout/sessions/current.jsonl',
     getCommands: vi.fn(() => []),
+    setExtensionUIContext: vi.fn(),
+    reload: vi.fn(async () => ({ cancelled: false })),
     isStreaming: false,
   } as unknown as ExtensionSessionCoordinator;
 }
@@ -19,12 +22,14 @@ function makeSessionManager(): ExtensionSessionCoordinator {
 function makeConfigManager(): ConfigManager {
   return {
     getScoutConfig: vi.fn(() => ({ provider: 'openai' })),
+    getExtensionPaths: vi.fn(() => []),
   } as unknown as ConfigManager;
 }
 
 function makeBundle(): ScoutProtocolHostServices {
   return createScoutProtocolHostServices({
     cwd: '/workspace',
+    agentDir: '/home/me/.scout/agent',
     sessionManager: makeSessionManager(),
     configManager: makeConfigManager(),
     sessionIndex: new SessionIndex({
@@ -70,10 +75,31 @@ describe('createScoutProtocolHostServices', () => {
     });
   });
 
+  it('routes extension UI responses through the current ui service reference', () => {
+    const bundle = makeBundle();
+    const replacementUi = {
+      extensionUIResponse: vi.fn(),
+    } as unknown as UiProtocolService;
+    bundle.ui = replacementUi;
+
+    bundle.protocolServices.ui.extensionUIResponse({
+      type: 'extension_ui_response',
+      id: 'approval-1',
+      action: 'confirm',
+    });
+
+    expect(replacementUi.extensionUIResponse).toHaveBeenCalledWith({
+      type: 'extension_ui_response',
+      id: 'approval-1',
+      action: 'confirm',
+    });
+  });
+
   it('uses the event forwarder busy state when building webview state', async () => {
     const messages: unknown[] = [];
     const bundle = createScoutProtocolHostServices({
       cwd: '/workspace',
+      agentDir: '/home/me/.scout/agent',
       sessionManager: {
         ...makeSessionManager(),
         isStreaming: true,
@@ -119,6 +145,7 @@ describe('createScoutProtocolHostServices', () => {
     const showErrorMessage = vi.fn();
     const bundle = createScoutProtocolHostServices({
       cwd: '/workspace',
+      agentDir: '/home/me/.scout/agent',
       sessionManager: {
         ...makeSessionManager(),
         initialize: vi.fn(async () => {

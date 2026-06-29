@@ -68,6 +68,7 @@ import type {
   SessionStartEvent,
   ReplacedSessionContext,
   ContextUsage,
+  ExtensionUIContext,
 } from './extensions/types.ts';
 import type { Skill as ScoutSkill } from './skills.ts';
 import { createSyntheticSourceInfo } from './source-info.ts';
@@ -1355,6 +1356,10 @@ export class AgentSession implements CoreDisposable {
       this.logger.appendLine(`[scout] Refresh tools failed: ${errorMessage}`);
       this.emit({ type: 'error', message: `Refresh tools failed: ${errorMessage}` });
     });
+  }
+
+  setExtensionUIContext(uiContext: ExtensionUIContext | undefined): void {
+    this.extensionRunner?.setUIContext(uiContext);
   }
 
   // ---------- Session Tree / Navigation / Label ----------

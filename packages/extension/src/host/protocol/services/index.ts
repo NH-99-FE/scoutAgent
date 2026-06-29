@@ -6,6 +6,7 @@ import type { WebviewRequestPayload } from '@scout-agent/shared';
 import type { ProtocolServer } from '../protocol-server.ts';
 import type {
   ConfigProtocolHost,
+  ExtensionManagementProtocolHost,
   LifecycleProtocolHost,
   MentionProtocolHost,
   ProtocolPayload,
@@ -29,6 +30,7 @@ export interface ScoutProtocolServices {
   task: TaskProtocolHost;
   tree: TreeProtocolHost;
   mention: MentionProtocolHost;
+  extensions: ExtensionManagementProtocolHost;
   ui: UiProtocolHost;
 }
 
@@ -182,9 +184,30 @@ export function registerScoutProtocolServices(
     },
   });
 
+  registerProtocolServiceHandlers(server, 'extensions', {
+    request_extensions: async (_message, context) => {
+      await services.extensions.requestExtensions(context.respond);
+    },
+    create_extension_from_template: async (message, context) => {
+      await services.extensions.createExtensionFromTemplate(
+        payload<'create_extension_from_template'>(message),
+        context.respond,
+      );
+    },
+    open_extension_file: async (message, context) => {
+      await services.extensions.openExtensionFile(
+        payload<'open_extension_file'>(message),
+        context.respond,
+      );
+    },
+  });
+
   registerProtocolServiceHandlers(server, 'ui', {
     request_commands: (_message, context) => {
       services.ui.requestCommands(context.respond);
+    },
+    extension_ui_response: (message) => {
+      services.ui.extensionUIResponse(payload<'extension_ui_response'>(message));
     },
     open_settings_panel: async (_message, context) => {
       await services.ui.openSettingsPanel(context.respond);

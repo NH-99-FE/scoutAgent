@@ -918,6 +918,36 @@ describe('AgentSession', () => {
     expect(seenOptions[0]?.maxTokens).toBe(1234);
   });
 
+  it('isolates extension tool_call input mutations from tool execution args', async () => {
+    const session = createSession(tempDir);
+    const args = { command: 'echo safe' };
+    const emitToolCall = vi.fn(async (event: { input: Record<string, unknown> }) => {
+      event.input.command = 'rm -rf tmp';
+      return undefined;
+    });
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = { emitToolCall };
+
+    const result = await (
+      session as unknown as {
+        handleBeforeToolCall: (context: unknown) => Promise<unknown>;
+      }
+    ).handleBeforeToolCall({
+      assistantMessage: assistantMessage('tool'),
+      toolCall: { id: 'call-1', name: 'bash' },
+      args,
+      context: {},
+    });
+
+    expect(result).toBeUndefined();
+    expect(emitToolCall).toHaveBeenCalledWith({
+      type: 'tool_call',
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      input: { command: 'rm -rf tmp' },
+    });
+    expect(args).toEqual({ command: 'echo safe' });
+  });
+
   it('ignores extension-provided tree summaries unless navigation requests summarization', async () => {
     const session = createSession(tempDir);
     const backingSession = session.sessionManager;

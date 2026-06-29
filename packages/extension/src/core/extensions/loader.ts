@@ -374,7 +374,7 @@ interface ScoutManifest {
   extensions?: string[];
 }
 
-interface DiscoveredExtensionEntry {
+export interface DiscoveredExtensionEntry {
   path: string;
   origin: SourceOrigin;
   baseDir: string;
@@ -402,7 +402,7 @@ function readScoutManifest(packageJsonPath: string): ScoutManifest | null {
  * 1. package.json 中的 "scout.extensions" 字段
  * 2. index.ts 或 index.js
  */
-function resolveExtensionEntries(dir: string): DiscoveredExtensionEntry[] | null {
+export function resolveExtensionEntries(dir: string): DiscoveredExtensionEntry[] | null {
   const packageJsonPath = path.join(dir, 'package.json');
   if (fs.existsSync(packageJsonPath)) {
     const manifest = readScoutManifest(packageJsonPath);
@@ -446,7 +446,7 @@ function resolveExtensionEntries(dir: string): DiscoveredExtensionEntry[] | null
  *
  * 不递归超过一层。
  */
-function discoverExtensionsInDir(dir: string): DiscoveredExtensionEntry[] {
+export function discoverExtensionsInDir(dir: string): DiscoveredExtensionEntry[] {
   if (!fs.existsSync(dir)) return [];
 
   const discovered: DiscoveredExtensionEntry[] = [];

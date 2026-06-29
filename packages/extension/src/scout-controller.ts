@@ -51,11 +51,10 @@ export class ScoutController implements vscode.Disposable {
     this.extensionUri = options.extensionUri;
     this.outputChannel = options.outputChannel;
     this.cwd = options.cwd;
-    this.agentDir = this.resolveAgentDir();
-    const userConfigDir = getDefaultUserConfigDir();
+    this.agentDir = getDefaultUserConfigDir();
     this.configManager = new ConfigManager({
       cwd: this.cwd,
-      userConfigDir,
+      userConfigDir: this.agentDir,
     });
 
     this.sessionManager = new ExtensionSessionCoordinator({
@@ -75,12 +74,17 @@ export class ScoutController implements vscode.Disposable {
     });
     this.protocolHostServices = createScoutProtocolHostServices({
       cwd: this.cwd,
+      agentDir: this.agentDir,
       sessionManager: this.sessionManager,
       configManager: this.configManager,
       sessionIndex: this.sessionIndex,
       postMessage: (message, surface) => this.postMessage(message, surface),
       openSettingsPanel: options.openSettingsPanel,
       openTreePanel: options.openTreePanel,
+      openTextFile: async (filePath) => {
+        const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+        await vscode.window.showTextDocument(document);
+      },
       showErrorMessage: (message) => {
         void vscode.window.showErrorMessage(message);
       },
@@ -154,12 +158,5 @@ export class ScoutController implements vscode.Disposable {
 
   private postMessage(message: ExtensionMessage, surface?: ScoutWebviewSurface): void {
     this.webviewRegistry.postMessage(message, surface);
-  }
-
-  // ---------- 辅助 ----------
-
-  private resolveAgentDir(): string {
-    // 默认在 cwd 下的 .scout 目录
-    return vscode.Uri.joinPath(vscode.Uri.file(this.cwd), '.scout').fsPath;
   }
 }

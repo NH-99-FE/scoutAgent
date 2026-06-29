@@ -14,6 +14,7 @@ import type {
   ScoutQueueState,
   ScoutSessionStats,
   ScoutSessionTreeNode,
+  ScoutExtensionUIRequestClosedReason,
   ThinkingLevel,
   ToolInfo,
 } from '@scout-agent/shared';
@@ -30,6 +31,7 @@ import { getDefaultSessionDir, getSessionsRoot } from './session-paths.ts';
 
 import {
   ScoutExtensionRunner,
+  type ExtensionUIContext,
   type SendMessageInput,
   type NewSessionReplacementOptions,
   type ScoutExtensionActions,
@@ -115,6 +117,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private previewGeneration = 0;
   private readonly sessionOperationBroker = new SessionOperationBroker();
   private readonly agentEventCorrelator = new AgentEventCorrelator();
+  private extensionUIContext: ExtensionUIContext | undefined;
+  private cancelExtensionUIRequests:
+    | ((reason?: ScoutExtensionUIRequestClosedReason) => void)
+    | undefined;
 
   /** 事件监听器列表（透传 AgentSession 事件） */
   private listeners: ((event: ScoutSessionEvent) => void)[] = [];
@@ -219,6 +225,15 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     }
   }
 
+  setExtensionUIContext(
+    uiContext: ExtensionUIContext | undefined,
+    cancelPending?: (reason?: ScoutExtensionUIRequestClosedReason) => void,
+  ): void {
+    this.extensionUIContext = uiContext;
+    this.cancelExtensionUIRequests = cancelPending;
+    this.agentSession?.setExtensionUIContext(uiContext);
+  }
+
   // ---------- 核心生命周期 ----------
 
   async initialize(): Promise<void> {
@@ -299,6 +314,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   }
 
   private async runSessionReplacement<T>(operation: () => Promise<T>): Promise<T> {
+    this.cancelExtensionUIRequests?.('session_replacement');
     return await this.sessionOperationBroker.runExclusive(operation);
   }
 
@@ -948,6 +964,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     };
 
     extensionRunner.bindCore(extensionActions, contextActions);
+    extensionRunner.setUIContext(this.extensionUIContext);
   }
 
   // ---------- 生命周期 ----------
@@ -958,6 +975,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     }
 
     this.disposePromise = (async () => {
+      this.cancelExtensionUIRequests?.('disposed');
       const runtime = this.sessionRuntime;
       const agentSession = this.agentSession;
 

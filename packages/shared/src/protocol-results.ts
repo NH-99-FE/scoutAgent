@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { ScoutCustomModelsSettings } from './models.ts';
+import type { ScoutExtensionsSettings } from './protocol-extensions.ts';
 import type { ScoutRuntimeSettingsState } from './settings.ts';
 import type {
   ScoutCommandInfo,
@@ -49,6 +50,11 @@ export interface ScoutCustomModelsResult {
 export interface ScoutRuntimeSettingsResult {
   type: 'runtime_settings_result';
   settings: ScoutRuntimeSettingsState;
+}
+
+export interface ScoutExtensionsResult {
+  type: 'extensions_result';
+  settings: ScoutExtensionsSettings;
 }
 
 export interface ScoutContextUsageResult {
@@ -100,6 +106,8 @@ export type ScoutGenericCommandResultType =
   | 'label_result'
   | 'set_session_name_result'
   | 'set_default_model_result'
+  | 'create_extension_from_template_result'
+  | 'open_extension_file_result'
   | 'reload_result'
   | 'delete_session_result';
 
@@ -159,6 +167,7 @@ export type ScoutProtocolResponsePayload =
   | ScoutConfigResult
   | ScoutCustomModelsResult
   | ScoutRuntimeSettingsResult
+  | ScoutExtensionsResult
   | ScoutContextUsageResult
   | ScoutCommandsResult
   | ScoutTreeResult
