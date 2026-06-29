@@ -1,9 +1,21 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ScoutCustomModelsSettings, ScoutRuntimeSettingsState } from '@scout-agent/shared';
+import type {
+  ScoutBusyState,
+  ScoutConfig,
+  ScoutCustomModelsSettings,
+  ScoutRuntimeSettingsState,
+  ScoutWebviewState,
+} from '@scout-agent/shared';
 import App from '@/App';
 import { routeProtocolResponse, resetProtocolTransport } from '@/bridge/transport-client';
+import { useConfigStore } from '@/store/config-store';
+import { useConversationStore } from '@/store/conversation-store';
+import { useSessionStore } from '@/store/session-store';
+import { useTaskStore } from '@/store/task-store';
+import { useTreeStore } from '@/store/tree-store';
+import { useUiStore } from '@/store/ui-store';
 import { SettingsApp } from '@/surfaces/settings/SettingsApp';
 
 const postMessage = vi.fn();
@@ -75,6 +87,36 @@ function makeRuntimeSettings(): ScoutRuntimeSettingsState {
   };
 }
 
+function makeBootstrapConfig(): ScoutConfig {
+  return {
+    models: [],
+    defaultModelProvider: 'openai',
+    defaultModelId: 'qwen3.7-max',
+    branchSummary: {
+      reserveTokens: 0,
+      skipPrompt: false,
+    },
+  };
+}
+
+function makeBootstrapState(): ScoutWebviewState {
+  return {
+    messages: [],
+    isStreaming: false,
+    busyState: { kind: 'idle', cancellable: false } as ScoutBusyState,
+    modelProvider: 'openai',
+    modelId: 'qwen3.7-max',
+    thinkingLevel: 'off',
+    tools: [],
+    activeToolNames: [],
+    commands: [],
+    sessionId: 'session-1',
+    sessionName: '',
+    sessionFile: '',
+    cwd: 'E:\\scout-test',
+  };
+}
+
 function getPostedRequests(type: string): Array<Record<string, unknown>> {
   return postMessage.mock.calls
     .map(([message]) => message as Record<string, unknown>)
@@ -98,6 +140,24 @@ function installImmediateSettingsHost(): void {
         }
       | undefined;
     if (request?.type !== 'protocol_request' || typeof request.requestId !== 'string') return;
+
+    if (request.payload?.type === 'ready') {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'protocol_response',
+            requestId: request.requestId,
+            payload: {
+              type: 'bootstrap_result',
+              surface: 'settings',
+              config: makeBootstrapConfig(),
+              state: makeBootstrapState(),
+              commands: [],
+            },
+          },
+        }),
+      );
+    }
 
     if (request.payload?.type === 'request_custom_models') {
       window.dispatchEvent(
@@ -239,6 +299,12 @@ describe('SettingsApp', () => {
     cleanup();
     resetProtocolTransport();
     delete window.__SCOUT_WEBVIEW_SURFACE__;
+    useConfigStore.getState().actions.reset();
+    useConversationStore.getState().actions.reset();
+    useSessionStore.getState().actions.reset();
+    useTaskStore.getState().actions.reset();
+    useTreeStore.getState().actions.reset();
+    useUiStore.getState().actions.reset();
   });
 
   it('constrains settings content to the internal scroll region', () => {
@@ -252,10 +318,9 @@ describe('SettingsApp', () => {
     installImmediateSettingsHost();
 
     render(<App />);
-    await act(async () => undefined);
 
     expect(screen.queryByText('C:\\Users\\me\\.scout\\agent\\models.json')).not.toBeInTheDocument();
-    expect(screen.getByDisplayValue('openai-key')).toBeEnabled();
+    expect(await screen.findByDisplayValue('openai-key')).toBeEnabled();
     expect(screen.queryByText('正在读取全局模型配置')).not.toBeInTheDocument();
   });
 

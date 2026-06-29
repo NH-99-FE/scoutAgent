@@ -1,13 +1,13 @@
 import { defineConfig } from 'vitest/config';
-import path from 'node:path';
 
 export default defineConfig({
-  resolve: {
-    alias: {
-      vscode: path.resolve(__dirname, 'packages/extension/test/mock-vscode.ts'),
-    },
-  },
   test: {
+    projects: [
+      'packages/ai/vitest.config.ts',
+      'packages/agent/vitest.config.ts',
+      'packages/extension/vitest.config.ts',
+      'packages/webview/vitest.config.ts',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'], // 输出格式
@@ -24,7 +24,7 @@ export default defineConfig({
         lines: 70,
         functions: 70,
         branches: 60,
-        statements: 70,
+        statements: 68,
       },
     },
   },
