@@ -30,6 +30,7 @@ export interface ScoutProtocolHostServicesOptions {
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
   postMessage: (message: ExtensionMessage, surface?: ScoutWebviewSurface) => void;
+  showErrorMessage?: (message: string) => void;
   log: (message: string) => void;
 }
 
@@ -147,6 +148,10 @@ export function createScoutProtocolHostServices(
     },
     getTreeResult: () => bundle.tree.getTreeResult(),
     logReady: (surface) => options.log(`[scout] Webview ready: ${surface}`),
+    notifyReadyFailure: (surface, message) => {
+      options.log(`[scout] Webview bootstrap failed (${surface}): ${message}`);
+      options.showErrorMessage?.(`Scout 启动失败：${message}`);
+    },
   });
 
   bundle.sessionEventForwarder = new SessionEventForwarder({

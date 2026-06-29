@@ -81,6 +81,9 @@ export class ScoutController implements vscode.Disposable {
       postMessage: (message, surface) => this.postMessage(message, surface),
       openSettingsPanel: options.openSettingsPanel,
       openTreePanel: options.openTreePanel,
+      showErrorMessage: (message) => {
+        void vscode.window.showErrorMessage(message);
+      },
       log: (message) => this.outputChannel.appendLine(message),
     });
     this.protocolServer = new ProtocolServer({

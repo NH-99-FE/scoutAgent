@@ -17,6 +17,7 @@ import type {
 import { projectExtensionEvent } from './extension-event-projector';
 import { resolveProtocolRoute } from './protocol-route';
 import {
+  projectBootstrapFailure,
   projectProtocolResponsePayload,
   projectTaskHistoryResult,
 } from './protocol-response-projector';
@@ -194,7 +195,10 @@ function openSessionByPath(payload: OpenSessionPayload, failureType: OpenSession
 }
 
 export const protocolClient = {
-  ready: () => sendRouted({ type: 'ready' }, projectProtocolResponsePayload),
+  ready: () =>
+    sendRouted({ type: 'ready' }, projectProtocolResponsePayload, (message) => {
+      projectBootstrapFailure(message);
+    }),
   requestState: () => sendRouted({ type: 'request_state' }, projectProtocolResponsePayload),
   requestConfig: () => sendRouted({ type: 'request_config' }, projectProtocolResponsePayload),
   requestCustomModels: (

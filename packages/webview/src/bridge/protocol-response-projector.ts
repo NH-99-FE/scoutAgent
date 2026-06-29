@@ -25,6 +25,7 @@ export function projectProtocolResponsePayload(
       useConfigStore.getState().actions.setConfig(payload.config);
       useConfigStore.getState().actions.setCommands(payload.commands);
       applyStateSnapshotToStores(payload.state);
+      useUiStore.getState().actions.markBootstrapReady();
       if (payload.sessions) {
         useSessionStore.getState().actions.setSessions(payload.sessions);
       }
@@ -68,6 +69,10 @@ export function projectProtocolResponsePayload(
       projectCommandResult(payload);
       break;
   }
+}
+
+export function projectBootstrapFailure(message: string): void {
+  useUiStore.getState().actions.markBootstrapFailed(message);
 }
 
 export function projectTaskHistoryResult(

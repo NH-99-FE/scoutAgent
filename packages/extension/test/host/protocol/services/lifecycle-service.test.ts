@@ -134,4 +134,27 @@ describe('LifecycleProtocolService', () => {
       }),
     );
   });
+
+  it('notifies the host and rethrows when ready bootstrap fails', async () => {
+    const sessionManager = makeSessionManager();
+    const respond = vi.fn();
+    const notifyReadyFailure = vi.fn();
+    vi.mocked(sessionManager.initialize).mockRejectedValueOnce(new Error('runtime unavailable'));
+    const service = new LifecycleProtocolService({
+      sessionManager,
+      getConfig: makeConfig,
+      getState: vi.fn(async () => makeState()),
+      getCommands: () => [],
+      getSessions: vi.fn(async () => []),
+      getRecentTasks: vi.fn(async () => []),
+      getTreeResult: vi.fn(async () => ({ type: 'tree_result' as const, tree: [], leafId: null })),
+      logReady: vi.fn(),
+      notifyReadyFailure,
+    });
+
+    await expect(service.ready('chat', respond)).rejects.toThrow('runtime unavailable');
+
+    expect(notifyReadyFailure).toHaveBeenCalledWith('chat', 'runtime unavailable');
+    expect(respond).not.toHaveBeenCalled();
+  });
 });

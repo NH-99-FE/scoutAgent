@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectTaskHistoryResult as routeTaskHistoryResponse } from '@/bridge/protocol-response-projector';
 import { resetProtocolTransport } from '@/bridge/transport-client';
+import { AppNotificationToaster } from '@/components/common/AppNotificationToaster';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
 import { useConfigStore } from '@/store/config-store';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
@@ -329,7 +330,12 @@ describe('ChatApp', () => {
 
   it('shows extension notifications in the chat surface', async () => {
     routeDetailState();
-    render(<ChatApp />);
+    render(
+      <>
+        <ChatApp />
+        <AppNotificationToaster />
+      </>,
+    );
 
     act(() => {
       routeExtensionMessage({

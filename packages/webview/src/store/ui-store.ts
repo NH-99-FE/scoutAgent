@@ -7,12 +7,15 @@ import type { ScoutDiagnostic, ScoutNotificationMessage } from '@scout-agent/sha
 import type { WebviewSurface } from '@/bridge/surface';
 
 export type ChatView = 'auto' | 'home' | 'detail';
+export type BootstrapStatus = 'pending' | 'ready' | 'failed';
 
 interface UiActions {
   beginOpenTask: (sessionPath: string) => void;
   completeOpenTask: (success: boolean) => void;
   beginNewSessionRequest: () => void;
   completeNewSessionRequest: (success: boolean) => void;
+  markBootstrapFailed: (message: string) => void;
+  markBootstrapReady: () => void;
   resolveOpenTask: (sessionFile: string | undefined) => void;
   setChatView: (view: ChatView) => void;
   setSurface: (surface: WebviewSurface) => void;
@@ -22,6 +25,8 @@ interface UiActions {
 }
 
 interface UiStore {
+  bootstrapError: string | undefined;
+  bootstrapStatus: BootstrapStatus;
   chatView: ChatView;
   newSessionPending: boolean;
   openingTaskSessionPath: string | undefined;
@@ -32,6 +37,8 @@ interface UiStore {
 }
 
 const initialState = {
+  bootstrapError: undefined as string | undefined,
+  bootstrapStatus: 'pending' as BootstrapStatus,
   chatView: 'auto' as ChatView,
   newSessionPending: false,
   openingTaskSessionPath: undefined as string | undefined,
@@ -68,6 +75,12 @@ export const useUiStore = create<UiStore>((set) => ({
         newSessionPending: false,
       });
     },
+    markBootstrapFailed: (message) =>
+      set({
+        bootstrapError: message,
+        bootstrapStatus: 'failed',
+      }),
+    markBootstrapReady: () => set({ bootstrapError: undefined, bootstrapStatus: 'ready' }),
     resolveOpenTask: (sessionFile) =>
       set((state) => {
         if (!state.openingTaskSessionPath || state.openingTaskSessionPath !== sessionFile) {
@@ -86,11 +99,11 @@ export const useUiStore = create<UiStore>((set) => ({
   },
 }));
 
+export const useBootstrapError = () => useUiStore((state) => state.bootstrapError);
+export const useBootstrapStatus = () => useUiStore((state) => state.bootstrapStatus);
 export const useChatView = () => useUiStore((state) => state.chatView);
-export const useNewSessionPending = () =>
-  useUiStore((state) => state.newSessionPending);
-export const useOpeningTaskSessionPath = () =>
-  useUiStore((state) => state.openingTaskSessionPath);
+export const useNewSessionPending = () => useUiStore((state) => state.newSessionPending);
+export const useOpeningTaskSessionPath = () => useUiStore((state) => state.openingTaskSessionPath);
 export const useSurface = () => useUiStore((state) => state.surface);
 export const useNotification = () => useUiStore((state) => state.notification);
 export const useDiagnostics = () => useUiStore((state) => state.diagnostics);

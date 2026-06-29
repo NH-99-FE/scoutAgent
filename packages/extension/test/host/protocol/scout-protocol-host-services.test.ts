@@ -114,4 +114,31 @@ describe('createScoutProtocolHostServices', () => {
       }),
     ]);
   });
+
+  it('uses the host notification hook when lifecycle bootstrap fails', async () => {
+    const showErrorMessage = vi.fn();
+    const bundle = createScoutProtocolHostServices({
+      cwd: '/workspace',
+      sessionManager: {
+        ...makeSessionManager(),
+        initialize: vi.fn(async () => {
+          throw new Error('runtime unavailable');
+        }),
+      } as unknown as ExtensionSessionCoordinator,
+      configManager: makeConfigManager(),
+      sessionIndex: new SessionIndex({
+        listWorkspace: vi.fn(async () => []),
+        listAll: vi.fn(async () => []),
+      }),
+      postMessage: vi.fn(),
+      showErrorMessage,
+      log: vi.fn(),
+    });
+
+    await expect(bundle.protocolServices.lifecycle.ready('chat', vi.fn())).rejects.toThrow(
+      'runtime unavailable',
+    );
+
+    expect(showErrorMessage).toHaveBeenCalledWith('Scout 启动失败：runtime unavailable');
+  });
 });

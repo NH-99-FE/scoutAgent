@@ -26,6 +26,7 @@ export interface LifecycleProtocolServiceOptions {
   getRecentTasks: () => Promise<ScoutTaskItem[]>;
   getTreeResult: () => Promise<ScoutTreeResult>;
   logReady: (surface: ScoutWebviewSurface) => void;
+  notifyReadyFailure?: (surface: ScoutWebviewSurface, message: string) => void;
 }
 
 // ---------- Service ----------
@@ -39,6 +40,7 @@ export class LifecycleProtocolService implements LifecycleProtocolHost {
   private readonly getRecentTasks: () => Promise<ScoutTaskItem[]>;
   private readonly getTreeResult: () => Promise<ScoutTreeResult>;
   private readonly logReady: (surface: ScoutWebviewSurface) => void;
+  private readonly notifyReadyFailure?: (surface: ScoutWebviewSurface, message: string) => void;
 
   constructor(options: LifecycleProtocolServiceOptions) {
     this.sessionManager = options.sessionManager;
@@ -49,28 +51,38 @@ export class LifecycleProtocolService implements LifecycleProtocolHost {
     this.getRecentTasks = options.getRecentTasks;
     this.getTreeResult = options.getTreeResult;
     this.logReady = options.logReady;
+    this.notifyReadyFailure = options.notifyReadyFailure;
   }
 
   async ready(surface: ScoutWebviewSurface, respond: ProtocolResponder): Promise<void> {
-    this.logReady(surface);
-    if (surface !== 'settings') {
-      await this.sessionManager.initialize();
+    try {
+      this.logReady(surface);
+      if (surface !== 'settings') {
+        await this.sessionManager.initialize();
+      }
+      const result: ScoutBootstrapResult = {
+        type: 'bootstrap_result',
+        surface,
+        config: this.getConfig(),
+        state: await this.getState(),
+        commands: this.getCommands(),
+      };
+      if (surface === 'chat') {
+        result.sessions = await this.getSessions();
+        result.recentTasks = await this.getRecentTasks();
+      }
+      if (surface === 'tree') {
+        const tree = await this.getTreeResult();
+        result.tree = { nodes: tree.tree, leafId: tree.leafId };
+      }
+      respond(result);
+    } catch (error) {
+      this.notifyReadyFailure?.(surface, getErrorMessage(error));
+      throw error;
     }
-    const result: ScoutBootstrapResult = {
-      type: 'bootstrap_result',
-      surface,
-      config: this.getConfig(),
-      state: await this.getState(),
-      commands: this.getCommands(),
-    };
-    if (surface === 'chat') {
-      result.sessions = await this.getSessions();
-      result.recentTasks = await this.getRecentTasks();
-    }
-    if (surface === 'tree') {
-      const tree = await this.getTreeResult();
-      result.tree = { nodes: tree.tree, leafId: tree.leafId };
-    }
-    respond(result);
   }
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

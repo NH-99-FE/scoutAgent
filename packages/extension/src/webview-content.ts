@@ -6,47 +6,15 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import {
-  EXTENSION_TO_WEBVIEW_MESSAGE_TYPES,
-  WEBVIEW_TO_EXTENSION_MESSAGE_TYPES,
-} from '@scout-agent/shared';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 
 const DEV_SERVER_URL = 'http://localhost:5173';
-const THEME_VARIABLES = [
-  '--vscode-tab-activeBackground',
-  '--vscode-sideBar-background',
-  '--vscode-editor-background',
-  '--vscode-foreground',
-  '--vscode-editorWidget-background',
-  '--vscode-editorWidget-foreground',
-  '--vscode-menu-background',
-  '--vscode-menu-foreground',
-  '--vscode-dropdown-background',
-  '--vscode-dropdown-foreground',
-  '--vscode-toolbar-hoverBackground',
-  '--vscode-toolbar-activeBackground',
-  '--vscode-list-hoverBackground',
-  '--vscode-descriptionForeground',
-  '--vscode-contrastBorder',
-  '--vscode-widget-border',
-  '--vscode-panel-border',
-  '--vscode-input-border',
-  '--vscode-input-placeholderForeground',
-  '--vscode-focusBorder',
-  '--vscode-errorForeground',
-  '--vscode-charts-blue',
-  '--vscode-charts-green',
-  '--vscode-charts-yellow',
-  '--vscode-charts-orange',
-  '--vscode-charts-red',
-];
 const STARTUP_BACKGROUND =
   'var(--vscode-sideBar-background, var(--vscode-editor-background, #252526))';
 
 const STARTUP_THEME_STYLE = `<style data-scout-startup-theme>
     :root { color: var(--vscode-foreground); background: ${STARTUP_BACKGROUND}; }
-    html, body, #root, #scout-webview-frame { background: ${STARTUP_BACKGROUND}; }
+    html, body, #root { background: ${STARTUP_BACKGROUND}; }
   </style>`;
 
 export function configureScoutWebview(extensionUri: vscode.Uri, webview: vscode.Webview): void {
@@ -62,8 +30,9 @@ export async function getScoutWebviewHtml(
   webview: vscode.Webview,
   isDev: boolean,
   surface: ScoutWebviewSurface,
+  probeDevServerFn: () => Promise<boolean> = probeDevServer,
 ): Promise<string> {
-  if (isDev && (await probeDevServer())) {
+  if (isDev && (await probeDevServerFn())) {
     return getHmrHtml(surface);
   }
   return getLocalHtml(extensionUri, webview, surface);
@@ -84,96 +53,31 @@ function probeDevServer(): Promise<boolean> {
 }
 
 function getHmrHtml(surface: ScoutWebviewSurface): string {
-  const url = `${DEV_SERVER_URL}?surface=${encodeURIComponent(surface)}`;
   const devOrigin = new URL(DEV_SERVER_URL).origin;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${devOrigin}; script-src 'unsafe-inline'; style-src 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${devOrigin} data:; font-src ${devOrigin} data:; style-src ${devOrigin} 'unsafe-inline'; script-src ${devOrigin} 'unsafe-inline'; connect-src ${devOrigin} ws://localhost:5173;">
   <title>${getSurfaceTitle(surface)}</title>
   ${STARTUP_THEME_STYLE}
   <style>
     body { margin: 0; padding: 0; overflow: hidden; height: 100vh; color: var(--vscode-foreground); }
-    iframe { width: 100%; height: 100%; border: none; opacity: 0; background: ${STARTUP_BACKGROUND}; }
-    iframe[data-scout-ready="true"] { opacity: 1; }
   </style>
+  <script>window.__SCOUT_WEBVIEW_SURFACE__=${JSON.stringify(surface)};</script>
+  <script type="module">
+    import RefreshRuntime from '${devOrigin}/@react-refresh';
+    RefreshRuntime.injectIntoGlobalHook(window);
+    window.$RefreshReg$ = () => {};
+    window.$RefreshSig$ = () => (type) => type;
+    window.__vite_plugin_react_preamble_installed__ = true;
+  </script>
+  <script type="module" src="${devOrigin}/@vite/client"></script>
+  <script type="module" src="${devOrigin}/src/main.tsx"></script>
 </head>
 <body>
-  <iframe id="scout-webview-frame"></iframe>
-  <script>
-    (() => {
-      const frame = document.getElementById('scout-webview-frame');
-      const vscode = acquireVsCodeApi();
-      const devOrigin = ${JSON.stringify(devOrigin)};
-      const devUrl = ${JSON.stringify(url)};
-      const webviewToExtensionTypes = new Set(${JSON.stringify(WEBVIEW_TO_EXTENSION_MESSAGE_TYPES)});
-      const extensionToWebviewTypes = new Set(${JSON.stringify(EXTENSION_TO_WEBVIEW_MESSAGE_TYPES)});
-      const getTheme = () => {
-        const className = [
-          document.documentElement.className,
-          document.body.className,
-        ].join(' ');
-        if (className.includes('vscode-high-contrast')) return 'high-contrast';
-        if (className.includes('vscode-dark')) return 'dark';
-        return 'light';
-      };
-      const getThemeVariables = () => {
-        const rootStyles = getComputedStyle(document.documentElement);
-        const bodyStyles = getComputedStyle(document.body);
-        return ${JSON.stringify(THEME_VARIABLES)}.reduce((variables, name) => {
-          const value =
-            rootStyles.getPropertyValue(name).trim() ||
-            bodyStyles.getPropertyValue(name).trim();
-          if (value) variables[name] = value;
-          return variables;
-        }, {});
-      };
-      const getFrameUrl = () => {
-        const nextUrl = new URL(devUrl);
-        nextUrl.searchParams.set('theme', getTheme());
-        return nextUrl.toString();
-      };
-      const postTheme = () => {
-        frame.contentWindow?.postMessage(
-          { type: 'scout_theme_update', theme: getTheme(), variables: getThemeVariables() },
-          devOrigin,
-        );
-      };
-      const isMessageObject = (value) =>
-        value !== null && typeof value === 'object' && typeof value.type === 'string';
-      const isFrameMessage = (event) =>
-        event.source === frame.contentWindow && event.origin === devOrigin;
-      frame.addEventListener('load', postTheme);
-      new MutationObserver(postTheme).observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['class'],
-      });
-      new MutationObserver(postTheme).observe(document.body, {
-        attributes: true,
-        attributeFilter: ['class'],
-      });
-      window.addEventListener('message', (event) => {
-        if (!isMessageObject(event.data)) return;
-        if (isFrameMessage(event)) {
-          if (event.data.type === 'scout_theme_ready') {
-            frame.dataset.scoutReady = 'true';
-            postTheme();
-            return;
-          }
-          if (webviewToExtensionTypes.has(event.data.type)) {
-            vscode.postMessage(event.data);
-          }
-          return;
-        }
-        if (extensionToWebviewTypes.has(event.data.type)) {
-          frame.contentWindow?.postMessage(event.data, devOrigin);
-        }
-      });
-      frame.src = getFrameUrl();
-    })();
-  </script>
+  <div id="root"></div>
 </body>
 </html>`;
 }
