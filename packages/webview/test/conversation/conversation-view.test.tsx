@@ -83,6 +83,10 @@ function renderConversation({
   );
 }
 
+function expandCompletedTurn() {
+  fireEvent.click(screen.getByRole('button', { name: /展开回复 已处理/ }));
+}
+
 function setViewportScrollMetrics(
   viewport: HTMLElement,
   metrics: { clientHeight: number; scrollHeight: number; scrollTop: number },
@@ -159,16 +163,16 @@ describe('ConversationView', () => {
       />,
     );
 
-    const turnSummaryButton = screen.getByRole('button', { name: /收起回复 已处理/ });
+    const turnSummaryButton = screen.getByRole('button', { name: /展开回复 已处理/ });
     expect(turnSummaryButton).toBeInTheDocument();
     expect(turnSummaryButton.className).not.toContain('-ml-1');
     expect(turnSummaryButton.className).not.toContain('px-1');
     expect(turnSummaryButton.className).not.toContain('py-0.5');
     expect(container.querySelector('[data-assistant-turn-disclosure-icon]')).toBeTruthy();
-    expect(screen.getByText('分析当前布局')).toBeInTheDocument();
+    expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
 
     fireEvent.click(turnSummaryButton);
-    expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
+    expect(screen.getByText('分析当前布局')).toBeInTheDocument();
   });
 
   it('collapses process history once final answer content starts streaming', () => {
@@ -381,7 +385,9 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开回复 已处理/ })).toBeInTheDocument();
+    expect(screen.queryByText('上一轮思考')).not.toBeInTheDocument();
+    expandCompletedTurn();
     expect(screen.getByText('正在思考')).toBeInTheDocument();
     expect(screen.getByText('上一轮思考')).toBeInTheDocument();
   });
@@ -1073,8 +1079,10 @@ describe('ConversationView', () => {
       ],
     });
 
-    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开回复 已处理/ })).toBeInTheDocument();
     expect(screen.getByText('已经给出可用结果')).toBeInTheDocument();
+    expect(screen.queryByText('某个内部状态需要注意')).not.toBeInTheDocument();
+    expandCompletedTurn();
     expect(screen.getByText('某个内部状态需要注意')).toBeInTheDocument();
   });
 
@@ -1233,6 +1241,8 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('准备读取文件')).toBeInTheDocument();
+    expect(screen.queryByText('已阅读 README.md')).not.toBeInTheDocument();
+    expandCompletedTurn();
     expect(screen.getByText('已阅读 README.md')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /展开过程 已阅读 README\.md/ }),
@@ -1274,6 +1284,7 @@ describe('ConversationView', () => {
       ],
     });
 
+    expandCompletedTurn();
     const readActivity = screen.getByText('已阅读 README.md');
     const activityRow = readActivity.closest('div');
     const processList = readActivity.closest('[data-assistant-process-phase]')?.parentElement;
@@ -1316,6 +1327,7 @@ describe('ConversationView', () => {
       ],
     });
 
+    expandCompletedTurn();
     expect(screen.getByText('阅读失败 missing.md')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /展开过程 阅读失败 missing\.md/ }),
@@ -1523,6 +1535,7 @@ describe('ConversationView', () => {
       ],
     });
 
+    expandCompletedTurn();
     expect(screen.getByText('写入失败 src/generated.ts')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /展开过程 写入失败 src\/generated\.ts/ }),
@@ -1686,6 +1699,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     expect(screen.getByText('已运行 printf markdown')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
 
@@ -1725,6 +1739,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     expect(screen.getByText('已运行 pnpm test')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /展开过程 已运行 pnpm test/ }),
@@ -1763,6 +1778,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     expect(screen.getByText('已运行 todo_write')).toBeInTheDocument();
     expect(screen.queryByText('已todo_write')).not.toBeInTheDocument();
   });
@@ -2693,6 +2709,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     expect(screen.getByText('运行失败 pnpm test')).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /展开过程 运行失败 pnpm test/ }),
@@ -2741,6 +2758,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     expect(screen.getByText('已列出 src')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /展开过程 已列出 src/ })).not.toBeInTheDocument();
     expect(screen.queryByText('处理了 1 项')).not.toBeInTheDocument();
@@ -2789,6 +2807,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     expect(screen.getByRole('button', { name: /展开过程 已运行 2 条命令/ })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /展开过程 已运行 pnpm lint/ }),
@@ -2838,6 +2857,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     expect(screen.getByRole('button', { name: /展开过程 已完成 2 项/ })).toBeInTheDocument();
     expect(screen.queryByText('已运行 1 条命令')).not.toBeInTheDocument();
     expect(screen.queryByText('已阅读 1 个文件')).not.toBeInTheDocument();
@@ -2877,6 +2897,7 @@ describe('ConversationView', () => {
       },
     });
 
+    expandCompletedTurn();
     fireEvent.click(screen.getByRole('button', { name: /展开工具输出 bash/ }));
     expect(screen.getByText('最终答案内容')).toBeInTheDocument();
     expect(screen.getByText(/测试失败/)).toBeInTheDocument();
@@ -2938,8 +2959,9 @@ describe('ConversationView', () => {
       toolExecutionsById,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /收起回复 已处理/ }));
     expect(screen.getByRole('button', { name: /展开回复 已处理/ })).toBeInTheDocument();
+    expandCompletedTurn();
+    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
 
     rerender(
       <ConversationView
@@ -2951,7 +2973,9 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: /收起回复 已处理/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /展开回复 已处理/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开工具输出 bash/ })).not.toBeInTheDocument();
+    expandCompletedTurn();
     expect(screen.getByRole('button', { name: /展开工具输出 bash/ })).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /展开过程 已运行 pnpm test/ }),

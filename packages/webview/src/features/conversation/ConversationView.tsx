@@ -444,7 +444,7 @@ function AssistantTurn({
 }) {
   const shouldShowActions = !row.isLatestAssistant || !row.isStreaming;
   const expansionId = getAssistantTurnExpansionId(row.key, expansionScope);
-  const open = useConversationExpansionOpen(expansionId, true);
+  const open = useConversationExpansionOpen(expansionId, getAssistantTurnDefaultOpen(row));
   const turnSummary = row.turnSummary;
 
   useRegisterConversationExpansionNode({
@@ -518,6 +518,14 @@ function AssistantTurn({
       {content}
     </article>
   );
+}
+
+function getAssistantTurnDefaultOpen(row: AssistantConversationRow): boolean {
+  const summary = row.turnSummary;
+  if (!summary) return true;
+  if (summary.running) return true;
+  if (summary.status === 'failed' || summary.status === 'stopped') return true;
+  return row.entries.some((entry) => entry.type === 'process' && entry.defaultOpen);
 }
 
 function AssistantTurnEntries({
