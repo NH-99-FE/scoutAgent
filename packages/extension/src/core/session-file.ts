@@ -16,6 +16,13 @@ export interface SessionFileInfo {
   forkPointEntryId?: string;
 }
 
+export interface DefaultSessionExportFileNameOptions {
+  sessionId?: string;
+  now?: Date;
+}
+
+const MAX_SESSION_ID_FILE_NAME_LENGTH = 80;
+
 interface SessionHeader {
   type: 'session';
   version?: number;
@@ -68,6 +75,27 @@ export function readSessionFileInfo(filePath: string): SessionFileInfo {
     forkPointEntryId:
       typeof header.forkPointEntryId === 'string' ? header.forkPointEntryId : undefined,
   };
+}
+
+// ---------- 导出 ----------
+
+export function createDefaultSessionExportFileName(
+  options: DefaultSessionExportFileNameOptions = {},
+): string {
+  const timestamp = (options.now ?? new Date()).toISOString().replace(/[:.]/g, '-');
+  const sessionId = sanitizeSessionIdForFileName(options.sessionId);
+  return sessionId ? `session-${sessionId}-${timestamp}.jsonl` : `session-${timestamp}.jsonl`;
+}
+
+function sanitizeSessionIdForFileName(sessionId: string | undefined): string | undefined {
+  const normalized = sessionId
+    ?.trim()
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
+  const truncated = normalized
+    ?.slice(0, MAX_SESSION_ID_FILE_NAME_LENGTH)
+    .replace(/[^A-Za-z0-9]+$/g, '');
+  return truncated || undefined;
 }
 
 // ---------- 导入 ----------

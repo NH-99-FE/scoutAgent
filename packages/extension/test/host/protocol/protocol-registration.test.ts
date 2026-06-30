@@ -327,7 +327,7 @@ function makeServices(): ScoutProtocolServices {
       deleteSession: vi.fn(async (_message, respond) => {
         respond({ type: 'delete_session_result', success: true });
       }),
-      exportSession: vi.fn((_message, respond) => {
+      exportSession: vi.fn(async (_message, respond) => {
         respond({ type: 'export_session_result', success: true, path: '/workspace/export.jsonl' });
       }),
       setSessionName: vi.fn(async (_message, respond) => {

@@ -137,8 +137,8 @@ export function registerScoutProtocolServices(
     delete_session: async (message, context) => {
       await services.session.deleteSession(payload<'delete_session'>(message), context.respond);
     },
-    export_session: (message, context) => {
-      services.session.exportSession(payload<'export_session'>(message), context.respond);
+    export_session: async (message, context) => {
+      await services.session.exportSession(payload<'export_session'>(message), context.respond);
     },
     set_session_name: async (message, context) => {
       await services.session.setSessionName(payload<'set_session_name'>(message), context.respond);

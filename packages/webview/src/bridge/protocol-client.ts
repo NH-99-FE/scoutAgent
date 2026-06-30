@@ -306,6 +306,8 @@ export const protocolClient = {
     sendRouted({ type: 'open_settings_panel' }, projectProtocolResponsePayload),
   pickImportSession: () =>
     sendRouted({ type: 'pick_import_session' }, projectProtocolResponsePayload),
+  exportSession: () =>
+    sendRouted({ type: 'export_session', format: 'jsonl' }, projectProtocolResponsePayload),
   openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, projectProtocolResponsePayload),
   openTask: (task: ScoutTaskItem) => {
     openSessionByPath(

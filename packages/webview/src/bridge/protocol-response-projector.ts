@@ -165,10 +165,19 @@ function projectCommandResult(message: ScoutCommandResult): void {
   }
 
   if (
-    message.type === 'import_session_result' &&
+    (message.type === 'import_session_result' || message.type === 'export_session_result') &&
     !message.success &&
     message.error === 'cancelled'
   ) {
+    return;
+  }
+
+  if (message.type === 'export_session_result' && message.success) {
+    useUiStore.getState().actions.setNotification({
+      type: 'notification',
+      level: 'success',
+      message: message.path ? `会话已导出：${message.path}` : '会话已导出',
+    });
     return;
   }
 

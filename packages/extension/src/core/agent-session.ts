@@ -107,7 +107,7 @@ import type {
   SessionTreeEntry,
   SessionTreeNode,
 } from './session/index.ts';
-import { CURRENT_SESSION_VERSION } from './session/index.ts';
+import { createDefaultSessionExportFileName, CURRENT_SESSION_VERSION } from './session/index.ts';
 import {
   DEFAULT_REASONING_THINKING_LEVEL,
   normalizeThinkingLevelForModel,
@@ -173,7 +173,7 @@ export type AgentSessionEvent =
    */
   | { type: 'error'; message: string }
   /** 用户级提示，渲染为 webview toast。与 'error' 互斥使用：一次只走一条路径。 */
-  | { type: 'notification'; level: 'info' | 'warning' | 'error'; message: string }
+  | { type: 'notification'; level: 'success' | 'info' | 'warning' | 'error'; message: string }
   | {
       type: 'auto_retry_start';
       attempt: number;
@@ -735,10 +735,7 @@ export class AgentSession implements CoreDisposable {
   }
 
   exportToJsonl(outputPath?: string): string {
-    const filePath = resolve(
-      this.cwd,
-      outputPath ?? `session-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`,
-    );
+    const filePath = resolve(this.cwd, outputPath ?? createDefaultSessionExportFileName());
     const dir = dirname(filePath);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });

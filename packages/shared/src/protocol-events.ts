@@ -129,7 +129,7 @@ export type ScoutRuntimeExtensionEvent =
 
 export interface ScoutNotificationMessage {
   type: 'notification';
-  level: 'info' | 'warning' | 'error';
+  level: 'success' | 'info' | 'warning' | 'error';
   message: string;
 }
 

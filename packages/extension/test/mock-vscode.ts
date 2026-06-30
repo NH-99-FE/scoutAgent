@@ -30,6 +30,8 @@ export const window = {
   createWebviewPanel: vi.fn(),
   createOutputChannel: vi.fn(),
   registerWebviewViewProvider: vi.fn(() => ({ dispose: vi.fn() })),
+  showOpenDialog: vi.fn(),
+  showSaveDialog: vi.fn(),
   showInformationMessage: vi.fn(),
   showWarningMessage: vi.fn(),
   showErrorMessage: vi.fn(),

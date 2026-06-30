@@ -14,7 +14,9 @@ export {
   migrateSessionEntries,
   parseSessionEntries,
 } from '../session-manager.ts';
+export { createDefaultSessionExportFileName, readSessionFileInfo } from '../session-file.ts';
 export { extractSessionTextContent } from './content-text.ts';
+export type { DefaultSessionExportFileNameOptions } from '../session-file.ts';
 export type { SessionTextContent, SessionTextContentPart } from './content-text.ts';
 export type {
   BranchedSessionResult,

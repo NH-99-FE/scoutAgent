@@ -3,9 +3,13 @@
 // ============================================================
 
 import * as vscode from 'vscode';
+import { join } from 'node:path';
 import type { ExtensionEventMessage, ScoutSessionListItem } from '@scout-agent/shared';
 import { isPathInsideOrEqual, resolveSessionCwdPolicy } from '../../../core/session-cwd.ts';
-import { readSessionFileInfo } from '../../../core/session-file.ts';
+import {
+  createDefaultSessionExportFileName,
+  readSessionFileInfo,
+} from '../../../core/session/index.ts';
 import type {
   ExtensionSessionCoordinator,
   UserSessionOperationToken,
@@ -318,14 +322,23 @@ export class SessionProtocolService implements SessionProtocolHost {
     }
   }
 
-  exportSession(message: ProtocolPayload<'export_session'>, respond: ProtocolResponder): void {
+  async exportSession(
+    message: ProtocolPayload<'export_session'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
     try {
-      const path = this.sessionManager.exportSessionToJsonl(message.outputPath);
+      const outputPath = message.outputPath ?? (await this.pickExportSessionPath());
+      if (!outputPath) {
+        respond({ type: 'export_session_result', success: false, error: 'cancelled' });
+        return;
+      }
+
+      const path = this.sessionManager.exportSessionToJsonl(outputPath);
       if (!path) {
         respond({
           type: 'export_session_result',
           success: false,
-          error: 'No active session',
+          error: '导出会话失败：当前没有活动会话',
         });
         return;
       }
@@ -337,6 +350,20 @@ export class SessionProtocolService implements SessionProtocolHost {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  private async pickExportSessionPath(): Promise<string | undefined> {
+    const selected = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(
+        join(
+          this.cwd,
+          createDefaultSessionExportFileName({ sessionId: this.sessionManager.sessionId }),
+        ),
+      ),
+      filters: { 'JSONL Session': ['jsonl'], 'All Files': ['*'] },
+      saveLabel: 'Export Session',
+    });
+    return selected?.fsPath;
   }
 
   async setSessionName(

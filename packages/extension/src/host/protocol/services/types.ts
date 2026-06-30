@@ -115,7 +115,10 @@ export interface SessionProtocolHost {
     message: ProtocolPayload<'delete_session'>,
     respond: ProtocolResponder,
   ) => Promise<void>;
-  exportSession: (message: ProtocolPayload<'export_session'>, respond: ProtocolResponder) => void;
+  exportSession: (
+    message: ProtocolPayload<'export_session'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
   setSessionName: (
     message: ProtocolPayload<'set_session_name'>,
     respond: ProtocolResponder,

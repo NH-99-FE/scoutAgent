@@ -33,5 +33,9 @@ function showNotificationToast(notification: ScoutNotificationMessage): void {
     toast.warning(notification.message, options);
     return;
   }
+  if (notification.level === 'success') {
+    toast.success(notification.message, options);
+    return;
+  }
   toast.info(notification.message, options);
 }

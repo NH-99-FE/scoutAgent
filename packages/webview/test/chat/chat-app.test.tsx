@@ -780,6 +780,34 @@ describe('ChatApp', () => {
     expect(useUiStore.getState().chatView).toBe('home');
   });
 
+  it('exports the current session from the detail more menu', () => {
+    routeDetailState({ sessionFile: '/sessions/current.jsonl' });
+
+    render(<ChatApp />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: '更多操作' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '导出会话' }));
+
+    const exportMessage = getLatestPostedProtocolRequest('export_session');
+    expect(exportMessage?.payload).toEqual({ type: 'export_session', format: 'jsonl' });
+
+    act(() => {
+      routeProtocolResult(exportMessage, {
+        type: 'export_session_result',
+        success: true,
+        path: '/workspace/export.jsonl',
+      });
+    });
+
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'success',
+      message: '会话已导出：/workspace/export.jsonl',
+    });
+  });
+
   it('clears parent session pending state when restore is cancelled', () => {
     routeDetailState({
       sessionFile: '/sessions/fork.jsonl',

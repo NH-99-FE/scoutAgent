@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonlSessionMetadata } from '../../../../src/core/session/index.ts';
 import type {
   ExtensionSessionCoordinator,
@@ -37,6 +38,7 @@ function makeOperation(
 
 function makeSessionManager(overrides: Record<string, unknown> = {}): ExtensionSessionCoordinator {
   return {
+    sessionId: 'session-1',
     sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
     beginUserSessionOperation: vi.fn((kind: UserSessionOperationToken['kind']) =>
       makeOperation(kind),
@@ -91,6 +93,11 @@ function makeService(
 }
 
 describe('SessionProtocolService', () => {
+  beforeEach(() => {
+    vi.mocked(vscode.window.showOpenDialog).mockReset();
+    vi.mocked(vscode.window.showSaveDialog).mockReset();
+  });
+
   it('responds with session list data and marks the active session', async () => {
     const respond = vi.fn();
     const { service } = makeService({
@@ -188,5 +195,69 @@ describe('SessionProtocolService', () => {
     expect(respond).toHaveBeenCalledWith({ type: 'new_session_result', success: true });
     expect(pushState).toHaveBeenCalledTimes(2);
     expect(requestRecentTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it('prompts for an export path and writes the active session jsonl there', async () => {
+    const sessionManager = makeSessionManager();
+    const respond = vi.fn();
+    vi.mocked(vscode.window.showSaveDialog).mockResolvedValue(
+      vscode.Uri.file('/workspace/exported-session.jsonl'),
+    );
+    const { service } = makeService({ sessionManager });
+
+    await service.exportSession({ type: 'export_session', format: 'jsonl' }, respond);
+
+    expect(vscode.window.showSaveDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultUri: expect.objectContaining({
+          fsPath: expect.stringMatching(/^\/workspace\/session-session-1-/),
+        }),
+        filters: { 'JSONL Session': ['jsonl'], 'All Files': ['*'] },
+        saveLabel: 'Export Session',
+      }),
+    );
+    expect(sessionManager.exportSessionToJsonl).toHaveBeenCalledWith(
+      '/workspace/exported-session.jsonl',
+    );
+    expect(respond).toHaveBeenCalledWith({
+      type: 'export_session_result',
+      success: true,
+      path: '/workspace/session.jsonl',
+    });
+  });
+
+  it('exports directly to the provided output path without opening a save dialog', async () => {
+    const sessionManager = makeSessionManager();
+    const respond = vi.fn();
+    const { service } = makeService({ sessionManager });
+
+    await service.exportSession(
+      { type: 'export_session', format: 'jsonl', outputPath: '/workspace/direct.jsonl' },
+      respond,
+    );
+
+    expect(vscode.window.showSaveDialog).not.toHaveBeenCalled();
+    expect(sessionManager.exportSessionToJsonl).toHaveBeenCalledWith('/workspace/direct.jsonl');
+    expect(respond).toHaveBeenCalledWith({
+      type: 'export_session_result',
+      success: true,
+      path: '/workspace/session.jsonl',
+    });
+  });
+
+  it('does not export when the save dialog is cancelled', async () => {
+    const sessionManager = makeSessionManager();
+    const respond = vi.fn();
+    vi.mocked(vscode.window.showSaveDialog).mockResolvedValue(undefined);
+    const { service } = makeService({ sessionManager });
+
+    await service.exportSession({ type: 'export_session', format: 'jsonl' }, respond);
+
+    expect(sessionManager.exportSessionToJsonl).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      type: 'export_session_result',
+      success: false,
+      error: 'cancelled',
+    });
   });
 });

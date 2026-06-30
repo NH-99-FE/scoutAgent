@@ -224,10 +224,9 @@ function ConversationMoreMenu({ parentSessionPath }: { parentSessionPath: string
           <GitBranch />
           <span>查看会话树</span>
         </DropdownMenuItem>
-        <DropdownMenuItem disabled className="text-[12px]">
+        <DropdownMenuItem className="text-[12px]" onSelect={protocolClient.exportSession}>
           <Download />
           <span>导出会话</span>
-          <span className="text-muted-foreground ml-auto text-[11px]">Beta</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
