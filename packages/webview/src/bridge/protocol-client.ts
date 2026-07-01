@@ -47,6 +47,10 @@ interface NavigateTreeOptions {
 }
 
 type LabelResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'label_result' }>;
+type SetSessionNameResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'set_session_name_result' }
+>;
 type SetDefaultModelResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'set_default_model_result' }
@@ -274,6 +278,22 @@ export const protocolClient = {
       projectProtocolResponsePayload(payload);
       if (payload.type === 'label_result') onResult?.(payload);
     }),
+  setSessionName: (
+    name: string,
+    onResult?: (payload: SetSessionNameResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'set_session_name', name },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'set_session_name_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
   forkSession: (entryId: string) =>
     sendRouted(
       { type: 'fork_session', entryId, position: 'before' },

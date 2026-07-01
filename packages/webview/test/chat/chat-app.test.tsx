@@ -808,6 +808,135 @@ describe('ChatApp', () => {
     });
   });
 
+  it('renames the current session from the detail more menu', () => {
+    routeDetailState({
+      sessionFile: '/sessions/current.jsonl',
+      sessionName: '设计对话重命名方案',
+    });
+
+    render(<ChatApp />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: '更多操作' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名对话' }));
+
+    const input = screen.getByRole('textbox', { name: '对话标题' });
+    expect(input).toHaveValue('设计对话重命名方案');
+
+    fireEvent.change(input, { target: { value: '新的对话标题' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    const renameMessage = getLatestPostedProtocolRequest('set_session_name');
+    expect(renameMessage?.payload).toEqual({ type: 'set_session_name', name: '新的对话标题' });
+
+    act(() => {
+      routeProtocolResult(renameMessage, {
+        type: 'set_session_name_result',
+        success: true,
+      });
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+          sessionFile: '/sessions/current.jsonl',
+          sessionName: '新的对话标题',
+        }),
+      });
+    });
+
+    expect(screen.queryByRole('dialog', { name: '重命名对话' })).not.toBeInTheDocument();
+    expect(screen.getByText('新的对话标题')).toBeInTheDocument();
+  });
+
+  it('clears rename pending state when the rename request envelope fails', () => {
+    routeDetailState({
+      sessionFile: '/sessions/current.jsonl',
+      sessionName: '设计对话重命名方案',
+    });
+
+    render(<ChatApp />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: '更多操作' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名对话' }));
+
+    fireEvent.change(screen.getByRole('textbox', { name: '对话标题' }), {
+      target: { value: '新的对话标题' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+
+    act(() => {
+      routeProtocolError(getLatestPostedProtocolRequest('set_session_name'), 'rename failed');
+    });
+
+    expect(screen.getByRole('dialog', { name: '重命名对话' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: '取消' })).not.toBeDisabled();
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'error',
+      message: 'rename failed',
+    });
+  });
+
+  it('prefills the rename input with the displayed conversation title', () => {
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState([{ role: 'user', content: '设计对话重命名方案', timestamp: 1 }], {
+          sessionFile: '/sessions/current.jsonl',
+          sessionName: '',
+        }),
+      });
+    });
+
+    render(<ChatApp />);
+    expect(screen.getByRole('heading', { name: '设计对话重命名方案' })).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: '更多操作' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名对话' }));
+
+    const input = screen.getByRole('textbox', { name: '对话标题' });
+    expect(input).toHaveValue('设计对话重命名方案');
+    expect(input).toHaveAttribute('placeholder', '添加标题...');
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(getLatestPostedProtocolRequest('set_session_name')?.payload).toEqual({
+      type: 'set_session_name',
+      name: '设计对话重命名方案',
+    });
+  });
+
+  it('uses the default title when the current session has no derived title', () => {
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState([{ role: 'user', content: '   ', timestamp: 1 }], {
+          sessionFile: '/sessions/current.jsonl',
+          sessionName: '',
+        }),
+      });
+    });
+
+    render(<ChatApp />);
+    fireEvent.pointerDown(screen.getByRole('button', { name: '更多操作' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitem', { name: '重命名对话' }));
+
+    const input = screen.getByRole('textbox', { name: '对话标题' });
+    expect(input).toHaveValue('当前会话');
+    expect(input).toHaveAttribute('placeholder', '添加标题...');
+  });
+
   it('clears parent session pending state when restore is cancelled', () => {
     routeDetailState({
       sessionFile: '/sessions/fork.jsonl',

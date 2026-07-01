@@ -246,6 +246,13 @@ body,
     outline-offset: 0 !important;
     box-shadow: none !important;
   }
+  .scout-subtle-input-focus:focus,
+  .scout-subtle-input-focus:focus-visible {
+    outline: none !important;
+    outline-offset: 0 !important;
+    border-color: color-mix(in srgb, var(--foreground) 28%, transparent) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent) !important;
+  }
   .task-search-field:focus-within + div [data-slot='separator'] {
     background: var(--vscode-focusBorder, var(--border));
   }

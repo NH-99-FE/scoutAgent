@@ -197,6 +197,25 @@ describe('SessionProtocolService', () => {
     expect(requestRecentTasks).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes recent tasks after renaming the active session', async () => {
+    const sessionManager = makeSessionManager();
+    const pushState = vi.fn(async () => undefined);
+    const requestRecentTasks = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const { service } = makeService({
+      sessionManager,
+      pushState,
+      requestRecentTasks,
+    });
+
+    await service.setSessionName({ type: 'set_session_name', name: '新的对话标题' }, respond);
+
+    expect(sessionManager.setSessionName).toHaveBeenCalledWith('新的对话标题');
+    expect(respond).toHaveBeenCalledWith({ type: 'set_session_name_result', success: true });
+    expect(pushState).toHaveBeenCalledTimes(1);
+    expect(requestRecentTasks).toHaveBeenCalledTimes(1);
+  });
+
   it('prompts for an export path and writes the active session jsonl there', async () => {
     const sessionManager = makeSessionManager();
     const respond = vi.fn();

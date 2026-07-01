@@ -376,6 +376,7 @@ export class SessionProtocolService implements SessionProtocolHost {
       respond({ type: 'set_session_name_result', success: true });
       await this.pushState();
       await this.pushSessionsUpdate();
+      await this.requestRecentTasks();
     } catch (error) {
       respond({
         type: 'set_session_name_result',

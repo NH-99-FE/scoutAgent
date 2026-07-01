@@ -48,6 +48,7 @@ import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
 import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
 import { useTaskHistoryPanel } from '@/features/tasks/use-task-history-panel';
 import { ExtensionUIRequestsPanel } from './ExtensionUIRequestsPanel';
+import { RenameSessionDialog } from './RenameSessionDialog';
 
 interface ChatWorkspaceProps {
   onBack: () => void;
@@ -57,6 +58,7 @@ interface ChatWorkspaceProps {
 
 export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspaceProps) {
   const [pendingScrollToBottomKey, setPendingScrollToBottomKey] = useState(0);
+  const [renameOpen, setRenameOpen] = useState(false);
   const messages = useConversationMessages();
   const conversationItems = useConversationItems();
   const isStreaming = useVisualIsStreaming();
@@ -84,7 +86,8 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     toggle: toggleTaskHistory,
     setQuery: setTaskHistoryQuery,
   } = useTaskHistoryPanel();
-  const title = sessionName || getConversationTitle(messages) || '当前会话';
+  const fallbackTitle = getConversationTitle(messages);
+  const title = sessionName || fallbackTitle || '当前会话';
   const conversationViewItems = useMemo(
     () =>
       applyForkOriginNotice({
@@ -127,7 +130,10 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
           }
           actions={
             <>
-              <ConversationMoreMenu parentSessionPath={parentSessionPath} />
+              <ConversationMoreMenu
+                onRename={() => setRenameOpen(true)}
+                parentSessionPath={parentSessionPath}
+              />
               <span ref={taskHistoryTriggerRef} className="inline-flex">
                 <IconButton
                   label={isAgentRunning ? '正在回复' : '历史任务'}
@@ -143,6 +149,11 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
               </IconButton>
             </>
           }
+        />
+        <RenameSessionDialog
+          currentTitle={title}
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
         />
       </header>
 
@@ -187,7 +198,13 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   );
 }
 
-function ConversationMoreMenu({ parentSessionPath }: { parentSessionPath: string }) {
+function ConversationMoreMenu({
+  onRename,
+  parentSessionPath,
+}: {
+  onRename: () => void;
+  parentSessionPath: string;
+}) {
   const uiActions = useUiActions();
 
   const openParentSession = () => {
@@ -210,7 +227,7 @@ function ConversationMoreMenu({ parentSessionPath }: { parentSessionPath: string
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="center" className="w-35">
-        <DropdownMenuItem disabled className="text-[12px]">
+        <DropdownMenuItem className="text-[12px]" onSelect={onRename}>
           <Pencil />
           <span>重命名对话</span>
         </DropdownMenuItem>
