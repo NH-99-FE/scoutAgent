@@ -14,7 +14,6 @@ export {
 export type {
   DiffToolDisplayDetail,
   FileEditToolDisplayResult,
-  FileWriteToolDisplayResult,
   GenericToolDisplayResult,
   ResolveToolDisplayOptions,
   TextToolDisplayDetail,
@@ -26,5 +25,4 @@ export type {
   ToolDisplayResult,
   ToolDisplayStatus,
   ToolActivitySummarySpec,
-  WriteContentToolDisplayDetail,
 } from './tool-display/index';

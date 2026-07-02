@@ -16,7 +16,11 @@ export function useWebviewBootstrap(): WebviewSurface {
     useUiStore.getState().actions.setSurface(surface);
     const stopThemeSync = startWebviewThemeSync();
     const stopRouter = startExtensionMessageRouter();
-    protocolClient.ready();
+    if (surface === 'changes-review') {
+      useUiStore.getState().actions.markBootstrapReady();
+    } else {
+      protocolClient.ready();
+    }
 
     return () => {
       stopRouter();

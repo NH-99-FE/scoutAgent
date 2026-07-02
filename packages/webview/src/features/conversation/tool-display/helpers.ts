@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { ToolCallPreviewState } from '@/store/conversation-store';
+import type { ScoutFileChangeDetails } from '@scout-agent/shared';
 import type {
   FileEditToolDisplayResult,
   GenericToolDisplayResult,
@@ -37,7 +38,7 @@ export function createGenericDisplay(
   };
 }
 
-export function createFileEditDisplayFromDetails({
+export function createFileChangeDisplayFromDetails({
   status,
   toolName,
   args,
@@ -47,31 +48,20 @@ export function createFileEditDisplayFromDetails({
   toolName: string;
   args: Record<string, unknown> | undefined;
   details: unknown;
-}): FileEditToolDisplayResult | undefined {
-  const diffText = getFileEditDetailsDiff(details);
-  if (!diffText) return undefined;
-
-  const path = getFirstArgText(args, ['path', 'filePath', 'file', 'target']) || '文件';
-  const stats = countEditDiffStats(diffText);
+}): ToolDisplayResult | undefined {
+  if (!isFileChangeDetails(details)) return undefined;
   return {
-    kind: 'file_edit',
+    kind: 'file_change',
     status,
     toolName,
     icon: 'edit',
-    path,
-    detail: {
-      kind: 'diff',
-      diffText,
-    },
-    additions: stats.additions,
-    deletions: stats.deletions,
     metrics: [
-      { key: 'additions', value: stats.additions, prefix: '+', tone: 'added' },
-      { key: 'deletions', value: stats.deletions, prefix: '-', tone: 'deleted' },
+      { key: 'additions', value: details.additions, prefix: '+', tone: 'added' },
+      { key: 'deletions', value: details.deletions, prefix: '-', tone: 'deleted' },
     ],
     metricsPlacement: 'end',
-    detailLabel: '编辑差异',
-    detailTarget: path,
+    detailLabel: '文件变更',
+    detailTarget: details.path,
     summaryTitle: formatToolExecutionSummary(status, toolName, args),
   };
 }
@@ -177,23 +167,15 @@ export function formatMixedToolActivitySummaryLabel(count: number): string {
   return `已完成 ${count} 项`;
 }
 
-function getFileEditDetailsDiff(details: unknown): string {
-  if (!details || typeof details !== 'object') return '';
-  if ((details as { kind?: unknown }).kind !== 'file_edit') return '';
-  const diff = (details as { diff?: unknown }).diff;
-  return typeof diff === 'string' ? diff : '';
-}
-
-function countEditDiffStats(diff: string): { additions: number; deletions: number } {
-  let additions = 0;
-  let deletions = 0;
-
-  for (const line of diff.split('\n')) {
-    if (line.startsWith('+') && !line.startsWith('+++')) additions += 1;
-    if (line.startsWith('-') && !line.startsWith('---')) deletions += 1;
-  }
-
-  return { additions, deletions };
+function isFileChangeDetails(value: unknown): value is ScoutFileChangeDetails {
+  if (!value || typeof value !== 'object') return false;
+  const details = value as Partial<ScoutFileChangeDetails>;
+  return (
+    details.kind === 'file_change' &&
+    typeof details.path === 'string' &&
+    typeof details.additions === 'number' &&
+    typeof details.deletions === 'number'
+  );
 }
 
 export function formatToolExecutionSummary(

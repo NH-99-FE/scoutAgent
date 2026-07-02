@@ -49,11 +49,27 @@ export interface AssistantConversationRow {
   type: 'assistant';
   key: string;
   entries: AssistantTurnEntry[];
+  changesReviews: AssistantChangesReview[];
   turnSummary?: AssistantTurnSummary;
   actionText: string;
   timestamp: number;
   isLatestAssistant: boolean;
   isStreaming: boolean;
+}
+
+export interface AssistantChangesReview {
+  key: string;
+  turnId: string;
+  fileCount: number;
+  additions: number;
+  deletions: number;
+  files: AssistantChangesReviewFile[];
+}
+
+export interface AssistantChangesReviewFile {
+  path: string;
+  additions: number;
+  deletions: number;
 }
 
 export type AssistantOutcomeKind = 'aborted' | 'error' | 'compacting' | 'compacted' | 'forked';

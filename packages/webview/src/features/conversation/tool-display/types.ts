@@ -38,17 +38,7 @@ export interface DiffToolDisplayDetail {
   previewError?: string;
 }
 
-export interface WriteContentToolDisplayDetail {
-  kind: 'write_content';
-  contentText: string;
-  lines: string[];
-  errorText?: string;
-}
-
-export type ToolDisplayDetail =
-  | TextToolDisplayDetail
-  | DiffToolDisplayDetail
-  | WriteContentToolDisplayDetail;
+export type ToolDisplayDetail = TextToolDisplayDetail | DiffToolDisplayDetail;
 
 export interface ToolDisplayResult {
   kind: string;
@@ -79,13 +69,6 @@ export interface FileEditToolDisplayResult extends ToolDisplayResult {
   detail: DiffToolDisplayDetail;
   additions: number;
   deletions: number;
-}
-
-export interface FileWriteToolDisplayResult extends ToolDisplayResult {
-  kind: 'file_write';
-  path: string;
-  lineCount: number;
-  detail?: WriteContentToolDisplayDetail;
 }
 
 export interface ResolveToolDisplayOptions {

@@ -11,6 +11,7 @@ import { BootstrapPendingState } from '@/components/common/BootstrapPendingState
 import { SettingsSurfaceSkeleton } from '@/surfaces/settings/SettingsSurfaceSkeleton';
 import { TreeSurfaceSkeleton } from '@/surfaces/tree/TreeSurfaceSkeleton';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
+import { ChangesReviewApp } from '@/surfaces/changes-review/ChangesReviewApp';
 import { type BootstrapStatus, useBootstrapError, useBootstrapStatus } from '@/store/ui-store';
 
 const SettingsApp = lazy(() =>
@@ -54,6 +55,10 @@ function AppContent({
     return <ChatSurfaceContent bootstrapStatus={bootstrapStatus} />;
   }
 
+  if (surface === 'changes-review') {
+    return <ChangesReviewApp />;
+  }
+
   if (bootstrapStatus === 'pending') {
     return <SurfaceSkeleton surface={surface} />;
   }
@@ -66,7 +71,11 @@ function ChatSurfaceContent({ bootstrapStatus }: { bootstrapStatus: BootstrapSta
   return <BootstrapPendingState />;
 }
 
-function LazySurfaceContent({ surface }: { surface: Exclude<WebviewSurface, 'chat'> }) {
+function LazySurfaceContent({
+  surface,
+}: {
+  surface: Exclude<WebviewSurface, 'chat' | 'changes-review'>;
+}) {
   const SurfaceApp = surface === 'settings' ? SettingsApp : TreeApp;
 
   return (
@@ -76,7 +85,11 @@ function LazySurfaceContent({ surface }: { surface: Exclude<WebviewSurface, 'cha
   );
 }
 
-function SurfaceSkeleton({ surface }: { surface: Exclude<WebviewSurface, 'chat'> }) {
+function SurfaceSkeleton({
+  surface,
+}: {
+  surface: Exclude<WebviewSurface, 'chat' | 'changes-review'>;
+}) {
   return surface === 'settings' ? <SettingsSurfaceSkeleton /> : <TreeSurfaceSkeleton />;
 }
 

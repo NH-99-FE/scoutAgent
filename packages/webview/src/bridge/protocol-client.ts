@@ -329,6 +329,11 @@ export const protocolClient = {
   exportSession: () =>
     sendRouted({ type: 'export_session', format: 'jsonl' }, projectProtocolResponsePayload),
   openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, projectProtocolResponsePayload),
+  openChangesReview: (turnId: string, recordId?: string) => {
+    const payload: WebviewRequestPayload = { type: 'open_changes_review', turnId };
+    if (recordId) payload.recordId = recordId;
+    return sendRouted(payload, projectProtocolResponsePayload);
+  },
   openTask: (task: ScoutTaskItem) => {
     openSessionByPath(
       {

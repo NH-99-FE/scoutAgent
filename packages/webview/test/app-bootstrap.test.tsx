@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '@/App';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
@@ -12,6 +12,7 @@ import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
 import type {
   ScoutBusyState,
+  ScoutChangesReviewModel,
   ScoutConfig,
   ScoutProtocolRequest,
   ScoutWebviewState,
@@ -49,6 +50,26 @@ function makeState(): ScoutWebviewState {
   };
 }
 
+function makeChangesReviewModel(): ScoutChangesReviewModel {
+  return {
+    turnId: 'turn-1',
+    viewMode: 'unified',
+    files: [
+      {
+        id: 'file-0',
+        path: 'packages/webview/src/App.tsx',
+        absolutePath: '/workspace/packages/webview/src/App.tsx',
+        external: false,
+        additions: 1,
+        deletions: 0,
+        recordIds: ['review-1'],
+        rows: [{ type: 'added', newLineNumber: 1, text: 'export default App;' }],
+      },
+    ],
+    totals: { fileCount: 1, additions: 1, deletions: 0 },
+  };
+}
+
 function getReadyRequest(): ScoutProtocolRequest {
   const request = postMessage.mock.calls
     .map(([message]) => message as ScoutProtocolRequest)
@@ -83,6 +104,9 @@ describe('App bootstrap', () => {
     cleanup();
     resetProtocolTransport();
     delete window.__SCOUT_WEBVIEW_SURFACE__;
+    delete window.__SCOUT_CHANGES_REVIEW__;
+    document.body.style.removeProperty('height');
+    document.body.style.removeProperty('overflow');
     useConfigStore.getState().actions.reset();
     useConversationStore.getState().actions.reset();
     useSessionStore.getState().actions.reset();
@@ -133,6 +157,242 @@ describe('App bootstrap', () => {
 
     expect(screen.queryByText('Scout 正在启动')).not.toBeInTheDocument();
     expect(document.querySelector('.animate-pulse')).toBeInTheDocument();
+  });
+
+  it('renders the changes review surface from injected data without lifecycle bootstrap', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    window.__SCOUT_CHANGES_REVIEW__ = makeChangesReviewModel();
+
+    render(<App />);
+
+    expect(screen.getByText('1 个文件已更改')).toBeInTheDocument();
+    expect(screen.getByText('packages/webview/src/')).toBeInTheDocument();
+    expect(screen.getByText('App.tsx')).toBeInTheDocument();
+    expect(screen.getByText('export default App;')).toBeInTheDocument();
+    expect(
+      postMessage.mock.calls.some(([message]) => {
+        const candidate = message as { service?: string; method?: string };
+        return candidate.service === 'lifecycle' && candidate.method === 'ready';
+      }),
+    ).toBe(false);
+  });
+
+  it('lets the changes review surface scroll when the host document locks body overflow', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    window.__SCOUT_CHANGES_REVIEW__ = makeChangesReviewModel();
+    document.body.style.height = '100vh';
+    document.body.style.overflow = 'hidden';
+
+    render(<App />);
+
+    const shell = screen.getByRole('main');
+    expect(shell).toHaveClass('bg-tree-background', 'h-screen', 'overflow-y-auto');
+    const topbar = screen.getByText('1 个文件已更改').closest('header');
+    expect(topbar).toHaveClass('bg-tree-background');
+    const fileHeader = screen.getByText('App.tsx').closest('header');
+    expect(fileHeader).toHaveClass('bg-tree-background');
+  });
+
+  it('sends changes review panel messages directly to the host webview', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    window.__SCOUT_CHANGES_REVIEW__ = makeChangesReviewModel();
+
+    render(<App />);
+    fireEvent.click(screen.getByLabelText('Split diff'));
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'changes_review_set_view_mode',
+      mode: 'split',
+    });
+  });
+
+  it('renders paired split diff changes in the same visual row', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    const model = makeChangesReviewModel();
+    model.viewMode = 'split';
+    const file = model.files[0];
+    if (!file) throw new Error('changes review fixture file is missing');
+    file.rows = [
+      { type: 'removed', oldLineNumber: 1, text: 'const value = 1;' },
+      { type: 'added', newLineNumber: 1, text: 'const value = 2;' },
+    ];
+    window.__SCOUT_CHANGES_REVIEW__ = model;
+
+    render(<App />);
+
+    const removedCode = screen.getByText('const value = 1;');
+    const addedCode = screen.getByText('const value = 2;');
+    const removedColumn = document.querySelector('[data-split-column="removed"]');
+    const addedColumn = document.querySelector('[data-split-column="added"]');
+    if (!(removedColumn instanceof HTMLElement)) {
+      throw new Error('split diff removed column is missing');
+    }
+    if (!(addedColumn instanceof HTMLElement))
+      throw new Error('split diff added column is missing');
+    const addedLineNumber = addedColumn.querySelector(
+      '[data-split-line-number-side="added"][data-line-type="added"]',
+    );
+    const removedLineNumber = removedColumn.querySelector(
+      '[data-split-line-number-side="removed"][data-line-type="removed"]',
+    );
+    if (!addedLineNumber) throw new Error('split diff added gutter is missing');
+    if (!removedLineNumber) throw new Error('split diff removed gutter is missing');
+    expect(removedColumn).toContainElement(removedCode);
+    expect(addedColumn).toContainElement(addedCode);
+    const removedCodePane = removedCode.closest('[data-split-code-pane="true"]');
+    const addedCodePane = addedCode.closest('[data-split-code-pane="true"]');
+    if (!(removedCodePane instanceof HTMLElement)) throw new Error('removed code cell is missing');
+    if (!(addedCodePane instanceof HTMLElement)) throw new Error('added code cell is missing');
+    expect(removedCode).toHaveClass('scout-review-split-code');
+    expect(removedCodePane).toHaveClass('bg-changes-review-removed-muted', 'overflow-hidden');
+    expect(removedLineNumber).toHaveClass('border-r-[2px]', 'border-r-tree-background');
+    expect(addedLineNumber).toHaveClass(
+      'shadow-[inset_4px_0_0_var(--chart-2)]',
+      'border-r-[2px]',
+      'border-r-tree-background',
+    );
+    expect(addedCodePane).toHaveClass('bg-changes-review-added-muted', 'overflow-hidden');
+  });
+
+  it('keeps split diff chrome continuous while syncing both code scrollbars', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    const model = makeChangesReviewModel();
+    model.viewMode = 'split';
+    const file = model.files[0];
+    if (!file) throw new Error('changes review fixture file is missing');
+    const removedLine = `const removedValue = '${'old-'.repeat(60)}';`;
+    const addedLine = `const addedValue = '${'new-'.repeat(60)}';`;
+    file.rows = [
+      {
+        type: 'removed',
+        oldLineNumber: 1,
+        text: removedLine,
+      },
+      {
+        type: 'added',
+        newLineNumber: 1,
+        text: addedLine,
+      },
+    ];
+    window.__SCOUT_CHANGES_REVIEW__ = model;
+
+    render(<App />);
+
+    const scrollPlane = document.querySelector('[data-review-diff-scroll="split"]');
+    const splitDiff = document.querySelector('[data-split-diff="true"]');
+    const removedColumn = document.querySelector('[data-split-column="removed"]');
+    const removedCodePane = screen.getByText(removedLine).closest('[data-split-code-pane="true"]');
+    if (!(scrollPlane instanceof HTMLElement)) throw new Error('diff scroll plane is missing');
+    if (!(splitDiff instanceof HTMLElement)) throw new Error('split diff container is missing');
+    if (!(removedColumn instanceof HTMLElement))
+      throw new Error('split diff removed column is missing');
+    if (!(removedCodePane instanceof HTMLElement)) throw new Error('removed code pane is missing');
+
+    expect(scrollPlane).toHaveClass('scout-review-diff-scroll', 'overflow-x-hidden');
+    expect(splitDiff).toHaveClass(
+      'min-w-full',
+      'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]',
+      '[--changes-review-split-code-scroll-left:0px]',
+    );
+    expect(removedColumn).toHaveClass(
+      'min-w-0',
+      'grid-cols-[var(--changes-review-line-gutter)_minmax(0,1fr)]',
+    );
+    expect(removedColumn).not.toHaveClass('w-max');
+    expect(removedCodePane).toHaveClass('overflow-hidden');
+    Object.defineProperty(removedCodePane, 'clientWidth', { configurable: true, value: 100 });
+    Object.defineProperty(removedCodePane, 'scrollWidth', { configurable: true, value: 420 });
+
+    fireEvent.wheel(splitDiff, { deltaX: 120, deltaY: 0, shiftKey: true });
+
+    const removedScrollbar = document.querySelector('[data-split-code-scrollbar="removed"]');
+    const addedScrollbar = document.querySelector('[data-split-code-scrollbar="added"]');
+    if (!(removedScrollbar instanceof HTMLElement)) throw new Error('removed scrollbar is missing');
+    if (!(addedScrollbar instanceof HTMLElement)) throw new Error('added scrollbar is missing');
+
+    expect(scrollPlane.scrollLeft).toBe(0);
+    expect(splitDiff.style.getPropertyValue('--changes-review-split-code-scroll-left')).toBe(
+      '120px',
+    );
+    expect(removedScrollbar.scrollLeft).toBe(120);
+    expect(addedScrollbar.scrollLeft).toBe(120);
+
+    addedScrollbar.scrollLeft = 240;
+    fireEvent.scroll(addedScrollbar);
+
+    expect(splitDiff.style.getPropertyValue('--changes-review-split-code-scroll-left')).toBe(
+      '240px',
+    );
+    expect(removedScrollbar.scrollLeft).toBe(240);
+  });
+
+  it('renders changes review syntax and intraline diff tokens', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    const model = makeChangesReviewModel();
+    const file = model.files[0];
+    if (!file) throw new Error('changes review fixture file is missing');
+    file.rows = [
+      {
+        type: 'added',
+        newLineNumber: 1,
+        text: 'const value = 2;',
+        tokens: [
+          { text: 'const', syntaxScopes: ['hljs-keyword'] },
+          { text: ' value = ' },
+          { text: '2', syntaxScopes: ['hljs-number'], diff: 'added' },
+          { text: ';' },
+        ],
+      },
+    ];
+    window.__SCOUT_CHANGES_REVIEW__ = model;
+
+    render(<App />);
+
+    expect(screen.getByText('const')).toHaveClass('scout-review-token-keyword');
+    expect(screen.getByText('2')).toHaveClass(
+      'scout-review-token-number',
+      'scout-review-token-diff-added',
+    );
+  });
+
+  it('renders split diff empty sides with hatched placeholders', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    const model = makeChangesReviewModel();
+    model.viewMode = 'split';
+    const file = model.files[0];
+    if (!file) throw new Error('changes review fixture file is missing');
+    file.rows = [
+      { type: 'fold', count: 59 },
+      { type: 'removed', oldLineNumber: 60, text: 'const oldValue = 1;' },
+    ];
+    window.__SCOUT_CHANGES_REVIEW__ = model;
+
+    render(<App />);
+
+    const foldBar = screen.getByText('59 unmodified lines').parentElement;
+    if (!(foldBar instanceof HTMLElement)) throw new Error('split diff fold bar is missing');
+    expect(foldBar).toHaveClass('bg-muted');
+    const foldGutter = document.querySelector('[data-split-fold-gutter-side="removed"]');
+    const addedFoldContent = document.querySelector('[data-split-fold-content-side="added"]');
+    if (!(foldGutter instanceof HTMLElement)) throw new Error('split diff fold gutter is missing');
+    if (!(addedFoldContent instanceof HTMLElement)) {
+      throw new Error('split diff added fold content is missing');
+    }
+    expect(foldGutter).toHaveClass('border-r-tree-background', 'border-r-[2px]', 'rounded-l-[7px]');
+    expect(addedFoldContent).toHaveClass('rounded-r-[7px]');
+    const splitDiff = document.querySelector('[data-split-diff="true"]');
+    if (!(splitDiff instanceof HTMLElement)) throw new Error('split diff container is missing');
+    expect(splitDiff).toHaveClass('grid-cols-[minmax(0,1fr)_minmax(0,1fr)]');
+    expect(splitDiff).toHaveClass('min-w-full');
+    const emptySide = document.querySelector('[data-split-buffer-side="added"]');
+    if (!(emptySide instanceof HTMLElement)) throw new Error('split diff added buffer is missing');
+    expect(emptySide).toHaveAttribute('data-split-buffer-size', '1');
+    expect(emptySide).toHaveClass(
+      'col-span-2',
+      'bg-[var(--changes-review-empty-split-bg)]',
+      '[background-image:var(--changes-review-empty-split-pattern)]',
+      '[background-size:10px_10px]',
+    );
   });
 
   it('does not mount non-chat surfaces before bootstrap state arrives', async () => {

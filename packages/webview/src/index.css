@@ -76,6 +76,31 @@
   --chart-3: var(--vscode-charts-yellow, #cca700);
   --chart-4: var(--vscode-charts-orange, #d18616);
   --chart-5: var(--vscode-charts-red, #f14c4c);
+  --changes-review-added-muted: color-mix(in srgb, var(--chart-2) 18%, var(--background));
+  --changes-review-removed-muted: color-mix(in srgb, var(--chart-5) 16%, var(--background));
+  --changes-review-token-comment: #008000;
+  --changes-review-token-keyword: #0000ff;
+  --changes-review-token-string: #a31515;
+  --changes-review-token-number: #098658;
+  --changes-review-token-title: #795e26;
+  --changes-review-token-function: #795e26;
+  --changes-review-token-property: #001080;
+  --changes-review-token-variable: #001080;
+  --changes-review-token-meta: #800000;
+  --changes-review-token-symbol: #267f99;
+  --changes-review-token-name: #800000;
+  --changes-review-token-diff-added: color-mix(in srgb, var(--chart-2) 46%, transparent);
+  --changes-review-token-diff-added-border: color-mix(in srgb, var(--chart-2) 54%, transparent);
+  --changes-review-token-diff-removed: color-mix(in srgb, var(--chart-5) 44%, transparent);
+  --changes-review-token-diff-removed-border: color-mix(in srgb, var(--chart-5) 52%, transparent);
+  --changes-review-empty-split-bg: color-mix(in srgb, var(--muted) 34%, transparent);
+  --changes-review-empty-split-line: color-mix(in srgb, var(--muted-foreground) 24%, transparent);
+  --changes-review-empty-split-pattern: linear-gradient(
+    135deg,
+    transparent 0 calc(50% - 0.5px),
+    var(--changes-review-empty-split-line) calc(50% - 0.5px) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
   --radius: 0.625rem;
   --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
@@ -115,6 +140,17 @@ html.vscode-high-contrast {
   --scout-action-background: var(--vscode-foreground, #d4d4d4);
   --scout-action-foreground: var(--vscode-editor-background, #1f1f1f);
   --ring: transparent;
+  --changes-review-token-comment: #6a9955;
+  --changes-review-token-keyword: #569cd6;
+  --changes-review-token-string: #ce9178;
+  --changes-review-token-number: #b5cea8;
+  --changes-review-token-title: #dcdcaa;
+  --changes-review-token-function: #dcdcaa;
+  --changes-review-token-property: #9cdcfe;
+  --changes-review-token-variable: #9cdcfe;
+  --changes-review-token-meta: #c586c0;
+  --changes-review-token-symbol: #4ec9b0;
+  --changes-review-token-name: #4ec9b0;
   --background: var(
     --vscode-sideBar-background,
     var(--vscode-editor-background, var(--scout-fallback-background))
@@ -198,6 +234,8 @@ body,
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-changes-review-removed-muted: var(--changes-review-removed-muted);
+  --color-changes-review-added-muted: var(--changes-review-added-muted);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -519,6 +557,91 @@ body,
 
 .scout-fold-anchor-highlight {
   animation: scout-fold-anchor-highlight 1.2s ease-out both;
+}
+
+.scout-review-diff-scroll {
+  overscroll-behavior-x: contain;
+}
+
+.scout-review-split-diff {
+  --changes-review-line-height: calc(var(--vscode-editor-font-size, 14px) * 1.42);
+}
+
+.scout-review-split-code {
+  display: inline-block;
+  min-width: max-content;
+  transform: translateX(calc(var(--changes-review-split-code-scroll-left, 0px) * -1));
+  will-change: transform;
+}
+
+.scout-review-split-code-scrollbar {
+  height: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.scout-review-split-code-scrollbar-spacer {
+  height: 1px;
+}
+
+.scout-review-token-comment {
+  color: var(--changes-review-token-comment);
+}
+
+.scout-review-token-keyword {
+  color: var(--changes-review-token-keyword);
+}
+
+.scout-review-token-string {
+  color: var(--changes-review-token-string);
+}
+
+.scout-review-token-number {
+  color: var(--changes-review-token-number);
+}
+
+.scout-review-token-title {
+  color: var(--changes-review-token-title);
+}
+
+.scout-review-token-function {
+  color: var(--changes-review-token-function);
+}
+
+.scout-review-token-property {
+  color: var(--changes-review-token-property);
+}
+
+.scout-review-token-variable {
+  color: var(--changes-review-token-variable);
+}
+
+.scout-review-token-meta {
+  color: var(--changes-review-token-meta);
+}
+
+.scout-review-token-symbol {
+  color: var(--changes-review-token-symbol);
+}
+
+.scout-review-token-name {
+  color: var(--changes-review-token-name);
+}
+
+.scout-review-token-diff-added,
+.scout-review-token-diff-removed {
+  border-radius: 2px;
+  padding-inline: 1px;
+}
+
+.scout-review-token-diff-added {
+  background: var(--changes-review-token-diff-added);
+  box-shadow: inset 0 0 0 1px var(--changes-review-token-diff-added-border);
+}
+
+.scout-review-token-diff-removed {
+  background: var(--changes-review-token-diff-removed);
+  box-shadow: inset 0 0 0 1px var(--changes-review-token-diff-removed-border);
 }
 
 @keyframes scout-task-history-panel-enter {

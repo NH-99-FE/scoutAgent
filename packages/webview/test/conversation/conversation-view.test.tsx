@@ -1,6 +1,15 @@
 import { act, cleanup, fireEvent as rtlFireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScoutBusyState } from '@scout-agent/shared';
+
+const protocolClientMock = vi.hoisted(() => ({
+  openChangesReview: vi.fn(),
+}));
+
+vi.mock('@/bridge/protocol-client', () => ({
+  protocolClient: protocolClientMock,
+}));
+
 import { ConversationView } from '@/features/conversation/ConversationView';
 import {
   buildConversationRows,
@@ -129,6 +138,7 @@ function isToolActivity(
 describe('ConversationView', () => {
   afterEach(() => {
     useConversationExpansionStore.getState().actions.reset();
+    protocolClientMock.openChangesReview.mockReset();
     cleanup();
     vi.restoreAllMocks();
   });
@@ -1340,7 +1350,7 @@ describe('ConversationView', () => {
     expect(screen.queryByText(/"path": "missing.md"/)).not.toBeInTheDocument();
   });
 
-  it('shows write progress as a compact line count and expands generated content', () => {
+  it('shows write progress without exposing generated content', () => {
     renderConversation({
       isStreaming: true,
       items: [
@@ -1372,56 +1382,14 @@ describe('ConversationView', () => {
     });
 
     expect(screen.getByText('正在写入 src/generated.ts')).toBeInTheDocument();
-    expect(screen.getByText('+3')).toBeInTheDocument();
-    expect(screen.queryByText('-0')).not.toBeInTheDocument();
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/generated\.ts/ }));
-    expect(screen.getByText(/secret/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开写入内容 src\/generated\.ts/ }),
+    ).not.toBeInTheDocument();
   });
 
-  it('shows growing write line counts while exposing generated content on expand', () => {
+  it('does not render raw write content from arguments', () => {
     renderConversation({
-      isStreaming: true,
-      items: [
-        {
-          key: 'assistant-1',
-          message: {
-            role: 'assistant',
-            content: [
-              {
-                type: 'toolCall',
-                id: 'tool-1',
-                name: 'write',
-                arguments: { path: 'src/generated.ts', content: 'secret\nline 2\nline 3\n' },
-              },
-            ],
-            timestamp: 1,
-          },
-        },
-      ],
-      toolExecutionsById: {
-        'tool-1': {
-          toolCallId: 'tool-1',
-          toolName: 'write',
-          args: { path: 'src/generated.ts', content: 'secret\nline 2\nline 3\n' },
-          status: 'running',
-          isError: false,
-        },
-      },
-    });
-
-    expect(screen.getByText('正在写入 src/generated.ts')).toBeInTheDocument();
-    expect(screen.getByText('+3')).toBeInTheDocument();
-    expect(screen.queryByText('-0')).not.toBeInTheDocument();
-    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/generated\.ts/ }));
-    expect(screen.getByText(/secret/)).toBeInTheDocument();
-  });
-
-  it('preserves raw write content when counting and rendering lines', () => {
-    const { container } = renderConversation({
       isStreaming: true,
       items: [
         {
@@ -1451,18 +1419,16 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByText('+3')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/spaced\.ts/ }));
-    const lineContents = Array.from(container.querySelectorAll('[data-write-line-content]')).map(
-      (node) => node.textContent,
-    );
-    expect(lineContents).toEqual(['  indented', '   ', 'last']);
-    expect(screen.queryByText('+4')).not.toBeInTheDocument();
+    expect(screen.getByText('正在写入 src/spaced.ts')).toBeInTheDocument();
+    expect(screen.queryByText(/indented/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/last/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开写入内容 src\/spaced\.ts/ }),
+    ).not.toBeInTheDocument();
   });
 
-  it('allows expanding purely blank write content', () => {
-    const { container } = renderConversation({
+  it('does not expose blank write content as an expandable block', () => {
+    renderConversation({
       isStreaming: true,
       items: [
         {
@@ -1492,15 +1458,10 @@ describe('ConversationView', () => {
       },
     });
 
-    expect(screen.getByText('+1')).toBeInTheDocument();
-    const expandButton = screen.getByRole('button', { name: /展开写入内容 src\/blank\.txt/ });
-    expect(expandButton).not.toBeDisabled();
-
-    fireEvent.click(expandButton);
-    const lineContents = Array.from(container.querySelectorAll('[data-write-line-content]')).map(
-      (node) => node.textContent,
-    );
-    expect(lineContents).toEqual(['   ']);
+    expect(screen.getByText('正在写入 src/blank.txt')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开写入内容 src\/blank\.txt/ }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps write failures expandable without exposing content', () => {
@@ -1540,14 +1501,264 @@ describe('ConversationView', () => {
     expect(
       screen.queryByRole('button', { name: /展开过程 写入失败 src\/generated\.ts/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('+2')).toBeInTheDocument();
-    expect(screen.queryByText('-0')).not.toBeInTheDocument();
     expect(screen.queryByText(/EACCES/)).not.toBeInTheDocument();
     expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/generated\.ts/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开工具输出 src\/generated\.ts/ }));
     expect(screen.getByText(/EACCES: permission denied/)).toBeInTheDocument();
-    expect(screen.getByText(/secret/)).toBeInTheDocument();
+    expect(screen.queryByText(/secret/)).not.toBeInTheDocument();
+  });
+
+  it('renders assistant turn review entry and opens the changes review panel', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: 'src/app.ts',
+              additions: 2,
+              deletions: 1,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const reviewButton = screen.getByRole('button', { name: 'Review Changes' });
+    expect(reviewButton).toBeInTheDocument();
+    expect(screen.getByText('已编辑 1 个文件')).toBeInTheDocument();
+    expect(screen.getAllByText('+2')).toHaveLength(2);
+    expect(screen.getAllByText('-1')).toHaveLength(2);
+    expect(screen.getByText('src/')).toBeInTheDocument();
+    expect(screen.getByText('app.ts')).toBeInTheDocument();
+    expect(screen.queryByText('src/app.ts')).toBeNull();
+
+    fireEvent.click(reviewButton);
+
+    expect(protocolClientMock.openChangesReview).toHaveBeenCalledWith('turn-1');
+  });
+
+  it('collapses assistant review files after the first three and expands the rest on click', () => {
+    const paths = ['src/one.ts', 'src/two.ts', 'src/three.ts', 'src/four.ts'];
+
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: paths.map((path, index) => ({
+              type: 'toolCall',
+              id: `tool-${index + 1}`,
+              name: 'edit',
+              arguments: { path },
+            })),
+            timestamp: 1,
+          },
+        },
+        ...paths.map((path, index) => ({
+          key: `tool-result-${index + 1}`,
+          message: {
+            role: 'toolResult' as const,
+            toolCallId: `tool-${index + 1}`,
+            toolName: 'edit',
+            content: [{ type: 'text' as const, text: 'done' }],
+            details: {
+              kind: 'file_change' as const,
+              path,
+              additions: index + 1,
+              deletions: 0,
+              review: {
+                turnId: 'turn-1',
+                recordId: `review-${index + 1}`,
+              },
+            },
+            isError: false,
+            timestamp: index + 2,
+          },
+        })),
+      ],
+    });
+
+    expect(screen.getByText('已编辑 4 个文件')).toBeInTheDocument();
+    expect(screen.getByText('four.ts')).toBeInTheDocument();
+    expect(screen.getByText('three.ts')).toBeInTheDocument();
+    expect(screen.getByText('two.ts')).toBeInTheDocument();
+    expect(screen.queryByText('one.ts')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /再显示 1 个文件/ }));
+
+    expect(screen.getByText('one.ts')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /再显示 1 个文件/ })).not.toBeInTheDocument();
+  });
+
+  it('opens each assistant review entry by its own turn', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/old.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: 'src/old.ts',
+              additions: 1,
+              deletions: 0,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+        {
+          key: 'assistant-2',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-2',
+                name: 'edit',
+                arguments: { path: 'src/latest.ts' },
+              },
+            ],
+            timestamp: 3,
+          },
+        },
+        {
+          key: 'tool-result-2',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-2',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: 'src/latest.ts',
+              additions: 2,
+              deletions: 1,
+              review: {
+                turnId: 'turn-2',
+                recordId: 'review-2',
+              },
+            },
+            isError: false,
+            timestamp: 4,
+          },
+        },
+      ],
+    });
+
+    const reviewButtons = screen.getAllByRole('button', { name: 'Review Changes' });
+    expect(reviewButtons).toHaveLength(2);
+
+    fireEvent.click(reviewButtons[0]);
+    fireEvent.click(reviewButtons[1]);
+
+    expect(protocolClientMock.openChangesReview).toHaveBeenCalledTimes(2);
+    expect(protocolClientMock.openChangesReview.mock.calls.map(([turnId]) => turnId)).toEqual(
+      expect.arrayContaining(['turn-1', 'turn-2']),
+    );
+  });
+
+  it('keeps assistant turn review entry clickable for the host error path', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: 'src/app.ts',
+              additions: 1,
+              deletions: 0,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const reviewButton = screen.getByRole('button', {
+      name: 'Review Changes',
+    });
+    expect(reviewButton).not.toBeDisabled();
+
+    fireEvent.click(reviewButton);
+
+    expect(protocolClientMock.openChangesReview).toHaveBeenCalledWith('turn-1');
   });
 
   it('renders assistant text as safe GitHub flavored markdown', () => {
@@ -2468,7 +2679,7 @@ describe('ConversationView', () => {
     expect(screen.getByText(/405 line-405/)).toBeInTheDocument();
   });
 
-  it('limits large write content until the detail is explicitly expanded', () => {
+  it('does not render large write arguments in the tool row', () => {
     const content = Array.from({ length: 405 }, (_, index) => `line-${index + 1}`).join('\n');
 
     renderConversation({
@@ -2501,15 +2712,12 @@ describe('ConversationView', () => {
       },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开写入内容 src\/large\.ts/ }));
-
-    expect(screen.getByText('line-400')).toBeInTheDocument();
+    expect(screen.getByText('正在写入 src/large.ts')).toBeInTheDocument();
+    expect(screen.queryByText('line-1')).not.toBeInTheDocument();
     expect(screen.queryByText('line-405')).not.toBeInTheDocument();
-    const showAll = screen.getByRole('button', { name: /显示全部 405 行，已隐藏 5 行/ });
-
-    fireEvent.click(showAll);
-
-    expect(screen.getByText('line-405')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开写入内容 src\/large\.ts/ }),
+    ).not.toBeInTheDocument();
   });
   it('shows edit preview errors without marking the real tool execution as failed', () => {
     renderConversation({
@@ -3193,7 +3401,10 @@ describe('buildConversationRows', () => {
       ],
     });
 
-    const assistantRow = rows.find((row) => row.type === 'assistant');
+    const assistantRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { type: 'assistant' }> =>
+        row.type === 'assistant',
+    );
     if (assistantRow?.type !== 'assistant') {
       throw new Error('Expected assistant row');
     }
@@ -3417,10 +3628,15 @@ describe('buildConversationRows', () => {
             toolName: 'edit',
             content: [{ type: 'text', text: 'done' }],
             details: {
-              kind: 'file_edit',
-              diff: '-1 old\n+1 final\n+2 extra',
-              patch: '',
+              kind: 'file_change',
+              path: 'src/app.ts',
+              additions: 2,
+              deletions: 1,
               firstChangedLine: 1,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
             },
             isError: false,
             timestamp: 2,
@@ -3442,14 +3658,24 @@ describe('buildConversationRows', () => {
       .at(0);
 
     expect(toolActivity?.display).toMatchObject({
-      kind: 'file_edit',
-      additions: 2,
-      deletions: 1,
-      detail: {
-        kind: 'diff',
-        diffText: '-1 old\n+1 final\n+2 extra',
-      },
+      kind: 'file_change',
+      detailLabel: '文件变更',
+      detailTarget: 'src/app.ts',
+      metrics: [
+        { key: 'additions', value: 2, prefix: '+', tone: 'added' },
+        { key: 'deletions', value: 1, prefix: '-', tone: 'deleted' },
+      ],
     });
+
+    const assistantRow = rows.find((row) => row.type === 'assistant');
+    expect(assistantRow?.changesReviews).toMatchObject([
+      {
+        turnId: 'turn-1',
+        fileCount: 1,
+        additions: 2,
+        deletions: 1,
+      },
+    ]);
   });
 
   it('does not treat unmarked edit diff details as file edit output', () => {

@@ -2,9 +2,8 @@
 // Tool Display Presenters — 各工具展示策略
 // ============================================================
 
-import { countContentLines, splitContentLines } from './content';
 import {
-  createFileEditDisplayFromDetails,
+  createFileChangeDisplayFromDetails,
   createFileEditDisplayFromPreview,
   createGenericDisplay,
   formatBashDetailText,
@@ -12,12 +11,7 @@ import {
   formatToolExecutionSummary,
   getToolDisplayIcon,
 } from './helpers';
-import type {
-  FileWriteToolDisplayResult,
-  ToolDisplayContext,
-  ToolDisplayPresenter,
-  ToolDisplayResult,
-} from './types';
+import type { ToolDisplayContext, ToolDisplayPresenter, ToolDisplayResult } from './types';
 
 export const TOOL_DISPLAY_PRESENTERS: Record<string, ToolDisplayPresenter> = {
   bash: presentBashTool,
@@ -51,13 +45,13 @@ function presentReadTool(context: ToolDisplayContext): ToolDisplayResult {
 }
 
 function presentEditTool(context: ToolDisplayContext): ToolDisplayResult | undefined {
-  const detailsDisplay = createFileEditDisplayFromDetails({
+  const fileChangeDisplay = createFileChangeDisplayFromDetails({
     status: context.status,
     toolName: context.toolName,
     args: context.args,
     details: context.details,
   });
-  if (detailsDisplay) return detailsDisplay;
+  if (fileChangeDisplay) return fileChangeDisplay;
 
   if (
     context.preview?.preview.kind === 'file_edit' &&
@@ -95,31 +89,32 @@ function presentLsTool(context: ToolDisplayContext): ToolDisplayResult {
   });
 }
 
-function presentWriteTool(context: ToolDisplayContext): FileWriteToolDisplayResult {
+function presentWriteTool(context: ToolDisplayContext): ToolDisplayResult {
+  const fileChangeDisplay = createFileChangeDisplayFromDetails({
+    status: context.status,
+    toolName: context.toolName,
+    args: context.args,
+    details: context.details,
+  });
+  if (fileChangeDisplay) return fileChangeDisplay;
+
   const path = getStringArg(context.args, ['path', 'filePath', 'file', 'target']) || '文件';
-  const content = getRawStringArg(context.args, 'content');
-  const lines = splitContentLines(content);
-  const lineCount = countContentLines(content);
   const errorText = context.isError && context.bodyText.trim() ? context.bodyText : undefined;
   return {
-    kind: 'file_write',
+    kind: 'generic',
     status: context.status,
     toolName: context.toolName,
     icon: getToolDisplayIcon(context.toolName),
-    path,
-    lineCount,
-    metrics: [{ key: 'line_count', value: lineCount, prefix: '+', tone: 'added' }],
     metricsPlacement: 'inline',
-    detail:
-      content.length > 0 || errorText
-        ? {
-            kind: 'write_content',
-            contentText: content,
-            lines,
-            errorText,
-          }
-        : undefined,
-    detailLabel: '写入内容',
+    detail: errorText
+      ? {
+          kind: 'text',
+          title: '错误',
+          text: `错误\n${errorText}`,
+          completionLabel: context.completionLabel,
+        }
+      : undefined,
+    detailLabel: '工具输出',
     detailTarget: path,
     summaryTitle: formatToolExecutionSummary(context.status, context.toolName, context.args),
   };
@@ -132,10 +127,4 @@ function getStringArg(args: Record<string, unknown> | undefined, keys: string[])
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return '';
-}
-
-function getRawStringArg(args: Record<string, unknown> | undefined, key: string): string {
-  if (!args) return '';
-  const value = args[key];
-  return typeof value === 'string' ? value : '';
 }

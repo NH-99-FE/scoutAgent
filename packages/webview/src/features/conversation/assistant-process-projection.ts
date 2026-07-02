@@ -186,6 +186,7 @@ export function finalizeAssistantTurn(turn: AssistantTurnBuilder): AssistantConv
     type: 'assistant',
     key: turn.key,
     entries,
+    changesReviews: [],
     turnSummary: resolveAssistantTurnSummary(turn, entries),
     actionText: turn.actionTextParts.join('\n'),
     timestamp: turn.timestamp,
@@ -247,6 +248,7 @@ export function appendRuntimeActivityRow(
         phases,
       },
     ],
+    changesReviews: [],
     turnSummary: {
       status,
       label: status === 'work_processing' ? '正在处理' : '正在思考',

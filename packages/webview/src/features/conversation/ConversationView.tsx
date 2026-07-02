@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Copy,
   ExternalLink,
+  FileDiff,
   LoaderCircle,
   Split,
   ThumbsDown,
@@ -22,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { protocolClient } from '@/bridge/protocol-client';
 import { cn } from '@/lib/utils';
 import {
   getAssistantTurnExpansionId,
@@ -32,6 +34,7 @@ import {
 import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
 import {
   createConversationRowsProjector,
+  type AssistantChangesReview,
   type AssistantContentEntry,
   type AssistantConversationRow,
   type AssistantOutcomeConversationRow,
@@ -65,6 +68,7 @@ interface ConversationViewProps {
 }
 
 const EMPTY_TOOL_PREVIEWS: Record<string, ToolCallPreviewState> = {};
+const CHANGES_REVIEW_VISIBLE_FILE_LIMIT = 3;
 
 export function ConversationView({
   busyState,
@@ -466,6 +470,7 @@ function AssistantTurn({
           expansionScope={expansionScope}
           showProcessEntries={!turnSummary || turnSummary.running || open}
         />
+        <AssistantChangesReviewList reviews={row.changesReviews} />
       </div>
       {shouldShowActions ? (
         <MessageActions
@@ -559,6 +564,118 @@ function AssistantTurnEntries({
       )}
     </>
   );
+}
+
+function AssistantChangesReviewList({ reviews }: { reviews: AssistantChangesReview[] }) {
+  if (reviews.length === 0) return null;
+  return (
+    <div className="flex max-w-full min-w-0 flex-col gap-2 pt-1" data-changes-review-list="true">
+      {reviews.map((review) => (
+        <AssistantChangesReviewCard key={review.key} review={review} />
+      ))}
+    </div>
+  );
+}
+
+function AssistantChangesReviewCard({ review }: { review: AssistantChangesReview }) {
+  const [expanded, setExpanded] = useState(false);
+  const hiddenFileCount = Math.max(0, review.files.length - CHANGES_REVIEW_VISIBLE_FILE_LIMIT);
+  const visibleFiles = expanded
+    ? review.files
+    : review.files.slice(0, CHANGES_REVIEW_VISIBLE_FILE_LIMIT);
+
+  return (
+    <div className="border-border/80 bg-foreground/[0.035] max-w-[32rem] overflow-hidden rounded-lg border shadow-sm">
+      <div className="border-border/70 flex min-h-11 items-center gap-2.5 border-b px-3 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-5 font-semibold">
+            <FileDiff
+              aria-hidden="true"
+              className="text-muted-foreground size-3.5 shrink-0"
+              strokeWidth={2}
+            />
+            <span className="min-w-0 truncate">已编辑 {review.fileCount} 个文件</span>
+            <span className="shrink-0 font-mono text-[var(--chart-2)]">+{review.additions}</span>
+            {review.deletions > 0 ? (
+              <span className="shrink-0 font-mono text-[var(--chart-5)]">-{review.deletions}</span>
+            ) : null}
+          </div>
+        </div>
+        <Button
+          aria-label="Review Changes"
+          className="h-7 rounded-md px-2.5 text-xs font-medium shadow-none"
+          data-changes-review-button="true"
+          type="button"
+          variant="secondary"
+          onClick={() => protocolClient.openChangesReview(review.turnId)}
+        >
+          审核
+        </Button>
+      </div>
+      <div className="flex flex-col gap-0.5 px-3 py-2">
+        {visibleFiles.map((file) => (
+          <AssistantChangesReviewFileRow file={file} key={file.path} />
+        ))}
+        {!expanded && hiddenFileCount > 0 ? (
+          <button
+            className="text-foreground hover:text-foreground/80 flex min-h-7 w-fit cursor-pointer items-center gap-1 border-0 bg-transparent px-0 pt-1 text-sm font-medium"
+            onClick={() => setExpanded(true)}
+            type="button"
+          >
+            <span>再显示 {hiddenFileCount} 个文件</span>
+            <ChevronDown className="size-4" />
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AssistantChangesReviewFileRow({
+  file,
+}: {
+  file: AssistantChangesReview['files'][number];
+}) {
+  const pathParts = getReviewPathParts(file.path);
+  return (
+    <div className="flex min-h-6 items-center gap-2 text-xs leading-5">
+      <span className="flex min-w-0 flex-1 items-baseline">
+        {pathParts.directoryPrefix ? (
+          <span className="text-muted-foreground min-w-0 truncate">
+            {pathParts.directoryPrefix}
+          </span>
+        ) : null}
+        <span
+          className={cn(
+            'text-foreground min-w-0 truncate font-medium',
+            pathParts.directoryPrefix ? 'max-w-[70%] shrink-0' : 'flex-1',
+          )}
+        >
+          {pathParts.fileName}
+        </span>
+      </span>
+      <span className="shrink-0 font-mono text-xs font-semibold text-[var(--chart-2)]">
+        +{file.additions}
+      </span>
+      {file.deletions > 0 ? (
+        <span className="shrink-0 font-mono text-xs font-semibold text-[var(--chart-5)]">
+          -{file.deletions}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function getReviewPathParts(path: string): { directoryPrefix: string; fileName: string } {
+  const normalized = path.replace(/\\/g, '/');
+  const lastSeparatorIndex = normalized.lastIndexOf('/');
+  if (lastSeparatorIndex < 0) {
+    return { directoryPrefix: '', fileName: path };
+  }
+  return {
+    directoryPrefix: normalized.slice(0, lastSeparatorIndex + 1),
+    fileName: normalized.slice(lastSeparatorIndex + 1) || path,
+  };
 }
 
 const AssistantContentSegment = memo(function AssistantContentSegment({

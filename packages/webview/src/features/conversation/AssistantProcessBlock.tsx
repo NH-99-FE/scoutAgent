@@ -2,7 +2,7 @@
 // Assistant Process Block — assistant 过程与工具活动渲染
 // ============================================================
 
-import { type CSSProperties, useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -39,7 +39,6 @@ import type {
   ToolDisplayIcon,
   ToolDisplayMetric,
   ToolDisplayResult,
-  WriteContentToolDisplayDetail,
 } from './tool-display';
 import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
 
@@ -454,7 +453,6 @@ function ToolDetailPanel({
   status: ToolDisplayResult['status'];
 }) {
   if (detail.kind === 'diff') return <FileEditDiffPanel detail={detail} />;
-  if (detail.kind === 'write_content') return <FileWriteContentPanel detail={detail} />;
   return <TextToolDetailPanel detail={detail} status={status} />;
 }
 
@@ -494,80 +492,6 @@ function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
           onShowAll={() => setShowAll(true)}
         />
       ) : null}
-    </div>
-  );
-}
-
-function FileWriteContentPanel({ detail }: { detail: WriteContentToolDisplayDetail }) {
-  const lines = detail.lines;
-  const { hiddenLineCount, isTruncated, setShowAll, visibleLines } = usePreviewLines(lines);
-  const viewportRef = useRef<HTMLDivElement | null>(null);
-  const shouldStickToBottomRef = useRef(true);
-
-  const updateStickiness = useCallback(() => {
-    const element = viewportRef.current;
-    if (!element) return;
-    shouldStickToBottomRef.current = getIsNearScrollBottom(element);
-  }, []);
-
-  useLayoutEffect(() => {
-    const element = viewportRef.current;
-    if (!element || !shouldStickToBottomRef.current) return;
-    element.scrollTop = element.scrollHeight;
-  }, [detail.contentText, visibleLines.length]);
-
-  return (
-    <div
-      className="border-border/60 max-w-full min-w-0 overflow-hidden rounded-md border-l"
-      style={WRITE_PANEL_STYLE}
-    >
-      {detail.errorText ? (
-        <pre className="text-destructive/90 border-border/40 max-w-full border-b px-2.5 py-1.5 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
-          {detail.errorText}
-        </pre>
-      ) : null}
-      {lines.length > 0 ? (
-        <>
-          <ScrollArea
-            className="max-h-44 max-w-full min-w-0 sm:max-h-56"
-            scrollbars="vertical"
-            type="always"
-            viewportClassName="max-h-44 sm:max-h-56"
-            viewportProps={{ onScroll: updateStickiness }}
-            viewportRef={viewportRef}
-          >
-            <pre className="max-w-full py-1 font-mono text-[12px] leading-5">
-              {visibleLines.map((line, index) => (
-                <span
-                  className="grid min-h-5 max-w-full grid-cols-[2rem_minmax(0,1fr)]"
-                  key={`${index}:${line.slice(0, 16)}`}
-                >
-                  <span className="pr-1.5 text-right select-none" style={ADDED_TEXT_STYLE}>
-                    {index + 1}
-                  </span>
-                  <span
-                    className="text-foreground/85 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
-                    data-write-line-content
-                  >
-                    {line || ' '}
-                  </span>
-                </span>
-              ))}
-            </pre>
-          </ScrollArea>
-          {isTruncated ? (
-            <ToolDetailLineLimitButton
-              hiddenLineCount={hiddenLineCount}
-              totalLineCount={lines.length}
-              onShowAll={() => setShowAll(true)}
-            />
-          ) : null}
-        </>
-      ) : (
-        <div className="text-muted-foreground/75 border-border/40 border-t px-2.5 py-2 text-[12px]">
-          等待内容
-        </div>
-      )}
     </div>
   );
 }
@@ -731,16 +655,6 @@ const ADDED_TEXT_STYLE: CSSProperties = {
 const DELETED_TEXT_STYLE: CSSProperties = {
   color: '#df7b7b',
 };
-
-const WRITE_PANEL_STYLE: CSSProperties = {
-  backgroundColor: 'rgba(111, 186, 124, 0.08)',
-  borderLeftColor: '#6fba7c',
-};
-
-function getIsNearScrollBottom(element: HTMLElement): boolean {
-  const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
-  return distanceToBottom <= 24;
-}
 
 function getDiffLineStyle(line: string): CSSProperties | undefined {
   if (line.startsWith('+') && !line.startsWith('+++')) {

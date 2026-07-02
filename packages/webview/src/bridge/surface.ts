@@ -14,11 +14,16 @@ declare global {
 
 export function getWebviewSurface(): WebviewSurface {
   const injected = window.__SCOUT_WEBVIEW_SURFACE__;
-  if (injected === 'chat' || injected === 'settings' || injected === 'tree') {
+  if (
+    injected === 'chat' ||
+    injected === 'settings' ||
+    injected === 'tree' ||
+    injected === 'changes-review'
+  ) {
     return injected;
   }
 
   const query = new URLSearchParams(window.location.search).get('surface');
-  if (query === 'settings' || query === 'tree') return query;
+  if (query === 'settings' || query === 'tree' || query === 'changes-review') return query;
   return 'chat';
 }

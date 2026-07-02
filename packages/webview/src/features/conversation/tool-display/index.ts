@@ -13,7 +13,6 @@ export { resolveToolDisplayResult } from './resolve-tool-display';
 export type {
   DiffToolDisplayDetail,
   FileEditToolDisplayResult,
-  FileWriteToolDisplayResult,
   GenericToolDisplayResult,
   ResolveToolDisplayOptions,
   TextToolDisplayDetail,
@@ -25,5 +24,4 @@ export type {
   ToolDisplayResult,
   ToolDisplayStatus,
   ToolActivitySummarySpec,
-  WriteContentToolDisplayDetail,
 } from './types';
