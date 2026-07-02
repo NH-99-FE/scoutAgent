@@ -140,6 +140,10 @@ const PAYLOAD_CASES = [
   protocolCase({ type: 'open_settings_panel' }, { service: 'ui', method: 'open_settings_panel' }),
   protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),
   protocolCase(
+    { type: 'open_changes_review', turnId: 'turn-1' },
+    { service: 'ui', method: 'open_changes_review' },
+  ),
+  protocolCase(
     { type: 'fork_session', entryId: 'entry-1', position: 'at' },
     { service: 'tree', method: 'fork_session' },
   ),
@@ -402,6 +406,9 @@ function makeServices(): ScoutProtocolServices {
       }),
       openTreePanel: vi.fn(async (respond) => {
         respond({ type: 'open_tree_panel_result', success: true });
+      }),
+      openChangesReview: vi.fn(async (_message, respond) => {
+        respond({ type: 'open_changes_review_result', success: true });
       }),
     },
   };

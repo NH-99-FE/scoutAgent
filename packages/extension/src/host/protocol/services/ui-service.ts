@@ -9,6 +9,8 @@ import type {
   ScoutExtensionUIRequestClosedReason,
 } from '@scout-agent/shared';
 import type { ExtensionUIContext } from '../../../core/extensions/index.ts';
+import type { FileReviewTurnSnapshot } from '../../../core/review/file-review.ts';
+import type { FileReviewArtifact } from '../../review/file-review-artifact.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
 import type { ProtocolPayload, ProtocolResponder, UiProtocolHost } from './types.ts';
 import { ExtensionUIRequestBroker } from './extension-ui-request-broker.ts';
@@ -92,6 +94,15 @@ export interface UiProtocolServiceOptions {
   publishEvent: (message: ExtensionEventMessage, surface?: ScoutWebviewSurface) => void;
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
+  getChangesReview?: (turnId: string) => FileReviewTurnSnapshot | undefined;
+  getChangesReviewArtifact?: (
+    turnId: string,
+  ) => FileReviewArtifact | undefined | Promise<FileReviewArtifact | undefined>;
+  canExpandChangesReviewContext?: (turnId: string) => boolean;
+  openChangesReviewPanel?: (
+    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    options: { allowCurrentFileContextExpansion?: boolean; recordId?: string },
+  ) => void | Promise<void>;
 }
 
 // ---------- Service ----------
@@ -104,6 +115,15 @@ export class UiProtocolService implements UiProtocolHost {
   ) => void;
   private readonly openSettingsPanelCallback?: () => void | Promise<void>;
   private readonly openTreePanelCallback?: () => void | Promise<void>;
+  private readonly getChangesReview?: (turnId: string) => FileReviewTurnSnapshot | undefined;
+  private readonly getChangesReviewArtifact?: (
+    turnId: string,
+  ) => FileReviewArtifact | undefined | Promise<FileReviewArtifact | undefined>;
+  private readonly canExpandChangesReviewContext?: (turnId: string) => boolean;
+  private readonly openChangesReviewPanelCallback?: (
+    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    options: { allowCurrentFileContextExpansion?: boolean; recordId?: string },
+  ) => void | Promise<void>;
   private readonly extensionUIBroker: ExtensionUIRequestBroker;
 
   constructor(options: UiProtocolServiceOptions) {
@@ -111,6 +131,10 @@ export class UiProtocolService implements UiProtocolHost {
     this.publishEvent = options.publishEvent;
     this.openSettingsPanelCallback = options.openSettingsPanel;
     this.openTreePanelCallback = options.openTreePanel;
+    this.getChangesReview = options.getChangesReview;
+    this.getChangesReviewArtifact = options.getChangesReviewArtifact;
+    this.canExpandChangesReviewContext = options.canExpandChangesReviewContext;
+    this.openChangesReviewPanelCallback = options.openChangesReviewPanel;
     this.extensionUIBroker = new ExtensionUIRequestBroker({
       publishEvent: (message) => this.publishEvent(message),
       notify: (message, type = 'info') => {
@@ -179,6 +203,62 @@ export class UiProtocolService implements UiProtocolHost {
     } catch (error) {
       respond({
         type: 'open_tree_panel_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async openChangesReview(
+    message: ProtocolPayload<'open_changes_review'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    try {
+      if (
+        (!this.getChangesReview && !this.getChangesReviewArtifact) ||
+        !this.openChangesReviewPanelCallback
+      ) {
+        respond({
+          type: 'open_changes_review_result',
+          success: false,
+          error: 'Changes review panel is not registered',
+        });
+        return;
+      }
+      const artifact = await this.getChangesReviewArtifact?.(message.turnId);
+      const runtimeReview = artifact ? undefined : this.getChangesReview?.(message.turnId);
+      const review =
+        artifact ?? (runtimeReview && !runtimeReview.contentReleased ? runtimeReview : undefined);
+      if (!review) {
+        respond({
+          type: 'open_changes_review_result',
+          success: false,
+          error: 'Changes are no longer available',
+        });
+        return;
+      }
+      if (
+        message.recordId &&
+        !review.records.some((record) => record.recordId === message.recordId)
+      ) {
+        respond({
+          type: 'open_changes_review_result',
+          success: false,
+          error: 'Changes are no longer available',
+        });
+        return;
+      }
+      const recordId = message.recordId;
+      await this.openChangesReviewPanelCallback(review, {
+        allowCurrentFileContextExpansion: artifact
+          ? (this.canExpandChangesReviewContext?.(artifact.turnId) ?? false)
+          : true,
+        recordId,
+      });
+      respond({ type: 'open_changes_review_result', success: true });
+    } catch (error) {
+      respond({
+        type: 'open_changes_review_result',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });

@@ -229,7 +229,7 @@ describe('SessionProtocolService', () => {
     expect(vscode.window.showSaveDialog).toHaveBeenCalledWith(
       expect.objectContaining({
         defaultUri: expect.objectContaining({
-          fsPath: expect.stringMatching(/^\/workspace\/session-session-1-/),
+          fsPath: expect.stringMatching(/^[\\/]+workspace[\\/]session-session-1-/),
         }),
         filters: { 'JSONL Session': ['jsonl'], 'All Files': ['*'] },
         saveLabel: 'Export Session',

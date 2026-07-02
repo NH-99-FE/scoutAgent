@@ -1,5 +1,72 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { FileReviewTurnSnapshot } from '../../../../src/core/review/file-review.ts';
+import type { FileReviewArtifact } from '../../../../src/host/review/file-review-artifact.ts';
 import { UiProtocolService } from '../../../../src/host/protocol/services/ui-service.ts';
+
+function makeReviewSnapshot(turnId: string, recordId: string): FileReviewTurnSnapshot {
+  return {
+    turnId,
+    records: [
+      {
+        recordId,
+        turnId,
+        toolCallId: 'tool-1',
+        operation: 'edit',
+        path: 'src/app.ts',
+        absolutePath: '/workspace/src/app.ts',
+        sequence: 1,
+      },
+    ],
+    files: [
+      {
+        absolutePath: '/workspace/src/app.ts',
+        path: 'src/app.ts',
+        originalContent: 'old\n',
+        modifiedContent: 'new\n',
+        recordIds: [recordId],
+        latestRecordId: recordId,
+        latestSequence: 1,
+        additions: 1,
+        deletions: 1,
+      },
+    ],
+  };
+}
+
+function makeReviewArtifact(turnId: string, recordId: string): FileReviewArtifact {
+  return {
+    version: 1,
+    sessionId: 'session-1',
+    turnId,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    records: [
+      {
+        recordId,
+        turnId,
+        toolCallId: 'tool-1',
+        operation: 'edit',
+        path: 'src/app.ts',
+        absolutePath: '/workspace/src/app.ts',
+        sequence: 1,
+      },
+    ],
+    files: [
+      {
+        absolutePath: '/workspace/src/app.ts',
+        path: 'src/app.ts',
+        recordIds: [recordId],
+        latestRecordId: recordId,
+        latestSequence: 1,
+        additions: 1,
+        deletions: 1,
+        rows: [
+          { type: 'removed', oldLineNumber: 1, text: 'old' },
+          { type: 'added', newLineNumber: 1, text: 'new' },
+        ],
+      },
+    ],
+  };
+}
 
 describe('UiProtocolService', () => {
   it('responds with builtin and extension commands', () => {
@@ -84,6 +151,131 @@ describe('UiProtocolService', () => {
       type: 'open_tree_panel_result',
       success: false,
       error: 'Tree panel is not registered',
+    });
+  });
+
+  it('opens a persisted artifact when the requested runtime review is unavailable', async () => {
+    const artifact = makeReviewArtifact('turn-1', 'review-1');
+    const openChangesReviewPanel = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+      getChangesReview: () => undefined,
+      getChangesReviewArtifact: () => artifact,
+      openChangesReviewPanel,
+    });
+
+    await service.openChangesReview(
+      {
+        type: 'open_changes_review',
+        turnId: 'turn-1',
+        recordId: 'review-1',
+      },
+      respond,
+    );
+
+    expect(openChangesReviewPanel).toHaveBeenCalledWith(artifact, {
+      allowCurrentFileContextExpansion: false,
+      recordId: 'review-1',
+    });
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_changes_review_result',
+      success: true,
+    });
+  });
+
+  it('prefers a persisted artifact over the requested runtime review', async () => {
+    const requestedReview = makeReviewSnapshot('turn-1', 'review-1');
+    const artifact = makeReviewArtifact('turn-1', 'review-1');
+    const openChangesReviewPanel = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+      getChangesReview: () => requestedReview,
+      getChangesReviewArtifact: () => artifact,
+      canExpandChangesReviewContext: () => true,
+      openChangesReviewPanel,
+    });
+
+    await service.openChangesReview(
+      {
+        type: 'open_changes_review',
+        turnId: 'turn-1',
+        recordId: 'review-1',
+      },
+      respond,
+    );
+
+    expect(openChangesReviewPanel).toHaveBeenCalledWith(artifact, {
+      allowCurrentFileContextExpansion: true,
+      recordId: 'review-1',
+    });
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_changes_review_result',
+      success: true,
+    });
+  });
+
+  it('does not open released runtime review snapshots when no artifact is available', async () => {
+    const releasedReview = {
+      ...makeReviewSnapshot('turn-1', 'review-1'),
+      contentReleased: true,
+    };
+    const openChangesReviewPanel = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+      getChangesReview: () => releasedReview,
+      getChangesReviewArtifact: () => undefined,
+      openChangesReviewPanel,
+    });
+
+    await service.openChangesReview(
+      {
+        type: 'open_changes_review',
+        turnId: 'turn-1',
+        recordId: 'review-1',
+      },
+      respond,
+    );
+
+    expect(openChangesReviewPanel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_changes_review_result',
+      success: false,
+      error: 'Changes are no longer available',
+    });
+  });
+
+  it('returns unavailable when the requested record is absent from the review', async () => {
+    const artifact = makeReviewArtifact('turn-1', 'review-2');
+    const openChangesReviewPanel = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+      getChangesReview: () => undefined,
+      getChangesReviewArtifact: () => artifact,
+      openChangesReviewPanel,
+    });
+
+    await service.openChangesReview(
+      {
+        type: 'open_changes_review',
+        turnId: 'turn-1',
+        recordId: 'review-1',
+      },
+      respond,
+    );
+
+    expect(openChangesReviewPanel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_changes_review_result',
+      success: false,
+      error: 'Changes are no longer available',
     });
   });
 

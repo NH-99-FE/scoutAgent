@@ -215,6 +215,9 @@ export function registerScoutProtocolServices(
     open_tree_panel: async (_message, context) => {
       await services.ui.openTreePanel(context.respond);
     },
+    open_changes_review: async (message, context) => {
+      await services.ui.openChangesReview(payload<'open_changes_review'>(message), context.respond);
+    },
   });
 }
 

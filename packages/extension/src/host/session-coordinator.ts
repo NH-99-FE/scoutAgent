@@ -43,6 +43,7 @@ import {
   type AgentSessionEvent,
   type NavigateTreeResult,
 } from '../core/agent-session.ts';
+import type { FileReviewTurnSnapshot } from '../core/review/file-review.ts';
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -60,6 +61,13 @@ import {
   projectSessionTreeToScout,
   resolveVisibleSessionLeafId,
 } from './protocol/session-tree-mapper.ts';
+import {
+  collectCurrentBranchFileReviewArtifacts,
+  createFileReviewArtifact,
+  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+  prepareFileReviewArtifactForSession,
+  type FileReviewArtifact,
+} from './review/file-review-artifact.ts';
 import {
   SessionOperationBroker,
   type SessionOperationResult,
@@ -109,6 +117,12 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private readonly outputChannel: vscode.OutputChannel;
   private readonly configManager: ConfigManager;
   private readonly disposables: vscode.Disposable[] = [];
+  private readonly pendingFileReviewArtifacts = new Map<
+    string,
+    { agentSession: AgentSession; sessionId: string; review: FileReviewTurnSnapshot }
+  >();
+  private readonly fileReviewArtifactTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly fileReviewArtifactWrites = new Set<Promise<void>>();
 
   private agentSession?: AgentSession;
   private sessionRuntime?: AgentSessionRuntime;
@@ -315,7 +329,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   private async runSessionReplacement<T>(operation: () => Promise<T>): Promise<T> {
     this.cancelExtensionUIRequests?.('session_replacement');
-    return await this.sessionOperationBroker.runExclusive(operation);
+    return await this.sessionOperationBroker.runExclusive(async () => {
+      await this.flushFileReviewArtifactSaves();
+      return await operation();
+    });
   }
 
   beginUserSessionOperation(kind: SessionUserOperationKind): UserSessionOperationToken {
@@ -609,7 +626,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     await this.agentSession.setSessionName(name);
   }
 
-  exportSessionToJsonl(outputPath?: string): string | undefined {
+  async exportSessionToJsonl(outputPath?: string): Promise<string | undefined> {
+    await this.flushFileReviewArtifactSaves();
     return this.agentSession?.exportToJsonl(outputPath);
   }
 
@@ -707,6 +725,21 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   getScoutMessages(): ScoutMessage[] {
     return this.scoutMessagesCache.project(this.agentSession?.getSessionBranch());
+  }
+
+  getFileReviewTurn(turnId: string): FileReviewTurnSnapshot | undefined {
+    return this.agentSession?.getFileReviewTurn(turnId);
+  }
+
+  async getFileReviewArtifact(turnId: string): Promise<FileReviewArtifact | undefined> {
+    if (!this.agentSession?.isStreaming) {
+      await this.flushFileReviewArtifactSave(this.sessionId, turnId);
+    }
+    return this.getFileReviewArtifactIndex().artifactsByTurnId.get(turnId);
+  }
+
+  isLatestFileReviewArtifact(turnId: string): boolean {
+    return this.getFileReviewArtifactIndex().latestTurnId === turnId;
   }
 
   /**
@@ -896,6 +929,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       initialModel,
       initialThinkingLevel,
       sessionStartEvent,
+      onFileReviewUpdated: (agentSession, review) =>
+        this.scheduleFileReviewArtifactSave(agentSession, review),
     });
 
     this.logRuntimeDiagnostics(result.diagnostics);
@@ -912,6 +947,138 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
         this.outputChannel.appendLine(`[scout] WARN: ${diag.message}`);
       }
     }
+  }
+
+  private scheduleFileReviewArtifactSave(
+    agentSession: AgentSession,
+    review: FileReviewTurnSnapshot,
+  ): void {
+    const sessionId = agentSession.sessionId;
+    if (!sessionId) return;
+    const key = this.createFileReviewArtifactKey(sessionId, review.turnId);
+    this.pendingFileReviewArtifacts.set(key, { agentSession, sessionId, review });
+
+    const existingTimer = this.fileReviewArtifactTimers.get(key);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const flushPending = () => {
+      this.fileReviewArtifactTimers.delete(key);
+      if (agentSession.isStreaming) {
+        const retryTimer = setTimeout(flushPending, 250);
+        this.fileReviewArtifactTimers.set(key, retryTimer);
+        return;
+      }
+      const pending = this.pendingFileReviewArtifacts.get(key);
+      if (!pending) return;
+      this.pendingFileReviewArtifacts.delete(key);
+      void this.startFileReviewArtifactSave(pending);
+    };
+
+    const timer = setTimeout(flushPending, 100);
+    this.fileReviewArtifactTimers.set(key, timer);
+  }
+
+  private async flushFileReviewArtifactSaves(): Promise<void> {
+    if (
+      this.fileReviewArtifactTimers.size === 0 &&
+      this.pendingFileReviewArtifacts.size === 0 &&
+      this.fileReviewArtifactWrites.size === 0
+    ) {
+      return;
+    }
+
+    for (const timer of this.fileReviewArtifactTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.fileReviewArtifactTimers.clear();
+
+    const pending = Array.from(this.pendingFileReviewArtifacts.values());
+    this.pendingFileReviewArtifacts.clear();
+    const pendingWrites = pending.map((entry) => this.startFileReviewArtifactSave(entry));
+    await Promise.all([...this.fileReviewArtifactWrites, ...pendingWrites]);
+  }
+
+  private async flushFileReviewArtifactSave(sessionId: string, turnId: string): Promise<void> {
+    const pending = this.findPendingFileReviewArtifact(sessionId, turnId);
+    if (!pending) {
+      await Promise.all([...this.fileReviewArtifactWrites]);
+      return;
+    }
+
+    const key = this.createFileReviewArtifactKey(pending.sessionId, pending.review.turnId);
+    const timer = this.fileReviewArtifactTimers.get(key);
+    if (timer) {
+      clearTimeout(timer);
+      this.fileReviewArtifactTimers.delete(key);
+    }
+    this.pendingFileReviewArtifacts.delete(key);
+    await this.startFileReviewArtifactSave(pending);
+  }
+
+  private startFileReviewArtifactSave(entry: {
+    agentSession: AgentSession;
+    sessionId: string;
+    review: FileReviewTurnSnapshot;
+  }): Promise<void> {
+    const write = this.saveFileReviewArtifact(entry);
+    this.fileReviewArtifactWrites.add(write);
+    void write.finally(() => {
+      this.fileReviewArtifactWrites.delete(write);
+    });
+    return write;
+  }
+
+  private async saveFileReviewArtifact({
+    agentSession,
+    sessionId,
+    review,
+  }: {
+    agentSession: AgentSession;
+    sessionId: string;
+    review: FileReviewTurnSnapshot;
+  }): Promise<void> {
+    try {
+      if (this.agentSession !== agentSession || this.sessionId !== sessionId) {
+        this.outputChannel.appendLine(
+          `[scout] Skipped changes review artifact for inactive session: ${sessionId}`,
+        );
+        return;
+      }
+      const { artifact, warnings } = prepareFileReviewArtifactForSession(
+        createFileReviewArtifact(sessionId, review),
+      );
+      for (const warning of warnings) {
+        this.outputChannel.appendLine(`[scout] ${warning}`);
+      }
+      await agentSession.appendEntry(FILE_REVIEW_ARTIFACT_CUSTOM_TYPE, artifact);
+      agentSession.releaseFileReviewTurnContent(review.turnId);
+      this.scoutMessagesCache.invalidate();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.outputChannel.appendLine(
+        `[scout] Failed to persist changes review artifact: ${message}`,
+      );
+    }
+  }
+
+  private findPendingFileReviewArtifact(
+    sessionId: string,
+    turnId: string,
+  ): { agentSession: AgentSession; sessionId: string; review: FileReviewTurnSnapshot } | undefined {
+    return this.pendingFileReviewArtifacts.get(this.createFileReviewArtifactKey(sessionId, turnId));
+  }
+
+  private createFileReviewArtifactKey(sessionId: string, turnId: string): string {
+    return `${sessionId}\u0000${turnId}`;
+  }
+
+  private getFileReviewArtifactIndex() {
+    return collectCurrentBranchFileReviewArtifacts(
+      this.agentSession?.getSessionEntries(),
+      this.agentSession?.getSessionBranch(),
+    );
   }
 
   /** 绑定扩展 core actions 到指定 AgentSession */
@@ -979,6 +1146,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       const runtime = this.sessionRuntime;
       const agentSession = this.agentSession;
 
+      await this.flushFileReviewArtifactSaves();
       this.unsubscribeAgentSession?.();
       this.unsubscribeAgentSession = undefined;
       this.sessionRuntime = undefined;

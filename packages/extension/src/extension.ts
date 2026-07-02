@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import { ScoutController } from './scout-controller.ts';
+import { ScoutChangesReviewPanelManager } from './host/review/changes-review-panel.ts';
 import { ScoutSidebarProvider } from './sidebar-provider.ts';
 import { ScoutWebviewPanelManager } from './webview-panel-manager.ts';
 
@@ -14,6 +15,12 @@ export function activate(context: vscode.ExtensionContext) {
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
   const panelManagerRef: { current?: ScoutWebviewPanelManager } = {};
+  const isDev = context.extensionMode === vscode.ExtensionMode.Development;
+  const changesReviewPanelManager = new ScoutChangesReviewPanelManager(
+    context.extensionUri,
+    context.globalState,
+    isDev,
+  );
   const controller = new ScoutController({
     extensionUri: context.extensionUri,
     outputChannel,
@@ -28,10 +35,16 @@ export function activate(context: vscode.ExtensionContext) {
       if (!panelManager) throw new Error('Scout panel manager is not initialized');
       return panelManager.openTreePanel();
     },
+    openChangesReviewPanel: (review, options) =>
+      changesReviewPanelManager.open({
+        review,
+        allowCurrentFileContextExpansion: options.allowCurrentFileContextExpansion,
+        cwd: options.cwd,
+        recordId: options.recordId,
+      }),
   });
   activeControllers.add(controller);
 
-  const isDev = context.extensionMode === vscode.ExtensionMode.Development;
   const panelManager = new ScoutWebviewPanelManager(context.extensionUri, isDev, controller);
   panelManagerRef.current = panelManager;
   const provider = new ScoutSidebarProvider(context.extensionUri, isDev, controller);
@@ -45,6 +58,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
     outputChannel,
     panelManager,
+    changesReviewPanelManager,
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(ScoutSidebarProvider.viewType, provider),

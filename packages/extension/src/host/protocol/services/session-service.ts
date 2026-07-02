@@ -333,7 +333,7 @@ export class SessionProtocolService implements SessionProtocolHost {
         return;
       }
 
-      const path = this.sessionManager.exportSessionToJsonl(outputPath);
+      const path = await this.sessionManager.exportSessionToJsonl(outputPath);
       if (!path) {
         respond({
           type: 'export_session_result',

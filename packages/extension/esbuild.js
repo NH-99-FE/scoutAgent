@@ -53,7 +53,7 @@ const copyWebviewPlugin = {
 };
 
 async function main() {
-  const ctx = await esbuild.context({
+  const extensionCtx = await esbuild.context({
     entryPoints: ['src/extension.ts'],
     bundle: true,
     format: 'esm',
@@ -70,10 +70,10 @@ async function main() {
     plugins: [esbuildProblemMatcherPlugin, copyWebviewPlugin],
   });
   if (watch) {
-    await ctx.watch();
+    await extensionCtx.watch();
   } else {
-    await ctx.rebuild();
-    await ctx.dispose();
+    await extensionCtx.rebuild();
+    await extensionCtx.dispose();
   }
 }
 

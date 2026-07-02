@@ -8,7 +8,7 @@ import type { ScoutController } from './scout-controller.ts';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 import { configureScoutWebview, getScoutWebviewHtml } from './webview-content.ts';
 
-type ScoutPanelSurface = Exclude<ScoutWebviewSurface, 'chat'>;
+type ScoutPanelSurface = Exclude<ScoutWebviewSurface, 'chat' | 'changes-review'>;
 
 interface ScoutPanelSpec {
   surface: ScoutPanelSurface;

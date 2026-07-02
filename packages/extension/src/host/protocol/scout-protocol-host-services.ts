@@ -5,6 +5,8 @@
 
 import type { ExtensionMessage } from '@scout-agent/shared';
 import type { ConfigManager } from '../../config-manager.ts';
+import type { FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
+import type { FileReviewArtifact } from '../review/file-review-artifact.ts';
 import type { ExtensionSessionCoordinator } from '../session-coordinator.ts';
 import type { SessionIndex } from '../session-index.ts';
 import type { ScoutWebviewSurface } from '../webview-surface.ts';
@@ -31,6 +33,10 @@ export interface ScoutProtocolHostServicesOptions {
   sessionIndex: SessionIndex;
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
+  openChangesReviewPanel?: (
+    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
+  ) => void | Promise<void>;
   openTextFile?: (filePath: string) => Promise<void>;
   postMessage: (message: ExtensionMessage, surface?: ScoutWebviewSurface) => void;
   showErrorMessage?: (message: string) => void;
@@ -78,10 +84,21 @@ export function createScoutProtocolHostServices(
     publishEvent: (message, surface) => bundle.eventPublisher.publish(message, surface),
     openSettingsPanel: options.openSettingsPanel,
     openTreePanel: options.openTreePanel,
+    getChangesReview: (turnId) => options.sessionManager.getFileReviewTurn(turnId),
+    getChangesReviewArtifact: (turnId) => options.sessionManager.getFileReviewArtifact(turnId),
+    canExpandChangesReviewContext: (turnId) =>
+      options.sessionManager.isLatestFileReviewArtifact(turnId),
+    openChangesReviewPanel: options.openChangesReviewPanel
+      ? (review, panelOptions) =>
+          options.openChangesReviewPanel?.(review, {
+            allowCurrentFileContextExpansion: panelOptions.allowCurrentFileContextExpansion,
+            cwd: options.sessionManager.currentCwd,
+            recordId: panelOptions.recordId,
+          })
+      : undefined,
   });
-  options.sessionManager.setExtensionUIContext(
-    bundle.ui.createExtensionUIContext(),
-    (reason) => bundle.ui.cancelExtensionUIRequests(reason),
+  options.sessionManager.setExtensionUIContext(bundle.ui.createExtensionUIContext(), (reason) =>
+    bundle.ui.cancelExtensionUIRequests(reason),
   );
 
   bundle.state = new StateProtocolService({
@@ -229,7 +246,8 @@ export function createScoutProtocolHostServices(
       requestExtensions: (respond) => bundle.extensions.requestExtensions(respond),
       createExtensionFromTemplate: (message, respond) =>
         bundle.extensions.createExtensionFromTemplate(message, respond),
-      openExtensionFile: (message, respond) => bundle.extensions.openExtensionFile(message, respond),
+      openExtensionFile: (message, respond) =>
+        bundle.extensions.openExtensionFile(message, respond),
     },
     session: {
       userMessage: (message) => bundle.session.userMessage(message),
@@ -268,6 +286,7 @@ export function createScoutProtocolHostServices(
       extensionUIResponse: (message) => bundle.ui.extensionUIResponse(message),
       openSettingsPanel: (respond) => bundle.ui.openSettingsPanel(respond),
       openTreePanel: (respond) => bundle.ui.openTreePanel(respond),
+      openChangesReview: (message, respond) => bundle.ui.openChangesReview(message, respond),
     },
   };
 

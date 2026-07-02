@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import type { ScoutChangesReviewModel } from '@scout-agent/shared';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 
 const DEV_SERVER_URL = 'http://localhost:5173';
@@ -16,6 +17,10 @@ const STARTUP_THEME_STYLE = `<style data-scout-startup-theme>
     :root { color: var(--vscode-foreground); background: ${STARTUP_BACKGROUND}; }
     html, body, #root { background: ${STARTUP_BACKGROUND}; }
   </style>`;
+
+export interface ScoutWebviewBootstrapData {
+  changesReview?: ScoutChangesReviewModel;
+}
 
 export function configureScoutWebview(extensionUri: vscode.Uri, webview: vscode.Webview): void {
   const localRoot = vscode.Uri.joinPath(extensionUri, 'dist', 'webview');
@@ -31,11 +36,12 @@ export async function getScoutWebviewHtml(
   isDev: boolean,
   surface: ScoutWebviewSurface,
   probeDevServerFn: () => Promise<boolean> = probeDevServer,
+  bootstrapData: ScoutWebviewBootstrapData = {},
 ): Promise<string> {
   if (isDev && (await probeDevServerFn())) {
-    return getHmrHtml(surface);
+    return getHmrHtml(surface, bootstrapData);
   }
-  return getLocalHtml(extensionUri, webview, surface);
+  return getLocalHtml(extensionUri, webview, surface, bootstrapData);
 }
 
 function probeDevServer(): Promise<boolean> {
@@ -52,7 +58,10 @@ function probeDevServer(): Promise<boolean> {
   });
 }
 
-function getHmrHtml(surface: ScoutWebviewSurface): string {
+function getHmrHtml(
+  surface: ScoutWebviewSurface,
+  bootstrapData: ScoutWebviewBootstrapData,
+): string {
   const devOrigin = new URL(DEV_SERVER_URL).origin;
   return `<!DOCTYPE html>
 <html lang="en">
@@ -65,7 +74,7 @@ function getHmrHtml(surface: ScoutWebviewSurface): string {
   <style>
     body { margin: 0; padding: 0; overflow: hidden; height: 100vh; color: var(--vscode-foreground); }
   </style>
-  <script>window.__SCOUT_WEBVIEW_SURFACE__=${JSON.stringify(surface)};</script>
+  ${renderBootstrapScript(surface, bootstrapData)}
   <script type="module">
     import RefreshRuntime from '${devOrigin}/@react-refresh';
     RefreshRuntime.injectIntoGlobalHook(window);
@@ -86,6 +95,7 @@ function getLocalHtml(
   extensionUri: vscode.Uri,
   webview: vscode.Webview,
   surface: ScoutWebviewSurface,
+  bootstrapData: ScoutWebviewBootstrapData,
 ): string {
   const webviewDist = path.join(extensionUri.fsPath, 'dist', 'webview');
   const indexHtmlPath = path.join(webviewDist, 'index.html');
@@ -97,7 +107,7 @@ function getLocalHtml(
       /(src|href)="([^"]*)"/g,
       (_, attr, src) => `${attr}="${webviewUri}/${src}"`,
     );
-    return injectSurface(html, surface);
+    return injectSurface(html, surface, bootstrapData);
   }
 
   return `<!DOCTYPE html>
@@ -119,8 +129,12 @@ function getLocalHtml(
 </html>`;
 }
 
-function injectSurface(html: string, surface: ScoutWebviewSurface): string {
-  const script = `${STARTUP_THEME_STYLE}<script>window.__SCOUT_WEBVIEW_SURFACE__=${JSON.stringify(surface)};</script>`;
+function injectSurface(
+  html: string,
+  surface: ScoutWebviewSurface,
+  bootstrapData: ScoutWebviewBootstrapData,
+): string {
+  const script = `${STARTUP_THEME_STYLE}${renderBootstrapScript(surface, bootstrapData)}`;
   const headOpen = html.match(/<head[^>]*>/i);
   if (headOpen?.index !== undefined) {
     const insertAt = headOpen.index + headOpen[0].length;
@@ -132,8 +146,22 @@ function injectSurface(html: string, surface: ScoutWebviewSurface): string {
   return `${script}${html}`;
 }
 
+function renderBootstrapScript(
+  surface: ScoutWebviewSurface,
+  bootstrapData: ScoutWebviewBootstrapData,
+): string {
+  const assignments = [`window.__SCOUT_WEBVIEW_SURFACE__=${JSON.stringify(surface)};`];
+  if (bootstrapData.changesReview) {
+    assignments.push(
+      `window.__SCOUT_CHANGES_REVIEW__=${JSON.stringify(bootstrapData.changesReview).replace(/</g, '\\u003c')};`,
+    );
+  }
+  return `<script>${assignments.join('')}</script>`;
+}
+
 function getSurfaceTitle(surface: ScoutWebviewSurface): string {
   if (surface === 'settings') return 'Scout Settings';
   if (surface === 'tree') return 'Scout Tree';
+  if (surface === 'changes-review') return 'Scout Diff';
   return 'Scout Agent';
 }

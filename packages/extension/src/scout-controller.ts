@@ -12,6 +12,8 @@ import { ExtensionSessionCoordinator } from './host/session-coordinator.ts';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 import { WebviewSurfaceRegistry } from './host/webview-surface-registry.ts';
 import { SessionIndex } from './host/session-index.ts';
+import type { FileReviewTurnSnapshot } from './core/review/file-review.ts';
+import type { FileReviewArtifact } from './host/review/file-review-artifact.ts';
 import { ProtocolServer } from './host/protocol/protocol-server.ts';
 import {
   createScoutProtocolHostServices,
@@ -27,6 +29,10 @@ export interface ScoutControllerOptions {
   cwd: string;
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
+  openChangesReviewPanel?: (
+    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
+  ) => void | Promise<void>;
 }
 
 // ---------- Controller ----------
@@ -81,6 +87,7 @@ export class ScoutController implements vscode.Disposable {
       postMessage: (message, surface) => this.postMessage(message, surface),
       openSettingsPanel: options.openSettingsPanel,
       openTreePanel: options.openTreePanel,
+      openChangesReviewPanel: options.openChangesReviewPanel,
       openTextFile: async (filePath) => {
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
         await vscode.window.showTextDocument(document);
