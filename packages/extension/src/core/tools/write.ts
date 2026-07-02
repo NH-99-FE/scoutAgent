@@ -4,13 +4,24 @@
 // ============================================================
 
 import type { AgentTool } from '@scout-agent/agent';
-import { mkdir as fsMkdir, writeFile as fsWriteFile } from 'node:fs/promises';
+import {
+  readFile as fsReadFile,
+  mkdir as fsMkdir,
+  stat as fsStat,
+  writeFile as fsWriteFile,
+} from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { type Static, Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '../extensions/types.ts';
+import {
+  decodeReviewContent,
+  FILE_REVIEW_PAYLOAD_KIND,
+  MAX_REVIEW_TEXT_BYTES,
+  type FileReviewPayload,
+} from '../review/file-review.ts';
 import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { withFileMutationQueue } from './shared/file-mutation-queue.ts';
-import { resolveToCwd } from './shared/path-utils.ts';
+import { formatPathRelativeToCwd, resolveToCwd } from './shared/path-utils.ts';
 
 // ---------- Schema ----------
 
@@ -21,6 +32,17 @@ const writeSchema = Type.Object({
 
 export type WriteToolInput = Static<typeof writeSchema>;
 
+export interface WriteToolDetails {
+  /** 内部 review payload。AgentSession 会捕获并替换为轻量 file_change details。 */
+  kind: typeof FILE_REVIEW_PAYLOAD_KIND;
+  operation: 'write';
+  path: string;
+  absolutePath: string;
+  originalContent: string | null;
+  modifiedContent: string | null;
+  unavailableReason?: FileReviewPayload['unavailableReason'];
+}
+
 // ---------- Operations ----------
 
 /**
@@ -28,6 +50,10 @@ export type WriteToolInput = Static<typeof writeSchema>;
  * 覆盖这些方法可将文件写入委托给远程系统（例如 SSH）。
  */
 export interface WriteOperations {
+  /** 获取写入前文件大小；本地文件系统用于避免为 review 读取超大文件。 */
+  stat?: (absolutePath: string) => Promise<{ size: number }>;
+  /** 以 Buffer 读取写入前内容；ENOENT 表示新文件。 */
+  readFile?: (absolutePath: string) => Promise<Buffer>;
   /** 写入文件内容 */
   writeFile: (absolutePath: string, content: string) => Promise<void>;
   /** 递归创建目录 */
@@ -35,6 +61,8 @@ export interface WriteOperations {
 }
 
 const defaultWriteOperations: WriteOperations = {
+  stat: (path) => fsStat(path),
+  readFile: (path) => fsReadFile(path),
   writeFile: (path, content) => fsWriteFile(path, content, 'utf-8'),
   mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
 };
@@ -51,7 +79,7 @@ export interface WriteToolOptions {
 export function createWriteToolDefinition(
   cwd: string,
   options?: WriteToolOptions,
-): ToolDefinition<typeof writeSchema, undefined> {
+): ToolDefinition<typeof writeSchema, WriteToolDetails> {
   const ops = options?.operations ?? defaultWriteOperations;
 
   return {
@@ -70,6 +98,7 @@ export function createWriteToolDefinition(
       _onUpdate?: (update: any) => void, // eslint-disable-line @typescript-eslint/no-explicit-any,
     ) {
       const absolutePath = resolveToCwd(path, cwd);
+      const displayPath = formatPathRelativeToCwd(absolutePath, cwd);
       const dir = dirname(absolutePath);
 
       return withFileMutationQueue(absolutePath, async () => {
@@ -81,6 +110,9 @@ export function createWriteToolDefinition(
         };
 
         throwIfAborted();
+        const original = await captureExistingContentForReview(ops, absolutePath);
+        throwIfAborted();
+
         // 按需创建父目录
         await ops.mkdir(dir);
         throwIfAborted();
@@ -93,7 +125,15 @@ export function createWriteToolDefinition(
           content: [
             { type: 'text', text: `Successfully wrote ${content.length} bytes to ${path}` },
           ],
-          details: undefined,
+          details: {
+            kind: FILE_REVIEW_PAYLOAD_KIND,
+            operation: 'write',
+            path: displayPath,
+            absolutePath,
+            originalContent: original.content,
+            modifiedContent: original.unavailableReason ? null : content,
+            unavailableReason: original.unavailableReason,
+          },
         };
       });
     },
@@ -103,6 +143,32 @@ export function createWriteToolDefinition(
 export function createWriteTool(
   cwd: string,
   options?: WriteToolOptions,
-): AgentTool<typeof writeSchema, undefined> {
+): AgentTool<typeof writeSchema, WriteToolDetails> {
   return wrapToolDefinition(createWriteToolDefinition(cwd, options));
+}
+
+async function captureExistingContentForReview(
+  ops: WriteOperations,
+  absolutePath: string,
+): Promise<{ content: string | null; unavailableReason?: FileReviewPayload['unavailableReason'] }> {
+  if (!ops.readFile) {
+    return { content: null, unavailableReason: 'Original content unavailable' };
+  }
+  try {
+    if (ops.stat) {
+      const stats = await ops.stat(absolutePath);
+      if (stats.size > MAX_REVIEW_TEXT_BYTES) {
+        return { content: null, unavailableReason: 'Diff too large to review' };
+      }
+    }
+    const buffer = await ops.readFile(absolutePath);
+    return decodeReviewContent(buffer);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return { content: null };
+    }
+    // Review capture is observational; only mkdir/writeFile decide write success.
+    return { content: null, unavailableReason: 'Original content unavailable' };
+  }
 }

@@ -15,6 +15,7 @@ import {
 } from '@scout-agent/ai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentSession, type AgentSessionEvent } from '../../src/core/agent-session.ts';
+import type { FileReviewTurnSnapshot } from '../../src/core/review/file-review.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
 import { createConfigManager, mockModel, userMessage, assistantMessage } from './test-utils.ts';
 import { ConfigManager } from '../../src/config-manager.ts';
@@ -946,6 +947,152 @@ describe('AgentSession', () => {
       input: { command: 'rm -rf tmp' },
     });
     expect(args).toEqual({ command: 'echo safe' });
+  });
+
+  it('stores tool review results as file_change details and scopes review turns per agent run', async () => {
+    const model = mockModel({
+      id: 'file-review-loop-model',
+      api: STREAM_OPTIONS_TEST_API,
+    });
+    let streamCallIndex = 0;
+    const streamSimple = vi.fn(
+      (
+        _model: Model<typeof STREAM_OPTIONS_TEST_API>,
+        _context: Context,
+        _options?: SimpleStreamOptions,
+      ) => {
+        const callIndex = streamCallIndex++;
+        const stream = createAssistantMessageEventStream();
+        queueMicrotask(() => {
+          if (callIndex === 0) {
+            stream.push({
+              type: 'done',
+              reason: 'toolUse',
+              message: assistantMessage('', {
+                api: STREAM_OPTIONS_TEST_API,
+                model: model.id,
+                provider: model.provider,
+                stopReason: 'toolUse',
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'edit-a-1',
+                    name: 'edit',
+                    arguments: {
+                      path: 'a.txt',
+                      edits: [{ oldText: 'old-a', newText: 'new-a' }],
+                    },
+                  },
+                  {
+                    type: 'toolCall',
+                    id: 'edit-b-1',
+                    name: 'edit',
+                    arguments: {
+                      path: 'b.txt',
+                      edits: [{ oldText: 'old-b', newText: 'new-b' }],
+                    },
+                  },
+                ],
+              }),
+            });
+            return;
+          }
+          if (callIndex === 2) {
+            stream.push({
+              type: 'done',
+              reason: 'toolUse',
+              message: assistantMessage('', {
+                api: STREAM_OPTIONS_TEST_API,
+                model: model.id,
+                provider: model.provider,
+                stopReason: 'toolUse',
+                content: [
+                  {
+                    type: 'toolCall',
+                    id: 'edit-a-2',
+                    name: 'edit',
+                    arguments: {
+                      path: 'a.txt',
+                      edits: [{ oldText: 'new-a', newText: 'final-a' }],
+                    },
+                  },
+                ],
+              }),
+            });
+            return;
+          }
+          stream.push({
+            type: 'done',
+            reason: 'stop',
+            message: assistantMessage('done', {
+              api: STREAM_OPTIONS_TEST_API,
+              model: model.id,
+              provider: model.provider,
+            }),
+          });
+        });
+        return stream;
+      },
+    );
+    registerApiProvider(
+      {
+        api: STREAM_OPTIONS_TEST_API,
+        stream: streamSimple,
+        streamSimple,
+      },
+      STREAM_OPTIONS_TEST_SOURCE,
+    );
+    registerModel(model, { sourceId: STREAM_OPTIONS_TEST_SOURCE });
+
+    fs.writeFileSync(path.join(tempDir, 'a.txt'), 'old-a\n', 'utf-8');
+    fs.writeFileSync(path.join(tempDir, 'b.txt'), 'old-b\n', 'utf-8');
+    const reviews: FileReviewTurnSnapshot[] = [];
+    const session = new AgentSession({
+      session: SessionManager.inMemory(tempDir),
+      configManager: createConfigManagerWithValues(tempDir, {
+        anthropicProviderApiKey: 'test-key',
+        defaultModel: `${model.provider}/${model.id}`,
+      }),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+      onFileReviewUpdated: (_session, review) => {
+        reviews.push(review);
+      },
+    });
+
+    await session.initialize();
+    try {
+      await session.sendUserMessage('edit first pair');
+      await session.sendUserMessage('edit again');
+    } finally {
+      session.dispose();
+    }
+
+    const toolResultDetails = session.sessionManager
+      .getEntries()
+      .flatMap((entry) =>
+        entry.type === 'message' && entry.message.role === 'toolResult'
+          ? [entry.message.details as { kind?: string; path?: string }]
+          : [],
+      );
+
+    expect(toolResultDetails).toHaveLength(3);
+    expect(toolResultDetails.every((details) => details.kind === 'file_change')).toBe(true);
+    expect(toolResultDetails.map((details) => details.path).sort()).toEqual([
+      'a.txt',
+      'a.txt',
+      'b.txt',
+    ]);
+    expect(JSON.stringify(toolResultDetails)).not.toContain('file_review_payload');
+
+    expect(reviews).toHaveLength(3);
+    expect(reviews[1]?.turnId).toBe(reviews[0]?.turnId);
+    expect(reviews[0]?.records).toHaveLength(1);
+    expect(reviews[1]?.records).toHaveLength(2);
+    expect(reviews[2]?.turnId).not.toBe(reviews[0]?.turnId);
+    expect(reviews[2]?.records).toHaveLength(1);
+    expect(reviews[0]?.turnId).toContain(':run-');
   });
 
   it('ignores extension-provided tree summaries unless navigation requests summarization', async () => {

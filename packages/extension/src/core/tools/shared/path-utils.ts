@@ -5,7 +5,7 @@
 
 import { access, constants } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 
 /** 检查路径是否存在 */
 export async function pathExists(filePath: string): Promise<boolean> {
@@ -41,6 +41,16 @@ export function expandPath(filePath: string): string {
 export function resolveToCwd(filePath: string, cwd: string): string {
   const normalized = expandPath(filePath);
   return isAbsolute(normalized) ? resolve(normalized) : resolve(cwd, normalized);
+}
+
+/**
+ * 将绝对路径格式化为相对 cwd 的展示路径。
+ * cwd 外路径保留 ../ 前缀，由调用方决定是否额外标记 External。
+ */
+export function formatPathRelativeToCwd(filePath: string, cwd: string): string {
+  if (!cwd) return filePath;
+  const displayPath = relative(cwd, filePath) || '.';
+  return displayPath.replace(/\\/g, '/');
 }
 
 /**

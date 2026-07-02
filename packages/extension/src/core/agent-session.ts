@@ -4,6 +4,7 @@
 //       Compaction、Auto Retry、Fork、Session Tree/Navigation/Label
 // ============================================================
 
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type {
@@ -81,6 +82,11 @@ import {
 } from './queued-message-policy.ts';
 import type { CoreDisposable, CoreLogger } from './logger.ts';
 import {
+  FileReviewStore,
+  isFileReviewPayload,
+  type FileReviewTurnSnapshot,
+} from './review/file-review.ts';
+import {
   ScoutResourceLoader,
   type DiscoveredExtensionResources,
   type ScoutContextFile,
@@ -123,6 +129,10 @@ const NON_RETRYABLE_LIMIT_PATTERN =
   /GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing/i;
 
 const EXTENSION_MESSAGE_CUSTOM_TYPE = 'extension_message';
+
+function createReviewRunId(): string {
+  return `run-${randomUUID()}`;
+}
 
 function cloneStreamOptions(streamOptions?: ScoutStreamOptions): ScoutStreamOptions {
   return {
@@ -213,6 +223,7 @@ export interface AgentSessionOptions {
   initialModel?: Model<Api>;
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
+  onFileReviewUpdated?: (session: AgentSession, review: FileReviewTurnSnapshot) => void;
 }
 
 export interface ExtensionBindings {
@@ -297,6 +308,10 @@ export class AgentSession implements CoreDisposable {
   private includeAllExtensionToolsOnInitialize: boolean;
   private readonly initialModel?: Model<Api>;
   private readonly initialThinkingLevel?: ThinkingLevel;
+  private readonly onFileReviewUpdated?: (
+    session: AgentSession,
+    review: FileReviewTurnSnapshot,
+  ) => void;
   private toolRegistry = new Map<string, ToolRegistryEntry>();
   private lastSystemPrompt = '';
 
@@ -329,6 +344,9 @@ export class AgentSession implements CoreDisposable {
   private lastAssistantMessage: AssistantMessage | undefined;
   /** Pi extension lifecycle turn index；agent_start 时重置，turn_end 后递增。 */
   private turnIndex = 0;
+  /** 当前 agent_start 运行 id，用于生成一次 assistant 回复范围内的 review turnId。 */
+  private currentReviewRunId = createReviewRunId();
+  private readonly fileReviewStore = new FileReviewStore();
 
   /** 从当前 session branch 缓存原始路径；provider runtime context 由 agent.state.messages 持有。 */
   private cachedBranch: SessionTreeEntry[] = [];
@@ -372,6 +390,7 @@ export class AgentSession implements CoreDisposable {
     this.includeAllExtensionToolsOnInitialize = options.includeAllExtensionTools ?? false;
     this.initialModel = options.initialModel;
     this.initialThinkingLevel = options.initialThinkingLevel;
+    this.onFileReviewUpdated = options.onFileReviewUpdated;
   }
 
   // ---------- 初始化 ----------
@@ -433,6 +452,14 @@ export class AgentSession implements CoreDisposable {
 
   get sessionManager(): Session {
     return this.session;
+  }
+
+  getFileReviewTurn(turnId: string): FileReviewTurnSnapshot | undefined {
+    return this.fileReviewStore.getTurn(turnId);
+  }
+
+  releaseFileReviewTurnContent(turnId: string): boolean {
+    return this.fileReviewStore.releaseTurnContent(turnId);
   }
 
   // ---------- 运行时操作 ----------
@@ -1147,6 +1174,7 @@ export class AgentSession implements CoreDisposable {
   async appendEntry<TData = unknown>(customType: string, data?: TData): Promise<void> {
     await this.session.appendCustomEntry(customType, data);
     this.cachedLeafId = await this.session.getLeafId();
+    await this.rebuildCachedSessionBranch();
     this.emit({ type: 'state_change' });
     this.emit({ type: 'tree_change' });
   }
@@ -1544,6 +1572,10 @@ export class AgentSession implements CoreDisposable {
     // 返回内部数组引用：rebuild 时整体替换为新数组，调用方只读使用；
     // host 层依赖引用稳定做投影记忆化。
     return this.cachedBranch;
+  }
+
+  getSessionEntries(): readonly SessionTreeEntry[] {
+    return this.session.getEntries();
   }
 
   createReplacedSessionContext(): ReplacedSessionContext {
@@ -2247,8 +2279,10 @@ export class AgentSession implements CoreDisposable {
     context: AfterToolCallContext,
     _signal?: AbortSignal,
   ): Promise<AfterToolCallResult | undefined> {
-    if (!this.extensionRunner) return undefined;
-    return await this.extensionRunner.emitToolResult({
+    const reviewResult = await this.captureFileReviewResult(context);
+    if (!this.extensionRunner) return reviewResult;
+
+    const hookResult = await this.extensionRunner.emitToolResult({
       type: 'tool_result',
       toolCallId: context.toolCall.id,
       toolName: context.toolCall.name,
@@ -2256,10 +2290,60 @@ export class AgentSession implements CoreDisposable {
         typeof context.args === 'object' && context.args !== null
           ? ({ ...(context.args as Record<string, unknown>) } as Record<string, unknown>)
           : {},
-      content: context.result.content,
-      details: context.result.details,
-      isError: context.isError,
+      content: reviewResult?.content ?? context.result.content,
+      details: reviewResult?.details ?? context.result.details,
+      isError: reviewResult?.isError ?? context.isError,
     });
+    if (!hookResult) return reviewResult;
+    return {
+      content: hookResult.content ?? reviewResult?.content,
+      details: hookResult.details ?? reviewResult?.details,
+      isError: hookResult.isError ?? reviewResult?.isError,
+      terminate: reviewResult?.terminate,
+    };
+  }
+
+  private startFileReviewRun(): void {
+    this.currentReviewRunId = createReviewRunId();
+  }
+
+  private getCurrentFileReviewTurnId(): string {
+    return `${this.sessionId || 'session'}:${this.currentReviewRunId}`;
+  }
+
+  private captureFileReviewResult(
+    context: AfterToolCallContext,
+  ): Promise<AfterToolCallResult | undefined> {
+    if (context.isError || !isFileReviewPayload(context.result.details)) {
+      return Promise.resolve(undefined);
+    }
+    return this.captureFileReviewPayload(context);
+  }
+
+  private async captureFileReviewPayload(
+    context: AfterToolCallContext,
+  ): Promise<AfterToolCallResult | undefined> {
+    if (!isFileReviewPayload(context.result.details)) return undefined;
+    const turnId = this.getCurrentFileReviewTurnId();
+    const details = this.fileReviewStore.addRecord(
+      turnId,
+      context.toolCall.id,
+      context.result.details,
+    );
+    this.emitFileReviewUpdated(turnId);
+    return { details };
+  }
+
+  private emitFileReviewUpdated(turnId: string): void {
+    if (!this.onFileReviewUpdated) return;
+    const review = this.fileReviewStore.getTurn(turnId);
+    if (!review) return;
+    try {
+      this.onFileReviewUpdated(this, review);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.appendLine(`[scout] Failed to schedule changes review artifact: ${message}`);
+    }
   }
 
   private async prepareAgentNextTurn(): Promise<AgentLoopTurnUpdate> {
@@ -2309,6 +2393,7 @@ export class AgentSession implements CoreDisposable {
     }
 
     if (type === 'agent_start') {
+      this.startFileReviewRun();
       this.emit({ type: 'state_change' });
     }
 

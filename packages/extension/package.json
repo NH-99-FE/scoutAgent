@@ -65,18 +65,20 @@
     "@scout-agent/shared": "workspace:*",
     "@sinclair/typebox": "^0.34.0",
     "diff": "^9.0.0",
-    "yaml": "^2.9.0",
+    "highlight.js": "^11.11.1",
     "ignore": "^6.0.0",
-    "jiti": "^2.4.2"
+    "jiti": "^2.4.2",
+    "lowlight": "^3.3.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/vscode": "^1.120.0",
+    "@types/diff": "^8.0.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "25.9.1",
-    "@types/diff": "^8.0.0",
-    "esbuild": "^0.28.0",
-    "typescript": "^6.0.3",
+    "@types/vscode": "^1.120.0",
     "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "esbuild": "^0.28.0",
+    "typescript": "^6.0.3"
   }
 }

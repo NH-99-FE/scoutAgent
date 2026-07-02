@@ -19,6 +19,7 @@ import type { Session } from './session/index.ts';
 import type { CoreLogger } from './logger.ts';
 import type { Api, Model } from '@scout-agent/ai';
 import type { ThinkingLevel } from '@scout-agent/agent';
+import type { FileReviewTurnSnapshot } from './review/file-review.ts';
 
 // ---------- 类型 ----------
 
@@ -48,6 +49,7 @@ export interface CreateAgentSessionFromServicesOptions {
   initialModel?: Model<Api>;
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
+  onFileReviewUpdated?: (session: AgentSession, review: FileReviewTurnSnapshot) => void;
 }
 
 // ---------- Services ----------
@@ -136,6 +138,7 @@ export async function createAgentSessionFromServices(
     initialModel: options.initialModel,
     initialThinkingLevel: options.initialThinkingLevel,
     sessionStartEvent: options.sessionStartEvent,
+    onFileReviewUpdated: options.onFileReviewUpdated,
   });
 
   try {

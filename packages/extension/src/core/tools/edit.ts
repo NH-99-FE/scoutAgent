@@ -12,19 +12,22 @@ import {
 } from 'node:fs/promises';
 import { type Static, Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '../extensions/types.ts';
+import {
+  decodeReviewContent,
+  FILE_REVIEW_PAYLOAD_KIND,
+  type FileReviewPayload,
+} from '../review/file-review.ts';
 import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import {
   applyEditsToNormalizedContent,
   detectLineEnding,
   type Edit,
-  generateDiffString,
-  generateUnifiedPatch,
   normalizeToLF,
   restoreLineEndings,
   stripBom,
 } from './shared/edit-diff.ts';
 import { withFileMutationQueue } from './shared/file-mutation-queue.ts';
-import { resolveToCwd } from './shared/path-utils.ts';
+import { formatPathRelativeToCwd, resolveToCwd } from './shared/path-utils.ts';
 
 // ---------- Schema ----------
 
@@ -61,14 +64,14 @@ type LegacyEditToolInput = EditToolInput & {
 };
 
 export interface EditToolDetails {
-  /** 结果语义标记，供上层安全识别文件编辑 diff。 */
-  kind: 'file_edit';
-  /** 显示用 diff */
-  diff: string;
-  /** 标准统一补丁 */
-  patch: string;
-  /** 新文件中第一个变更行号（用于编辑器导航） */
-  firstChangedLine?: number;
+  /** 内部 review payload。AgentSession 会捕获并替换为轻量 file_change details。 */
+  kind: typeof FILE_REVIEW_PAYLOAD_KIND;
+  operation: 'edit';
+  path: string;
+  absolutePath: string;
+  originalContent: string | null;
+  modifiedContent: string | null;
+  unavailableReason?: FileReviewPayload['unavailableReason'];
 }
 
 // ---------- 可插拔操作接口 ----------
@@ -162,6 +165,7 @@ export function createEditToolDefinition(
     async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?) {
       const { path, edits } = validateEditInput(input);
       const absolutePath = resolveToCwd(path, cwd);
+      const displayPath = formatPathRelativeToCwd(absolutePath, cwd);
 
       return withFileMutationQueue(absolutePath, async () => {
         // 不要在 abort 事件监听器中 reject：那会在飞行中的文件系统操作
@@ -188,26 +192,21 @@ export function createEditToolDefinition(
 
         // 读取文件
         const buffer = await ops.readFile(absolutePath);
-        const rawContent = buffer.toString('utf-8');
+        const decodedReviewOriginal = decodeReviewContent(buffer);
+        const rawContent = decodedReviewOriginal.content ?? buffer.toString('utf-8');
         throwIfAborted();
 
         // 匹配前去除 BOM — 模型不会在 oldText 中包含不可见的 BOM
         const { bom, text: content } = stripBom(rawContent);
         const originalEnding = detectLineEnding(content);
         const normalizedContent = normalizeToLF(content);
-        const { baseContent, newContent } = applyEditsToNormalizedContent(
-          normalizedContent,
-          edits,
-          path,
-        );
+        const { newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path);
         throwIfAborted();
 
         const finalContent = bom + restoreLineEndings(newContent, originalEnding);
         await ops.writeFile(absolutePath, finalContent);
         throwIfAborted();
 
-        const diffResult = generateDiffString(baseContent, newContent);
-        const patch = generateUnifiedPatch(path, baseContent, newContent);
         return {
           content: [
             {
@@ -216,10 +215,13 @@ export function createEditToolDefinition(
             },
           ],
           details: {
-            kind: 'file_edit',
-            diff: diffResult.diff,
-            patch,
-            firstChangedLine: diffResult.firstChangedLine,
+            kind: FILE_REVIEW_PAYLOAD_KIND,
+            operation: 'edit',
+            path: displayPath,
+            absolutePath,
+            originalContent: decodedReviewOriginal.content,
+            modifiedContent: decodedReviewOriginal.unavailableReason ? null : finalContent,
+            unavailableReason: decodedReviewOriginal.unavailableReason,
           },
         };
       });
