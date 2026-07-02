@@ -208,6 +208,20 @@ export interface ScoutToolExecutionResult {
   details?: unknown;
 }
 
+export interface ScoutFileChangeReviewRef {
+  turnId: string;
+  recordId: string;
+}
+
+export interface ScoutFileChangeDetails {
+  kind: 'file_change';
+  path: string;
+  additions: number;
+  deletions: number;
+  firstChangedLine?: number;
+  review: ScoutFileChangeReviewRef;
+}
+
 export interface ScoutFileEditPreview {
   kind: 'file_edit';
   path: string;

@@ -4,7 +4,7 @@
 
 // ---------- Webview 面板 ----------
 
-export type ScoutWebviewSurface = 'chat' | 'settings' | 'tree';
+export type ScoutWebviewSurface = 'chat' | 'settings' | 'tree' | 'changes-review';
 
 // ---------- 来源与工具信息 ----------
 

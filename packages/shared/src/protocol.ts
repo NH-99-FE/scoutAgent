@@ -37,6 +37,16 @@ export type {
 } from './protocol-core.ts';
 
 export type {
+  ScoutChangesReviewFile,
+  ScoutChangesReviewModel,
+  ScoutChangesReviewRow,
+  ScoutChangesReviewToken,
+  ScoutChangesReviewTokenDiff,
+  ScoutChangesReviewViewMode,
+  ScoutChangesReviewWebviewMessage,
+} from './protocol-review.ts';
+
+export type {
   ScoutExtensionListItem,
   ScoutExtensionsSettings,
   ScoutExtensionScope,
@@ -54,6 +64,8 @@ export type {
   ScoutContent,
   ScoutContextUsage,
   ScoutCustomMessage,
+  ScoutFileChangeDetails,
+  ScoutFileChangeReviewRef,
   ScoutFileEditPreview,
   ScoutImageContent,
   ScoutMessage,
