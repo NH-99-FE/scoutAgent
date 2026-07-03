@@ -25,6 +25,7 @@ export function ReviewFileSection({
   viewMode: ScoutChangesReviewViewMode;
 }) {
   const ChevronIcon = expanded ? ChevronDown : ChevronRight;
+  const displayPath = file.displayPath ?? file.path;
 
   return (
     <article
@@ -38,10 +39,10 @@ export function ReviewFileSection({
             className="flex min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden border-0 bg-transparent p-0 text-left font-[inherit] text-inherit focus-visible:outline-none"
             onClick={() => onToggleFile(file.id)}
             onDoubleClick={() => onOpenFile(file.absolutePath)}
-            title={file.path}
+            title={displayPath}
             type="button"
           >
-            <ReviewPath path={file.path} />
+            <ReviewPath path={displayPath} />
             {file.external ? (
               <span className="border-border bg-muted text-muted-foreground rounded-[3px] border px-[5px] py-px text-[11px]">
                 External

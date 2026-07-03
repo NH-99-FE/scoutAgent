@@ -28,8 +28,8 @@ import {
 } from '@/store/runtime-overlay-store';
 import { useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
+import { ComposerActivityTray, type ComposerChangesReviewSummary } from './ComposerActivityTray';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
-import { FollowUpQueuePanel } from './FollowUpQueuePanel';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
@@ -39,6 +39,7 @@ import { useForkCandidateMenu } from './use-fork-candidate-menu';
 import { getSlashCommandTrigger } from './use-slash-command-trigger';
 
 interface BaseChatComposerProps {
+  changesReview?: ComposerChangesReviewSummary;
   draftSessionId?: string;
   onMessageSent?: () => void;
   placeholder: string;
@@ -60,6 +61,7 @@ interface NewSessionChatComposerProps extends BaseChatComposerProps {
 type ChatComposerProps = CurrentSessionChatComposerProps | NewSessionChatComposerProps;
 
 interface BaseChatComposerSessionProps {
+  changesReview?: ComposerChangesReviewSummary;
   onMessageSent?: () => void;
   placeholder: string;
   sessionId: string;
@@ -115,6 +117,7 @@ export function ChatComposer(props: ChatComposerProps) {
         placeholder={props.placeholder}
         sessionId={composerSessionId}
         submitDisabled={props.submitDisabled}
+        changesReview={undefined}
         onMessageSent={props.onMessageSent}
         onBeginNewSessionRequest={props.onBeginNewSessionRequest}
       />
@@ -128,13 +131,14 @@ export function ChatComposer(props: ChatComposerProps) {
       placeholder={props.placeholder}
       sessionId={composerSessionId}
       submitDisabled={props.submitDisabled ?? false}
+      changesReview={props.changesReview}
       onMessageSent={props.onMessageSent}
     />
   );
 }
 
 function ChatComposerSession(props: ChatComposerSessionProps) {
-  const { mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
+  const { changesReview, mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
   const [confirmAbort, setConfirmAbort] = useState(false);
   const [pendingSubmit, setPendingSubmit] = useState<PendingSubmit | null>(null);
   const [selectionStart, setSelectionStart] = useState(0);
@@ -430,7 +434,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   return (
     <>
       <div className="max-w-full min-w-0">
-        {isCurrentSessionMode ? <FollowUpQueuePanel /> : null}
+        {isCurrentSessionMode ? <ComposerActivityTray changesReview={changesReview} /> : null}
         {forkMenu.open ? (
           <div ref={floatingPanelRef}>
             <ForkCandidateMenu

@@ -3,7 +3,6 @@
 // ============================================================
 
 import type {
-  ScoutFileChangeDetails,
   ScoutAssistantMessage,
   ScoutMessage,
   ScoutToolResultMessage,
@@ -95,6 +94,7 @@ interface UserSegmentPlan extends SegmentBase {
 interface AssistantSegmentPlan extends SegmentBase {
   anchorKey: string;
   isLatestAssistant: boolean;
+  isStreaming: boolean;
   items: AssistantSegmentItem[];
   kind: 'assistant';
   runtimeActivity: AssistantRuntimeActivity;
@@ -501,7 +501,7 @@ function createAssistantSignature(
 ): SegmentSignature {
   const refs: unknown[] = [];
   for (const item of segment.items) {
-    refs.push(item.message, ...item.pairedToolResults);
+    refs.push(item.message, item.message.changesReviews, ...item.pairedToolResults);
     for (const toolCallId of item.toolCallIds) {
       refs.push(toolExecutionsById[toolCallId], toolPreviewsById[toolCallId]);
     }
@@ -596,7 +596,10 @@ function projectAssistantSegment(
 
   const assistantRow = finalizeAssistantTurn(turn);
   assistantRow.isLatestAssistant = segment.isLatestAssistant;
-  assistantRow.changesReviews = collectChangesReviews(segment);
+  assistantRow.changesReviews =
+    segment.isLatestAssistant && segment.isStreaming
+      ? []
+      : collectAssistantMessageChangesReviews(segment);
   const rows: ConversationRow[] = [assistantRow];
   if (turn.stopReason === 'aborted') {
     rows.push(
@@ -619,67 +622,25 @@ function projectAssistantSegment(
   return rows;
 }
 
-function collectChangesReviews(segment: AssistantSegmentPlan): AssistantChangesReview[] {
-  const groups = new Map<
-    string,
-    {
-      itemsByPath: Map<string, { details: ScoutFileChangeDetails; index: number }>;
-      latestIndex: number;
-    }
-  >();
-  let index = 0;
+function collectAssistantMessageChangesReviews(
+  segment: AssistantSegmentPlan,
+): AssistantChangesReview[] {
+  const latestByTurnId = new Map<string, { review: AssistantChangesReview; order: number }>();
+  let order = 0;
 
   for (const item of segment.items) {
-    for (const toolResult of item.pairedToolResults) {
-      index += 1;
-      if (!isScoutFileChangeDetails(toolResult.details)) continue;
-      const details = toolResult.details;
-      const turnId = details.review.turnId;
-      const group = groups.get(turnId) ?? {
-        itemsByPath: new Map<string, { details: ScoutFileChangeDetails; index: number }>(),
-        latestIndex: index,
-      };
-      group.itemsByPath.set(details.path, { details, index });
-      group.latestIndex = index;
-      groups.set(turnId, group);
+    for (const review of item.message.changesReviews ?? []) {
+      latestByTurnId.set(review.turnId, {
+        review: { ...review, key: `changes-review:${review.turnId}` },
+        order,
+      });
+      order += 1;
     }
   }
 
-  return Array.from(groups.entries())
-    .map(([turnId, group]) => {
-      const items = Array.from(group.itemsByPath.values()).sort((a, b) => b.index - a.index);
-      return {
-        key: `changes-review:${turnId}`,
-        turnId,
-        fileCount: items.length,
-        additions: items.reduce((sum, item) => sum + item.details.additions, 0),
-        deletions: items.reduce((sum, item) => sum + item.details.deletions, 0),
-        files: items.map((item) => ({
-          path: item.details.path,
-          additions: item.details.additions,
-          deletions: item.details.deletions,
-        })),
-      };
-    })
-    .sort((a, b) => {
-      const aIndex = groups.get(a.turnId)?.latestIndex ?? 0;
-      const bIndex = groups.get(b.turnId)?.latestIndex ?? 0;
-      return bIndex - aIndex;
-    });
-}
-
-function isScoutFileChangeDetails(value: unknown): value is ScoutFileChangeDetails {
-  if (!value || typeof value !== 'object') return false;
-  const details = value as Partial<ScoutFileChangeDetails>;
-  return (
-    details.kind === 'file_change' &&
-    typeof details.path === 'string' &&
-    typeof details.additions === 'number' &&
-    typeof details.deletions === 'number' &&
-    Boolean(details.review) &&
-    typeof details.review?.turnId === 'string' &&
-    typeof details.review?.recordId === 'string'
-  );
+  return Array.from(latestByTurnId.values())
+    .sort((left, right) => right.order - left.order)
+    .map((entry) => entry.review);
 }
 
 function createToolResultResolver(

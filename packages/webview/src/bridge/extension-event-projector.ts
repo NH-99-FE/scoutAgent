@@ -43,6 +43,9 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
     case 'queue_update':
       useConversationStore.getState().actions.applyQueueState(message.queueState);
       break;
+    case 'changes_review_update':
+      useConversationStore.getState().actions.applyChangesReviewUpdate(message);
+      break;
     case 'config_update':
       useConfigStore.getState().actions.setConfig(message.config);
       break;
@@ -127,6 +130,7 @@ function applyRuntimeEvent(event: ScoutRuntimeEvent): void {
 export const EXTENSION_EVENT_TYPES = new Set<string>([
   'state_update',
   'queue_update',
+  'changes_review_update',
   'runtime_state_update',
   'agent_event',
   'tool_call_preview_update',

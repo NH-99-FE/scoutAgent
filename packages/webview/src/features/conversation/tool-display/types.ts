@@ -35,6 +35,10 @@ export interface TextToolDisplayDetail {
 export interface DiffToolDisplayDetail {
   kind: 'diff';
   diffText: string;
+  title?: string;
+  path?: string;
+  additions?: number;
+  deletions?: number;
   previewError?: string;
 }
 

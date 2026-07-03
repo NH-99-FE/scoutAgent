@@ -636,7 +636,7 @@ function AssistantChangesReviewFileRow({
 }: {
   file: AssistantChangesReview['files'][number];
 }) {
-  const pathParts = getReviewPathParts(file.path);
+  const pathParts = getReviewPathParts(file.displayPath ?? file.path);
   return (
     <div className="flex min-h-6 items-center gap-2 text-xs leading-5">
       <span className="flex min-w-0 flex-1 items-baseline">

@@ -170,6 +170,46 @@ describe('routeExtensionMessage', () => {
     expect(useConversationStore.getState().queueState.paused).toBe(true);
   });
 
+  it('routes active changes review updates into the conversation store', () => {
+    routeExtensionMessage({
+      type: 'state_update',
+      state: {
+        messages: [{ role: 'user', content: 'hello', timestamp: 1 }],
+        isStreaming: true,
+        busyState: { kind: 'agent', label: 'Working', cancellable: true },
+        modelProvider: 'openai',
+        modelId: 'gpt-test',
+        thinkingLevel: 'off',
+        tools: [],
+        activeToolNames: [],
+        commands: [],
+        sessionId: 'session-1',
+        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+        cwd: '/workspace',
+      },
+    });
+    routeExtensionMessage({
+      type: 'changes_review_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      changesReview: {
+        turnId: 'turn-1',
+        fileCount: 1,
+        additions: 19,
+        deletions: 19,
+        files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+      },
+    });
+
+    expect(useConversationStore.getState().activeChangesReview).toEqual({
+      turnId: 'turn-1',
+      fileCount: 1,
+      additions: 19,
+      deletions: 19,
+      files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+    });
+  });
+
   it('routes runtime state updates into the conversation store', () => {
     routeExtensionMessage({
       type: 'runtime_state_update',

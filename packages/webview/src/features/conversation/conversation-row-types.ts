@@ -6,6 +6,8 @@ import type {
   ScoutBusyState,
   ScoutImageContent,
   ScoutMessage,
+  ScoutChangesReviewSummary,
+  ScoutChangesReviewSummaryFile,
   ScoutTextContent,
   ScoutThinkingContent,
   ScoutToolCallContent,
@@ -57,20 +59,12 @@ export interface AssistantConversationRow {
   isStreaming: boolean;
 }
 
-export interface AssistantChangesReview {
+export interface AssistantChangesReview extends ScoutChangesReviewSummary {
   key: string;
-  turnId: string;
-  fileCount: number;
-  additions: number;
-  deletions: number;
   files: AssistantChangesReviewFile[];
 }
 
-export interface AssistantChangesReviewFile {
-  path: string;
-  additions: number;
-  deletions: number;
-}
+export type AssistantChangesReviewFile = ScoutChangesReviewSummaryFile;
 
 export type AssistantOutcomeKind = 'aborted' | 'error' | 'compacting' | 'compacted' | 'forked';
 

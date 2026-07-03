@@ -21,7 +21,8 @@ export function resolveToolDisplayResult({
   assistantStopReason,
 }: ResolveToolDisplayOptions): ToolDisplayResult {
   const toolName = toolResult?.toolName ?? runtime?.toolName ?? toolCall.name;
-  const args = runtime?.args ?? toolCall.arguments;
+  const args =
+    runtime?.displayArgs ?? toolCall.displayArguments ?? runtime?.args ?? toolCall.arguments;
   const context = createToolDisplayContext({
     toolName,
     args,

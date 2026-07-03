@@ -1878,6 +1878,187 @@ describe('ChatApp', () => {
     });
   });
 
+  it('shows a live streaming changes review summary in the composer tray', () => {
+    const queueState = {
+      paused: false,
+      messages: [{ id: 'follow-1', delivery: 'followUp' as const, text: '111', timestamp: 4 }],
+      followUps: [{ id: 'follow-1', text: '111', timestamp: 4 }],
+    };
+    const streamingMessages: ScoutMessage[] = [
+      { role: 'user', content: 'hello', timestamp: 1 },
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'toolCall',
+            id: 'tool-1',
+            name: 'edit',
+            arguments: { path: 'src/app.ts' },
+          },
+          {
+            type: 'toolCall',
+            id: 'tool-2',
+            name: 'edit',
+            arguments: { path: 'src/other.ts' },
+          },
+        ],
+        timestamp: 2,
+      },
+    ];
+    const makeToolResult = (
+      toolCallId: string,
+      path: string,
+      additions: number,
+      deletions: number,
+      recordId: string,
+      timestamp: number,
+    ): Extract<ScoutMessage, { role: 'toolResult' }> => ({
+      role: 'toolResult',
+      toolCallId,
+      toolName: 'edit',
+      content: [{ type: 'text', text: 'done' }],
+      details: {
+        kind: 'file_change',
+        path,
+        additions,
+        deletions,
+        review: {
+          turnId: 'turn-1',
+          recordId,
+        },
+      },
+      isError: false,
+      timestamp,
+    });
+    const settledMessages: ScoutMessage[] = [
+      streamingMessages[0]!,
+      {
+        ...(streamingMessages[1]! as Extract<ScoutMessage, { role: 'assistant' }>),
+        changesReviews: [
+          {
+            turnId: 'turn-1',
+            fileCount: 2,
+            additions: 27,
+            deletions: 23,
+            files: [
+              { path: 'src/app.ts', additions: 19, deletions: 19 },
+              { path: 'src/other.ts', additions: 8, deletions: 4 },
+            ],
+          },
+        ],
+      },
+      makeToolResult('tool-1', 'src/app.ts', 19, 19, 'review-1', 3),
+      makeToolResult('tool-2', 'src/other.ts', 8, 4, 'review-2', 4),
+    ];
+    const streamingState = makeState(streamingMessages, {
+      isStreaming: true,
+      busyState: { kind: 'agent', label: 'Working', cancellable: true },
+      queueState,
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+    });
+    useConversationStore.getState().actions.applyStateSnapshot(streamingState);
+    useSessionStore.getState().actions.applyState(streamingState);
+
+    const { container } = render(<ChatApp />);
+
+    expect(container.querySelector('[data-composer-changes-review-summary="true"]')).toBeNull();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'changes_review_update',
+        sessionId: 'session-1',
+        changesReview: {
+          turnId: 'turn-1',
+          fileCount: 1,
+          additions: 19,
+          deletions: 19,
+          files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+        },
+      });
+    });
+
+    let summary = container.querySelector(
+      '[data-composer-changes-review-summary="true"]',
+    ) as HTMLElement;
+    const queue = container.querySelector('[data-composer-follow-up-queue="true"]') as HTMLElement;
+    expect(summary).not.toBeNull();
+    expect(queue).not.toBeNull();
+    expect(summary.parentElement).toBe(queue.parentElement);
+    expect(within(summary).getByText('1 个文件已更改')).toBeInTheDocument();
+    expect(within(summary).getByText('+19')).toBeInTheDocument();
+    expect(within(summary).getByText('-19')).toBeInTheDocument();
+    expect(within(queue).getByText('111')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Review Changes' })).not.toBeInTheDocument();
+
+    fireEvent.click(within(summary).getByRole('button', { name: '审查' }));
+    expectPostedPayload('open_changes_review', {
+      type: 'open_changes_review',
+      turnId: 'turn-1',
+    });
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'changes_review_update',
+        sessionId: 'session-1',
+        changesReview: {
+          turnId: 'turn-1',
+          fileCount: 2,
+          additions: 27,
+          deletions: 23,
+          files: [
+            { path: 'src/app.ts', additions: 19, deletions: 19 },
+            { path: 'src/other.ts', additions: 8, deletions: 4 },
+          ],
+        },
+      });
+    });
+    summary = container.querySelector(
+      '[data-composer-changes-review-summary="true"]',
+    ) as HTMLElement;
+    expect(within(summary).getByText('2 个文件已更改')).toBeInTheDocument();
+    expect(within(summary).getByText('+27')).toBeInTheDocument();
+    expect(within(summary).getByText('-23')).toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'tool_call_preview_update',
+        sessionId: 'session-1',
+        toolCallId: 'tool-1',
+        toolName: 'edit',
+        preview: {
+          kind: 'file_edit',
+          path: 'src/app.ts',
+          diff: ' 1 const value = 1;\n-2 old\n+2 new',
+          additions: 19,
+          deletions: 19,
+        },
+      });
+    });
+    expect(screen.getByText('正在编辑 src/app.ts')).toBeInTheDocument();
+    expect(screen.queryByText('正在编辑 /workspace/src/app.ts')).not.toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState(settledMessages, {
+          isStreaming: false,
+          busyState: { kind: 'idle', cancellable: false },
+          queueState,
+          sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+        }),
+      });
+    });
+    expect(container.querySelector('[data-composer-changes-review-summary="true"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Review Changes' })).toBeInTheDocument();
+
+    expect(screen.queryByText('已编辑的文件')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开文件变更 src\/app\.ts/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('-2 old')).not.toBeInTheDocument();
+    expect(screen.queryByText('+2 new')).not.toBeInTheDocument();
+  });
+
   it('shows retry runtime status inline in the conversation', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
       isStreaming: true,

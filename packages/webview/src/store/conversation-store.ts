@@ -5,6 +5,8 @@
 import { create } from 'zustand';
 import type {
   ScoutBusyState,
+  ScoutChangesReviewSummary,
+  ScoutChangesReviewUpdateEvent,
   ScoutContextUsage,
   ScoutMessage,
   ScoutQueueState,
@@ -23,6 +25,7 @@ export interface ToolExecutionState {
   toolCallId: string;
   toolName: string;
   args?: Record<string, unknown>;
+  displayArgs?: Record<string, unknown>;
   status: 'running' | 'done' | 'error';
   partialResult?: ScoutToolExecutionResult;
   result?: ScoutToolExecutionResult;
@@ -39,6 +42,7 @@ interface ConversationActions {
   applyStateSnapshot: (state: ScoutWebviewState) => void;
   applyRuntimeState: (state: Pick<ConversationStore, 'isStreaming' | 'busyState'>) => void;
   applyQueueState: (queueState: ScoutQueueState) => void;
+  applyChangesReviewUpdate: (event: ScoutChangesReviewUpdateEvent) => void;
   applyRuntimeEvent: (event: ScoutRuntimeEvent) => void;
   setContextUsage: (contextUsage: ScoutContextUsage | undefined) => void;
   reset: () => void;
@@ -51,6 +55,7 @@ interface ConversationStore {
   isStreaming: boolean;
   busyState: ScoutBusyState;
   queueState: ScoutQueueState;
+  activeChangesReview: ScoutChangesReviewSummary | undefined;
   contextUsage: ScoutContextUsage | undefined;
   sessionId: string;
   sessionFile: string;
@@ -77,6 +82,7 @@ const initialState = {
   isStreaming: false,
   busyState: IDLE_BUSY_STATE,
   queueState: EMPTY_QUEUE_STATE,
+  activeChangesReview: undefined as ScoutChangesReviewSummary | undefined,
   contextUsage: undefined as ScoutContextUsage | undefined,
   sessionId: '',
   sessionFile: '',
@@ -149,6 +155,7 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           isStreaming: state.isStreaming,
           busyState: state.busyState,
           queueState: state.queueState ?? EMPTY_QUEUE_STATE,
+          activeChangesReview: state.activeChangesReview,
           contextUsage: state.contextUsage,
           sessionId: state.sessionId ?? '',
           sessionFile: state.sessionFile ?? '',
@@ -158,6 +165,11 @@ export const useConversationStore = create<ConversationStore>((set) => ({
       }),
     applyRuntimeState: (state) => set(state),
     applyQueueState: (queueState) => set({ queueState }),
+    applyChangesReviewUpdate: (event) =>
+      set((state) => {
+        if (!isChangesReviewUpdateForCurrentSession(event, state)) return {};
+        return { activeChangesReview: event.changesReview };
+      }),
     applyRuntimeEvent: (event) =>
       set((state) => {
         if (event.type === 'agent_start') {
@@ -169,6 +181,7 @@ export const useConversationStore = create<ConversationStore>((set) => ({
         if (event.type === 'agent_end') {
           return {
             toolExecutionsById: keepSettledToolExecutions(state.toolExecutionsById),
+            toolPreviewsById: {},
           };
         }
         if (
@@ -195,6 +208,7 @@ export const useConversationStore = create<ConversationStore>((set) => ({
                 toolCallId: event.toolCallId,
                 toolName: event.toolName,
                 args: event.args,
+                displayArgs: event.displayArgs,
                 status: 'running',
                 isError: false,
               },
@@ -231,8 +245,11 @@ export const useConversationStore = create<ConversationStore>((set) => ({
               isError: event.isError,
             },
           };
+          const toolPreviewsById = { ...state.toolPreviewsById };
+          delete toolPreviewsById[event.toolCallId];
           return {
             toolExecutionsById: nextToolExecutionsById,
+            toolPreviewsById,
           };
         }
         if (event.type === 'tool_call_preview_update') {
@@ -259,8 +276,25 @@ function isPreviewForCurrentSession(
   event: Extract<ScoutRuntimeEvent, { type: 'tool_call_preview_update' }>,
   state: ConversationStore,
 ): boolean {
+  return isEventForCurrentSession(event.sessionId, event.sessionFile, state);
+}
+
+function isChangesReviewUpdateForCurrentSession(
+  event: ScoutChangesReviewUpdateEvent,
+  state: ConversationStore,
+): boolean {
+  return isEventForCurrentSession(event.sessionId, event.sessionFile, state);
+}
+
+function isEventForCurrentSession(
+  eventSessionId: string,
+  eventSessionFile: string | undefined,
+  state: Pick<ConversationStore, 'sessionId' | 'sessionFile'>,
+): boolean {
   if (!state.sessionId) return false;
-  return event.sessionId === state.sessionId && (event.sessionFile ?? '') === state.sessionFile;
+  if (eventSessionId !== state.sessionId) return false;
+  if (eventSessionFile && state.sessionFile && eventSessionFile !== state.sessionFile) return false;
+  return true;
 }
 
 export const useConversationMessages = () => useConversationStore((state) => state.messages);
@@ -278,6 +312,8 @@ export const useIsStreaming = () => useConversationStore((state) => state.isStre
 export const useBusyState = () => useConversationStore((state) => state.busyState);
 export const useQueueState = () => useConversationStore((state) => state.queueState);
 export const useQueuedFollowUps = () => useConversationStore((state) => state.queueState.followUps);
+export const useActiveChangesReview = () =>
+  useConversationStore((state) => state.activeChangesReview);
 export const useContextUsage = () => useConversationStore((state) => state.contextUsage);
 export const useToolExecutionsById = () =>
   useConversationStore((state) => state.toolExecutionsById);

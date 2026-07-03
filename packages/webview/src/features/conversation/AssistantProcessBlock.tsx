@@ -7,10 +7,11 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardList,
+  ClipboardPen,
   EyeOff,
+  FileDiff,
   FileText,
   FolderOpen,
-  PencilLine,
   Search,
   SquareTerminal,
   Wrench,
@@ -461,21 +462,26 @@ function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
   const { hiddenLineCount, isTruncated, setShowAll, visibleLines } = usePreviewLines(lines);
 
   if (detail.previewError) {
-    return <FileEditPreviewErrorPanel message={detail.previewError} />;
+    return <FileEditPreviewErrorPanel detail={detail} message={detail.previewError} />;
   }
 
   return (
-    <div className="border-border/60 bg-muted/15 max-w-full min-w-0 overflow-hidden rounded-md border-l">
+    <div
+      className="border-border/70 bg-foreground/[0.035] max-w-full min-w-0 overflow-hidden rounded-lg border shadow-sm"
+      data-file-edit-diff-panel="true"
+    >
+      <FileEditDiffHeader detail={detail} />
       <ScrollArea
         className="max-h-44 max-w-full min-w-0 sm:max-h-56"
-        scrollbars="vertical"
+        scrollbars="both"
         type="always"
         viewportClassName="max-h-44 sm:max-h-56"
+        viewportProps={{ style: { overflowX: 'auto' } }}
       >
-        <pre className="max-w-full py-1 font-mono text-[12px] leading-5">
+        <pre className="m-0 w-max min-w-full py-1 font-mono text-[12px] leading-5">
           {visibleLines.map((line, index) => (
             <span
-              className="block min-h-5 max-w-full px-2.5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap"
+              className="block min-h-5 min-w-full border-l-2 border-transparent px-2.5 whitespace-pre"
               data-diff-line-content
               key={`${index}:${line.slice(0, 16)}`}
               style={getDiffLineStyle(line)}
@@ -491,6 +497,36 @@ function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
           totalLineCount={lines.length}
           onShowAll={() => setShowAll(true)}
         />
+      ) : null}
+    </div>
+  );
+}
+
+function FileEditDiffHeader({ detail }: { detail: DiffToolDisplayDetail }) {
+  if (!detail.title && !detail.path) return null;
+  return (
+    <div className="border-border/60 divide-border/60 divide-y border-b">
+      {detail.title ? (
+        <div className="text-muted-foreground flex min-h-8 items-center gap-1.5 px-2.5 py-1 text-[12px] leading-5 font-medium">
+          <span className="min-w-0 truncate">{detail.title}</span>
+          <ChevronDown className="size-3.5 shrink-0" aria-hidden="true" />
+        </div>
+      ) : null}
+      {detail.path ? (
+        <div className="flex min-h-8 items-center gap-1.5 px-2.5 py-1 text-[12px] leading-5">
+          <FileDiff
+            aria-hidden="true"
+            className="text-muted-foreground/70 size-3.5 shrink-0"
+            strokeWidth={2}
+          />
+          <span className="text-foreground min-w-0 flex-1 truncate font-mono">{detail.path}</span>
+          {typeof detail.additions === 'number' && detail.additions > 0 ? (
+            <span className="shrink-0 font-mono text-[var(--chart-2)]">+{detail.additions}</span>
+          ) : null}
+          {typeof detail.deletions === 'number' && detail.deletions > 0 ? (
+            <span className="shrink-0 font-mono text-[var(--chart-5)]">-{detail.deletions}</span>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -533,9 +569,16 @@ function ToolDetailLineLimitButton({
   );
 }
 
-function FileEditPreviewErrorPanel({ message }: { message: string }) {
+function FileEditPreviewErrorPanel({
+  detail,
+  message,
+}: {
+  detail: DiffToolDisplayDetail;
+  message: string;
+}) {
   return (
-    <div className="border-border/60 bg-muted/15 max-w-full min-w-0 overflow-hidden rounded-md border-l">
+    <div className="border-border/70 bg-foreground/[0.035] max-w-full min-w-0 overflow-hidden rounded-lg border shadow-sm">
+      <FileEditDiffHeader detail={detail} />
       <div className="text-muted-foreground/80 px-2.5 py-1 text-[11px] leading-4">预览错误</div>
       <pre className="text-destructive/90 max-w-full px-2.5 pb-2 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
         {message}
@@ -638,7 +681,7 @@ function ToolDisplayIconView({ icon }: { icon: ToolDisplayIcon }) {
     case 'file':
       return <FileText className={className} />;
     case 'edit':
-      return <PencilLine className={className} />;
+      return <ClipboardPen className={className} />;
     case 'folder':
       return <FolderOpen className={className} />;
     case 'clipboard-list':

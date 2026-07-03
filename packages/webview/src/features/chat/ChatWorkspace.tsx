@@ -28,6 +28,7 @@ import {
 import {
   useConversationMessages,
   useConversationItems,
+  useActiveChangesReview,
   useToolExecutionsById,
   useToolPreviewsById,
 } from '@/store/conversation-store';
@@ -64,6 +65,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
   const isStreaming = useVisualIsStreaming();
   const toolExecutionsById = useToolExecutionsById();
   const toolPreviewsById = useToolPreviewsById();
+  const activeChangesReview = useActiveChangesReview();
   const busyState = useVisualBusyState();
   const extensionUIRequests = useExtensionUIRequests();
   const sessionFile = useSessionFile();
@@ -150,11 +152,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
             </>
           }
         />
-        <RenameSessionDialog
-          currentTitle={title}
-          open={renameOpen}
-          onOpenChange={setRenameOpen}
-        />
+        <RenameSessionDialog currentTitle={title} open={renameOpen} onOpenChange={setRenameOpen} />
       </header>
 
       {taskHistoryRendered ? (
@@ -192,7 +190,11 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
       />
 
       <footer className="bg-background max-w-full min-w-0 shrink-0 px-3 pt-1 pb-3">
-        <ChatComposer placeholder="要求后续变更" onMessageSent={requestScrollToBottom} />
+        <ChatComposer
+          changesReview={activeChangesReview}
+          placeholder="要求后续变更"
+          onMessageSent={requestScrollToBottom}
+        />
       </footer>
     </main>
   );
