@@ -67,4 +67,5 @@ export {
 export { ScoutModelResolver, type ModelResolution } from './model-resolver.ts';
 export * from './compaction/index.ts';
 export * from './extensions/index.ts';
+export * from './tool-preview/index.ts';
 export * from './tools/index.ts';

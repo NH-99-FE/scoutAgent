@@ -16,9 +16,9 @@ import type { ToolDefinition } from '../extensions/types.ts';
 import {
   decodeReviewContent,
   FILE_REVIEW_PAYLOAD_KIND,
-  MAX_REVIEW_TEXT_BYTES,
   type FileReviewPayload,
 } from '../review/file-review.ts';
+import { MAX_REVIEW_TEXT_BYTES } from '../text-size.ts';
 import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { withFileMutationQueue } from './shared/file-mutation-queue.ts';
 import { formatPathRelativeToCwd, resolveToCwd } from './shared/path-utils.ts';
@@ -38,6 +38,7 @@ export interface WriteToolDetails {
   operation: 'write';
   path: string;
   absolutePath: string;
+  displayPath?: string;
   originalContent: string | null;
   modifiedContent: string | null;
   unavailableReason?: FileReviewPayload['unavailableReason'];
@@ -89,6 +90,7 @@ export function createWriteToolDefinition(
       "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
     promptSnippet: 'Create or overwrite files',
     promptGuidelines: ['Use write only for new files or complete rewrites.'],
+    presentation: { pathArguments: ['path'] },
     parameters: writeSchema,
 
     async execute(
@@ -128,8 +130,9 @@ export function createWriteToolDefinition(
           details: {
             kind: FILE_REVIEW_PAYLOAD_KIND,
             operation: 'write',
-            path: displayPath,
+            path,
             absolutePath,
+            displayPath,
             originalContent: original.content,
             modifiedContent: original.unavailableReason ? null : content,
             unavailableReason: original.unavailableReason,

@@ -12,7 +12,7 @@ import {
   createTools,
   DEFAULT_ACTIVE_TOOL_NAMES,
 } from '../../src/core/tools/index.ts';
-import { MAX_REVIEW_TEXT_BYTES } from '../../src/core/review/file-review.ts';
+import { MAX_REVIEW_TEXT_BYTES } from '../../src/core/text-size.ts';
 
 describe('builtin tools', () => {
   let cwd: string;
@@ -67,6 +67,9 @@ describe('builtin tools', () => {
     expect(definitions.write.promptGuidelines).toEqual([
       'Use write only for new files or complete rewrites.',
     ]);
+    expect(definitions.read.presentation).toEqual({ pathArguments: ['path'] });
+    expect(definitions.edit.presentation).toEqual({ pathArguments: ['path'] });
+    expect(definitions.write.presentation).toEqual({ pathArguments: ['path'] });
   });
 
   it('keeps the core edit review payload contract for AgentSession capture', async () => {
@@ -84,6 +87,7 @@ describe('builtin tools', () => {
       operation: 'edit',
       path: 'sample.txt',
       absolutePath: target,
+      displayPath: 'sample.txt',
       originalContent: 'old value\n',
       modifiedContent: 'new value\n',
     });
@@ -149,6 +153,7 @@ describe('builtin tools', () => {
       operation: 'write',
       path: 'large.txt',
       absolutePath: target,
+      displayPath: 'large.txt',
       originalContent: null,
       modifiedContent: null,
       unavailableReason: 'Diff too large to review',

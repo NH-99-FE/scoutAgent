@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto';
 import * as Diff from 'diff';
 import type { ScoutChangesReviewToken, ScoutFileChangeDetails } from '@scout-agent/shared';
+import { getUtf8ByteLength, MAX_REVIEW_TEXT_BYTES } from '../text-size.ts';
 import {
   applyReviewTokenDiff,
   createReviewIntralineRanges,
@@ -17,7 +18,6 @@ import { normalizeReviewLineEndings, splitReviewLines } from './review-text.ts';
 
 export const FILE_REVIEW_PAYLOAD_KIND = 'file_review_payload';
 export const FILE_CHANGE_DETAILS_KIND = 'file_change';
-export const MAX_REVIEW_TEXT_BYTES = 1024 * 1024;
 export const MAX_REVIEW_DIFF_ROWS = 20_000;
 export const REVIEW_CONTEXT_LINES = 3;
 export const MAX_RELEASED_REVIEW_TURNS = 20;
@@ -40,8 +40,12 @@ type ReviewStoredUnavailableReason = Exclude<
 export interface FileReviewPayload {
   kind: typeof FILE_REVIEW_PAYLOAD_KIND;
   operation: FileReviewOperation;
+  /** 工具调用中的原始 path 参数，保留给审计和 artifact。 */
   path: string;
+  /** 可定位文件的规范路径，review 聚合和 host 打开文件都基于它。 */
   absolutePath: string;
+  /** UI-only 展示路径，由创建 payload 的运行上下文格式化。 */
+  displayPath?: string;
   originalContent: string | null;
   modifiedContent: string | null;
   unavailableReason?: Exclude<FileReviewUnavailableReason, 'Changes are no longer available'>;
@@ -59,6 +63,7 @@ export interface FileReviewRecord {
   operation: FileReviewOperation;
   path: string;
   absolutePath: string;
+  displayPath?: string;
   sequence: number;
   unavailableReason?: Exclude<FileReviewUnavailableReason, 'Changes are no longer available'>;
 }
@@ -66,6 +71,7 @@ export interface FileReviewRecord {
 export interface FileReviewFile {
   absolutePath: string;
   path: string;
+  displayPath?: string;
   originalContent: string | null;
   modifiedContent: string | null;
   recordIds: string[];
@@ -143,6 +149,7 @@ export class FileReviewStore {
       operation: payload.operation,
       path: payload.path,
       absolutePath: payload.absolutePath,
+      displayPath: payload.displayPath,
       sequence,
       unavailableReason: payload.unavailableReason,
     };
@@ -155,6 +162,7 @@ export class FileReviewStore {
       ? {
           ...existing,
           path: payload.path,
+          displayPath: payload.displayPath ?? existing.displayPath,
           modifiedContent: payload.modifiedContent,
           modifiedUnavailableReason:
             payload.modifiedContent === null ? payload.unavailableReason : undefined,
@@ -165,6 +173,7 @@ export class FileReviewStore {
       : {
           absolutePath: payload.absolutePath,
           path: payload.path,
+          displayPath: payload.displayPath,
           originalContent: payload.originalContent,
           modifiedContent: payload.modifiedContent,
           originalUnavailableReason:
@@ -199,7 +208,8 @@ export class FileReviewStore {
 
     return {
       kind: FILE_CHANGE_DETAILS_KIND,
-      path: payload.path,
+      path: payload.absolutePath,
+      displayPath: payload.displayPath,
       additions: file.additions,
       deletions: file.deletions,
       firstChangedLine: file.firstChangedLine,
@@ -246,6 +256,7 @@ export class FileReviewStore {
     return {
       absolutePath: file.absolutePath,
       path: file.path,
+      displayPath: file.displayPath,
       originalContent: file.originalContent,
       modifiedContent: file.modifiedContent,
       recordIds: [...file.recordIds],
@@ -300,6 +311,7 @@ export function isFileReviewPayload(value: unknown): value is FileReviewPayload 
     isFileReviewOperation(value.operation) &&
     typeof value.path === 'string' &&
     typeof value.absolutePath === 'string' &&
+    isOptionalString(value.displayPath) &&
     isNullableString(value.originalContent) &&
     isNullableString(value.modifiedContent) &&
     isOptionalPayloadUnavailableReason(value.unavailableReason)
@@ -316,6 +328,10 @@ function isFileReviewOperation(value: unknown): value is FileReviewOperation {
 
 function isNullableString(value: unknown): value is string | null {
   return value === null || typeof value === 'string';
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string';
 }
 
 function isOptionalPayloadUnavailableReason(
@@ -339,10 +355,6 @@ export function decodeReviewContent(buffer: Buffer): DecodedReviewContent {
   } catch {
     return { content: null, unavailableReason: 'Binary or unsupported encoding' };
   }
-}
-
-export function getUtf8ByteLength(content: string | null): number {
-  return content === null ? 0 : Buffer.byteLength(content, 'utf-8');
 }
 
 export function createReviewContentFingerprint(

@@ -5,7 +5,8 @@
 
 import * as Diff from 'diff';
 import { constants } from 'node:fs';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
+import { getUtf8ByteLength, MAX_REVIEW_TEXT_BYTES } from '../../text-size.ts';
 import { resolveToCwd } from './path-utils.ts';
 
 export function detectLineEnding(content: string): '\r\n' | '\n' {
@@ -381,6 +382,10 @@ export interface EditDiffError {
   error: string;
 }
 
+export interface WriteDiffBaseSnapshot {
+  oldContent: string;
+}
+
 /** 计算一组编辑操作的 diff（不应用） */
 export async function computeEditsDiff(
   path: string,
@@ -413,4 +418,64 @@ export async function computeEditsDiff(
   } catch (err) {
     return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** 捕获 write 预览的旧内容基线；应在实际写入前尽早调用。 */
+export async function captureWriteDiffBase(
+  path: string,
+  cwd: string,
+): Promise<WriteDiffBaseSnapshot | EditDiffError> {
+  const absolutePath = resolveToCwd(path, cwd);
+  try {
+    let oldContent = '';
+    try {
+      const stats = await stat(absolutePath);
+      if (stats.size > MAX_REVIEW_TEXT_BYTES) {
+        return createWritePreviewTooLargeError(path);
+      }
+
+      const rawContent = await readFile(absolutePath, 'utf-8');
+      oldContent = stripBom(rawContent).text;
+    } catch (error: unknown) {
+      if (
+        !(error instanceof Error) ||
+        !('code' in error) ||
+        (error as NodeJS.ErrnoException).code !== 'ENOENT'
+      ) {
+        const errorMessage =
+          error instanceof Error && 'code' in error
+            ? `Error code: ${(error as NodeJS.ErrnoException).code}`
+            : String(error);
+        return { error: `Could not preview write to ${path}. ${errorMessage}.` };
+      }
+    }
+
+    return { oldContent };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** 基于已捕获的旧内容计算 write diff，避免实际写入后的读盘竞争。 */
+export function computeWriteDiffFromBase(
+  path: string,
+  content: string,
+  base: WriteDiffBaseSnapshot,
+): EditDiffResult | EditDiffError {
+  if (
+    getUtf8ByteLength(base.oldContent) > MAX_REVIEW_TEXT_BYTES ||
+    getUtf8ByteLength(content) > MAX_REVIEW_TEXT_BYTES
+  ) {
+    return createWritePreviewTooLargeError(path);
+  }
+
+  try {
+    return generateDiffString(normalizeToLF(base.oldContent), normalizeToLF(content));
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function createWritePreviewTooLargeError(path: string): EditDiffError {
+  return { error: `Could not preview write to ${path}. Diff too large to review.` };
 }

@@ -4,8 +4,8 @@ import {
   decodeReviewContent,
   FileReviewStore,
   isFileReviewPayload,
-  MAX_REVIEW_TEXT_BYTES,
 } from '../../src/core/review/file-review.ts';
+import { MAX_REVIEW_TEXT_BYTES } from '../../src/core/text-size.ts';
 import { createReviewLineTokens } from '../../src/core/review/review-syntax-tokens.ts';
 
 describe('FileReviewStore', () => {
@@ -47,6 +47,33 @@ describe('FileReviewStore', () => {
     expect(turn?.records[0]).not.toHaveProperty('modifiedContent');
     expect(turn?.records[1]).not.toHaveProperty('originalContent');
     expect(turn?.records[1]).not.toHaveProperty('modifiedContent');
+  });
+
+  it('returns locatable file_change details with separate display path', () => {
+    const store = new FileReviewStore();
+
+    const details = store.addRecord('turn-1', 'tool-1', {
+      kind: 'file_review_payload',
+      operation: 'edit',
+      path: '../workspace/src/app.ts',
+      absolutePath: '/workspace/src/app.ts',
+      displayPath: 'src/app.ts',
+      originalContent: 'old\n',
+      modifiedContent: 'new\n',
+    });
+
+    expect(details).toMatchObject({
+      kind: 'file_change',
+      path: '/workspace/src/app.ts',
+      displayPath: 'src/app.ts',
+      additions: 1,
+      deletions: 1,
+    });
+    expect(store.getTurn('turn-1')?.files[0]).toMatchObject({
+      path: '../workspace/src/app.ts',
+      absolutePath: '/workspace/src/app.ts',
+      displayPath: 'src/app.ts',
+    });
   });
 
   it('sorts files by latest touch and keeps different turns separated', () => {

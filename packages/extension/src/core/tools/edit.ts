@@ -69,6 +69,7 @@ export interface EditToolDetails {
   operation: 'edit';
   path: string;
   absolutePath: string;
+  displayPath?: string;
   originalContent: string | null;
   modifiedContent: string | null;
   unavailableReason?: FileReviewPayload['unavailableReason'];
@@ -160,6 +161,7 @@ export function createEditToolDefinition(
     promptGuidelines: [
       'Use edit for targeted replacements. Use write for new files or complete rewrites.',
     ],
+    presentation: { pathArguments: ['path'] },
     parameters: editSchema,
     prepareArguments: prepareEditArguments,
     async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?) {
@@ -217,8 +219,9 @@ export function createEditToolDefinition(
           details: {
             kind: FILE_REVIEW_PAYLOAD_KIND,
             operation: 'edit',
-            path: displayPath,
+            path,
             absolutePath,
+            displayPath,
             originalContent: decodedReviewOriginal.content,
             modifiedContent: decodedReviewOriginal.unavailableReason ? null : finalContent,
             unavailableReason: decodedReviewOriginal.unavailableReason,

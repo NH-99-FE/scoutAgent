@@ -33,6 +33,7 @@ import type {
   StreamFn,
   ThinkingLevel,
 } from '@scout-agent/agent';
+import type { ToolPresentationMetadata } from '@scout-agent/shared';
 import {
   Agent,
   type BashExecutionMessage,
@@ -313,6 +314,7 @@ export class AgentSession implements CoreDisposable {
     review: FileReviewTurnSnapshot,
   ) => void;
   private toolRegistry = new Map<string, ToolRegistryEntry>();
+  private toolRegistryVersion = 0;
   private lastSystemPrompt = '';
 
   private agent?: Agent;
@@ -1167,8 +1169,17 @@ export class AgentSession implements CoreDisposable {
       label: entry.definition.label,
       description: entry.definition.description,
       parameters: entry.definition.parameters,
+      ...(entry.definition.presentation ? { presentation: entry.definition.presentation } : {}),
       sourceInfo: entry.sourceInfo,
     }));
+  }
+
+  getToolPresentation(toolName: string): ToolPresentationMetadata | undefined {
+    return this.toolRegistry.get(toolName)?.definition.presentation;
+  }
+
+  getToolRegistryVersion(): number {
+    return this.toolRegistryVersion;
   }
 
   async appendEntry<TData = unknown>(customType: string, data?: TData): Promise<void> {
@@ -1779,6 +1790,7 @@ export class AgentSession implements CoreDisposable {
     }
 
     this.toolRegistry = registry;
+    this.toolRegistryVersion += 1;
   }
 
   private normalizeActiveToolNames(options?: {

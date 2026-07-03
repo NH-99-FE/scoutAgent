@@ -20,6 +20,7 @@ import type {
   ThinkingLevel,
   ToolExecutionMode,
 } from '@scout-agent/agent';
+import type { ToolPresentationMetadata } from '@scout-agent/shared';
 import type { CompactionPreparation, CompactionResult } from '../compaction/index.ts';
 import type {
   BranchSummaryEntry,
@@ -63,6 +64,7 @@ export interface ToolDefinition<
   parameters: TParams;
   promptSnippet?: string;
   promptGuidelines?: string[];
+  presentation?: ToolPresentationMetadata;
   renderShell?: 'default' | 'self';
   prepareArguments?: (args: unknown) => Static<TParams>;
   executionMode?: ToolExecutionMode;
@@ -460,6 +462,7 @@ export interface ToolInfo {
   label?: string;
   description: string;
   parameters: unknown;
+  presentation?: ToolPresentationMetadata;
   sourceInfo: SourceInfo;
 }
 

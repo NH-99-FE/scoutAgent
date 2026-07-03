@@ -1073,13 +1073,18 @@ describe('AgentSession', () => {
       .getEntries()
       .flatMap((entry) =>
         entry.type === 'message' && entry.message.role === 'toolResult'
-          ? [entry.message.details as { kind?: string; path?: string }]
+          ? [entry.message.details as { kind?: string; path?: string; displayPath?: string }]
           : [],
       );
 
     expect(toolResultDetails).toHaveLength(3);
     expect(toolResultDetails.every((details) => details.kind === 'file_change')).toBe(true);
     expect(toolResultDetails.map((details) => details.path).sort()).toEqual([
+      path.join(tempDir, 'a.txt'),
+      path.join(tempDir, 'a.txt'),
+      path.join(tempDir, 'b.txt'),
+    ]);
+    expect(toolResultDetails.map((details) => details.displayPath).sort()).toEqual([
       'a.txt',
       'a.txt',
       'b.txt',
