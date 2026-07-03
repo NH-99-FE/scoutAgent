@@ -186,4 +186,69 @@ describe('session message projector', () => {
     ]);
   });
 
+  it('attaches changes review summaries to assistant messages from paired file change results', () => {
+    const session = SessionManager.inMemory();
+    session.appendMessage(userMessage('edit app'));
+    session.appendMessage(
+      assistantMessage('', {
+        content: [
+          {
+            type: 'toolCall',
+            id: 'tool-1',
+            name: 'edit',
+            arguments: { path: '/workspace/src/app.ts' },
+          },
+        ],
+        stopReason: 'toolUse',
+      }),
+    );
+    session.appendMessage({
+      role: 'toolResult',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      content: [],
+      details: {
+        kind: 'file_change',
+        path: '/workspace/src/app.ts',
+        additions: 2,
+        deletions: 1,
+        review: { turnId: 'turn-1', recordId: 'record-1' },
+      },
+      isError: false,
+      timestamp: 3,
+    });
+
+    const messages = projectSessionBranchToScoutMessages(session.getBranch(), {
+      resolveChangesReviewSummary: (turnId) =>
+        turnId === 'turn-1'
+          ? {
+              turnId,
+              fileCount: 1,
+              additions: 2,
+              deletions: 1,
+              files: [
+                {
+                  path: '/workspace/src/app.ts',
+                  displayPath: 'src/app.ts',
+                  additions: 2,
+                  deletions: 1,
+                },
+              ],
+            }
+          : undefined,
+    });
+
+    const assistant = messages.find((message) => message.role === 'assistant');
+    expect(assistant).toMatchObject({
+      role: 'assistant',
+      changesReviews: [
+        {
+          turnId: 'turn-1',
+          fileCount: 1,
+          additions: 2,
+          deletions: 1,
+        },
+      ],
+    });
+  });
 });

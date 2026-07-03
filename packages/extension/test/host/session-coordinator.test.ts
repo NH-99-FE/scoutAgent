@@ -68,6 +68,11 @@ function createDeferred<T = void>() {
   return { promise, resolve, reject };
 }
 
+async function flushPromises(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function createFakeAgentSession(session: Session, calls: string[] = []): AgentSession {
   const fake = {
     sessionManager: session,
@@ -172,6 +177,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -562,6 +568,58 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     );
     expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('turn-1');
     expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('flushes debounced review artifacts from the idle lifecycle state', async () => {
+    vi.useFakeTimers();
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
+    });
+    const releaseFileReviewTurnContent = vi.fn();
+    const appendEntry = vi.fn(async () => undefined);
+    let isStreaming = true;
+    const agentSession = {
+      appendEntry,
+      getSessionEntries: () => [],
+      getSessionBranch: () => [],
+      get isStreaming() {
+        return isStreaming;
+      },
+      releaseFileReviewTurnContent,
+      sessionId: 'session-1',
+    } as unknown as AgentSession;
+    (coordinator as unknown as { agentSession: AgentSession }).agentSession = agentSession;
+
+    (
+      coordinator as unknown as {
+        scheduleFileReviewArtifactSave: (
+          agentSession: AgentSession,
+          review: FileReviewTurnSnapshot,
+        ) => void;
+      }
+    ).scheduleFileReviewArtifactSave(agentSession, makeReviewSnapshot());
+
+    vi.advanceTimersByTime(100);
+    await flushPromises();
+
+    expect(appendEntry).not.toHaveBeenCalled();
+
+    isStreaming = false;
+    (
+      coordinator as unknown as {
+        forwardAgentSessionEvent: (event: { type: 'state_change' }) => void;
+      }
+    ).forwardAgentSessionEvent({ type: 'state_change' });
+    await flushPromises();
+
+    expect(appendEntry).toHaveBeenCalledWith(
+      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+      expect.objectContaining({ turnId: 'turn-1' }),
+    );
+    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('turn-1');
   });
 
   it('flushes pending review artifacts before exporting the active session', async () => {

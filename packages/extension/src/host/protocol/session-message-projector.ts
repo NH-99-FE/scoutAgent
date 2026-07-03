@@ -3,7 +3,7 @@
 // 负责：将 core raw session branch 映射为 shared webview 可见消息流。
 // ============================================================
 
-import type { ScoutMessage } from '@scout-agent/shared';
+import type { ScoutMessage, ToolPresentationMetadata } from '@scout-agent/shared';
 import type { ImageContent, TextContent } from '@scout-agent/ai';
 import type { AgentMessage } from '@scout-agent/agent';
 import {
@@ -11,14 +11,25 @@ import {
   createCompactionSummaryMessage,
   createCustomMessage,
 } from '@scout-agent/agent';
-import type {
-  CompactionEntry,
-  SessionTreeEntry,
-} from '../../core/session/index.ts';
+import type { CompactionEntry, SessionTreeEntry } from '../../core/session/index.ts';
+import {
+  attachAssistantChangesReviews,
+  type ResolveChangesReviewSummary,
+} from './assistant-changes-review-attacher.ts';
 import { convertMessage } from './agent-event-mapper.ts';
+
+export interface SessionMessageProjectionOptions {
+  displayPathKey?: string;
+  formatDisplayPath?: (path: string) => string;
+  toolPresentationKey?: string;
+  getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
+  reviewProjectionKey?: string;
+  resolveChangesReviewSummary?: ResolveChangesReviewSummary;
+}
 
 export function projectSessionBranchToScoutMessages(
   pathEntries: readonly SessionTreeEntry[],
+  options: SessionMessageProjectionOptions = {},
 ): ScoutMessage[] {
   const messages: ScoutMessage[] = [];
   const latestCompactionIndex = findLatestCompactionIndex(pathEntries);
@@ -28,10 +39,10 @@ export function projectSessionBranchToScoutMessages(
   for (let i = startIndex; i < pathEntries.length; i++) {
     const entry = pathEntries[i]!;
     if (isStaleCompactionEntry(entry, i, latestCompactionIndex)) continue;
-    appendProjectedMessage(messages, entry);
+    appendProjectedMessage(messages, entry, options);
   }
 
-  return messages;
+  return attachAssistantChangesReviews(messages, options);
 }
 
 function findLatestCompactionIndex(pathEntries: readonly SessionTreeEntry[]): number {
@@ -106,15 +117,17 @@ function isDisplayableSessionMessageEntry(entry: SessionTreeEntry): boolean {
       role === 'custom'
     );
   }
-  return (
-    entry.type === 'branch_summary' || (entry.type === 'custom_message' && entry.display)
-  );
+  return entry.type === 'branch_summary' || (entry.type === 'custom_message' && entry.display);
 }
 
-function appendProjectedMessage(messages: ScoutMessage[], entry: SessionTreeEntry): void {
+function appendProjectedMessage(
+  messages: ScoutMessage[],
+  entry: SessionTreeEntry,
+  options: SessionMessageProjectionOptions,
+): void {
   const agentMessage = createAgentMessageFromEntry(entry);
   if (!agentMessage) return;
-  const scoutMessage = convertMessage(agentMessage);
+  const scoutMessage = convertMessage(agentMessage, options);
   if (!scoutMessage) return;
   scoutMessage.entryId = entry.id;
   messages.push(scoutMessage);

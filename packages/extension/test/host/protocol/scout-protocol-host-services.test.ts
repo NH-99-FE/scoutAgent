@@ -15,6 +15,7 @@ function makeSessionManager(): ExtensionSessionCoordinator {
     getCommands: vi.fn(() => []),
     setExtensionUIContext: vi.fn(),
     reload: vi.fn(async () => ({ cancelled: false })),
+    getActiveChangesReview: vi.fn(() => undefined),
     isStreaming: false,
   } as unknown as ExtensionSessionCoordinator;
 }

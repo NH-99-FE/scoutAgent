@@ -6,9 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import {
   createReviewContentFingerprint,
-  MAX_REVIEW_TEXT_BYTES,
   type FileReviewTurnSnapshot,
 } from '../../../src/core/review/file-review.ts';
+import { MAX_REVIEW_TEXT_BYTES } from '../../../src/core/text-size.ts';
 import type { FileReviewArtifact } from '../../../src/host/review/file-review-artifact.ts';
 import { ScoutChangesReviewPanelManager } from '../../../src/host/review/changes-review-panel.ts';
 import { getScoutWebviewHtml } from '../../../src/webview-content.ts';
@@ -97,6 +97,13 @@ describe('ScoutChangesReviewPanelManager', () => {
     );
     expect(panel.title).toBe('Scout Diff');
     expect(getScoutWebviewHtml).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(getScoutWebviewHtml).mock.calls[0]?.[5]?.changesReview?.files[0],
+    ).toMatchObject({
+      path: '/workspace/src/app.ts',
+      displayPath: 'src/app.ts',
+      absolutePath: '/workspace/src/app.ts',
+    });
     expect(panel.webview.postMessage).toHaveBeenCalledWith({
       type: 'scroll_to_record',
       recordId: 'review-2',

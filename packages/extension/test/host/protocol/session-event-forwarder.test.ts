@@ -3,7 +3,9 @@ import type { ScoutAgentEvent } from '@scout-agent/shared';
 import type { ScoutSessionEvent } from '../../../src/host/session-coordinator.ts';
 import { SessionEventForwarder } from '../../../src/host/protocol/session-event-forwarder.ts';
 import type {
+  CaptureWritePreviewBase,
   ComputeEditPreview,
+  ComputeWritePreview,
   ToolCallPreviewContext,
 } from '../../../src/host/protocol/tool-call-preview-projector.ts';
 
@@ -12,6 +14,8 @@ function makeForwarder(
     isStreaming?: () => boolean;
     getPreviewContext?: () => ToolCallPreviewContext;
     computeEditPreview?: ComputeEditPreview;
+    computeWritePreview?: ComputeWritePreview;
+    captureWritePreviewBase?: CaptureWritePreviewBase;
     agentEventFlushDelayMs?: number;
   } = {},
 ) {
@@ -27,6 +31,8 @@ function makeForwarder(
     pushTreeData,
     getPreviewContext: options.getPreviewContext,
     computeEditPreview: options.computeEditPreview,
+    computeWritePreview: options.computeWritePreview,
+    captureWritePreviewBase: options.captureWritePreviewBase,
     agentEventFlushDelayMs: options.agentEventFlushDelayMs,
   });
   return { forwarder, publishEvent, pushState, pushQueueState, pushTreeData };
@@ -77,6 +83,35 @@ function editToolCallMessageUpdate(): ScoutSessionEvent {
   return {
     type: 'agent_event',
     event: editToolCallEvent(),
+  } as unknown as ScoutSessionEvent;
+}
+
+function writeToolCallEvent(): ScoutAgentEvent {
+  return {
+    type: 'message_update',
+    messageId: 'assistant-1',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'tool-1',
+          name: 'write',
+          arguments: {
+            path: 'src/generated.ts',
+            content: 'line 1\nline 2\n',
+          },
+        },
+      ],
+      timestamp: 1,
+    },
+  };
+}
+
+function writeToolCallMessageUpdate(): ScoutSessionEvent {
+  return {
+    type: 'agent_event',
+    event: writeToolCallEvent(),
   } as unknown as ScoutSessionEvent;
 }
 
@@ -200,10 +235,12 @@ describe('SessionEventForwarder', () => {
         sessionId: 'session-1',
         sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
         cwd: '/workspace',
-        editTool: {
-          active: true,
-          source: 'builtin',
-          path: '<builtin:edit>',
+        tools: {
+          edit: {
+            active: true,
+            source: 'builtin',
+            path: '<builtin:edit>',
+          },
         },
       }),
       computeEditPreview,
@@ -224,6 +261,81 @@ describe('SessionEventForwarder', () => {
       type: 'agent_event',
       event: editToolCallEvent(),
     });
+  });
+
+  it('projects write progress from raw message updates before coalesced webview publishing', () => {
+    vi.useFakeTimers();
+    const computeWritePreview: ComputeWritePreview = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
+    const { forwarder, publishEvent } = makeForwarder({
+      agentEventFlushDelayMs: 16,
+      getPreviewContext: () => ({
+        generation: 1,
+        sessionId: 'session-1',
+        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+        cwd: '/workspace',
+        tools: {
+          write: {
+            active: true,
+            source: 'builtin',
+            path: '<builtin:write>',
+          },
+        },
+      }),
+      computeWritePreview,
+    });
+
+    forwarder.handle(writeToolCallMessageUpdate());
+
+    expect(computeWritePreview).not.toHaveBeenCalled();
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'tool_call_preview_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      toolCallId: 'tool-1',
+      toolName: 'write',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/generated.ts',
+        displayPath: 'src/generated.ts',
+        additions: 2,
+        deletions: 0,
+      },
+    });
+
+    vi.advanceTimersByTime(16);
+
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'agent_event',
+      event: writeToolCallEvent(),
+    });
+  });
+
+  it('passes write baseline capture overrides to the preview projector', () => {
+    const captureWritePreviewBase: CaptureWritePreviewBase = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
+    const { forwarder } = makeForwarder({
+      getPreviewContext: () => ({
+        generation: 1,
+        sessionId: 'session-1',
+        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+        cwd: '/workspace',
+        tools: {
+          write: {
+            active: true,
+            source: 'builtin',
+            path: '<builtin:write>',
+          },
+        },
+      }),
+      captureWritePreviewBase,
+    });
+
+    forwarder.handle(writeToolCallMessageUpdate());
+
+    expect(captureWritePreviewBase).toHaveBeenCalledWith('src/generated.ts', '/workspace');
   });
 
   it('publishes message_end immediately and drops any pending update for the same message', () => {
@@ -469,6 +581,37 @@ describe('SessionEventForwarder', () => {
       type: 'notification',
       level: 'warning',
       message: '当前没有可压缩的上下文',
+    });
+  });
+
+  it('forwards active changes review updates without refreshing state', () => {
+    const { forwarder, publishEvent, pushState } = makeForwarder();
+
+    forwarder.handle({
+      type: 'changes_review_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      changesReview: {
+        turnId: 'turn-1',
+        fileCount: 1,
+        additions: 19,
+        deletions: 19,
+        files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+      },
+    } as ScoutSessionEvent);
+
+    expect(pushState).not.toHaveBeenCalled();
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'changes_review_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      changesReview: {
+        turnId: 'turn-1',
+        fileCount: 1,
+        additions: 19,
+        deletions: 19,
+        files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+      },
     });
   });
 });

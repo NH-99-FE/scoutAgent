@@ -6,7 +6,10 @@
 
 import type { ScoutMessage } from '@scout-agent/shared';
 import type { SessionTreeEntry } from '../../core/session/index.ts';
-import { projectSessionBranchToScoutMessages } from './session-message-projector.ts';
+import {
+  projectSessionBranchToScoutMessages,
+  type SessionMessageProjectionOptions,
+} from './session-message-projector.ts';
 
 // ---------- 不变量 ----------
 //
@@ -26,6 +29,9 @@ const EMPTY_PROJECTION: readonly ScoutMessage[] = Object.freeze([]);
 
 interface ProjectionEntry {
   readonly branch: readonly SessionTreeEntry[];
+  readonly displayPathKey: string;
+  readonly reviewProjectionKey: string;
+  readonly toolPresentationKey: string;
   readonly messages: ScoutMessage[];
 }
 
@@ -36,11 +42,24 @@ export class SessionMessageProjectionCache {
    * 按 branch 引用查询投影；命中则返回缓存结果，未命中则重算并缓存。
    * branch 为 undefined（session 未就绪）时返回稳定的空数组。
    */
-  project(branch: readonly SessionTreeEntry[] | undefined): ScoutMessage[] {
+  project(
+    branch: readonly SessionTreeEntry[] | undefined,
+    options: SessionMessageProjectionOptions = {},
+  ): ScoutMessage[] {
     if (!branch) return EMPTY_PROJECTION as ScoutMessage[];
-    if (this.entry?.branch === branch) return this.entry.messages;
-    const messages = projectSessionBranchToScoutMessages(branch);
-    this.entry = { branch, messages };
+    const displayPathKey = options.displayPathKey ?? String(Boolean(options.formatDisplayPath));
+    const reviewProjectionKey = options.reviewProjectionKey ?? '';
+    const toolPresentationKey = options.toolPresentationKey ?? '';
+    if (
+      this.entry?.branch === branch &&
+      this.entry.displayPathKey === displayPathKey &&
+      this.entry.reviewProjectionKey === reviewProjectionKey &&
+      this.entry.toolPresentationKey === toolPresentationKey
+    ) {
+      return this.entry.messages;
+    }
+    const messages = projectSessionBranchToScoutMessages(branch, options);
+    this.entry = { branch, displayPathKey, reviewProjectionKey, toolPresentationKey, messages };
     return messages;
   }
 

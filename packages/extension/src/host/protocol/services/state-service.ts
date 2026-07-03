@@ -107,6 +107,7 @@ export class StateProtocolService implements StateProtocolHost {
       diagnostics: [...this.sessionManager.diagnostics],
       extensionUIRequests: this.getExtensionUIRequests(),
       modelFallbackMessage: this.sessionManager.modelFallbackMessage,
+      activeChangesReview: this.sessionManager.getActiveChangesReview(),
     };
   }
 }

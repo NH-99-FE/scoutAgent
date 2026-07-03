@@ -3,12 +3,14 @@
 // 负责：在 Host 协议边界为 message_start/update/end 分配 transient messageId。
 // ============================================================
 
-import type { ScoutAgentEvent } from '@scout-agent/shared';
+import type { ScoutAgentEvent, ToolPresentationMetadata } from '@scout-agent/shared';
 import type { AgentEvent } from '@scout-agent/agent';
 import { mapAgentEventToScout } from './agent-event-mapper.ts';
 
 export interface AgentEventCorrelationContext {
   sessionId?: string;
+  formatDisplayPath?: (path: string) => string;
+  getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
 }
 
 // ---------- AgentEventCorrelator ----------
@@ -24,6 +26,8 @@ export class AgentEventCorrelator {
   map(event: AgentEvent, context: AgentEventCorrelationContext = {}): ScoutAgentEvent | null {
     return mapAgentEventToScout(event, {
       messageId: this.getMessageId(event, context.sessionId),
+      formatDisplayPath: context.formatDisplayPath,
+      getToolPresentation: context.getToolPresentation,
     });
   }
 

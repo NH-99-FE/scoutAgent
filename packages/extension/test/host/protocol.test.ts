@@ -4,6 +4,7 @@ import {
   mapAgentEventToScout,
 } from '../../src/host/protocol/agent-event-mapper.ts';
 import { AgentEventCorrelator } from '../../src/host/protocol/agent-event-correlator.ts';
+import { createDisplayArguments } from '../../src/host/protocol/display-arguments.ts';
 import type { ScoutAgentEvent } from '@scout-agent/shared';
 import { assistantMessage, userMessage } from '../core/test-utils.ts';
 
@@ -31,6 +32,129 @@ describe('agent event mapper', () => {
         { type: 'thinking', thinking: 'think', redacted: false },
         { type: 'text', text: 'hello' },
         { type: 'toolCall', id: 'tool-1', name: 'read', arguments: { file: 'a.ts' } },
+      ],
+    });
+  });
+
+  it('projects display arguments for declared tool call path fields', () => {
+    const message = assistantMessage('hello', {
+      content: [
+        {
+          type: 'toolCall',
+          id: 'tool-1',
+          name: 'read',
+          arguments: {
+            path: '/workspace/src/app.ts',
+            cwd: '/workspace',
+            count: 1,
+          },
+        },
+      ],
+    });
+
+    expect(
+      convertMessage(message, {
+        formatDisplayPath: (path) => path.replace('/workspace/', ''),
+        getToolPresentation: (toolName) =>
+          toolName === 'read' ? { pathArguments: ['path'] } : undefined,
+      }),
+    ).toMatchObject({
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          arguments: {
+            path: '/workspace/src/app.ts',
+            cwd: '/workspace',
+            count: 1,
+          },
+          displayArguments: {
+            path: 'src/app.ts',
+            cwd: '/workspace',
+            count: 1,
+          },
+        },
+      ],
+    });
+  });
+
+  it('does not guess display arguments without tool presentation metadata', () => {
+    const message = assistantMessage('hello', {
+      content: [
+        {
+          type: 'toolCall',
+          id: 'tool-1',
+          name: 'extension-tool',
+          arguments: {
+            target: '/workspace/not-necessarily-a-path',
+            cwd: '/workspace',
+          },
+        },
+      ],
+    });
+
+    expect(
+      convertMessage(message, {
+        formatDisplayPath: (path) => path.replace('/workspace/', ''),
+      }),
+    ).toMatchObject({
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          arguments: {
+            target: '/workspace/not-necessarily-a-path',
+            cwd: '/workspace',
+          },
+        },
+      ],
+    });
+    const toolCall = convertMessage(message, {
+      formatDisplayPath: (path) => path.replace('/workspace/', ''),
+    });
+    expect(toolCall?.role === 'assistant' ? toolCall.content[0] : undefined).not.toHaveProperty(
+      'displayArguments',
+    );
+  });
+
+  it('projects display arguments with tool-specific path argument declarations', () => {
+    const message = assistantMessage('hello', {
+      content: [
+        {
+          type: 'toolCall',
+          id: 'tool-1',
+          name: 'rename',
+          arguments: {
+            from: '/workspace/src/old.ts',
+            to: '/workspace/src/new.ts',
+            path: '/workspace/metadata.json',
+          },
+        },
+      ],
+    });
+
+    expect(
+      convertMessage(message, {
+        formatDisplayPath: (path) => path.replace('/workspace/', ''),
+        getToolPresentation: (toolName) =>
+          toolName === 'rename' ? { pathArguments: ['from', 'to'] } : undefined,
+      }),
+    ).toMatchObject({
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          arguments: {
+            from: '/workspace/src/old.ts',
+            to: '/workspace/src/new.ts',
+            path: '/workspace/metadata.json',
+          },
+          displayArguments: {
+            from: 'src/old.ts',
+            to: 'src/new.ts',
+            path: '/workspace/metadata.json',
+          },
+        },
       ],
     });
   });
@@ -82,6 +206,110 @@ describe('agent event mapper', () => {
       },
       isError: false,
     });
+  });
+
+  it('projects display args for declared tool execution path fields', () => {
+    expect(
+      mapAgentEventToScout(
+        {
+          type: 'tool_execution_start',
+          toolCallId: 'tool-1',
+          toolName: 'edit',
+          args: {
+            filePath: '/workspace/src/app.ts',
+            query: 'value',
+          },
+        },
+        {
+          formatDisplayPath: (path) => path.replace('/workspace/', ''),
+          getToolPresentation: (toolName) =>
+            toolName === 'edit' ? { pathArguments: ['filePath'] } : undefined,
+        },
+      ),
+    ).toEqual({
+      type: 'tool_execution_start',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      args: {
+        filePath: '/workspace/src/app.ts',
+        query: 'value',
+      },
+      displayArgs: {
+        filePath: 'src/app.ts',
+        query: 'value',
+      },
+    });
+  });
+
+  it('uses declared path argument keys for tool execution display args', () => {
+    expect(
+      mapAgentEventToScout(
+        {
+          type: 'tool_execution_start',
+          toolCallId: 'tool-1',
+          toolName: 'rename',
+          args: {
+            from: '/workspace/src/old.ts',
+            to: '/workspace/src/new.ts',
+            path: '/workspace/metadata.json',
+          },
+        },
+        {
+          formatDisplayPath: (path) => path.replace('/workspace/', ''),
+          getToolPresentation: (toolName) =>
+            toolName === 'rename' ? { pathArguments: ['from', 'to'] } : undefined,
+        },
+      ),
+    ).toEqual({
+      type: 'tool_execution_start',
+      toolCallId: 'tool-1',
+      toolName: 'rename',
+      args: {
+        from: '/workspace/src/old.ts',
+        to: '/workspace/src/new.ts',
+        path: '/workspace/metadata.json',
+      },
+      displayArgs: {
+        from: 'src/old.ts',
+        to: 'src/new.ts',
+        path: '/workspace/metadata.json',
+      },
+    });
+  });
+
+  it('returns display arguments only when a declared path field changes', () => {
+    expect(
+      createDisplayArguments(
+        {
+          path: '/workspace/src/app.ts',
+          nested: { path: '/workspace/src/inner.ts' },
+          count: 1,
+        },
+        { formatDisplayPath: (path) => path.replace('/workspace/', '') },
+      ),
+    ).toBeUndefined();
+
+    expect(
+      createDisplayArguments(
+        {
+          path: '/workspace/src/app.ts',
+          input: '/workspace/src/input.ts',
+        },
+        { formatDisplayPath: (path) => path.replace('/workspace/', '') },
+        { pathArgumentKeys: ['input'] },
+      ),
+    ).toEqual({
+      path: '/workspace/src/app.ts',
+      input: 'src/input.ts',
+    });
+
+    expect(
+      createDisplayArguments(
+        { path: 'src/app.ts' },
+        { formatDisplayPath: (path) => path },
+        { pathArgumentKeys: ['path'] },
+      ),
+    ).toBeUndefined();
   });
 
   it('returns null for custom messages that are not part of the webview protocol', () => {
@@ -185,10 +413,9 @@ describe('AgentEventCorrelator', () => {
       ),
     );
     const assistantUpdate = expectMessageEvent(
-      correlator.map(
-        { type: 'message_update', message: assistantMessage('hello') } as any,
-        { sessionId: 'session-1' },
-      ),
+      correlator.map({ type: 'message_update', message: assistantMessage('hello') } as any, {
+        sessionId: 'session-1',
+      }),
     );
     const assistantEnd = expectMessageEvent(
       correlator.map(

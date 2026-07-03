@@ -35,6 +35,20 @@ describe('SessionMessageProjectionCache', () => {
     expect(updated.map((message) => message.role)).toEqual(['user', 'assistant']);
   });
 
+  it('reprojects when the review projection key changes', () => {
+    const session = SessionManager.inMemory();
+    session.appendMessage(userMessage('hello'));
+    session.appendMessage(assistantMessage('world'));
+    const branch = session.getBranch();
+    const cache = new SessionMessageProjectionCache();
+
+    const initial = cache.project(branch, { reviewProjectionKey: 'review-v1' });
+    const updated = cache.project(branch, { reviewProjectionKey: 'review-v2' });
+
+    expect(updated).not.toBe(initial);
+    expect(updated).toEqual(initial);
+  });
+
   it('returns a stable empty projection when the branch is undefined', () => {
     const cache = new SessionMessageProjectionCache();
 

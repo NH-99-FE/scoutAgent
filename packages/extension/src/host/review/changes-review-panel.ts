@@ -15,13 +15,13 @@ import type {
 } from '@scout-agent/shared';
 import type { FileReviewFile, FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
 import type { FileReviewArtifact, FileReviewArtifactFile } from './file-review-artifact.ts';
+import { MAX_REVIEW_TEXT_BYTES } from '../../core/text-size.ts';
 import { formatPathRelativeToCwd } from '../../core/tools/shared/path-utils.ts';
 import {
   computeReviewDiff,
   createReviewContentFingerprint,
   decodeReviewContent,
   isSameReviewContentFingerprint,
-  MAX_REVIEW_TEXT_BYTES,
   REVIEW_CONTEXT_LINES,
   type FileReviewContentFingerprint,
   type ReviewDisplayRow,
@@ -201,11 +201,13 @@ async function createReviewPanelFile(
   allowCurrentFileContextExpansion: boolean,
   runtimeContentReleased: boolean,
 ): Promise<ScoutChangesReviewFile> {
+  const displayPath = formatDisplayPath(cwd, file.absolutePath);
   if (isArtifactFile(file)) {
     const hydrated = await hydrateArtifactRows(file, allowCurrentFileContextExpansion);
     return {
       id: `file-${index}`,
-      path: formatDisplayPath(cwd, file.absolutePath),
+      path: file.absolutePath,
+      displayPath,
       absolutePath: file.absolutePath,
       external: isExternalPath(cwd, file.absolutePath),
       additions: file.additions,
@@ -220,7 +222,8 @@ async function createReviewPanelFile(
   if (runtimeContentReleased) {
     return {
       id: `file-${index}`,
-      path: formatDisplayPath(cwd, file.absolutePath),
+      path: file.absolutePath,
+      displayPath,
       absolutePath: file.absolutePath,
       external: isExternalPath(cwd, file.absolutePath),
       additions: file.additions,
@@ -240,7 +243,8 @@ async function createReviewPanelFile(
   const hydrated = hydrateFoldRowsFromContent(diff.rows, file.modifiedContent, file.absolutePath);
   return {
     id: `file-${index}`,
-    path: formatDisplayPath(cwd, file.absolutePath),
+    path: file.absolutePath,
+    displayPath,
     absolutePath: file.absolutePath,
     external: isExternalPath(cwd, file.absolutePath),
     additions: diff.unavailableReason ? file.additions : diff.additions,
@@ -445,6 +449,7 @@ function createPanelSignature(model: ScoutChangesReviewModel): string {
     viewMode: model.viewMode,
     files: model.files.map((file) => ({
       path: file.path,
+      displayPath: file.displayPath,
       additions: file.additions,
       deletions: file.deletions,
       unavailableReason: file.unavailableReason,

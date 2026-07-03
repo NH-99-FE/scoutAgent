@@ -3,9 +3,10 @@
 // 负责：集中创建 host/protocol service，隔离 controller 与具体 service 构造细节。
 // ============================================================
 
-import type { ExtensionMessage } from '@scout-agent/shared';
+import type { ExtensionMessage, ToolInfo } from '@scout-agent/shared';
 import type { ConfigManager } from '../../config-manager.ts';
 import type { FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
+import type { ToolPreviewContext, ToolPreviewToolIdentity } from '../../core/tool-preview/index.ts';
 import type { FileReviewArtifact } from '../review/file-review-artifact.ts';
 import type { ExtensionSessionCoordinator } from '../session-coordinator.ts';
 import type { SessionIndex } from '../session-index.ts';
@@ -194,24 +195,13 @@ export function createScoutProtocolHostServices(
 
   bundle.sessionEventForwarder = new SessionEventForwarder({
     isStreaming: () => options.sessionManager.isStreaming,
-    getPreviewContext: () => {
-      const editTool = options.sessionManager
-        .getAllToolInfos()
-        .find((tool) => tool.name === 'edit');
-      return {
-        generation: options.sessionManager.toolPreviewGeneration,
-        sessionId: options.sessionManager.sessionId,
-        sessionFile: options.sessionManager.sessionFile,
-        cwd: options.sessionManager.currentCwd,
-        editTool: editTool
-          ? {
-              active: editTool.active,
-              source: editTool.sourceInfo.source,
-              path: editTool.sourceInfo.path,
-            }
-          : undefined,
-      };
-    },
+    getPreviewContext: () => ({
+      generation: options.sessionManager.toolPreviewGeneration,
+      sessionId: options.sessionManager.sessionId,
+      sessionFile: options.sessionManager.sessionFile,
+      cwd: options.sessionManager.currentCwd,
+      tools: createToolPreviewToolMap(options.sessionManager.getAllToolInfos()),
+    }),
     publishEvent: (message) => bundle.eventPublisher.publish(message),
     pushState: () => bundle.state.pushState(),
     pushQueueState: () => bundle.state.pushQueueState(),
@@ -291,4 +281,16 @@ export function createScoutProtocolHostServices(
   };
 
   return bundle;
+}
+
+function createToolPreviewToolMap(tools: readonly ToolInfo[]): ToolPreviewContext['tools'] {
+  const previewTools: Record<string, ToolPreviewToolIdentity> = {};
+  for (const tool of tools) {
+    previewTools[tool.name] = {
+      active: tool.active,
+      source: tool.sourceInfo.source,
+      path: tool.sourceInfo.path,
+    };
+  }
+  return previewTools;
 }

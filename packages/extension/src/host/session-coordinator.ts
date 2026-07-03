@@ -7,6 +7,7 @@ import * as vscode from 'vscode';
 import { rmSync } from 'node:fs';
 import type {
   ScoutAgentEvent,
+  ScoutChangesReviewSummary,
   ScoutCommandInfo,
   ScoutForkCandidate,
   ScoutImageContent,
@@ -17,6 +18,7 @@ import type {
   ScoutExtensionUIRequestClosedReason,
   ThinkingLevel,
   ToolInfo,
+  ToolPresentationMetadata,
 } from '@scout-agent/shared';
 import { ConfigManager } from '../config-manager.ts';
 import { readSessionFileInfo } from '../core/session-file.ts';
@@ -55,6 +57,7 @@ import {
   type AgentSessionRuntimeDiagnostic,
   type CreateAgentSessionRuntimeFactory,
 } from '../core/agent-session-runtime.ts';
+import { formatPathRelativeToCwd, resolveToCwd } from '../core/tools/shared/path-utils.ts';
 import { AgentEventCorrelator } from './protocol/agent-event-correlator.ts';
 import { SessionMessageProjectionCache } from './protocol/session-message-projection-cache.ts';
 import {
@@ -67,7 +70,13 @@ import {
   FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
   prepareFileReviewArtifactForSession,
   type FileReviewArtifact,
+  type FileReviewArtifactIndex,
 } from './review/file-review-artifact.ts';
+import {
+  createArtifactChangesReviewSummary,
+  createRuntimeChangesReviewSummary,
+} from './review/changes-review-summary-projector.ts';
+import { FileReviewArtifactFlushScheduler } from './review/file-review-artifact-flush-scheduler.ts';
 import {
   SessionOperationBroker,
   type SessionOperationResult,
@@ -79,7 +88,13 @@ import {
 
 export type ScoutSessionEvent =
   | Exclude<AgentSessionEvent, { type: 'agent_event' }>
-  | { type: 'agent_event'; event: ScoutAgentEvent };
+  | { type: 'agent_event'; event: ScoutAgentEvent }
+  | {
+      type: 'changes_review_update';
+      sessionId: string;
+      sessionFile?: string;
+      changesReview?: ScoutChangesReviewSummary;
+    };
 
 export interface ExtensionSessionCoordinatorOptions {
   cwd: string;
@@ -117,11 +132,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private readonly outputChannel: vscode.OutputChannel;
   private readonly configManager: ConfigManager;
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly pendingFileReviewArtifacts = new Map<
-    string,
-    { agentSession: AgentSession; sessionId: string; review: FileReviewTurnSnapshot }
-  >();
-  private readonly fileReviewArtifactTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly fileReviewArtifactFlushScheduler = new FileReviewArtifactFlushScheduler({
+    startSave: (entry) => this.startFileReviewArtifactSave(entry),
+  });
   private readonly fileReviewArtifactWrites = new Set<Promise<void>>();
 
   private agentSession?: AgentSession;
@@ -135,6 +148,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private cancelExtensionUIRequests:
     | ((reason?: ScoutExtensionUIRequestClosedReason) => void)
     | undefined;
+  private activeChangesReview: ScoutChangesReviewSummary | undefined;
+  private reviewProjectionVersion = 0;
 
   /** 事件监听器列表（透传 AgentSession 事件） */
   private listeners: ((event: ScoutSessionEvent) => void)[] = [];
@@ -724,11 +739,22 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   // ---------- 消息访问 ----------
 
   getScoutMessages(): ScoutMessage[] {
-    return this.scoutMessagesCache.project(this.agentSession?.getSessionBranch());
+    return this.scoutMessagesCache.project(this.agentSession?.getSessionBranch(), {
+      displayPathKey: this.currentCwd,
+      reviewProjectionKey: String(this.reviewProjectionVersion),
+      toolPresentationKey: String(this.agentSession?.getToolRegistryVersion() ?? 0),
+      formatDisplayPath: (path) => this.formatDisplayPath(path),
+      resolveChangesReviewSummary: this.createChangesReviewSummaryResolver(),
+      getToolPresentation: (toolName) => this.getToolPresentation(toolName),
+    });
   }
 
   getFileReviewTurn(turnId: string): FileReviewTurnSnapshot | undefined {
     return this.agentSession?.getFileReviewTurn(turnId);
+  }
+
+  getActiveChangesReview(): ScoutChangesReviewSummary | undefined {
+    return this.activeChangesReview;
   }
 
   async getFileReviewArtifact(turnId: string): Promise<FileReviewArtifact | undefined> {
@@ -779,16 +805,62 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   private forwardAgentSessionEvent(event: AgentSessionEvent): void {
     if (event.type !== 'agent_event') {
+      if (event.type === 'state_change') {
+        this.handleAgentSessionLifecycleStateChange();
+      }
       this.emit(event);
       return;
     }
 
     const scoutEvent = this.agentEventCorrelator.map(event.event, {
       sessionId: this.sessionId,
+      formatDisplayPath: (path) => this.formatDisplayPath(path),
+      getToolPresentation: (toolName) => this.getToolPresentation(toolName),
     });
     if (scoutEvent) {
+      if (scoutEvent.type === 'agent_start') {
+        this.handleAgentSessionRunStarted();
+        this.setActiveChangesReview(undefined);
+      }
+      if (scoutEvent.type === 'agent_end') {
+        this.handleAgentSessionRunEnded();
+        this.setActiveChangesReview(undefined);
+      }
       this.emit({ type: 'agent_event', event: scoutEvent });
     }
+  }
+
+  private formatDisplayPath(path: string): string {
+    const cwd = this.currentCwd;
+    if (!cwd) return path;
+    return formatPathRelativeToCwd(resolveToCwd(path, cwd), cwd);
+  }
+
+  private getToolPresentation(toolName: string): ToolPresentationMetadata | undefined {
+    return this.agentSession?.getToolPresentation(toolName);
+  }
+
+  private handleAgentSessionRunStarted(): void {
+    const agentSession = this.agentSession;
+    if (!agentSession) return;
+    this.fileReviewArtifactFlushScheduler.markAgentSessionBusy(agentSession);
+  }
+
+  private handleAgentSessionRunEnded(): void {
+    const agentSession = this.agentSession;
+    if (!agentSession || agentSession.isStreaming) return;
+    void Promise.all(this.fileReviewArtifactFlushScheduler.setAgentSessionIdle(agentSession, true));
+  }
+
+  private handleAgentSessionLifecycleStateChange(): void {
+    const agentSession = this.agentSession;
+    if (!agentSession) return;
+    void Promise.all(
+      this.fileReviewArtifactFlushScheduler.setAgentSessionIdle(
+        agentSession,
+        !agentSession.isStreaming,
+      ),
+    );
   }
 
   // ---------- 内部：AgentSession 管理 ----------
@@ -799,6 +871,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.unsubscribeAgentSession?.();
     this.agentEventCorrelator.reset();
     this.scoutMessagesCache.invalidate();
+    this.setActiveChangesReview(undefined);
     if (disposePrevious) {
       this.agentSession?.dispose();
     }
@@ -930,7 +1003,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       initialThinkingLevel,
       sessionStartEvent,
       onFileReviewUpdated: (agentSession, review) =>
-        this.scheduleFileReviewArtifactSave(agentSession, review),
+        this.handleFileReviewUpdated(agentSession, review),
     });
 
     this.logRuntimeDiagnostics(result.diagnostics);
@@ -949,72 +1022,57 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     }
   }
 
+  private handleFileReviewUpdated(
+    agentSession: AgentSession,
+    review: FileReviewTurnSnapshot,
+  ): void {
+    if (this.agentSession === agentSession && this.sessionId === agentSession.sessionId) {
+      this.setActiveChangesReview(createRuntimeChangesReviewSummary(review));
+    }
+    this.scheduleFileReviewArtifactSave(agentSession, review);
+  }
+
+  private setActiveChangesReview(changesReview: ScoutChangesReviewSummary | undefined): void {
+    if (this.activeChangesReview === changesReview) return;
+    const sessionId = this.sessionId;
+    this.activeChangesReview = changesReview;
+    this.reviewProjectionVersion += 1;
+    if (!sessionId) return;
+    this.emit({
+      type: 'changes_review_update',
+      sessionId,
+      sessionFile: this.sessionFile,
+      changesReview,
+    });
+  }
+
   private scheduleFileReviewArtifactSave(
     agentSession: AgentSession,
     review: FileReviewTurnSnapshot,
   ): void {
-    const sessionId = agentSession.sessionId;
-    if (!sessionId) return;
-    const key = this.createFileReviewArtifactKey(sessionId, review.turnId);
-    this.pendingFileReviewArtifacts.set(key, { agentSession, sessionId, review });
-
-    const existingTimer = this.fileReviewArtifactTimers.get(key);
-    if (existingTimer) {
-      clearTimeout(existingTimer);
-    }
-
-    const flushPending = () => {
-      this.fileReviewArtifactTimers.delete(key);
-      if (agentSession.isStreaming) {
-        const retryTimer = setTimeout(flushPending, 250);
-        this.fileReviewArtifactTimers.set(key, retryTimer);
-        return;
-      }
-      const pending = this.pendingFileReviewArtifacts.get(key);
-      if (!pending) return;
-      this.pendingFileReviewArtifacts.delete(key);
-      void this.startFileReviewArtifactSave(pending);
-    };
-
-    const timer = setTimeout(flushPending, 100);
-    this.fileReviewArtifactTimers.set(key, timer);
+    this.fileReviewArtifactFlushScheduler.enqueue(agentSession, review);
   }
 
   private async flushFileReviewArtifactSaves(): Promise<void> {
     if (
-      this.fileReviewArtifactTimers.size === 0 &&
-      this.pendingFileReviewArtifacts.size === 0 &&
+      !this.fileReviewArtifactFlushScheduler.hasPendingWork() &&
       this.fileReviewArtifactWrites.size === 0
     ) {
       return;
     }
 
-    for (const timer of this.fileReviewArtifactTimers.values()) {
-      clearTimeout(timer);
-    }
-    this.fileReviewArtifactTimers.clear();
-
-    const pending = Array.from(this.pendingFileReviewArtifacts.values());
-    this.pendingFileReviewArtifacts.clear();
-    const pendingWrites = pending.map((entry) => this.startFileReviewArtifactSave(entry));
-    await Promise.all([...this.fileReviewArtifactWrites, ...pendingWrites]);
+    const activeWrites = Array.from(this.fileReviewArtifactWrites);
+    const pendingWrites = this.fileReviewArtifactFlushScheduler.flushAllNow();
+    await Promise.all([...activeWrites, ...pendingWrites]);
   }
 
   private async flushFileReviewArtifactSave(sessionId: string, turnId: string): Promise<void> {
-    const pending = this.findPendingFileReviewArtifact(sessionId, turnId);
-    if (!pending) {
+    const pendingWrite = this.fileReviewArtifactFlushScheduler.flushOneNow(sessionId, turnId);
+    if (!pendingWrite) {
       await Promise.all([...this.fileReviewArtifactWrites]);
       return;
     }
-
-    const key = this.createFileReviewArtifactKey(pending.sessionId, pending.review.turnId);
-    const timer = this.fileReviewArtifactTimers.get(key);
-    if (timer) {
-      clearTimeout(timer);
-      this.fileReviewArtifactTimers.delete(key);
-    }
-    this.pendingFileReviewArtifacts.delete(key);
-    await this.startFileReviewArtifactSave(pending);
+    await pendingWrite;
   }
 
   private startFileReviewArtifactSave(entry: {
@@ -1054,6 +1112,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       }
       await agentSession.appendEntry(FILE_REVIEW_ARTIFACT_CUSTOM_TYPE, artifact);
       agentSession.releaseFileReviewTurnContent(review.turnId);
+      this.reviewProjectionVersion += 1;
       this.scoutMessagesCache.invalidate();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1063,22 +1122,43 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     }
   }
 
-  private findPendingFileReviewArtifact(
-    sessionId: string,
-    turnId: string,
-  ): { agentSession: AgentSession; sessionId: string; review: FileReviewTurnSnapshot } | undefined {
-    return this.pendingFileReviewArtifacts.get(this.createFileReviewArtifactKey(sessionId, turnId));
-  }
-
-  private createFileReviewArtifactKey(sessionId: string, turnId: string): string {
-    return `${sessionId}\u0000${turnId}`;
-  }
-
   private getFileReviewArtifactIndex() {
     return collectCurrentBranchFileReviewArtifacts(
       this.agentSession?.getSessionEntries(),
       this.agentSession?.getSessionBranch(),
     );
+  }
+
+  private createChangesReviewSummaryResolver():
+    | ((turnId: string) => ScoutChangesReviewSummary | undefined)
+    | undefined {
+    if (!this.agentSession) return undefined;
+    const agentSession = this.agentSession;
+    let artifactIndex: FileReviewArtifactIndex | undefined;
+    const runtimeSummaries = new Map<string, ScoutChangesReviewSummary | undefined>();
+    const artifactSummaries = new Map<string, ScoutChangesReviewSummary | undefined>();
+
+    return (turnId) => {
+      if (!runtimeSummaries.has(turnId)) {
+        const review = agentSession.getFileReviewTurn(turnId);
+        runtimeSummaries.set(
+          turnId,
+          review ? createRuntimeChangesReviewSummary(review) : undefined,
+        );
+      }
+      const runtimeSummary = runtimeSummaries.get(turnId);
+      if (runtimeSummary) return runtimeSummary;
+
+      if (!artifactSummaries.has(turnId)) {
+        artifactIndex ??= this.getFileReviewArtifactIndex();
+        const artifact = artifactIndex.artifactsByTurnId.get(turnId);
+        artifactSummaries.set(
+          turnId,
+          artifact ? createArtifactChangesReviewSummary(artifact) : undefined,
+        );
+      }
+      return artifactSummaries.get(turnId);
+    };
   }
 
   /** 绑定扩展 core actions 到指定 AgentSession */

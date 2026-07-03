@@ -29,6 +29,7 @@ function makeSessionManager(
     parentSessionPath: undefined,
     diagnostics: [],
     modelFallbackMessage: undefined,
+    getActiveChangesReview: vi.fn(() => undefined),
     ...overrides,
   } as unknown as ExtensionSessionCoordinator;
 }
@@ -103,6 +104,44 @@ describe('StateProtocolService', () => {
           modelId: 'gpt-test',
           modelProvider: 'openai',
           sessionName: 'Current session',
+        }),
+      },
+      'chat',
+    );
+  });
+
+  it('includes the active changes review summary in state snapshots', async () => {
+    const publishEvent = vi.fn();
+    const service = new StateProtocolService({
+      sessionManager: makeSessionManager({
+        getActiveChangesReview: vi.fn(() => ({
+          turnId: 'turn-1',
+          fileCount: 1,
+          additions: 19,
+          deletions: 19,
+          files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+        })),
+      } as Partial<ExtensionSessionCoordinator>),
+      configManager: makeConfigManager(),
+      getCommands: () => [],
+      getBusyState: () => ({ kind: 'agent', label: 'Working', cancellable: true }),
+      getExtensionUIRequests: () => [],
+      publishEvent,
+    });
+
+    await service.pushState('chat');
+
+    expect(publishEvent).toHaveBeenCalledWith(
+      {
+        type: 'state_update',
+        state: expect.objectContaining({
+          activeChangesReview: {
+            turnId: 'turn-1',
+            fileCount: 1,
+            additions: 19,
+            deletions: 19,
+            files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+          },
         }),
       },
       'chat',

@@ -8,7 +8,9 @@ import type { ScoutSessionEvent } from '../session-coordinator.ts';
 import { AgentEventUpdateCoalescer } from './agent-event-update-coalescer.ts';
 import {
   ToolCallPreviewProjector,
+  type CaptureWritePreviewBase,
   type ComputeEditPreview,
+  type ComputeWritePreview,
   type ToolCallPreviewContext,
 } from './tool-call-preview-projector.ts';
 
@@ -22,6 +24,8 @@ export interface SessionEventForwarderOptions {
   pushQueueState: () => void;
   pushTreeData: () => Promise<void>;
   computeEditPreview?: ComputeEditPreview;
+  computeWritePreview?: ComputeWritePreview;
+  captureWritePreviewBase?: CaptureWritePreviewBase;
   logError?: (message: string) => void;
   agentEventFlushDelayMs?: number;
 }
@@ -136,6 +140,8 @@ export class SessionEventForwarder {
         getPreviewContext: options.getPreviewContext,
         publishEvent: options.publishEvent,
         computeEditPreview: options.computeEditPreview,
+        computeWritePreview: options.computeWritePreview,
+        captureWritePreviewBase: options.captureWritePreviewBase,
         logError: options.logError,
       });
     }
@@ -169,6 +175,15 @@ export class SessionEventForwarder {
     if (event.type === 'agent_event') {
       this.previewProjector?.handleAgentEvent(event.event);
       this.agentEventCoalescer.handle(event.event);
+    }
+
+    if (event.type === 'changes_review_update') {
+      this.publishEvent({
+        type: 'changes_review_update',
+        sessionId: event.sessionId,
+        sessionFile: event.sessionFile,
+        changesReview: event.changesReview,
+      });
     }
 
     if (event.type === 'auto_retry_start') {

@@ -22,6 +22,7 @@ import type {
   ScoutToolExecutionResult,
   ScoutToolResultMessage,
   ScoutUserMessage,
+  ToolPresentationMetadata,
 } from '@scout-agent/shared';
 import type {
   AgentEvent,
@@ -30,14 +31,20 @@ import type {
   CompactionSummaryMessage,
   CustomMessage,
 } from '@scout-agent/agent';
+import { createDisplayArguments } from './display-arguments.ts';
 
 export interface AgentEventMappingOptions {
   messageId?: string;
+  formatDisplayPath?: (path: string) => string;
+  getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
 }
 
 // ---------- 内容块转换 ----------
 
-function convertAssistantContent(content: AssistantMessage['content']): ScoutContent[] {
+function convertAssistantContent(
+  content: AssistantMessage['content'],
+  options: AgentEventMappingOptions,
+): ScoutContent[] {
   return content.flatMap((block): ScoutContent[] => {
     if (block.type === 'text') {
       return [{ type: 'text', text: block.text }];
@@ -46,12 +53,18 @@ function convertAssistantContent(content: AssistantMessage['content']): ScoutCon
       return [{ type: 'thinking', thinking: block.thinking, redacted: block.redacted }];
     }
     if (block.type === 'toolCall') {
+      const displayArguments = createDisplayArguments(
+        block.arguments as Record<string, unknown>,
+        options,
+        { toolName: block.name },
+      );
       return [
         {
           type: 'toolCall',
           id: block.id,
           name: block.name,
           arguments: block.arguments as Record<string, unknown>,
+          ...(displayArguments ? { displayArguments } : {}),
         },
       ];
     }
@@ -95,7 +108,10 @@ function convertToolResultContent(content: ToolResultMessage['content']): ScoutC
 
 // ---------- AgentMessage → ScoutMessage ----------
 
-export function convertMessage(message: AgentMessage): ScoutMessage | null {
+export function convertMessage(
+  message: AgentMessage,
+  options: AgentEventMappingOptions = {},
+): ScoutMessage | null {
   if (message.role === 'user') {
     const msg = message as UserMessage;
     const scoutMsg: ScoutUserMessage = {
@@ -110,7 +126,7 @@ export function convertMessage(message: AgentMessage): ScoutMessage | null {
     const msg = message as AssistantMessage;
     const scoutMsg: ScoutAssistantMessage = {
       role: 'assistant',
-      content: convertAssistantContent(msg.content),
+      content: convertAssistantContent(msg.content, options),
       stopReason: msg.stopReason,
       errorMessage: msg.errorMessage,
       timestamp: msg.timestamp,
@@ -222,7 +238,7 @@ export function mapAgentEventToScout(
       return { type: 'turn_end' };
 
     case 'message_start': {
-      const message = convertMessage(event.message);
+      const message = convertMessage(event.message, options);
       if (!message) return null;
       if (!options.messageId) {
         throw new Error('Missing Scout protocol messageId for message_start event');
@@ -231,7 +247,7 @@ export function mapAgentEventToScout(
     }
 
     case 'message_update': {
-      const message = convertMessage(event.message);
+      const message = convertMessage(event.message, options);
       if (!message) return null;
       if (!options.messageId) {
         throw new Error('Missing Scout protocol messageId for message_update event');
@@ -240,7 +256,7 @@ export function mapAgentEventToScout(
     }
 
     case 'message_end': {
-      const message = convertMessage(event.message);
+      const message = convertMessage(event.message, options);
       if (!message) return null;
       if (!options.messageId) {
         throw new Error('Missing Scout protocol messageId for message_end event');
@@ -248,13 +264,18 @@ export function mapAgentEventToScout(
       return { type: 'message_end', messageId: options.messageId, message };
     }
 
-    case 'tool_execution_start':
+    case 'tool_execution_start': {
+      const displayArgs = createDisplayArguments(event.args as Record<string, unknown>, options, {
+        toolName: event.toolName,
+      });
       return {
         type: 'tool_execution_start',
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         args: event.args as Record<string, unknown>,
+        ...(displayArgs ? { displayArgs } : {}),
       };
+    }
 
     case 'tool_execution_update':
       return {

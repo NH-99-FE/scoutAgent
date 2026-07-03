@@ -32,6 +32,7 @@ export interface FileReviewArtifactRecord {
   operation: FileReviewOperation;
   path: string;
   absolutePath: string;
+  displayPath?: string;
   sequence: number;
   unavailableReason?: Exclude<FileReviewUnavailableReason, 'Changes are no longer available'>;
 }
@@ -39,6 +40,7 @@ export interface FileReviewArtifactRecord {
 export interface FileReviewArtifactFile {
   absolutePath: string;
   path: string;
+  displayPath?: string;
   recordIds: string[];
   latestRecordId: string;
   latestSequence: number;
@@ -95,6 +97,7 @@ export function createFileReviewArtifact(
       operation: record.operation,
       path: record.path,
       absolutePath: record.absolutePath,
+      displayPath: record.displayPath,
       sequence: record.sequence,
       unavailableReason: record.unavailableReason,
     })),
@@ -108,6 +111,7 @@ export function createFileReviewArtifact(
       return {
         absolutePath: file.absolutePath,
         path: file.path,
+        displayPath: file.displayPath,
         recordIds: [...file.recordIds],
         latestRecordId: file.latestRecordId,
         latestSequence: file.latestSequence,
@@ -145,6 +149,7 @@ function isFileReviewArtifactRecord(value: unknown): value is FileReviewArtifact
     isFileReviewOperation(value.operation) &&
     typeof value.path === 'string' &&
     typeof value.absolutePath === 'string' &&
+    isOptionalString(value.displayPath) &&
     isFiniteNumber(value.sequence) &&
     isOptionalUnavailableReason(value.unavailableReason)
   );
@@ -155,6 +160,7 @@ function isFileReviewArtifactFile(value: unknown): value is FileReviewArtifactFi
   return (
     typeof value.absolutePath === 'string' &&
     typeof value.path === 'string' &&
+    isOptionalString(value.displayPath) &&
     Array.isArray(value.recordIds) &&
     value.recordIds.every((recordId) => typeof recordId === 'string') &&
     typeof value.latestRecordId === 'string' &&
@@ -244,6 +250,10 @@ function isOptionalUnavailableReason(
     value === 'Original content unavailable' ||
     value === 'Binary or unsupported encoding'
   );
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === 'string';
 }
 
 export function collectFileReviewArtifacts(
