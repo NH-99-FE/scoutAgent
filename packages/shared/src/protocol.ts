@@ -34,12 +34,15 @@ export type {
   SourceOrigin,
   SourceScope,
   ToolInfo,
+  ToolPresentationMetadata,
 } from './protocol-core.ts';
 
 export type {
   ScoutChangesReviewFile,
   ScoutChangesReviewModel,
   ScoutChangesReviewRow,
+  ScoutChangesReviewSummary,
+  ScoutChangesReviewSummaryFile,
   ScoutChangesReviewToken,
   ScoutChangesReviewTokenDiff,
   ScoutChangesReviewViewMode,
@@ -127,6 +130,7 @@ export type {
   ScoutCompactionReason,
   ScoutCompactionResult,
   ScoutCompactionStartEvent,
+  ScoutChangesReviewUpdateEvent,
   ScoutDomainEventType,
   ScoutNotificationMessage,
   ScoutProtocolError,

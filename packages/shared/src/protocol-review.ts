@@ -26,7 +26,10 @@ export interface ScoutChangesReviewRow {
 
 export interface ScoutChangesReviewFile {
   id: string;
+  /** review 业务 path，用于 host 打开/定位文件；展示优先使用 displayPath。 */
   path: string;
+  /** UI-only 展示路径，由 host 根据 cwd/path 规则生成。 */
+  displayPath?: string;
   absolutePath: string;
   external: boolean;
   additions: number;
@@ -47,6 +50,24 @@ export interface ScoutChangesReviewModel {
     deletions: number;
     fileCount: number;
   };
+}
+
+export interface ScoutChangesReviewSummaryFile {
+  /** review summary 的业务 path，用于标识文件；展示优先使用 displayPath。 */
+  path: string;
+  /** UI-only 展示路径，由 host 根据 cwd/path 规则生成。 */
+  displayPath?: string;
+  additions: number;
+  deletions: number;
+}
+
+export interface ScoutChangesReviewSummary {
+  /** 同一套摘要契约同时用于 composer active review 与 assistant settled review 卡片。 */
+  turnId: string;
+  fileCount: number;
+  additions: number;
+  deletions: number;
+  files: ScoutChangesReviewSummaryFile[];
 }
 
 export type ScoutChangesReviewWebviewMessage =

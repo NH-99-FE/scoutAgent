@@ -5,6 +5,7 @@
 import type { ScoutModelInfo, ThinkingLevel } from './models.ts';
 import type { ScoutCommandInfo, ScoutDiagnostic, ToolInfo } from './protocol-core.ts';
 import type { ScoutExtensionUIRequest } from './protocol-extension-ui.ts';
+import type { ScoutChangesReviewSummary } from './protocol-review.ts';
 
 // ---------- 消息内容块 ----------
 
@@ -24,6 +25,8 @@ export interface ScoutToolCallContent {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
+  /** UI 展示用参数；例如 host 已经把 path 转成 cwd-relative/display path。 */
+  displayArguments?: Record<string, unknown>;
 }
 
 export interface ScoutImageContent {
@@ -50,6 +53,8 @@ export interface ScoutUserMessage {
 export interface ScoutAssistantMessage {
   role: 'assistant';
   content: ScoutContent[];
+  /** Host 已归并的 settled changes review 摘要；webview 只负责渲染。 */
+  changesReviews?: ScoutChangesReviewSummary[];
   stopReason?: string;
   errorMessage?: string;
   timestamp: number;
@@ -164,6 +169,7 @@ export interface ScoutWebviewState {
   diagnostics?: ScoutDiagnostic[];
   extensionUIRequests?: ScoutExtensionUIRequest[];
   modelFallbackMessage?: string;
+  activeChangesReview?: ScoutChangesReviewSummary;
 }
 
 export interface ScoutConfig {
@@ -215,7 +221,10 @@ export interface ScoutFileChangeReviewRef {
 
 export interface ScoutFileChangeDetails {
   kind: 'file_change';
+  /** 可定位的业务路径，通常为 host/core 规范化后的绝对路径；不要当作 UI 展示规则来源。 */
   path: string;
+  /** UI-only 展示路径，由 host/core 格式化；webview 只负责渲染与截断。 */
+  displayPath?: string;
   additions: number;
   deletions: number;
   firstChangedLine?: number;
@@ -224,7 +233,10 @@ export interface ScoutFileChangeDetails {
 
 export interface ScoutFileEditPreview {
   kind: 'file_edit';
+  /** 预览关联的工具 path 参数；用于关联业务对象，不承载展示语义。 */
   path: string;
+  /** UI-only 展示路径，由 core preview 根据当前 cwd 格式化。 */
+  displayPath?: string;
   diff?: string;
   additions: number;
   deletions: number;

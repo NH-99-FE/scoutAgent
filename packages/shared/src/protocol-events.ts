@@ -24,6 +24,7 @@ import type {
   ScoutToolExecutionResult,
   ScoutWebviewState,
 } from './protocol-state.ts';
+import type { ScoutChangesReviewSummary } from './protocol-review.ts';
 
 /**
  * Agent 事件在 postMessage 通道上的序列化形式。
@@ -43,6 +44,8 @@ export type ScoutAgentEvent =
       toolCallId: string;
       toolName: string;
       args: Record<string, unknown>;
+      /** UI 展示用参数；例如 path 已由 host/core 格式化为 display path。 */
+      displayArgs?: Record<string, unknown>;
     }
   | {
       type: 'tool_execution_update';
@@ -118,6 +121,13 @@ export interface ScoutRuntimeStateUpdateEvent {
   busyState: ScoutBusyState;
 }
 
+export interface ScoutChangesReviewUpdateEvent {
+  type: 'changes_review_update';
+  sessionId: string;
+  sessionFile?: string;
+  changesReview?: ScoutChangesReviewSummary;
+}
+
 export type ScoutRuntimeExtensionEvent =
   | ScoutRuntimeStateUpdateEvent
   | { type: 'agent_event'; event: ScoutAgentEvent }
@@ -157,6 +167,7 @@ export type ExtensionEventMessage =
   | { type: 'config_update'; config: ScoutConfig }
   | { type: 'commands_update'; commands: ScoutCommandInfo[] }
   | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
+  | ScoutChangesReviewUpdateEvent
   | ScoutNotificationMessage
   | ScoutExtensionUIRequest
   | ScoutExtensionUIRequestClosedEvent
@@ -178,6 +189,7 @@ export const EXTENSION_TO_WEBVIEW_MESSAGE_TYPES = [
   'protocol_response',
   'state_update',
   'queue_update',
+  'changes_review_update',
   'runtime_state_update',
   'agent_event',
   'tool_call_preview_update',

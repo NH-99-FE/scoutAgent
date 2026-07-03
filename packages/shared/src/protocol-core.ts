@@ -19,12 +19,18 @@ export interface SourceInfo {
   baseDir?: string;
 }
 
+export interface ToolPresentationMetadata {
+  /** 工具参数中代表路径的字段名；host 会把这些字段格式化为 display path。 */
+  pathArguments?: readonly string[];
+}
+
 export interface ToolInfo {
   name: string;
   label?: string;
   description: string;
   parameters: unknown;
   active: boolean;
+  presentation?: ToolPresentationMetadata;
   sourceInfo: SourceInfo;
 }
 
