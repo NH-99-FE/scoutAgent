@@ -96,6 +96,21 @@ function expandCompletedTurn() {
   fireEvent.click(screen.getByRole('button', { name: /展开回复 已处理/ }));
 }
 
+function ensureFileChangeDiffExpanded(pathPattern: RegExp) {
+  const closedToggle = screen.queryByRole('button', {
+    name: new RegExp(`展开文件变更 ${pathPattern.source}`),
+  });
+  if (closedToggle) {
+    fireEvent.click(closedToggle);
+    return;
+  }
+  expect(
+    screen.getByRole('button', {
+      name: new RegExp(`收起文件变更 ${pathPattern.source}`),
+    }),
+  ).toBeInTheDocument();
+}
+
 function setViewportScrollMetrics(
   viewport: HTMLElement,
   metrics: { clientHeight: number; scrollHeight: number; scrollTop: number },
@@ -1504,7 +1519,7 @@ describe('ConversationView', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders write previews with change counts and an expandable diff', () => {
+  it('renders write previews with change counts without an expandable diff', () => {
     renderConversation({
       isStreaming: true,
       items: [
@@ -1543,16 +1558,13 @@ describe('ConversationView', () => {
     expect(screen.getByText('正在写入 src/generated.ts')).toBeInTheDocument();
     expect(screen.getByText('+1')).toBeInTheDocument();
     expect(screen.queryByText('-0')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开写入差异 src\/generated\.ts/ }));
-
-    expect(screen.getByText('src/generated.ts')).toBeInTheDocument();
-    expect(screen.getAllByText('+1')).toHaveLength(1);
-    expect(screen.queryByText('-0')).not.toBeInTheDocument();
-    expect(screen.getByText('+1 export const value = 1;')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开写入差异 src\/generated\.ts/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('+1 export const value = 1;')).not.toBeInTheDocument();
   });
 
-  it('does not show retained write preview diffs as completed file change details', () => {
+  it('renders completed write final diff previews from details', () => {
     renderConversation({
       items: [
         {
@@ -1586,37 +1598,24 @@ describe('ConversationView', () => {
                 turnId: 'turn-1',
                 recordId: 'review-1',
               },
+              diffPreview: {
+                rows: [{ type: 'added', newLineNumber: 1, text: 'export const value = 1;' }],
+              },
             },
             isError: false,
             timestamp: 2,
           },
         },
       ],
-      toolPreviewsById: {
-        'tool-1': {
-          toolCallId: 'tool-1',
-          toolName: 'write',
-          preview: {
-            kind: 'file_edit',
-            path: 'src/generated.ts',
-            diff: '+1 export const value = 1;',
-            additions: 1,
-            deletions: 0,
-            firstChangedLine: 1,
-          },
-        },
-      },
     });
-
-    expandCompletedTurn();
 
     expect(screen.getByText('已写入 src/generated.ts')).toBeInTheDocument();
     expect(screen.getAllByText('+1').length).toBeGreaterThan(0);
     expect(screen.queryByText('-0')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /展开文件变更 src\/generated\.ts/ }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText('+1 export const value = 1;')).not.toBeInTheDocument();
+
+    ensureFileChangeDiffExpanded(/src\/generated\.ts/);
+
+    expect(screen.getByText('+1 export const value = 1;')).toBeInTheDocument();
   });
 
   it('does not render raw write content from arguments', () => {
@@ -1796,6 +1795,241 @@ describe('ConversationView', () => {
     fireEvent.click(reviewButton);
 
     expect(protocolClientMock.openChangesReview).toHaveBeenCalledWith('turn-1');
+  });
+
+  it('expands completed file change tool rows with final diff preview rows', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: '/workspace/src/app.ts',
+              displayPath: 'src/app.ts',
+              additions: 1,
+              deletions: 1,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+              diffPreview: {
+                rows: [
+                  { type: 'removed', oldLineNumber: 2, text: 'const value = "old";' },
+                  { type: 'added', newLineNumber: 2, text: 'const value = "new";' },
+                ],
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const completedTool = screen.getByText('已编辑 src/app.ts');
+    const completedToolButton = completedTool.closest('button');
+    expect(completedToolButton).toHaveAccessibleName('展开文件变更 src/app.ts');
+
+    fireEvent.click(completedToolButton!);
+
+    expect(screen.getByText('-2 const value = "old";')).toBeInTheDocument();
+    expect(screen.getByText('+2 const value = "new";')).toBeInTheDocument();
+  });
+
+  it('marks completed final diff previews when the host truncated the rows', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: '/workspace/src/app.ts',
+              displayPath: 'src/app.ts',
+              additions: 10,
+              deletions: 1,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+              diffPreview: {
+                rows: [{ type: 'added', newLineNumber: 2, text: 'const value = "new";' }],
+                truncated: true,
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开文件变更 src\/app\.ts/ }));
+
+    expect(screen.getByText('+2 const value = "new";')).toBeInTheDocument();
+    expect(screen.getByText('… 预览已截断，请打开审查查看完整变更')).toBeInTheDocument();
+  });
+
+  it('keeps completed final diff previews expandable when rows are unavailable', () => {
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: '/workspace/src/app.ts',
+              displayPath: 'src/app.ts',
+              additions: 1000,
+              deletions: 1000,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+              diffPreview: {
+                rows: [],
+                unavailableReason: 'Diff too large to review',
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开文件变更 src\/app\.ts/ }));
+
+    expect(screen.getByText('预览错误')).toBeInTheDocument();
+    expect(screen.getByText('Diff too large to review')).toBeInTheDocument();
+  });
+
+  it('keeps the first completed file change row expandable when several files changed', () => {
+    const files = ['test.c', 'test.py', 'Test.java', 'test.js'];
+
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: files.map((path, index) => ({
+              type: 'toolCall' as const,
+              id: `tool-${index + 1}`,
+              name: 'edit',
+              arguments: { path },
+            })),
+            changesReviews: [
+              makeChangesReviewSummary({
+                files: files.map((path, index) => ({
+                  path,
+                  displayPath: path,
+                  additions: index + 1,
+                  deletions: 1,
+                })),
+              }),
+            ],
+            timestamp: 1,
+          },
+        },
+        ...files.map(
+          (path, index): ConversationItem => ({
+            key: `tool-result-${index + 1}`,
+            message: {
+              role: 'toolResult',
+              toolCallId: `tool-${index + 1}`,
+              toolName: 'edit',
+              content: [{ type: 'text', text: 'done' }],
+              details: {
+                kind: 'file_change',
+                path,
+                displayPath: path,
+                additions: index + 1,
+                deletions: 1,
+                review: {
+                  turnId: 'turn-1',
+                  recordId: `review-${index + 1}`,
+                },
+                diffPreview: {
+                  rows: [
+                    { type: 'removed', oldLineNumber: 1, text: `old ${path}` },
+                    { type: 'added', newLineNumber: 1, text: `new ${path}` },
+                  ],
+                },
+              },
+              isError: false,
+              timestamp: index + 2,
+            },
+          }),
+        ),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /展开文件变更 test\.c/ }));
+
+    expect(screen.getByText('-1 old test.c')).toBeInTheDocument();
+    expect(screen.getByText('+1 new test.c')).toBeInTheDocument();
+    for (const path of files.slice(1)) {
+      expect(screen.getByRole('button', { name: new RegExp(`展开文件变更 ${path}`) }));
+    }
   });
 
   it('defers the latest streaming assistant review entry until the turn settles', () => {
@@ -2917,7 +3151,7 @@ describe('ConversationView', () => {
     expect(screen.getByText('搜索失败 hello')).toBeInTheDocument();
   });
 
-  it('renders edit previews with change counts and an expandable diff', () => {
+  it('renders edit previews with change counts without an expandable diff', () => {
     renderConversation({
       isStreaming: true,
       items: [
@@ -2960,17 +3194,16 @@ describe('ConversationView', () => {
     expect(screen.getByText('正在编辑 src/app.ts')).toBeInTheDocument();
     expect(screen.getByText('+1')).toBeInTheDocument();
     expect(screen.getByText('-1')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开编辑差异 src\/app\.ts/ }));
-
-    expect(screen.queryByText('Diff')).not.toBeInTheDocument();
     expect(screen.getAllByText('+1')).toHaveLength(1);
     expect(screen.getAllByText('-1')).toHaveLength(1);
-    expect(screen.getByText('-2 old')).toBeInTheDocument();
-    expect(screen.getByText('+2 new')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开编辑差异 src\/app\.ts/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('-2 old')).not.toBeInTheDocument();
+    expect(screen.queryByText('+2 new')).not.toBeInTheDocument();
   });
 
-  it('does not show retained edit preview diffs as completed file change details', () => {
+  it('renders completed edit final diff previews from details', () => {
     renderConversation({
       items: [
         {
@@ -3007,42 +3240,33 @@ describe('ConversationView', () => {
                 turnId: 'turn-1',
                 recordId: 'review-1',
               },
+              diffPreview: {
+                rows: [
+                  { type: 'context', oldLineNumber: 1, newLineNumber: 1, text: 'const value = 1;' },
+                  { type: 'removed', oldLineNumber: 2, text: 'old' },
+                  { type: 'added', newLineNumber: 2, text: 'new' },
+                ],
+              },
             },
             isError: false,
             timestamp: 2,
           },
         },
       ],
-      toolPreviewsById: {
-        'tool-1': {
-          toolCallId: 'tool-1',
-          toolName: 'edit',
-          preview: {
-            kind: 'file_edit',
-            path: 'src/app.ts',
-            diff: ' 1 const value = 1;\n-2 old\n+2 new',
-            additions: 1,
-            deletions: 1,
-            firstChangedLine: 2,
-          },
-        },
-      },
     });
 
-    expandCompletedTurn();
-
     expect(screen.queryByText('已编辑的文件')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /展开文件变更 src\/app\.ts/ }),
-    ).not.toBeInTheDocument();
     expect(screen.getByText('已编辑 src/app.ts')).toBeInTheDocument();
     expect(screen.getAllByText('+1').length).toBeGreaterThan(0);
     expect(screen.getAllByText('-1').length).toBeGreaterThan(0);
-    expect(screen.queryByText('-2 old')).not.toBeInTheDocument();
-    expect(screen.queryByText('+2 new')).not.toBeInTheDocument();
+
+    ensureFileChangeDiffExpanded(/src\/app\.ts/);
+
+    expect(screen.getByText('-2 old')).toBeInTheDocument();
+    expect(screen.getByText('+2 new')).toBeInTheDocument();
   });
 
-  it('uses completed edit result paths without carrying over normalized preview diffs', () => {
+  it('uses completed edit result display paths for final diff details', () => {
     const previewPath = '/workspace/src/app.ts';
     const detailsPath = '/workspace/src/app.ts';
     const detailsDisplayPath = 'src/app.ts';
@@ -3084,8 +3308,8 @@ describe('ConversationView', () => {
       toolPreviewsById,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开编辑差异/ }));
-    expect(screen.getByText('-2 old')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开编辑差异/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('-2 old')).not.toBeInTheDocument();
 
     act(() => {
       rerender(
@@ -3111,6 +3335,12 @@ describe('ConversationView', () => {
                     turnId: 'turn-1',
                     recordId: 'review-1',
                   },
+                  diffPreview: {
+                    rows: [
+                      { type: 'removed', oldLineNumber: 2, text: 'old' },
+                      { type: 'added', newLineNumber: 2, text: 'new' },
+                    ],
+                  },
                 },
                 isError: false,
                 timestamp: 2,
@@ -3123,25 +3353,18 @@ describe('ConversationView', () => {
       );
     });
 
-    expandCompletedTurn();
-
     expect(screen.queryByText('已编辑的文件')).not.toBeInTheDocument();
     expect(screen.getByText('已编辑 src/app.ts')).toBeInTheDocument();
     expect(screen.queryByText('已编辑 /workspace/src/app.ts')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: /展开文件变更 src\/app\.ts/ }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText('-2 old')).not.toBeInTheDocument();
-    expect(screen.queryByText('+2 new')).not.toBeInTheDocument();
+
+    ensureFileChangeDiffExpanded(/src\/app\.ts/);
+
+    expect(screen.getByText('-2 old')).toBeInTheDocument();
+    expect(screen.getByText('+2 new')).toBeInTheDocument();
   });
 
-  it('limits large edit diffs until the detail is explicitly expanded', () => {
-    const diff = Array.from({ length: 405 }, (_, index) => ` ${index + 1} line-${index + 1}`).join(
-      '\n',
-    );
-
+  it('limits large completed edit diffs until the detail is explicitly expanded', () => {
     renderConversation({
-      isStreaming: true,
       items: [
         {
           key: 'assistant-1',
@@ -3158,24 +3381,38 @@ describe('ConversationView', () => {
             timestamp: 1,
           },
         },
-      ],
-      toolPreviewsById: {
-        'tool-1': {
-          toolCallId: 'tool-1',
-          toolName: 'edit',
-          preview: {
-            kind: 'file_edit',
-            path: 'src/large.ts',
-            diff,
-            additions: 0,
-            deletions: 0,
-            firstChangedLine: 1,
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: 'src/large.ts',
+              additions: 0,
+              deletions: 0,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+              diffPreview: {
+                rows: Array.from({ length: 405 }, (_, index) => ({
+                  type: 'context' as const,
+                  newLineNumber: index + 1,
+                  text: `line-${index + 1}`,
+                })),
+              },
+            },
+            isError: false,
+            timestamp: 2,
           },
         },
-      },
+      ],
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /展开编辑差异 src\/large\.ts/ }));
+    fireEvent.click(screen.getByRole('button', { name: /展开文件变更 src\/large\.ts/ }));
 
     expect(screen.getByText(/400 line-400/)).toBeInTheDocument();
     expect(screen.queryByText(/405 line-405/)).not.toBeInTheDocument();
@@ -3266,10 +3503,10 @@ describe('ConversationView', () => {
 
     expect(screen.getByText('预览失败 编辑 src/app.ts')).toBeInTheDocument();
     expect(screen.queryByText('编辑失败 src/app.ts')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /展开编辑差异 src\/app\.ts/ }));
-
-    expect(screen.getByText('Could not find the exact text')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /展开编辑差异 src\/app\.ts/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Could not find the exact text')).not.toBeInTheDocument();
   });
 
   it('keeps tool details inside the process body instead of the outer summary', () => {
@@ -4156,6 +4393,12 @@ describe('buildConversationRows', () => {
                 turnId: 'turn-1',
                 recordId: 'review-1',
               },
+              diffPreview: {
+                rows: [
+                  { type: 'removed', oldLineNumber: 1, text: 'old' },
+                  { type: 'added', newLineNumber: 1, text: 'final' },
+                ],
+              },
             },
             isError: false,
             timestamp: 2,
@@ -4185,7 +4428,13 @@ describe('buildConversationRows', () => {
         { key: 'deletions', value: 1, prefix: '-', tone: 'deleted' },
       ],
     });
-    expect(toolActivity?.display.detail).toBeUndefined();
+    expect(toolActivity?.display.detail).toMatchObject({
+      kind: 'diff',
+      path: 'src/app.ts',
+      diffText: '-1 old\n+1 final',
+      additions: 2,
+      deletions: 1,
+    });
 
     const assistantRow = rows.find((row) => row.type === 'assistant');
     expect(assistantRow?.changesReviews).toMatchObject([
@@ -4196,6 +4445,142 @@ describe('buildConversationRows', () => {
         deletions: 1,
       },
     ]);
+  });
+
+  it('does not render expandable final diff details without a host-enriched preview', () => {
+    const rows = buildConversationRows({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: 'src/app.ts',
+              additions: 1,
+              deletions: 1,
+              review: {
+                turnId: 'turn-1',
+                recordId: 'review-1',
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const toolActivity = rows
+      .flatMap((row) =>
+        row.type === 'assistant'
+          ? row.entries.flatMap((entry) =>
+              entry.type === 'process'
+                ? entry.phases.flatMap((phase) => phase.activities).filter(isToolActivity)
+                : [],
+            )
+          : [],
+      )
+      .at(0);
+
+    expect(toolActivity?.display).toMatchObject({
+      kind: 'file_change',
+      detailLabel: '文件变更',
+      detailTarget: 'src/app.ts',
+    });
+    expect(toolActivity?.display.detail).toBeUndefined();
+  });
+
+  it('does not infer final diff previews from review summaries', () => {
+    const rows = buildConversationRows({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'toolCall',
+                id: 'tool-1',
+                name: 'edit',
+                arguments: { path: 'src/app.ts' },
+              },
+            ],
+            changesReviews: [
+              makeChangesReviewSummary({
+                files: [
+                  { path: 'src/app.ts', displayPath: 'src/app.ts', additions: 1, deletions: 1 },
+                ],
+              }),
+            ],
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'tool-result-1',
+          message: {
+            role: 'toolResult',
+            toolCallId: 'tool-1',
+            toolName: 'edit',
+            content: [{ type: 'text', text: 'done' }],
+            details: {
+              kind: 'file_change',
+              path: 'src/app.ts',
+              additions: 1,
+              deletions: 1,
+              review: {
+                turnId: 'turn-1',
+              },
+            },
+            isError: false,
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const toolActivity = rows
+      .flatMap((row) =>
+        row.type === 'assistant'
+          ? row.entries.flatMap((entry) =>
+              entry.type === 'process'
+                ? entry.phases.flatMap((phase) => phase.activities).filter(isToolActivity)
+                : [],
+            )
+          : [],
+      )
+      .at(0);
+
+    expect(toolActivity?.display).toMatchObject({
+      kind: 'file_change',
+      detailLabel: '文件变更',
+      detailTarget: 'src/app.ts',
+    });
+    expect(toolActivity?.display.detail).toBeUndefined();
   });
 
   it('does not treat unmarked edit diff details as file edit output', () => {

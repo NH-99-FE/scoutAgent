@@ -444,7 +444,82 @@ describe('conversation store', () => {
     expect(useConversationStore.getState().toolPreviewsById['tool-1']).toBeUndefined();
   });
 
-  it('clears edit previews across snapshots because completed tool details are authoritative', () => {
+  it('clears file edit previews after tool completion and agent end', () => {
+    const actions = useConversationStore.getState().actions;
+    actions.applyStateSnapshot(
+      makeState([], {
+        sessionId: 'session-1',
+        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      }),
+    );
+
+    actions.applyRuntimeEvent({
+      type: 'tool_execution_start',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      args: { path: 'src/app.ts' },
+    });
+    actions.applyRuntimeEvent({
+      type: 'tool_call_preview_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        diff: '-1 old\n+1 new',
+        additions: 1,
+        deletions: 1,
+      },
+    });
+    actions.applyRuntimeEvent({
+      type: 'tool_execution_start',
+      toolCallId: 'tool-running',
+      toolName: 'edit',
+      args: { path: 'src/other.ts' },
+    });
+    actions.applyRuntimeEvent({
+      type: 'tool_call_preview_update',
+      sessionId: 'session-1',
+      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
+      toolCallId: 'tool-running',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/other.ts',
+        diff: '-1 old\n+1 other',
+        additions: 1,
+        deletions: 1,
+      },
+    });
+    actions.applyRuntimeEvent({
+      type: 'tool_execution_end',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      result: {
+        content: [{ type: 'text', text: 'done' }],
+        details: {
+          kind: 'file_change',
+          path: 'src/app.ts',
+          additions: 1,
+          deletions: 1,
+          review: { turnId: 'turn-1', recordId: 'review-1' },
+        },
+      },
+      isError: false,
+    });
+    actions.applyRuntimeEvent({ type: 'agent_end', willRetry: false });
+
+    expect(useConversationStore.getState().toolExecutionsById['tool-1']).toMatchObject({
+      status: 'done',
+    });
+    expect(useConversationStore.getState().toolExecutionsById['tool-running']).toBeUndefined();
+    expect(useConversationStore.getState().toolPreviewsById['tool-1']).toBeUndefined();
+    expect(useConversationStore.getState().toolPreviewsById['tool-running']).toBeUndefined();
+  });
+
+  it('clears edit previews across snapshots because snapshots are authoritative', () => {
     const actions = useConversationStore.getState().actions;
     actions.applyStateSnapshot(
       makeState([], {

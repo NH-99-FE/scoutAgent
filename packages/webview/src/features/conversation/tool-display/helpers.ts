@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { ToolCallPreviewState } from '@/store/conversation-store';
-import type { ScoutFileChangeDetails } from '@scout-agent/shared';
+import type { ScoutChangesReviewRow, ScoutFileChangeDetails } from '@scout-agent/shared';
 import type {
   FileEditToolDisplayResult,
   GenericToolDisplayResult,
@@ -13,6 +13,8 @@ import type {
   ToolDisplayResult,
   ToolDisplayStatus,
 } from './types';
+
+const FILE_CHANGE_DIFF_PREVIEW_TRUNCATED_LINE = '… 预览已截断，请打开审查查看完整变更';
 
 export function createGenericDisplay(
   context: ToolDisplayContext,
@@ -62,19 +64,13 @@ export function createFileChangeDisplayFromDetails({
   status,
   toolName,
   details,
-  preview,
 }: {
   status: ToolDisplayStatus;
   toolName: string;
   details: unknown;
-  preview?: ToolCallPreviewState;
 }): ToolDisplayResult | undefined {
   if (!isFileChangeDetails(details)) return undefined;
-  // 完成态 details 来自真实工具结果；preview 是执行前推断，不能当作最终 diff。
-  const detail =
-    status === 'done' || status === 'error'
-      ? undefined
-      : createFileChangeDiffDetail(details, preview);
+  const detail = status === 'error' ? undefined : createFileChangeDiffDetail(details);
   const displayPath = details.displayPath ?? details.path;
   const summaryArgs = { path: displayPath };
   return {
@@ -111,12 +107,6 @@ export function createFileEditDisplayFromPreview({
     toolName,
     icon: 'edit',
     path: displayPath,
-    detail: {
-      kind: 'diff',
-      diffText: fileEdit.diff ?? '',
-      path: displayPath,
-      previewError,
-    },
     additions: fileEdit.additions,
     deletions: fileEdit.deletions,
     metrics: previewError ? undefined : createChangeMetrics(fileEdit.additions, fileEdit.deletions),
@@ -217,21 +207,36 @@ function createChangeMetrics(
 
 function createFileChangeDiffDetail(
   details: ScoutFileChangeDetails,
-  preview: ToolCallPreviewState | undefined,
 ): ToolDisplayResult['detail'] | undefined {
-  if (preview?.preview.kind !== 'file_edit') return undefined;
-  const fileEdit = preview.preview;
-  if (!fileEdit.diff?.trim() && !fileEdit.error?.trim()) return undefined;
-
+  const preview = details.diffPreview;
+  if (!preview) return undefined;
+  const diffLines = preview.rows.map(formatFileChangeDiffPreviewRow);
+  const unavailableReason = preview.unavailableReason?.trim();
+  if (preview.truncated) {
+    diffLines.push(FILE_CHANGE_DIFF_PREVIEW_TRUNCATED_LINE);
+  }
+  if (unavailableReason && diffLines.length > 0) {
+    diffLines.push(`… ${unavailableReason}`);
+  }
+  if (diffLines.length === 0 && !unavailableReason) return undefined;
   const displayPath = details.displayPath ?? details.path;
   return {
     kind: 'diff',
     path: displayPath,
-    diffText: fileEdit.diff ?? '',
+    diffText: diffLines.join('\n'),
     additions: details.additions,
     deletions: details.deletions,
-    previewError: fileEdit.error,
+    previewError: diffLines.length === 0 ? unavailableReason : undefined,
   };
+}
+
+function formatFileChangeDiffPreviewRow(row: ScoutChangesReviewRow): string {
+  if (row.type === 'fold') {
+    return `… ${row.count ?? 0} unmodified ${(row.count ?? 0) === 1 ? 'line' : 'lines'}`;
+  }
+  const marker = row.type === 'added' ? '+' : row.type === 'removed' ? '-' : ' ';
+  const lineNumber = row.type === 'removed' ? row.oldLineNumber : row.newLineNumber;
+  return `${marker}${lineNumber ?? ''} ${row.text ?? ''}`;
 }
 
 export function formatToolExecutionSummary(

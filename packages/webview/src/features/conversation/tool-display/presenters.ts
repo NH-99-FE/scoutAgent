@@ -50,7 +50,6 @@ function presentEditTool(context: ToolDisplayContext): ToolDisplayResult | undef
     status: context.status,
     toolName: context.toolName,
     details: context.details,
-    preview: context.preview,
   });
   if (fileChangeDisplay) return fileChangeDisplay;
 
@@ -107,7 +106,6 @@ function presentWriteTool(context: ToolDisplayContext): ToolDisplayResult {
     status: context.status,
     toolName: context.toolName,
     details: context.details,
-    preview: context.preview,
   });
   if (fileChangeDisplay) return fileChangeDisplay;
 

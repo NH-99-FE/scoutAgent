@@ -70,7 +70,7 @@ export interface GenericToolDisplayResult extends ToolDisplayResult {
 export interface FileEditToolDisplayResult extends ToolDisplayResult {
   kind: 'file_edit';
   path: string;
-  detail: DiffToolDisplayDetail;
+  detail?: DiffToolDisplayDetail;
   additions: number;
   deletions: number;
 }
