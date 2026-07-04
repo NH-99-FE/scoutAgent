@@ -238,6 +238,7 @@ async function createReviewPanelFile(
     collapseContext: true,
     contextLines: REVIEW_CONTEXT_LINES,
     filePath: file.absolutePath,
+    includeTokens: true,
     unavailableReason: file.unavailableReason,
   });
   const hydrated = hydrateFoldRowsFromContent(diff.rows, file.modifiedContent, file.absolutePath);

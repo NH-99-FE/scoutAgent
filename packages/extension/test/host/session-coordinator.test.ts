@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ScoutChangesReviewSummary, ScoutFileChangeDetails } from '@scout-agent/shared';
 import { ExtensionSessionCoordinator } from '../../src/host/session-coordinator.ts';
 import { ConfigManager } from '../../src/config-manager.ts';
 import type { AgentSession } from '../../src/core/agent-session.ts';
@@ -620,6 +621,58 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       expect.objectContaining({ turnId: 'turn-1' }),
     );
     expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('turn-1');
+  });
+
+  it('reuses file change diff previews across coordinator enricher instances', () => {
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
+    });
+    const getFileReviewTurn = vi.fn((turnId: string) =>
+      turnId === 'turn-1' ? makeReviewSnapshot() : undefined,
+    );
+    const agentSession = {
+      sessionId: 'session-1',
+      getFileReviewTurn,
+      getSessionEntries: () => [],
+      getSessionBranch: () => [],
+    } as unknown as AgentSession;
+    (coordinator as unknown as { agentSession: AgentSession }).agentSession = agentSession;
+    const details: ScoutFileChangeDetails = {
+      kind: 'file_change',
+      path: '/workspace/src/app.ts',
+      displayPath: 'src/app.ts',
+      additions: 1,
+      deletions: 1,
+      review: { turnId: 'turn-1', recordId: 'review-1' },
+    };
+    const privateCoordinator = coordinator as unknown as {
+      createFileChangeDetailsEnricher: () => ((details: unknown) => unknown) | undefined;
+      setActiveChangesReview: (changesReview: ScoutChangesReviewSummary | undefined) => void;
+    };
+
+    const firstEnrich = privateCoordinator.createFileChangeDetailsEnricher();
+    const secondEnrich = privateCoordinator.createFileChangeDetailsEnricher();
+    const first = firstEnrich?.(details) as ScoutFileChangeDetails;
+    const second = secondEnrich?.({ ...details, additions: 2 }) as ScoutFileChangeDetails;
+
+    expect(first.diffPreview?.rows.length).toBeGreaterThan(0);
+    expect(second.diffPreview).toEqual(first.diffPreview);
+    expect(getFileReviewTurn).toHaveBeenCalledTimes(1);
+
+    privateCoordinator.setActiveChangesReview({
+      turnId: 'turn-1',
+      fileCount: 1,
+      additions: 1,
+      deletions: 1,
+      files: [{ path: '/workspace/src/app.ts', additions: 1, deletions: 1 }],
+    });
+    const nextProjectionEnrich = privateCoordinator.createFileChangeDetailsEnricher();
+    nextProjectionEnrich?.(details);
+
+    expect(getFileReviewTurn).toHaveBeenCalledTimes(2);
   });
 
   it('flushes pending review artifacts before exporting the active session', async () => {

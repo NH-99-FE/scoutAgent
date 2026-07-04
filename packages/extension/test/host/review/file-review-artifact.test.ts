@@ -98,6 +98,32 @@ describe('file review artifact', () => {
     expect(JSON.stringify(artifact)).not.toContain('line-1');
   });
 
+  it('persists syntax tokens for review artifact rows', () => {
+    const store = new FileReviewStore();
+    store.addRecord('turn-1', 'tool-1', {
+      kind: 'file_review_payload',
+      operation: 'edit',
+      path: 'src/app.ts',
+      absolutePath: '/workspace/src/app.ts',
+      originalContent: 'const value = 1;\n',
+      modifiedContent: 'const value = 2;\n',
+    });
+    const review = store.getTurn('turn-1');
+    if (!review) throw new Error('Expected review turn');
+
+    const artifact = createFileReviewArtifact('session-1', review);
+
+    expect(artifact.files[0]?.rows.find((row) => row.type === 'added')?.tokens).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: '2',
+          diff: 'added',
+          syntaxScopes: expect.arrayContaining(['hljs-number']),
+        }),
+      ]),
+    );
+  });
+
   it('rejects artifacts with malformed nested files, records, or rows', () => {
     const artifact = makeArtifact();
 

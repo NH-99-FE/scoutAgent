@@ -109,6 +109,14 @@ export interface ReviewDiffResult {
   unavailableReason?: Exclude<FileReviewUnavailableReason, 'Changes are no longer available'>;
 }
 
+export interface ReviewDiffOptions {
+  collapseContext?: boolean;
+  contextLines?: number;
+  filePath?: string;
+  includeTokens?: boolean;
+  unavailableReason?: Exclude<FileReviewUnavailableReason, 'Changes are no longer available'>;
+}
+
 export interface FileReviewContentFingerprint {
   size: number;
   sha256: string;
@@ -379,12 +387,7 @@ export function isSameReviewContentFingerprint(
 export function computeReviewDiff(
   originalContent: string | null,
   modifiedContent: string | null,
-  options: {
-    collapseContext?: boolean;
-    contextLines?: number;
-    filePath?: string;
-    unavailableReason?: Exclude<FileReviewUnavailableReason, 'Changes are no longer available'>;
-  } = {},
+  options: ReviewDiffOptions = {},
 ): ReviewDiffResult {
   if (options.unavailableReason) {
     return {
@@ -433,7 +436,7 @@ export function computeReviewDiff(
   const rows = buildDiffRows(
     normalizedOriginalContent ?? '',
     normalizedModifiedContent ?? '',
-    options.filePath,
+    options.includeTokens === false ? undefined : options.filePath,
   );
   const additions = rows.filter((row) => row.type === 'added').length;
   const deletions = rows.filter((row) => row.type === 'removed').length;
@@ -504,7 +507,7 @@ function buildDiffRows(
           originalLines[oldLineIndex] ?? line,
           tokenLines?.original[oldLineIndex],
         );
-        if (index < addedLines.length) {
+        if (row.tokens && index < addedLines.length) {
           const newLineIndex = newStartLine - 1 + index;
           const ranges = createReviewIntralineRanges(
             row.text ?? '',
@@ -523,7 +526,7 @@ function buildDiffRows(
           modifiedLines[newLineIndex] ?? line,
           tokenLines?.modified[newLineIndex],
         );
-        if (index < removedLines.length) {
+        if (row.tokens && index < removedLines.length) {
           const oldLineIndex = oldStartLine - 1 + index;
           const ranges = createReviewIntralineRanges(
             originalLines[oldLineIndex] ?? removedLines[index] ?? '',

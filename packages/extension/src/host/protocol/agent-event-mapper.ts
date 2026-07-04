@@ -37,6 +37,7 @@ export interface AgentEventMappingOptions {
   messageId?: string;
   formatDisplayPath?: (path: string) => string;
   getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
+  enrichToolResultDetails?: (details: unknown) => unknown;
 }
 
 // ---------- 内容块转换 ----------
@@ -141,7 +142,10 @@ export function convertMessage(
       toolCallId: msg.toolCallId,
       toolName: msg.toolName,
       content: convertToolResultContent(msg.content),
-      details: msg.details,
+      details:
+        msg.details === undefined
+          ? undefined
+          : (options.enrichToolResultDetails?.(msg.details) ?? msg.details),
       isError: msg.isError,
       timestamp: msg.timestamp,
     };
@@ -188,7 +192,11 @@ export function convertMessage(
 
 // ---------- AgentToolResult → ScoutToolExecutionResult ----------
 
-function convertToolExecutionResult(result: unknown): ScoutToolExecutionResult {
+function convertToolExecutionResult(
+  result: unknown,
+  options: AgentEventMappingOptions,
+  behavior: { enrichDetails: boolean },
+): ScoutToolExecutionResult {
   if (!result || typeof result !== 'object') return { content: [] };
   const r = result as { content?: unknown[] };
   if (!Array.isArray(r.content)) return { content: [] };
@@ -207,8 +215,23 @@ function convertToolExecutionResult(result: unknown): ScoutToolExecutionResult {
     }
     return [];
   });
-  const details = (result as { details?: unknown }).details;
+  const rawDetails = (result as { details?: unknown }).details;
+  const details =
+    rawDetails === undefined
+      ? undefined
+      : behavior.enrichDetails
+        ? (options.enrichToolResultDetails?.(rawDetails) ?? rawDetails)
+        : rawDetails;
   return details === undefined ? { content } : { content, details };
+}
+
+function withoutToolResultDetailsEnrichment(
+  options: AgentEventMappingOptions,
+): AgentEventMappingOptions {
+  if (!options.enrichToolResultDetails) return options;
+  const rest: AgentEventMappingOptions = { ...options };
+  delete rest.enrichToolResultDetails;
+  return rest;
 }
 
 // ---------- 主映射函数 ----------
@@ -238,7 +261,7 @@ export function mapAgentEventToScout(
       return { type: 'turn_end' };
 
     case 'message_start': {
-      const message = convertMessage(event.message, options);
+      const message = convertMessage(event.message, withoutToolResultDetailsEnrichment(options));
       if (!message) return null;
       if (!options.messageId) {
         throw new Error('Missing Scout protocol messageId for message_start event');
@@ -247,7 +270,7 @@ export function mapAgentEventToScout(
     }
 
     case 'message_update': {
-      const message = convertMessage(event.message, options);
+      const message = convertMessage(event.message, withoutToolResultDetailsEnrichment(options));
       if (!message) return null;
       if (!options.messageId) {
         throw new Error('Missing Scout protocol messageId for message_update event');
@@ -256,7 +279,9 @@ export function mapAgentEventToScout(
     }
 
     case 'message_end': {
-      const message = convertMessage(event.message, options);
+      const messageOptions =
+        event.message.role === 'toolResult' ? options : withoutToolResultDetailsEnrichment(options);
+      const message = convertMessage(event.message, messageOptions);
       if (!message) return null;
       if (!options.messageId) {
         throw new Error('Missing Scout protocol messageId for message_end event');
@@ -282,7 +307,9 @@ export function mapAgentEventToScout(
         type: 'tool_execution_update',
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        partialResult: convertToolExecutionResult(event.partialResult),
+        partialResult: convertToolExecutionResult(event.partialResult, options, {
+          enrichDetails: false,
+        }),
       };
 
     case 'tool_execution_end':
@@ -290,7 +317,7 @@ export function mapAgentEventToScout(
         type: 'tool_execution_end',
         toolCallId: event.toolCallId,
         toolName: event.toolName,
-        result: convertToolExecutionResult(event.result),
+        result: convertToolExecutionResult(event.result, options, { enrichDetails: true }),
         isError: event.isError,
       };
   }

@@ -377,6 +377,20 @@ describe('computeReviewDiff', () => {
     );
   });
 
+  it('skips syntax tokens when includeTokens is disabled', () => {
+    const diff = computeReviewDiff('const value = 1;\n', 'const value = 2;\n', {
+      filePath: 'src/app.ts',
+      includeTokens: false,
+    });
+    const removed = diff.rows.find((row) => row.type === 'removed');
+    const added = diff.rows.find((row) => row.type === 'added');
+
+    expect(removed).toMatchObject({ type: 'removed', text: 'const value = 1;' });
+    expect(added).toMatchObject({ type: 'added', text: 'const value = 2;' });
+    expect(removed?.tokens).toBeUndefined();
+    expect(added?.tokens).toBeUndefined();
+  });
+
   it('normalizes CRLF line endings before building display rows and tokens', () => {
     const diff = computeReviewDiff('const value = 1;\r\nkeep\r\n', 'const value = 2;\r\nkeep\r\n', {
       filePath: 'src/app.ts',

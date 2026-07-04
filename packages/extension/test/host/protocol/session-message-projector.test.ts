@@ -251,4 +251,44 @@ describe('session message projector', () => {
       ],
     });
   });
+
+  it('enriches tool result details while projecting session messages', () => {
+    const session = SessionManager.inMemory();
+    session.appendMessage({
+      role: 'toolResult',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      content: [],
+      details: {
+        kind: 'file_change',
+        path: '/workspace/src/app.ts',
+        additions: 1,
+        deletions: 1,
+        review: { turnId: 'turn-1', recordId: 'record-1' },
+      },
+      isError: false,
+      timestamp: 1,
+    });
+
+    const messages = projectSessionBranchToScoutMessages(session.getBranch(), {
+      enrichToolResultDetails: (details) => ({
+        ...(details as Record<string, unknown>),
+        diffPreview: {
+          rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
+        },
+      }),
+    });
+
+    expect(messages).toMatchObject([
+      {
+        role: 'toolResult',
+        details: {
+          kind: 'file_change',
+          diffPreview: {
+            rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
+          },
+        },
+      },
+    ]);
+  });
 });

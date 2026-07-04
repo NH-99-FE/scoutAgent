@@ -92,6 +92,7 @@ export type {
   ScoutExtensionsResult,
   ScoutExtensionsSettings,
   ScoutExtensionScope,
+  ScoutFileChangeDiffPreview,
   ScoutFileChangeDetails,
   ScoutFileChangeReviewRef,
   ScoutFileEditPreview,

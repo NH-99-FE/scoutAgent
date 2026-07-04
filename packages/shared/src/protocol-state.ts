@@ -5,7 +5,7 @@
 import type { ScoutModelInfo, ThinkingLevel } from './models.ts';
 import type { ScoutCommandInfo, ScoutDiagnostic, ToolInfo } from './protocol-core.ts';
 import type { ScoutExtensionUIRequest } from './protocol-extension-ui.ts';
-import type { ScoutChangesReviewSummary } from './protocol-review.ts';
+import type { ScoutChangesReviewRow, ScoutChangesReviewSummary } from './protocol-review.ts';
 
 // ---------- 消息内容块 ----------
 
@@ -219,6 +219,12 @@ export interface ScoutFileChangeReviewRef {
   recordId: string;
 }
 
+export interface ScoutFileChangeDiffPreview {
+  rows: ScoutChangesReviewRow[];
+  truncated?: boolean;
+  unavailableReason?: string;
+}
+
 export interface ScoutFileChangeDetails {
   kind: 'file_change';
   /** 可定位的业务路径，通常为 host/core 规范化后的绝对路径；不要当作 UI 展示规则来源。 */
@@ -229,6 +235,8 @@ export interface ScoutFileChangeDetails {
   deletions: number;
   firstChangedLine?: number;
   review: ScoutFileChangeReviewRef;
+  /** Host 在协议边界附加的轻量最终 diff 预览；不进入 provider runtime context。 */
+  diffPreview?: ScoutFileChangeDiffPreview;
 }
 
 export interface ScoutFileEditPreview {

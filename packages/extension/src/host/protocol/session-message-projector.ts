@@ -25,6 +25,7 @@ export interface SessionMessageProjectionOptions {
   getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
   reviewProjectionKey?: string;
   resolveChangesReviewSummary?: ResolveChangesReviewSummary;
+  enrichToolResultDetails?: (details: unknown) => unknown;
 }
 
 export function projectSessionBranchToScoutMessages(

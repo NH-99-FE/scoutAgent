@@ -104,6 +104,16 @@ describe('ScoutChangesReviewPanelManager', () => {
       displayPath: 'src/app.ts',
       absolutePath: '/workspace/src/app.ts',
     });
+    const rows = vi.mocked(getScoutWebviewHtml).mock.calls[0]?.[5]?.changesReview?.files[0]?.rows;
+    expect(rows?.find((row) => row.type === 'added')?.tokens).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          text: '2',
+          diff: 'added',
+          syntaxScopes: expect.arrayContaining(['hljs-number']),
+        }),
+      ]),
+    );
     expect(panel.webview.postMessage).toHaveBeenCalledWith({
       type: 'scroll_to_record',
       recordId: 'review-2',
@@ -353,8 +363,8 @@ function makeReviewSnapshot(): FileReviewTurnSnapshot {
       {
         absolutePath: '/workspace/src/app.ts',
         path: 'src/app.ts',
-        originalContent: 'old\n',
-        modifiedContent: 'new\n',
+        originalContent: 'const value = 1;\n',
+        modifiedContent: 'const value = 2;\n',
         recordIds: ['review-1', 'review-2'],
         latestRecordId: 'review-2',
         latestSequence: 2,

@@ -67,6 +67,7 @@ export type {
   ScoutContent,
   ScoutContextUsage,
   ScoutCustomMessage,
+  ScoutFileChangeDiffPreview,
   ScoutFileChangeDetails,
   ScoutFileChangeReviewRef,
   ScoutFileEditPreview,

@@ -106,6 +106,7 @@ export function createFileReviewArtifact(
         collapseContext: true,
         contextLines: REVIEW_CONTEXT_LINES,
         filePath: file.absolutePath,
+        includeTokens: true,
         unavailableReason: file.unavailableReason,
       });
       return {
