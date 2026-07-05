@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 import type { ScoutAgentEvent } from '@scout-agent/shared';
 import {
   ToolCallPreviewProjector,
@@ -52,6 +53,10 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve();
 }
 
+function resolvedWorkspacePath(path: string): string {
+  return resolve('/workspace', path);
+}
+
 describe('ToolCallPreviewProjector', () => {
   it('forwards core preview updates as shared protocol events', async () => {
     const publishEvent = vi.fn();
@@ -76,7 +81,7 @@ describe('ToolCallPreviewProjector', () => {
       toolName: 'edit',
       preview: {
         kind: 'file_edit',
-        path: '/workspace/src/app.ts',
+        path: resolvedWorkspacePath('src/app.ts'),
         displayPath: 'src/app.ts',
         diff: '-1 old\n+1 new',
         additions: 1,

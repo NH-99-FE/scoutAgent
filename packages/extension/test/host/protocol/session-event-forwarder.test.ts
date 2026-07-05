@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 import type { ScoutAgentEvent } from '@scout-agent/shared';
 import type { ScoutSessionEvent } from '../../../src/host/session-coordinator.ts';
 import { SessionEventForwarder } from '../../../src/host/protocol/session-event-forwarder.ts';
@@ -113,6 +114,10 @@ function writeToolCallMessageUpdate(): ScoutSessionEvent {
     type: 'agent_event',
     event: writeToolCallEvent(),
   } as unknown as ScoutSessionEvent;
+}
+
+function resolvedWorkspacePath(path: string): string {
+  return resolve('/workspace', path);
 }
 
 describe('SessionEventForwarder', () => {
@@ -297,7 +302,7 @@ describe('SessionEventForwarder', () => {
       toolName: 'write',
       preview: {
         kind: 'file_edit',
-        path: 'src/generated.ts',
+        path: resolvedWorkspacePath('src/generated.ts'),
         displayPath: 'src/generated.ts',
         additions: 2,
         deletions: 0,

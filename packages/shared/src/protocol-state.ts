@@ -241,7 +241,7 @@ export interface ScoutFileChangeDetails {
 
 export interface ScoutFileEditPreview {
   kind: 'file_edit';
-  /** 预览关联的工具 path 参数；用于关联业务对象，不承载展示语义。 */
+  /** 预览关联的业务 path，用于标识文件；展示优先使用 displayPath。 */
   path: string;
   /** UI-only 展示路径，由 core preview 根据当前 cwd 格式化。 */
   displayPath?: string;

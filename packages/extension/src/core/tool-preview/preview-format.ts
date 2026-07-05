@@ -64,7 +64,12 @@ export function createWriteArgsKey(input: ParsedWriteInput, stats: WriteContentS
 
 export function formatPreviewPath(path: string, cwd: string): string {
   if (!cwd) return path;
-  return formatPathRelativeToCwd(resolveToCwd(path, cwd), cwd);
+  return formatPathRelativeToCwd(resolvePreviewPath(path, cwd), cwd);
+}
+
+export function resolvePreviewPath(path: string, cwd: string): string {
+  if (!cwd) return path;
+  return resolveToCwd(path, cwd);
 }
 
 export function createFileEditPreview(

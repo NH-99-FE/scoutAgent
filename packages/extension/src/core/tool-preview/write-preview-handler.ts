@@ -12,6 +12,7 @@ import {
   createFileEditPreview,
   createWriteArgsKey,
   formatPreviewPath,
+  resolvePreviewPath,
 } from './preview-format.ts';
 import type {
   CaptureWritePreviewBase,
@@ -68,13 +69,14 @@ class WritePreviewHandler implements ToolPreviewHandler {
     const requestArgsKey = createWriteArgsKey(parsed, contentStats);
     controller.trackLatestRequest(requestArgsKey);
 
+    const previewPath = resolvePreviewPath(parsed.path, previewContext.cwd);
     const displayPath = formatPreviewPath(parsed.path, previewContext.cwd);
 
     if (!this.computeWritePreview) {
       void this.ensureWriteBaseSnapshot(controller, parsed.path);
     }
     publishWriteProgressPreview(controller, {
-      path: parsed.path,
+      path: previewPath,
       displayPath,
       additions: contentStats.lines,
     });
@@ -86,9 +88,9 @@ class WritePreviewHandler implements ToolPreviewHandler {
     controller.runFinalRequest({
       request,
       compute: () => this.computeWritePreviewResult(controller, parsed),
-      createPreview: (result) => createFileEditPreview(parsed.path, displayPath, result),
+      createPreview: (result) => createFileEditPreview(previewPath, displayPath, result),
       createErrorPreview: (message) =>
-        createFileEditErrorPreview(parsed.path, displayPath, message),
+        createFileEditErrorPreview(previewPath, displayPath, message),
       shouldPublish: () => controller.isLatestRequest(request),
       onErrorPublished: (message) => this.logError?.(`[scout] Write preview failed: ${message}`),
       onFinally: () => controller.releaseResource(createWriteBaseResourceKey(parsed.path), request),

@@ -10,6 +10,7 @@ import {
   createFileEditErrorPreview,
   createFileEditPreview,
   formatPreviewPath,
+  resolvePreviewPath,
 } from './preview-format.ts';
 import type { ComputeEditPreview, ToolPreviewHandler, ToolPreviewHandlerInput } from './types.ts';
 
@@ -44,14 +45,15 @@ class EditPreviewHandler implements ToolPreviewHandler {
     const request = controller.startRequest(createEditArgsKey(parsed));
     if (!request) return;
 
+    const previewPath = resolvePreviewPath(parsed.path, previewContext.cwd);
     const displayPath = formatPreviewPath(parsed.path, previewContext.cwd);
 
     controller.runFinalRequest({
       request,
       compute: () => this.computeEditPreview(parsed.path, parsed.edits, previewContext.cwd),
-      createPreview: (result) => createFileEditPreview(parsed.path, displayPath, result),
+      createPreview: (result) => createFileEditPreview(previewPath, displayPath, result),
       createErrorPreview: (message) =>
-        createFileEditErrorPreview(parsed.path, displayPath, message),
+        createFileEditErrorPreview(previewPath, displayPath, message),
       onErrorPublished: (message) => this.logError?.(`[scout] Edit preview failed: ${message}`),
     });
   }

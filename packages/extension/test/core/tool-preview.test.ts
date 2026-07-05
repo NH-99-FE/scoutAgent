@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { resolve } from 'node:path';
 import {
   ToolPreviewService,
   type CaptureWritePreviewBase,
@@ -78,6 +79,10 @@ function makeBuiltinWriteContext(overrides: Partial<ToolPreviewContext> = {}): T
   };
 }
 
+function resolvedWorkspacePath(path: string): string {
+  return resolve('/workspace', path);
+}
+
 describe('ToolPreviewService', () => {
   it('publishes a file edit preview for complete edit tool arguments', async () => {
     const publishUpdate = vi.fn();
@@ -112,7 +117,7 @@ describe('ToolPreviewService', () => {
       phase: 'final',
       preview: {
         kind: 'file_edit',
-        path: '/workspace/src/app.ts',
+        path: resolvedWorkspacePath('src/app.ts'),
         displayPath: 'src/app.ts',
         diff: ' 1 const value = 1;\n-2 old\n+2 new',
         additions: 1,
@@ -151,6 +156,15 @@ describe('ToolPreviewService', () => {
         { oldText: 'mid', newText: 'new' },
       ],
       '/workspace',
+    );
+    expect(publishUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'final',
+        preview: expect.objectContaining({
+          path: resolvedWorkspacePath('src/app.ts'),
+          displayPath: 'src/app.ts',
+        }),
+      }),
     );
   });
 
@@ -286,14 +300,24 @@ describe('ToolPreviewService', () => {
       1,
       expect.objectContaining({
         phase: 'progress',
-        preview: expect.objectContaining({ additions: 1, deletions: 0 }),
+        preview: expect.objectContaining({
+          path: resolvedWorkspacePath('src/generated.ts'),
+          displayPath: 'src/generated.ts',
+          additions: 1,
+          deletions: 0,
+        }),
       }),
     );
     expect(publishUpdate).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         phase: 'progress',
-        preview: expect.objectContaining({ additions: 2, deletions: 0 }),
+        preview: expect.objectContaining({
+          path: resolvedWorkspacePath('src/generated.ts'),
+          displayPath: 'src/generated.ts',
+          additions: 2,
+          deletions: 0,
+        }),
       }),
     );
   });
@@ -362,7 +386,7 @@ describe('ToolPreviewService', () => {
         phase: 'final',
         preview: expect.objectContaining({
           kind: 'file_edit',
-          path: 'generated.ts',
+          path: resolvedWorkspacePath('generated.ts'),
           displayPath: 'generated.ts',
           diff: '-1 old\n+1 new',
           additions: 1,
