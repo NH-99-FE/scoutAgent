@@ -31,11 +31,13 @@ const SPLIT_LINE_HEIGHT_CLASS =
 
 export function ReviewDiff({
   file,
+  fileKey,
   foldRevealCounts,
   onExpandFold,
   viewMode,
 }: {
   file: ScoutChangesReviewFile;
+  fileKey: string;
   foldRevealCounts: Record<string, number>;
   onExpandFold: (id: string, total: number) => void;
   viewMode: ScoutChangesReviewViewMode;
@@ -67,7 +69,7 @@ export function ReviewDiff({
           <ReviewRows
             foldRevealCounts={foldRevealCounts}
             onExpandFold={onExpandFold}
-            rowScopeId={file.id}
+            rowScopeId={fileKey}
             rows={file.rows}
             viewMode={viewMode}
           />

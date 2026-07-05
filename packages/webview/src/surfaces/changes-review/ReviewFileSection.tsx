@@ -10,6 +10,7 @@ import { ReviewPath } from '@/surfaces/changes-review/ReviewPath';
 export function ReviewFileSection({
   expanded,
   file,
+  fileKey,
   foldRevealCounts,
   onExpandFold,
   onOpenFile,
@@ -18,10 +19,11 @@ export function ReviewFileSection({
 }: {
   expanded: boolean;
   file: ScoutChangesReviewFile;
+  fileKey: string;
   foldRevealCounts: Record<string, number>;
   onExpandFold: (id: string, total: number) => void;
   onOpenFile: (path: string) => void;
-  onToggleFile: (id: string) => void;
+  onToggleFile: (key: string) => void;
   viewMode: ScoutChangesReviewViewMode;
 }) {
   const ChevronIcon = expanded ? ChevronDown : ChevronRight;
@@ -37,7 +39,7 @@ export function ReviewFileSection({
         <div className="group/file-row hover:bg-muted focus-within:bg-muted dark:hover:bg-muted/50 dark:focus-within:bg-muted/50 grid min-h-9 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-md px-2 py-1 transition-colors sm:px-[22px]">
           <button
             className="flex min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden border-0 bg-transparent p-0 text-left font-[inherit] text-inherit focus-visible:outline-none"
-            onClick={() => onToggleFile(file.id)}
+            onClick={() => onToggleFile(fileKey)}
             onDoubleClick={() => onOpenFile(file.absolutePath)}
             title={displayPath}
             type="button"
@@ -56,7 +58,7 @@ export function ReviewFileSection({
           <button
             aria-label="Toggle file diff"
             className="text-muted-foreground hover:bg-muted hover:text-foreground grid size-[22px] cursor-pointer place-items-center rounded-md border-0 bg-transparent text-center font-[inherit]"
-            onClick={() => onToggleFile(file.id)}
+            onClick={() => onToggleFile(fileKey)}
             type="button"
           >
             <ChevronIcon className="size-4" />
@@ -66,6 +68,7 @@ export function ReviewFileSection({
       {expanded ? (
         <ReviewDiff
           file={file}
+          fileKey={fileKey}
           foldRevealCounts={foldRevealCounts}
           onExpandFold={onExpandFold}
           viewMode={viewMode}

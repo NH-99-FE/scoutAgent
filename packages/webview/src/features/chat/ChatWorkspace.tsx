@@ -43,6 +43,7 @@ import {
 } from '@/store/session-store';
 import { useExtensionUIRequests, useUiActions } from '@/store/ui-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
+import { createComposerChangesReviewSummary } from '@/features/composer/composer-changes-review-summary';
 import { ConversationView } from '@/features/conversation/ConversationView';
 import { applyForkOriginNotice } from '@/features/conversation/conversation-notices';
 import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
@@ -98,6 +99,10 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         items: conversationItems,
       }),
     [conversationItems, forkPointEntryId, parentSessionPath],
+  );
+  const composerChangesReview = useMemo(
+    () => createComposerChangesReviewSummary(activeChangesReview, toolPreviewsById),
+    [activeChangesReview, toolPreviewsById],
   );
   const extensionUIRequestsKey = useMemo(
     () => extensionUIRequests.map((request) => request.id).join(':'),
@@ -191,7 +196,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
 
       <footer className="bg-background max-w-full min-w-0 shrink-0 px-3 pt-1 pb-3">
         <ChatComposer
-          changesReview={activeChangesReview}
+          changesReview={composerChangesReview}
           placeholder="要求后续变更"
           onMessageSent={requestScrollToBottom}
         />

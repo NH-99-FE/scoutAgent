@@ -1920,6 +1920,7 @@ describe('ChatApp', () => {
       details: {
         kind: 'file_change',
         path,
+        displayPath: path.replace(/^\/workspace\//, ''),
         additions,
         deletions,
         review: {
@@ -1941,14 +1942,24 @@ describe('ChatApp', () => {
             additions: 27,
             deletions: 23,
             files: [
-              { path: 'src/app.ts', additions: 19, deletions: 19 },
-              { path: 'src/other.ts', additions: 8, deletions: 4 },
+              {
+                path: '/workspace/src/app.ts',
+                displayPath: 'src/app.ts',
+                additions: 19,
+                deletions: 19,
+              },
+              {
+                path: '/workspace/src/other.ts',
+                displayPath: 'src/other.ts',
+                additions: 8,
+                deletions: 4,
+              },
             ],
           },
         ],
       },
-      makeToolResult('tool-1', 'src/app.ts', 19, 19, 'review-1', 3),
-      makeToolResult('tool-2', 'src/other.ts', 8, 4, 'review-2', 4),
+      makeToolResult('tool-1', '/workspace/src/app.ts', 19, 19, 'review-1', 3),
+      makeToolResult('tool-2', '/workspace/src/other.ts', 8, 4, 'review-2', 4),
     ];
     const streamingState = makeState(streamingMessages, {
       isStreaming: true,
@@ -1965,6 +1976,34 @@ describe('ChatApp', () => {
 
     act(() => {
       routeExtensionMessage({
+        type: 'tool_call_preview_update',
+        sessionId: 'session-1',
+        toolCallId: 'tool-1',
+        toolName: 'edit',
+        preview: {
+          kind: 'file_edit',
+          path: '/workspace/src/app.ts',
+          displayPath: 'src/app.ts',
+          diff: ' 1 const value = 1;\n-2 old\n+2 new',
+          additions: 19,
+          deletions: 19,
+        },
+      });
+    });
+
+    let summary = container.querySelector(
+      '[data-composer-changes-review-summary="true"]',
+    ) as HTMLElement;
+    expect(summary).not.toBeNull();
+    expect(within(summary).getByText('1 个文件已更改')).toBeInTheDocument();
+    expect(within(summary).getByText('+19')).toBeInTheDocument();
+    expect(within(summary).getByText('-19')).toBeInTheDocument();
+    expect(within(summary).getByRole('button', { name: '审查' })).toBeInTheDocument();
+    expect(screen.getByText('正在编辑 src/app.ts')).toBeInTheDocument();
+    expect(screen.queryByText('正在编辑 /workspace/src/app.ts')).not.toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
         type: 'changes_review_update',
         sessionId: 'session-1',
         changesReview: {
@@ -1972,12 +2011,19 @@ describe('ChatApp', () => {
           fileCount: 1,
           additions: 19,
           deletions: 19,
-          files: [{ path: 'src/app.ts', additions: 19, deletions: 19 }],
+          files: [
+            {
+              path: '/workspace/src/app.ts',
+              displayPath: 'src/app.ts',
+              additions: 19,
+              deletions: 19,
+            },
+          ],
         },
       });
     });
 
-    let summary = container.querySelector(
+    summary = container.querySelector(
       '[data-composer-changes-review-summary="true"]',
     ) as HTMLElement;
     const queue = container.querySelector('[data-composer-follow-up-queue="true"]') as HTMLElement;
@@ -1991,24 +2037,22 @@ describe('ChatApp', () => {
     expect(screen.queryByRole('button', { name: 'Review Changes' })).not.toBeInTheDocument();
 
     fireEvent.click(within(summary).getByRole('button', { name: '审查' }));
-    expectPostedPayload('open_changes_review', {
-      type: 'open_changes_review',
-      turnId: 'turn-1',
+    expectPostedPayload('open_current_changes_review', {
+      type: 'open_current_changes_review',
     });
 
     act(() => {
       routeExtensionMessage({
-        type: 'changes_review_update',
+        type: 'tool_call_preview_update',
         sessionId: 'session-1',
-        changesReview: {
-          turnId: 'turn-1',
-          fileCount: 2,
-          additions: 27,
-          deletions: 23,
-          files: [
-            { path: 'src/app.ts', additions: 19, deletions: 19 },
-            { path: 'src/other.ts', additions: 8, deletions: 4 },
-          ],
+        toolCallId: 'tool-2',
+        toolName: 'edit',
+        preview: {
+          kind: 'file_edit',
+          path: '/workspace/src/other.ts',
+          displayPath: 'src/other.ts',
+          additions: 8,
+          deletions: 4,
         },
       });
     });
@@ -2021,21 +2065,36 @@ describe('ChatApp', () => {
 
     act(() => {
       routeExtensionMessage({
-        type: 'tool_call_preview_update',
+        type: 'changes_review_update',
         sessionId: 'session-1',
-        toolCallId: 'tool-1',
-        toolName: 'edit',
-        preview: {
-          kind: 'file_edit',
-          path: 'src/app.ts',
-          diff: ' 1 const value = 1;\n-2 old\n+2 new',
-          additions: 19,
-          deletions: 19,
+        changesReview: {
+          turnId: 'turn-1',
+          fileCount: 2,
+          additions: 27,
+          deletions: 23,
+          files: [
+            {
+              path: '/workspace/src/app.ts',
+              displayPath: 'src/app.ts',
+              additions: 19,
+              deletions: 19,
+            },
+            {
+              path: '/workspace/src/other.ts',
+              displayPath: 'src/other.ts',
+              additions: 8,
+              deletions: 4,
+            },
+          ],
         },
       });
     });
-    expect(screen.getByText('正在编辑 src/app.ts')).toBeInTheDocument();
-    expect(screen.queryByText('正在编辑 /workspace/src/app.ts')).not.toBeInTheDocument();
+    summary = container.querySelector(
+      '[data-composer-changes-review-summary="true"]',
+    ) as HTMLElement;
+    expect(within(summary).getByText('2 个文件已更改')).toBeInTheDocument();
+    expect(within(summary).getByText('+27')).toBeInTheDocument();
+    expect(within(summary).getByText('-23')).toBeInTheDocument();
 
     act(() => {
       routeExtensionMessage({

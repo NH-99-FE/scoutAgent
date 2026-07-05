@@ -334,6 +334,8 @@ export const protocolClient = {
     if (recordId) payload.recordId = recordId;
     return sendRouted(payload, projectProtocolResponsePayload);
   },
+  openCurrentChangesReview: () =>
+    sendRouted({ type: 'open_current_changes_review' }, projectProtocolResponsePayload),
   openTask: (task: ScoutTaskItem) => {
     openSessionByPath(
       {

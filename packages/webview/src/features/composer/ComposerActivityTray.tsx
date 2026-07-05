@@ -3,14 +3,12 @@
 // ============================================================
 
 import { CornerDownRight, FileDiff, ListIndentIncrease, Trash2 } from 'lucide-react';
-import type { ScoutChangesReviewSummary } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
 import { Button } from '@/components/ui/button';
 import { useQueueState } from '@/store/conversation-store';
 import { cn } from '@/lib/utils';
-
-export type ComposerChangesReviewSummary = ScoutChangesReviewSummary;
+import type { ComposerChangesReviewSummary } from './composer-changes-review-summary';
 
 interface ComposerActivityTrayProps {
   changesReview?: ComposerChangesReviewSummary;
@@ -110,7 +108,7 @@ function ComposerChangesReviewRow({ review }: { review: ComposerChangesReviewSum
         size="xs"
         type="button"
         variant="ghost"
-        onClick={() => protocolClient.openChangesReview(review.turnId)}
+        onClick={() => protocolClient.openCurrentChangesReview()}
       >
         审查
       </Button>

@@ -177,6 +177,83 @@ describe('App bootstrap', () => {
     ).toBe(false);
   });
 
+  it('renders the changes review pending state without lifecycle bootstrap', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+
+    render(<App />);
+
+    expect(screen.getByText('正在生成文件变更')).toBeInTheDocument();
+    expect(
+      postMessage.mock.calls.some(([message]) => {
+        const candidate = message as { service?: string; method?: string };
+        return candidate.service === 'lifecycle' && candidate.method === 'ready';
+      }),
+    ).toBe(false);
+  });
+
+  it('hot-updates the changes review surface from host model messages', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+
+    render(<App />);
+    expect(screen.getByText('正在生成文件变更')).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'changes_review_model_update',
+            model: makeChangesReviewModel(),
+          },
+        }),
+      );
+    });
+
+    expect(screen.queryByText('正在生成文件变更')).not.toBeInTheDocument();
+    expect(screen.getByText('1 个文件已更改')).toBeInTheDocument();
+    expect(screen.getByText('export default App;')).toBeInTheDocument();
+  });
+
+  it('preserves collapsed files by stable path when hot update file ids shift', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    window.__SCOUT_CHANGES_REVIEW__ = makeChangesReviewModel();
+    render(<App />);
+
+    fireEvent.click(screen.getByLabelText('Toggle file diff'));
+    expect(screen.queryByText('export default App;')).not.toBeInTheDocument();
+
+    const nextModel = makeChangesReviewModel();
+    const appFile = {
+      ...nextModel.files[0]!,
+      id: 'file-1',
+    };
+    nextModel.files = [
+      {
+        id: 'file-0',
+        path: 'packages/webview/src/other.ts',
+        absolutePath: '/workspace/packages/webview/src/other.ts',
+        external: false,
+        additions: 1,
+        deletions: 0,
+        recordIds: ['review-2'],
+        rows: [{ type: 'added', newLineNumber: 1, text: 'export const other = true;' }],
+      },
+      appFile,
+    ];
+    nextModel.totals = { fileCount: 2, additions: 2, deletions: 0 };
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'changes_review_model_update', model: nextModel },
+        }),
+      );
+    });
+
+    expect(screen.getByText('2 个文件已更改')).toBeInTheDocument();
+    expect(screen.queryByText('export default App;')).not.toBeInTheDocument();
+    expect(screen.getByText('export const other = true;')).toBeInTheDocument();
+  });
+
   it('lets the changes review surface scroll when the host document locks body overflow', () => {
     window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
     window.__SCOUT_CHANGES_REVIEW__ = makeChangesReviewModel();

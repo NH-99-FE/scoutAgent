@@ -28,15 +28,18 @@ import {
 } from '@/store/runtime-overlay-store';
 import { useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
-import { ComposerActivityTray, type ComposerChangesReviewSummary } from './ComposerActivityTray';
+import { ComposerActivityTray } from './ComposerActivityTray';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
 import { SlashCommandMenu } from './SlashCommandMenu';
+import type { ComposerChangesReviewSummary } from './composer-changes-review-summary';
 import { buildSlashCommandItems, type SlashCommandMenuItem } from './slash-command-options';
 import { useForkCandidateMenu } from './use-fork-candidate-menu';
 import { getSlashCommandTrigger } from './use-slash-command-trigger';
+
+export type { ComposerChangesReviewSummary } from './composer-changes-review-summary';
 
 interface BaseChatComposerProps {
   changesReview?: ComposerChangesReviewSummary;

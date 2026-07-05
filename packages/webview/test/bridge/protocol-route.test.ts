@@ -132,6 +132,10 @@ const ROUTE_CASES = [
     { service: 'ui', method: 'open_changes_review' },
   ),
   protocolCase(
+    { type: 'open_current_changes_review' },
+    { service: 'ui', method: 'open_current_changes_review' },
+  ),
+  protocolCase(
     { type: 'fork_session', entryId: 'entry-1', position: 'at' },
     { service: 'tree', method: 'fork_session' },
   ),
