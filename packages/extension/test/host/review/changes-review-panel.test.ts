@@ -38,7 +38,7 @@ function makeWebview() {
       html = value;
     },
     onDidReceiveMessage: vi.fn(() => ({ dispose: vi.fn() })),
-    postMessage: vi.fn(),
+    postMessage: vi.fn(async () => true),
   };
 }
 
@@ -100,6 +100,7 @@ describe('ScoutChangesReviewPanelManager', () => {
     expect(
       vi.mocked(getScoutWebviewHtml).mock.calls[0]?.[5]?.changesReview?.files[0],
     ).toMatchObject({
+      id: 'file-%2Fworkspace%2Fsrc%2Fapp.ts',
       path: '/workspace/src/app.ts',
       displayPath: 'src/app.ts',
       absolutePath: '/workspace/src/app.ts',
@@ -115,8 +116,126 @@ describe('ScoutChangesReviewPanelManager', () => {
       ]),
     );
     expect(panel.webview.postMessage).toHaveBeenCalledWith({
-      type: 'scroll_to_record',
+      type: 'changes_review_scroll_to_record',
       recordId: 'review-2',
+    });
+  });
+
+  it('opens the current review panel in pending state before landed files exist', async () => {
+    const panel = makePanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never);
+    const manager = new ScoutChangesReviewPanelManager(
+      vscode.Uri.file('/extension'),
+      makeGlobalState(),
+      false,
+    );
+
+    await manager.openCurrent({ cwd: '/workspace', sessionId: 'session-1' });
+
+    expect(getScoutWebviewHtml).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(getScoutWebviewHtml).mock.calls[0]?.[5]).toEqual({
+      changesReview: undefined,
+    });
+    expect(panel.webview.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('hot-updates the current review panel when landed files arrive', async () => {
+    const panel = makePanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never);
+    const manager = new ScoutChangesReviewPanelManager(
+      vscode.Uri.file('/extension'),
+      makeGlobalState(),
+      false,
+    );
+    const review = makeReviewSnapshot();
+
+    await manager.openCurrent({ cwd: '/workspace', sessionId: 'session-1' });
+    await manager.updateCurrent({ cwd: '/workspace', review, sessionId: 'session-1' });
+
+    expect(getScoutWebviewHtml).toHaveBeenCalledTimes(1);
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'changes_review_model_update',
+      model: expect.objectContaining({
+        turnId: 'turn-1',
+        totals: { fileCount: 1, additions: 1, deletions: 1 },
+      }),
+    });
+  });
+
+  it('does not rewrite the current review html for subsequent landed file updates', async () => {
+    const panel = makePanel();
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never);
+    const manager = new ScoutChangesReviewPanelManager(
+      vscode.Uri.file('/extension'),
+      makeGlobalState(),
+      false,
+    );
+    const firstReview = makeReviewSnapshot();
+    const nextReview: FileReviewTurnSnapshot = {
+      ...firstReview,
+      records: [
+        ...firstReview.records,
+        {
+          recordId: 'review-3',
+          turnId: 'turn-1',
+          toolCallId: 'tool-3',
+          operation: 'edit',
+          path: 'src/other.ts',
+          absolutePath: '/workspace/src/other.ts',
+          sequence: 3,
+        },
+      ],
+      files: [
+        ...firstReview.files,
+        {
+          absolutePath: '/workspace/src/other.ts',
+          path: 'src/other.ts',
+          originalContent: 'old\n',
+          modifiedContent: 'new\n',
+          recordIds: ['review-3'],
+          latestRecordId: 'review-3',
+          latestSequence: 3,
+          additions: 1,
+          deletions: 1,
+        },
+      ],
+    };
+
+    await manager.openCurrent({ cwd: '/workspace', review: firstReview, sessionId: 'session-1' });
+    await manager.updateCurrent({ cwd: '/workspace', review: nextReview, sessionId: 'session-1' });
+
+    expect(getScoutWebviewHtml).toHaveBeenCalledTimes(1);
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'changes_review_model_update',
+      model: expect.objectContaining({
+        totals: { fileCount: 2, additions: 2, deletions: 2 },
+      }),
+    });
+  });
+
+  it('falls back to rendering html when a current model hot update is not delivered', async () => {
+    const panel = makePanel();
+    panel.webview.postMessage.mockResolvedValueOnce(false);
+    vi.mocked(vscode.window.createWebviewPanel).mockReturnValue(panel as never);
+    const manager = new ScoutChangesReviewPanelManager(
+      vscode.Uri.file('/extension'),
+      makeGlobalState(),
+      false,
+    );
+    const review = makeReviewSnapshot();
+
+    await manager.openCurrent({ cwd: '/workspace', sessionId: 'session-1' });
+    await manager.updateCurrent({ cwd: '/workspace', review, sessionId: 'session-1' });
+    await manager.updateCurrent({ cwd: '/workspace', review, sessionId: 'session-1' });
+
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: 'changes_review_model_update',
+      model: expect.objectContaining({ turnId: 'turn-1' }),
+    });
+    expect(getScoutWebviewHtml).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(getScoutWebviewHtml).mock.calls[1]?.[5]?.changesReview).toMatchObject({
+      turnId: 'turn-1',
+      totals: { fileCount: 1, additions: 1, deletions: 1 },
     });
   });
 

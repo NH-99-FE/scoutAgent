@@ -8,6 +8,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, relative } from 'node:path';
 import type {
   ScoutChangesReviewFile,
+  ScoutChangesReviewHostMessage,
   ScoutChangesReviewModel,
   ScoutChangesReviewRow,
   ScoutChangesReviewViewMode,
@@ -42,7 +43,16 @@ export interface OpenChangesReviewPanelInput {
   review: FileReviewTurnSnapshot | FileReviewArtifact;
 }
 
+export interface OpenCurrentChangesReviewPanelInput {
+  cwd: string;
+  review?: FileReviewTurnSnapshot | FileReviewArtifact;
+  sessionId: string;
+}
+
 type ReviewPanelRow = ScoutChangesReviewRow;
+type ReviewPanelTarget =
+  | { kind: 'turn'; turnId: string }
+  | { kind: 'current'; sessionId: string };
 
 // ---------- 常量 ----------
 
@@ -70,6 +80,7 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
   private panel?: vscode.WebviewPanel;
   private messageSubscription?: vscode.Disposable;
   private signature?: string;
+  private target?: ReviewPanelTarget;
 
   constructor(extensionUri: vscode.Uri, globalState: vscode.Memento, isDev: boolean) {
     this.extensionUri = extensionUri;
@@ -80,23 +91,72 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
   async open(input: OpenChangesReviewPanelInput): Promise<void> {
     const model = await createReviewPanelModel(input, this.getViewMode());
     const signature = createPanelSignature(model);
+    const target: ReviewPanelTarget = { kind: 'turn', turnId: model.turnId };
+    const targetChanged = !isSameReviewPanelTarget(this.target, target);
     const panel = this.ensurePanel();
+    this.target = target;
     panel.title = SCOUT_DIFF_TITLE;
     panel.reveal(this.getTargetColumn());
 
-    if (this.signature !== signature) {
-      panel.webview.html = await getScoutWebviewHtml(
-        this.extensionUri,
-        panel.webview,
-        this.isDev,
-        'changes-review',
-        undefined,
-        { changesReview: model },
-      );
+    if (targetChanged || this.signature !== signature) {
+      await this.render(panel, model);
       this.signature = signature;
     } else if (input.recordId) {
-      void panel.webview.postMessage({ type: 'scroll_to_record', recordId: input.recordId });
+      void this.postPanelMessage(panel, {
+        type: 'changes_review_scroll_to_record',
+        recordId: input.recordId,
+      });
     }
+  }
+
+  async openCurrent(input: OpenCurrentChangesReviewPanelInput): Promise<void> {
+    const model = input.review
+      ? await createReviewPanelModel(
+          {
+            allowCurrentFileContextExpansion: true,
+            cwd: input.cwd,
+            review: input.review,
+          },
+          this.getViewMode(),
+        )
+      : undefined;
+    const signature = model
+      ? createPanelSignature(model)
+      : createCurrentPendingPanelSignature(input.sessionId);
+    const target: ReviewPanelTarget = { kind: 'current', sessionId: input.sessionId };
+    const targetChanged = !isSameReviewPanelTarget(this.target, target);
+    const panel = this.ensurePanel();
+    this.target = target;
+    panel.title = SCOUT_DIFF_TITLE;
+    panel.reveal(this.getTargetColumn());
+
+    if (targetChanged || this.signature === undefined) {
+      await this.render(panel, model);
+    } else if (this.signature !== signature) {
+      await this.updatePanelModel(panel, model);
+    }
+    this.signature = signature;
+  }
+
+  async updateCurrent(input: OpenCurrentChangesReviewPanelInput): Promise<void> {
+    const panel = this.panel;
+    if (!panel || !isCurrentReviewPanelTarget(this.target, input.sessionId)) return;
+    const model = input.review
+      ? await createReviewPanelModel(
+          {
+            allowCurrentFileContextExpansion: true,
+            cwd: input.cwd,
+            review: input.review,
+          },
+          this.getViewMode(),
+        )
+      : undefined;
+    const signature = model
+      ? createPanelSignature(model)
+      : createCurrentPendingPanelSignature(input.sessionId);
+    if (this.signature === signature) return;
+    await this.updatePanelModel(panel, model);
+    this.signature = signature;
   }
 
   dispose(): void {
@@ -105,6 +165,40 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
     this.messageSubscription = undefined;
     this.panel = undefined;
     this.signature = undefined;
+    this.target = undefined;
+  }
+
+  private async render(
+    panel: vscode.WebviewPanel,
+    model: ScoutChangesReviewModel | undefined,
+  ): Promise<void> {
+    panel.webview.html = await getScoutWebviewHtml(
+      this.extensionUri,
+      panel.webview,
+      this.isDev,
+      'changes-review',
+      undefined,
+      { changesReview: model },
+    );
+  }
+
+  private async postPanelMessage(
+    panel: vscode.WebviewPanel,
+    message: ScoutChangesReviewHostMessage,
+  ): Promise<boolean> {
+    return await panel.webview.postMessage(message);
+  }
+
+  private async updatePanelModel(
+    panel: vscode.WebviewPanel,
+    model: ScoutChangesReviewModel | undefined,
+  ): Promise<void> {
+    const delivered = await this.postPanelMessage(panel, {
+      type: 'changes_review_model_update',
+      model,
+    });
+    if (delivered) return;
+    await this.render(panel, model);
   }
 
   private ensurePanel(): vscode.WebviewPanel {
@@ -128,6 +222,7 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
       this.messageSubscription = undefined;
       this.panel = undefined;
       this.signature = undefined;
+      this.target = undefined;
     });
     return panel;
   }
@@ -171,11 +266,10 @@ async function createReviewPanelModel(
 ): Promise<ScoutChangesReviewModel> {
   const runtimeContentReleased = isRuntimeReviewContentReleased(input.review);
   const files = await Promise.all(
-    input.review.files.map((file, index) =>
+    input.review.files.map((file) =>
       createReviewPanelFile(
         file,
         input.cwd,
-        index,
         input.allowCurrentFileContextExpansion ?? false,
         runtimeContentReleased,
       ),
@@ -197,15 +291,15 @@ async function createReviewPanelModel(
 async function createReviewPanelFile(
   file: FileReviewFile | FileReviewArtifactFile,
   cwd: string,
-  index: number,
   allowCurrentFileContextExpansion: boolean,
   runtimeContentReleased: boolean,
 ): Promise<ScoutChangesReviewFile> {
   const displayPath = formatDisplayPath(cwd, file.absolutePath);
+  const id = createReviewPanelFileId(file.absolutePath);
   if (isArtifactFile(file)) {
     const hydrated = await hydrateArtifactRows(file, allowCurrentFileContextExpansion);
     return {
-      id: `file-${index}`,
+      id,
       path: file.absolutePath,
       displayPath,
       absolutePath: file.absolutePath,
@@ -221,7 +315,7 @@ async function createReviewPanelFile(
 
   if (runtimeContentReleased) {
     return {
-      id: `file-${index}`,
+      id,
       path: file.absolutePath,
       displayPath,
       absolutePath: file.absolutePath,
@@ -243,7 +337,7 @@ async function createReviewPanelFile(
   });
   const hydrated = hydrateFoldRowsFromContent(diff.rows, file.modifiedContent, file.absolutePath);
   return {
-    id: `file-${index}`,
+    id,
     path: file.absolutePath,
     displayPath,
     absolutePath: file.absolutePath,
@@ -437,6 +531,10 @@ function formatDisplayPath(cwd: string, absolutePath: string): string {
   return formatPathRelativeToCwd(absolutePath, cwd);
 }
 
+function createReviewPanelFileId(absolutePath: string): string {
+  return `file-${encodeURIComponent(absolutePath)}`;
+}
+
 function isExternalPath(cwd: string, absolutePath: string): boolean {
   if (!cwd) return false;
   const rel = relative(cwd, absolutePath);
@@ -468,6 +566,34 @@ function createPanelSignature(model: ScoutChangesReviewModel): string {
       tokens: createRowsTokenSignature(file.rows),
     })),
   });
+}
+
+function createCurrentPendingPanelSignature(sessionId: string): string {
+  return JSON.stringify({
+    renderVersion: REVIEW_PANEL_RENDER_VERSION,
+    kind: 'current_pending',
+    sessionId,
+  });
+}
+
+function isSameReviewPanelTarget(
+  left: ReviewPanelTarget | undefined,
+  right: ReviewPanelTarget,
+): boolean {
+  if (!left) return false;
+  if (left.kind !== right.kind) return false;
+  if (left.kind === 'turn' && right.kind === 'turn') return left.turnId === right.turnId;
+  if (left.kind === 'current' && right.kind === 'current') {
+    return left.sessionId === right.sessionId;
+  }
+  return false;
+}
+
+function isCurrentReviewPanelTarget(
+  target: ReviewPanelTarget | undefined,
+  sessionId: string,
+): target is { kind: 'current'; sessionId: string } {
+  return target?.kind === 'current' && target.sessionId === sessionId;
 }
 
 function createRowsTokenSignature(rows: readonly ScoutChangesReviewRow[]): string {

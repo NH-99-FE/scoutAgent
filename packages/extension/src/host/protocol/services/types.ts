@@ -177,4 +177,5 @@ export interface UiProtocolHost {
     message: ProtocolPayload<'open_changes_review'>,
     respond: ProtocolResponder,
   ) => Promise<void>;
+  openCurrentChangesReview: (respond: ProtocolResponder) => Promise<void>;
 }

@@ -39,6 +39,7 @@ export type {
 
 export type {
   ScoutChangesReviewFile,
+  ScoutChangesReviewHostMessage,
   ScoutChangesReviewModel,
   ScoutChangesReviewRow,
   ScoutChangesReviewSummary,

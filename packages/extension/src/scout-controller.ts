@@ -8,7 +8,7 @@ import * as vscode from 'vscode';
 import type { ExtensionMessage, WebviewMessage } from '@scout-agent/shared';
 import { ConfigManager } from './config-manager.ts';
 import { getDefaultUserConfigDir } from './settings-manager.ts';
-import { ExtensionSessionCoordinator } from './host/session-coordinator.ts';
+import { ExtensionSessionCoordinator, type ScoutSessionEvent } from './host/session-coordinator.ts';
 import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 import { WebviewSurfaceRegistry } from './host/webview-surface-registry.ts';
 import { SessionIndex } from './host/session-index.ts';
@@ -33,6 +33,14 @@ export interface ScoutControllerOptions {
     review: FileReviewTurnSnapshot | FileReviewArtifact,
     options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
   ) => void | Promise<void>;
+  openCurrentChangesReviewPanel?: (
+    review: FileReviewTurnSnapshot | undefined,
+    options: { cwd: string; sessionId: string },
+  ) => void | Promise<void>;
+  updateCurrentChangesReviewPanel?: (
+    review: FileReviewTurnSnapshot | undefined,
+    options: { cwd: string; sessionId: string },
+  ) => void | Promise<void>;
 }
 
 // ---------- Controller ----------
@@ -45,6 +53,10 @@ export class ScoutController implements vscode.Disposable {
   private readonly configManager: ConfigManager;
   private readonly sessionManager: ExtensionSessionCoordinator;
   private readonly sessionIndex: SessionIndex;
+  private readonly updateCurrentChangesReviewPanelCallback?: (
+    review: FileReviewTurnSnapshot | undefined,
+    options: { cwd: string; sessionId: string },
+  ) => void | Promise<void>;
   private readonly protocolHostServices: ScoutProtocolHostServices;
   private readonly protocolServer: ProtocolServer;
   private readonly webviewRegistry: WebviewSurfaceRegistry;
@@ -62,6 +74,7 @@ export class ScoutController implements vscode.Disposable {
       cwd: this.cwd,
       userConfigDir: this.agentDir,
     });
+    this.updateCurrentChangesReviewPanelCallback = options.updateCurrentChangesReviewPanel;
 
     this.sessionManager = new ExtensionSessionCoordinator({
       cwd: this.cwd,
@@ -88,6 +101,7 @@ export class ScoutController implements vscode.Disposable {
       openSettingsPanel: options.openSettingsPanel,
       openTreePanel: options.openTreePanel,
       openChangesReviewPanel: options.openChangesReviewPanel,
+      openCurrentChangesReviewPanel: options.openCurrentChangesReviewPanel,
       openTextFile: async (filePath) => {
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
         await vscode.window.showTextDocument(document);
@@ -104,7 +118,7 @@ export class ScoutController implements vscode.Disposable {
 
     // 监听 ExtensionSessionCoordinator 事件
     this.unsubscribeSession = this.sessionManager.subscribe((event) =>
-      this.protocolHostServices.sessionEventForwarder.handle(event),
+      this.handleSessionEvent(event),
     );
   }
 
@@ -165,5 +179,28 @@ export class ScoutController implements vscode.Disposable {
 
   private postMessage(message: ExtensionMessage, surface?: ScoutWebviewSurface): void {
     this.webviewRegistry.postMessage(message, surface);
+  }
+
+  private handleSessionEvent(event: ScoutSessionEvent): void {
+    this.protocolHostServices.sessionEventForwarder.handle(event);
+    this.updateCurrentChangesReviewPanel(event);
+  }
+
+  private updateCurrentChangesReviewPanel(event: ScoutSessionEvent): void {
+    if (!this.updateCurrentChangesReviewPanelCallback) return;
+    if (event.type === 'agent_event' && event.event.type === 'agent_start') {
+      void this.updateCurrentChangesReviewPanelCallback(undefined, {
+        cwd: this.sessionManager.currentCwd,
+        sessionId: this.sessionManager.sessionId,
+      });
+      return;
+    }
+    if (event.type !== 'changes_review_update' || !event.changesReview) return;
+    const review = this.sessionManager.getActiveFileReviewTurn();
+    if (!review) return;
+    void this.updateCurrentChangesReviewPanelCallback(review, {
+      cwd: this.sessionManager.currentCwd,
+      sessionId: event.sessionId,
+    });
   }
 }

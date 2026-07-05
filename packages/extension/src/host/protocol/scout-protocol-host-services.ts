@@ -38,6 +38,10 @@ export interface ScoutProtocolHostServicesOptions {
     review: FileReviewTurnSnapshot | FileReviewArtifact,
     options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
   ) => void | Promise<void>;
+  openCurrentChangesReviewPanel?: (
+    review: FileReviewTurnSnapshot | undefined,
+    options: { cwd: string; sessionId: string },
+  ) => void | Promise<void>;
   openTextFile?: (filePath: string) => Promise<void>;
   postMessage: (message: ExtensionMessage, surface?: ScoutWebviewSurface) => void;
   showErrorMessage?: (message: string) => void;
@@ -87,6 +91,9 @@ export function createScoutProtocolHostServices(
     openTreePanel: options.openTreePanel,
     getChangesReview: (turnId) => options.sessionManager.getFileReviewTurn(turnId),
     getChangesReviewArtifact: (turnId) => options.sessionManager.getFileReviewArtifact(turnId),
+    getCurrentChangesReview: () => options.sessionManager.getActiveFileReviewTurn(),
+    getCurrentCwd: () => options.sessionManager.currentCwd,
+    getCurrentSessionId: () => options.sessionManager.sessionId,
     canExpandChangesReviewContext: (turnId) =>
       options.sessionManager.isLatestFileReviewArtifact(turnId),
     openChangesReviewPanel: options.openChangesReviewPanel
@@ -95,6 +102,13 @@ export function createScoutProtocolHostServices(
             allowCurrentFileContextExpansion: panelOptions.allowCurrentFileContextExpansion,
             cwd: options.sessionManager.currentCwd,
             recordId: panelOptions.recordId,
+          })
+      : undefined,
+    openCurrentChangesReviewPanel: options.openCurrentChangesReviewPanel
+      ? (review, panelOptions) =>
+          options.openCurrentChangesReviewPanel?.(review, {
+            cwd: panelOptions.cwd,
+            sessionId: panelOptions.sessionId,
           })
       : undefined,
   });
@@ -277,6 +291,7 @@ export function createScoutProtocolHostServices(
       openSettingsPanel: (respond) => bundle.ui.openSettingsPanel(respond),
       openTreePanel: (respond) => bundle.ui.openTreePanel(respond),
       openChangesReview: (message, respond) => bundle.ui.openChangesReview(message, respond),
+      openCurrentChangesReview: (respond) => bundle.ui.openCurrentChangesReview(respond),
     },
   };
 

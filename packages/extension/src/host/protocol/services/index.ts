@@ -218,6 +218,9 @@ export function registerScoutProtocolServices(
     open_changes_review: async (message, context) => {
       await services.ui.openChangesReview(payload<'open_changes_review'>(message), context.respond);
     },
+    open_current_changes_review: async (_message, context) => {
+      await services.ui.openCurrentChangesReview(context.respond);
+    },
   });
 }
 

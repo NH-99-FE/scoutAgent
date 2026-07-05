@@ -100,6 +100,7 @@ const PAYLOAD_VALIDATORS = {
     requiredString('turnId'),
     optionalString('recordId'),
   ),
+  open_current_changes_review: fields('type'),
   fork_session: combine(
     fields('type', 'entryId', 'position'),
     requiredString('entryId'),

@@ -98,10 +98,17 @@ export interface UiProtocolServiceOptions {
   getChangesReviewArtifact?: (
     turnId: string,
   ) => FileReviewArtifact | undefined | Promise<FileReviewArtifact | undefined>;
+  getCurrentChangesReview?: () => FileReviewTurnSnapshot | undefined;
+  getCurrentCwd?: () => string;
+  getCurrentSessionId?: () => string;
   canExpandChangesReviewContext?: (turnId: string) => boolean;
   openChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
     options: { allowCurrentFileContextExpansion?: boolean; recordId?: string },
+  ) => void | Promise<void>;
+  openCurrentChangesReviewPanel?: (
+    review: FileReviewTurnSnapshot | undefined,
+    options: { cwd: string; sessionId: string },
   ) => void | Promise<void>;
 }
 
@@ -119,10 +126,17 @@ export class UiProtocolService implements UiProtocolHost {
   private readonly getChangesReviewArtifact?: (
     turnId: string,
   ) => FileReviewArtifact | undefined | Promise<FileReviewArtifact | undefined>;
+  private readonly getCurrentChangesReview?: () => FileReviewTurnSnapshot | undefined;
+  private readonly getCurrentCwd?: () => string;
+  private readonly getCurrentSessionId?: () => string;
   private readonly canExpandChangesReviewContext?: (turnId: string) => boolean;
   private readonly openChangesReviewPanelCallback?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
     options: { allowCurrentFileContextExpansion?: boolean; recordId?: string },
+  ) => void | Promise<void>;
+  private readonly openCurrentChangesReviewPanelCallback?: (
+    review: FileReviewTurnSnapshot | undefined,
+    options: { cwd: string; sessionId: string },
   ) => void | Promise<void>;
   private readonly extensionUIBroker: ExtensionUIRequestBroker;
 
@@ -133,8 +147,12 @@ export class UiProtocolService implements UiProtocolHost {
     this.openTreePanelCallback = options.openTreePanel;
     this.getChangesReview = options.getChangesReview;
     this.getChangesReviewArtifact = options.getChangesReviewArtifact;
+    this.getCurrentChangesReview = options.getCurrentChangesReview;
+    this.getCurrentCwd = options.getCurrentCwd;
+    this.getCurrentSessionId = options.getCurrentSessionId;
     this.canExpandChangesReviewContext = options.canExpandChangesReviewContext;
     this.openChangesReviewPanelCallback = options.openChangesReviewPanel;
+    this.openCurrentChangesReviewPanelCallback = options.openCurrentChangesReviewPanel;
     this.extensionUIBroker = new ExtensionUIRequestBroker({
       publishEvent: (message) => this.publishEvent(message),
       notify: (message, type = 'info') => {
@@ -259,6 +277,43 @@ export class UiProtocolService implements UiProtocolHost {
     } catch (error) {
       respond({
         type: 'open_changes_review_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async openCurrentChangesReview(respond: ProtocolResponder): Promise<void> {
+    try {
+      if (
+        !this.openCurrentChangesReviewPanelCallback ||
+        !this.getCurrentSessionId ||
+        !this.getCurrentCwd
+      ) {
+        respond({
+          type: 'open_current_changes_review_result',
+          success: false,
+          error: 'Changes review panel is not registered',
+        });
+        return;
+      }
+      const sessionId = this.getCurrentSessionId();
+      if (!sessionId) {
+        respond({
+          type: 'open_current_changes_review_result',
+          success: false,
+          error: 'No active session for changes review',
+        });
+        return;
+      }
+      await this.openCurrentChangesReviewPanelCallback(this.getCurrentChangesReview?.(), {
+        cwd: this.getCurrentCwd(),
+        sessionId,
+      });
+      respond({ type: 'open_current_changes_review_result', success: true });
+    } catch (error) {
+      respond({
+        type: 'open_current_changes_review_result',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });

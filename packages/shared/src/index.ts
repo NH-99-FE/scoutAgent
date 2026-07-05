@@ -58,6 +58,7 @@ export type {
   ScoutBusyState,
   ScoutCommandInfo,
   ScoutChangesReviewFile,
+  ScoutChangesReviewHostMessage,
   ScoutChangesReviewModel,
   ScoutChangesReviewRow,
   ScoutChangesReviewSummary,

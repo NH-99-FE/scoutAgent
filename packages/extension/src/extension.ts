@@ -42,6 +42,18 @@ export function activate(context: vscode.ExtensionContext) {
         cwd: options.cwd,
         recordId: options.recordId,
       }),
+    openCurrentChangesReviewPanel: (review, options) =>
+      changesReviewPanelManager.openCurrent({
+        review,
+        cwd: options.cwd,
+        sessionId: options.sessionId,
+      }),
+    updateCurrentChangesReviewPanel: (review, options) =>
+      changesReviewPanelManager.updateCurrent({
+        review,
+        cwd: options.cwd,
+        sessionId: options.sessionId,
+      }),
   });
   activeControllers.add(controller);
 

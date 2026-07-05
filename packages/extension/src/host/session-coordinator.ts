@@ -767,6 +767,13 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return this.activeChangesReview;
   }
 
+  getActiveFileReviewTurn(): FileReviewTurnSnapshot | undefined {
+    const turnId = this.activeChangesReview?.turnId;
+    if (!turnId) return undefined;
+    const review = this.agentSession?.getFileReviewTurn(turnId);
+    return review && !review.contentReleased ? review : undefined;
+  }
+
   async getFileReviewArtifact(turnId: string): Promise<FileReviewArtifact | undefined> {
     if (!this.agentSession?.isStreaming) {
       await this.flushFileReviewArtifactSave(this.sessionId, turnId);

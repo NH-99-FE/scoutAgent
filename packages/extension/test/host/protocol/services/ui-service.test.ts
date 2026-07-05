@@ -279,6 +279,54 @@ describe('UiProtocolService', () => {
     });
   });
 
+  it('opens the current changes review panel with the active landed review', async () => {
+    const activeReview = makeReviewSnapshot('turn-1', 'review-1');
+    const openCurrentChangesReviewPanel = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+      getCurrentChangesReview: () => activeReview,
+      getCurrentCwd: () => '/workspace',
+      getCurrentSessionId: () => 'session-1',
+      openCurrentChangesReviewPanel,
+    });
+
+    await service.openCurrentChangesReview(respond);
+
+    expect(openCurrentChangesReviewPanel).toHaveBeenCalledWith(activeReview, {
+      cwd: '/workspace',
+      sessionId: 'session-1',
+    });
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_current_changes_review_result',
+      success: true,
+    });
+  });
+
+  it('opens the current changes review panel in pending state before files land', async () => {
+    const openCurrentChangesReviewPanel = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+      getCurrentCwd: () => '/workspace',
+      getCurrentSessionId: () => 'session-1',
+      openCurrentChangesReviewPanel,
+    });
+
+    await service.openCurrentChangesReview(respond);
+
+    expect(openCurrentChangesReviewPanel).toHaveBeenCalledWith(undefined, {
+      cwd: '/workspace',
+      sessionId: 'session-1',
+    });
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_current_changes_review_result',
+      success: true,
+    });
+  });
+
   it('resolves extension confirm requests from webview responses', async () => {
     const publishEvent = vi.fn();
     const service = new UiProtocolService({

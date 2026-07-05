@@ -25,11 +25,13 @@ export interface ScoutChangesReviewRow {
 }
 
 export interface ScoutChangesReviewFile {
+  /** UI-only DOM/scroll anchor，不能作为文件业务 identity；跨热更新状态请使用 absolutePath。 */
   id: string;
   /** review 业务 path，用于 host 打开/定位文件；展示优先使用 displayPath。 */
   path: string;
   /** UI-only 展示路径，由 host 根据 cwd/path 规则生成。 */
   displayPath?: string;
+  /** 跨热更新稳定的文件业务 identity，webview 状态应优先用它做 key。 */
   absolutePath: string;
   external: boolean;
   additions: number;
@@ -73,3 +75,7 @@ export interface ScoutChangesReviewSummary {
 export type ScoutChangesReviewWebviewMessage =
   | { type: 'changes_review_set_view_mode'; mode: ScoutChangesReviewViewMode }
   | { type: 'changes_review_open_file'; path: string };
+
+export type ScoutChangesReviewHostMessage =
+  | { type: 'changes_review_model_update'; model?: ScoutChangesReviewModel }
+  | { type: 'changes_review_scroll_to_record'; recordId: string };
