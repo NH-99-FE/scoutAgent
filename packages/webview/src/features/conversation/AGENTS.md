@@ -4,6 +4,12 @@
 
 消息滚动组件的 API 可参考 [message-scroller-api.md](./docs/message-scroller-api.md)。
 
+## 投影管线
+
+- `ConversationTranscriptProjector` 是 transcript pipeline owner：负责把会话 items 投影为 base rows、拼接 addon/runtime status，并复用稳定 transcript row。
+- `ConversationRowsProjector` 只负责协议消息到 base `ConversationRow` 的增量投影与 segment cache；React view 层不直接编排 base rows。
+- `conversation-render-signature` 是结构共享比较契约；新增 row/entry/activity 展示字段时必须同步更新签名与回归测试。
+
 ## 滚动语义
 
 - 会话详情页保留用户当前阅读位置；发送消息只表达提交意图，不隐式滚到底部。
