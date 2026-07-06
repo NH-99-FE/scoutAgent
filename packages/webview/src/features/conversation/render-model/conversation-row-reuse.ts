@@ -16,6 +16,7 @@ import {
   createAssistantRowSignature,
   createAssistantTurnSummarySignature,
 } from './conversation-render-signature';
+import { reuseListByKey, reuseListByIndex, reuseOptional } from './structural-sharing';
 
 export function reuseProjectedRows(
   previousRows: ConversationRow[],
@@ -75,56 +76,41 @@ function reuseAssistantEntries(
   previousEntries: AssistantTurnEntry[],
   nextEntries: AssistantTurnEntry[],
 ): AssistantTurnEntry[] {
-  const previousByKey = new Map(previousEntries.map((entry) => [entry.key, entry]));
-  let reusedAnyEntry = false;
-  const entries = nextEntries.map((entry) => {
-    const previous = previousByKey.get(entry.key);
-    if (!previous) return entry;
-    if (
-      !areRenderSignaturesEqual(
+  return reuseListByKey({
+    previous: previousEntries,
+    next: nextEntries,
+    getKey: (entry) => entry.key,
+    canReuse: (previous, next) =>
+      areRenderSignaturesEqual(
         createAssistantEntrySignature(previous),
-        createAssistantEntrySignature(entry),
-      )
-    ) {
-      return entry;
-    }
-    reusedAnyEntry ||= previous !== entry;
-    return previous;
+        createAssistantEntrySignature(next),
+      ),
   });
-
-  if (!reusedAnyEntry) return nextEntries;
-  return entries.every((entry, index) => entry === previousEntries[index]) &&
-    entries.length === previousEntries.length
-    ? previousEntries
-    : entries;
 }
 
 function reuseChangesReviews(
   previousReviews: AssistantChangesReview[],
   nextReviews: AssistantChangesReview[],
 ): AssistantChangesReview[] {
-  if (
-    areRenderSignaturesEqual(
-      createAssistantChangesReviewListSignature(previousReviews),
-      createAssistantChangesReviewListSignature(nextReviews),
-    )
-  ) {
-    return previousReviews;
-  }
-  return nextReviews;
+  return reuseListByIndex({
+    previous: previousReviews,
+    next: nextReviews,
+    canReuse: (previous, next) =>
+      areRenderSignaturesEqual(
+        createAssistantChangesReviewListSignature([previous]),
+        createAssistantChangesReviewListSignature([next]),
+      ),
+  });
 }
 
 function reuseAssistantTurnSummary(
   previous: AssistantTurnSummary | undefined,
   next: AssistantTurnSummary | undefined,
 ): AssistantTurnSummary | undefined {
-  if (
+  return reuseOptional(previous, next, (previousSummary, nextSummary) =>
     areRenderSignaturesEqual(
-      createAssistantTurnSummarySignature(previous),
-      createAssistantTurnSummarySignature(next),
-    )
-  ) {
-    return previous;
-  }
-  return next;
+      createAssistantTurnSummarySignature(previousSummary),
+      createAssistantTurnSummarySignature(nextSummary),
+    ),
+  );
 }
