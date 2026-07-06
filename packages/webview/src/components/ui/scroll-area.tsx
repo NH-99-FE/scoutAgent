@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { ScrollArea as ScrollAreaPrimitive } from 'radix-ui';
 
+import { getNestedScrollBoundaryProps } from '@/components/ui/nested-scroll-boundary';
 import { cn } from '@/lib/utils';
 
 interface ScrollAreaProps extends React.ComponentProps<typeof ScrollAreaPrimitive.Root> {
@@ -22,6 +23,7 @@ function ScrollArea({
   const { className: viewportPropsClassName, ...resolvedViewportProps } = viewportProps ?? {};
   const showVerticalScrollbar = scrollbars === 'vertical' || scrollbars === 'both';
   const showHorizontalScrollbar = scrollbars === 'horizontal' || scrollbars === 'both';
+  const nestedScrollAxis = getNestedScrollAxis(scrollbars);
 
   return (
     <ScrollAreaPrimitive.Root
@@ -30,6 +32,7 @@ function ScrollArea({
       {...props}
     >
       <ScrollAreaPrimitive.Viewport
+        {...getNestedScrollBoundaryProps(nestedScrollAxis)}
         {...resolvedViewportProps}
         ref={viewportRef}
         data-slot="scroll-area-viewport"
@@ -46,6 +49,14 @@ function ScrollArea({
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   );
+}
+
+function getNestedScrollAxis(
+  scrollbars: ScrollAreaProps['scrollbars'],
+): 'vertical' | 'horizontal' | 'both' {
+  if (scrollbars === 'horizontal') return 'horizontal';
+  if (scrollbars === 'both') return 'both';
+  return 'vertical';
 }
 
 function ScrollBar({
@@ -66,7 +77,7 @@ function ScrollBar({
     >
       <ScrollAreaPrimitive.ScrollAreaThumb
         data-slot="scroll-area-thumb"
-        className="bg-border relative flex-1 rounded-full"
+        className="scout-scroll-area-thumb relative flex-1 rounded-full transition-colors"
       />
     </ScrollAreaPrimitive.ScrollAreaScrollbar>
   );

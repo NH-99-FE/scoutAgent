@@ -24,6 +24,7 @@ import type {
   ConversationViewItem,
   SystemConversationRow,
 } from './conversation-row-types';
+import { reuseProjectedRows } from './conversation-row-reuse';
 import {
   buildConversationIndex,
   consumeNextToolResult,
@@ -193,7 +194,7 @@ class IncrementalConversationRowsProjector implements ConversationRowsProjector 
         previous && areSignaturesEqual(previous.signature, segment.signature)
           ? previous
           : {
-              rows: projectSegment(segment, options),
+              rows: projectSegmentWithReuse(segment, options, previous?.rows),
               signature: segment.signature,
             };
       nextSegmentsByKey.set(segment.key, projected);
@@ -684,6 +685,18 @@ function projectSystemSegment(segment: SystemSegmentPlan): ConversationRow[] {
   }
 
   return [createSystemRow(segment.item)];
+}
+
+function projectSegmentWithReuse(
+  segment: SegmentPlan,
+  options: BuildConversationRowsOptions,
+  previousRows: ConversationRow[] | undefined,
+): ConversationRow[] {
+  const rows = projectSegment(segment, options);
+  if (!previousRows) return rows;
+  // segment 内容变化时不能复用整行，但可以复用未变化的 assistant entry，
+  // 让 Markdown / process block 等行内 memo 获得稳定引用。
+  return reuseProjectedRows(previousRows, rows);
 }
 
 type AssistantOutcomeRowInput =

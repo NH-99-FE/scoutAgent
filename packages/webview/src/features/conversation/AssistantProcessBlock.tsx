@@ -2,7 +2,7 @@
 // Assistant Process Block — assistant 过程与工具活动渲染
 // ============================================================
 
-import { type CSSProperties, useCallback, useState } from 'react';
+import { memo, type CSSProperties, useCallback, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -45,17 +45,19 @@ import { useRegisterConversationExpansionNode } from './conversation-expansion-n
 
 const TOOL_DETAIL_PREVIEW_LINE_LIMIT = 400;
 
-export function AssistantProcessBlock({
-  entry,
-  expansionScope,
-  parentExpansionId,
-  suppressLifecycleOnlyProcess = false,
-}: {
+interface AssistantProcessBlockProps {
   entry: AssistantProcessEntry;
   expansionScope: string;
   parentExpansionId?: string;
   suppressLifecycleOnlyProcess?: boolean;
-}) {
+}
+
+function AssistantProcessBlockView({
+  entry,
+  expansionScope,
+  parentExpansionId,
+  suppressLifecycleOnlyProcess = false,
+}: AssistantProcessBlockProps) {
   const expansionId = getProcessExpansionId(entry.key, expansionScope);
   const open = useConversationExpansionOpen(expansionId, entry.defaultOpen);
   const hasProcessContent = entry.phases.some(hasPhaseContent);
@@ -182,6 +184,16 @@ export function AssistantProcessBlock({
     </Collapsible>
   );
 }
+
+// 过程块包含展开订阅、diff/ScrollArea 等重内容；投影层复用 entry 时跳过父层重复 render。
+export const AssistantProcessBlock = memo(
+  AssistantProcessBlockView,
+  (previous, next) =>
+    previous.entry === next.entry &&
+    previous.expansionScope === next.expansionScope &&
+    previous.parentExpansionId === next.parentExpansionId &&
+    previous.suppressLifecycleOnlyProcess === next.suppressLifecycleOnlyProcess,
+);
 
 function ProcessPhaseList({
   className,

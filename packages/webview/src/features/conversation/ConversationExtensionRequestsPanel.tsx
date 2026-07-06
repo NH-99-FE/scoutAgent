@@ -1,5 +1,5 @@
 // ============================================================
-// Extension UI Requests Panel — 扩展交互请求容器
+// Conversation Extension Requests Panel — 会话内扩展交互请求
 // ============================================================
 
 import { useState } from 'react';
@@ -8,27 +8,34 @@ import type { ScoutExtensionUIRequest } from '@scout-agent/shared';
 import { protocolClient, type ExtensionUIResponsePayload } from '@/bridge/protocol-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { getNestedScrollBoundaryProps } from '@/components/ui/nested-scroll-boundary';
 import { cn } from '@/lib/utils';
 import { useExtensionUIRequests, useUiActions } from '@/store/ui-store';
 
-interface ExtensionUIRequestsPanelProps {
+interface ConversationExtensionRequestsPanelProps {
   requests?: ScoutExtensionUIRequest[];
 }
 
-export function ExtensionUIRequestsPanel({ requests }: ExtensionUIRequestsPanelProps) {
+export function ConversationExtensionRequestsPanel({
+  requests,
+}: ConversationExtensionRequestsPanelProps) {
   const storedRequests = useExtensionUIRequests();
   const visibleRequests = requests ?? storedRequests;
   if (visibleRequests.length === 0) return null;
   return (
     <div className="flex w-full max-w-full min-w-0 flex-col gap-2 px-1 py-1">
       {visibleRequests.map((request) => (
-        <ExtensionUIRequestCard key={request.id} request={request} />
+        <ConversationExtensionRequestCard key={request.id} request={request} />
       ))}
     </div>
   );
 }
 
-export function ExtensionUIRequestCard({ request }: { request: ScoutExtensionUIRequest }) {
+export function ConversationExtensionRequestCard({
+  request,
+}: {
+  request: ScoutExtensionUIRequest;
+}) {
   const [value, setValue] = useState('');
   const uiActions = useUiActions();
   const isDanger = request.variant === 'danger';
@@ -113,8 +120,9 @@ function RequestBody({ request }: { request: ScoutExtensionUIRequest }) {
   if (request.body) {
     return (
       <pre
+        {...getNestedScrollBoundaryProps('vertical')}
         className={cn(
-          'text-muted-foreground mt-1 max-h-28 overflow-auto text-xs break-words whitespace-pre-wrap',
+          'scout-native-scrollbar text-muted-foreground mt-1 max-h-28 overflow-auto text-xs break-words whitespace-pre-wrap',
           request.body.kind === 'code' && 'font-mono',
         )}
       >

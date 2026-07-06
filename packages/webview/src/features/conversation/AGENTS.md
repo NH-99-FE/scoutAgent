@@ -4,6 +4,15 @@
 
 消息滚动组件的 API 可参考同目录的 [message-scroller-api.md](./message-scroller-api.md)。
 
+## 滚动语义
+
+- 会话详情页保留用户当前阅读位置；发送消息只表达提交意图，不隐式滚到底部。
+- 用户需要查看最新内容时使用一键到底；用户已在底部时由 `MessageScroller` 的 `autoScroll` 自然跟随。
+- 顶层 row 只注册 `messageId`，默认不启用 `scrollAnchor`；`scrollAnchor` 属于 turn-anchor 阅读模型，会在新 user row 追加时触发对齐并打断历史阅读。
+- 顶层 row 不使用浏览器 `content-visibility` / `contain-intrinsic-size`；它们会在离屏 row 进入布局时修正高度，导致从底部向上阅读时 `scrollHeight` 改变、滚动条变短和阅读位置跳动。长 transcript 性能优化应优先通过 React row memo 与稳定投影对象完成。
+- 当前会话详情默认没有向上分页加载历史消息的 prepend 语义，因此 `ConversationView` 不暴露 `preserveScrollOnPrepend`；接入历史分页时必须由专门的 history pagination owner 显式打开，并先定义分页加载与底部阅读模型的交互。
+- 会话内部可滚动区域必须通过 `ScrollArea` 或 `getNestedScrollBoundaryProps()` 显式标记 `data-scout-nested-scroll="vertical"` / `"both"`；live-tail 恢复逻辑只信任这个协议，不通过 `data-slot` 或 computed style 猜测滚动容器。
+
 ## Assistant 过程状态
 
 - `busyState` 是宿主全局运行态，只表达 `idle / agent / retry / compaction`。

@@ -371,38 +371,35 @@ body,
   opacity: 0;
 }
 
-.scout-composer-textarea {
+.scout-native-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted-foreground) 34%, transparent) transparent;
+  scrollbar-gutter: stable;
 }
 
-.scout-composer-textarea::-webkit-scrollbar {
+.scout-native-scrollbar::-webkit-scrollbar {
   width: 10px;
+  height: 10px;
 }
 
-.scout-composer-textarea::-webkit-scrollbar-track,
-.scout-composer-textarea::-webkit-scrollbar-corner {
+.scout-native-scrollbar::-webkit-scrollbar-track,
+.scout-native-scrollbar::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-.scout-composer-textarea::-webkit-scrollbar-thumb {
+.scout-native-scrollbar::-webkit-scrollbar-thumb {
   min-height: 24px;
+  min-width: 24px;
   border: 3px solid transparent;
   border-radius: 999px;
   background-color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
   background-clip: content-box;
 }
 
-.scout-composer-textarea:hover::-webkit-scrollbar-thumb,
-.scout-composer-textarea:focus-visible::-webkit-scrollbar-thumb {
+.scout-native-scrollbar:hover::-webkit-scrollbar-thumb,
+.scout-native-scrollbar:focus-visible::-webkit-scrollbar-thumb,
+.scout-native-scrollbar:focus-within::-webkit-scrollbar-thumb {
   background-color: color-mix(in srgb, var(--muted-foreground) 48%, transparent);
-}
-
-.scout-conversation-viewport > div {
-  display: block !important;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0 !important;
 }
 
 .scout-conversation-viewport {
@@ -410,12 +407,8 @@ body,
   overscroll-behavior: contain;
 }
 
-.scout-conversation-viewport * {
+.scout-conversation-content > [data-slot='message-scroller-item'] {
   overflow-anchor: none;
-}
-
-.scout-conversation-bottom-anchor {
-  overflow-anchor: auto;
 }
 
 .scout-conversation-content,
@@ -588,6 +581,17 @@ body,
 
 .scout-review-diff-scroll {
   overscroll-behavior-x: contain;
+}
+
+.scout-scroll-area-thumb {
+  background-color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
+}
+
+[data-slot='scroll-area-scrollbar']:hover .scout-scroll-area-thumb,
+[data-slot='scroll-area-viewport']:focus-visible
+  ~ [data-slot='scroll-area-scrollbar']
+  .scout-scroll-area-thumb {
+  background-color: color-mix(in srgb, var(--muted-foreground) 48%, transparent);
 }
 
 .scout-review-split-diff {

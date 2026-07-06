@@ -46,10 +46,10 @@ import { ChatComposer } from '@/features/composer/ChatComposer';
 import { createComposerChangesReviewSummary } from '@/features/composer/composer-changes-review-summary';
 import { ConversationView } from '@/features/conversation/ConversationView';
 import { applyForkOriginNotice } from '@/features/conversation/conversation-notices';
+import { createExtensionRequestsTranscriptAddon } from '@/features/conversation/conversation-transcript-rows';
 import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
 import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
 import { useTaskHistoryPanel } from '@/features/tasks/use-task-history-panel';
-import { ExtensionUIRequestsPanel } from './ExtensionUIRequestsPanel';
 import { RenameSessionDialog } from './RenameSessionDialog';
 
 interface ChatWorkspaceProps {
@@ -59,7 +59,6 @@ interface ChatWorkspaceProps {
 }
 
 export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspaceProps) {
-  const [pendingScrollToBottomKey, setPendingScrollToBottomKey] = useState(0);
   const [renameOpen, setRenameOpen] = useState(false);
   const messages = useConversationMessages();
   const conversationItems = useConversationItems();
@@ -104,10 +103,10 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     () => createComposerChangesReviewSummary(activeChangesReview, toolPreviewsById),
     [activeChangesReview, toolPreviewsById],
   );
-  const extensionUIRequestsKey = useMemo(
-    () => extensionUIRequests.map((request) => request.id).join(':'),
-    [extensionUIRequests],
-  );
+  const transcriptAddons = useMemo(() => {
+    const extensionRequestsAddon = createExtensionRequestsTranscriptAddon(extensionUIRequests);
+    return extensionRequestsAddon ? [extensionRequestsAddon] : [];
+  }, [extensionUIRequests]);
   const handleOpenTask = (task: ScoutTaskItem) => {
     if (task.isCurrent) {
       closeTaskHistory();
@@ -115,9 +114,6 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     }
     closeTaskHistory();
     onOpenTask(task);
-  };
-  const requestScrollToBottom = () => {
-    setPendingScrollToBottomKey((key) => key + 1);
   };
   const isAgentRunning = busyState.kind === 'agent';
 
@@ -184,22 +180,16 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         busyState={busyState}
         className="min-h-0 flex-1"
         expansionScope={getConversationExpansionScope({ sessionFile, sessionId })}
-        forceScrollToBottomKey={pendingScrollToBottomKey}
         isStreaming={isStreaming}
         items={conversationViewItems}
         showScrollToBottomButton
-        tailContent={<ExtensionUIRequestsPanel requests={extensionUIRequests} />}
-        tailContentKey={extensionUIRequestsKey}
+        transcriptAddons={transcriptAddons}
         toolExecutionsById={toolExecutionsById}
         toolPreviewsById={toolPreviewsById}
       />
 
       <footer className="bg-background max-w-full min-w-0 shrink-0 px-3 pt-1 pb-3">
-        <ChatComposer
-          changesReview={composerChangesReview}
-          placeholder="要求后续变更"
-          onMessageSent={requestScrollToBottom}
-        />
+        <ChatComposer changesReview={composerChangesReview} placeholder="要求后续变更" />
       </footer>
     </main>
   );

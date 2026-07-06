@@ -2,6 +2,7 @@
 // Markdown Content — Assistant 文本 Markdown 渲染
 // ============================================================
 
+import { memo } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -202,7 +203,7 @@ const markdownComponents: Components = {
   },
 };
 
-export function MarkdownContent({ children, className }: MarkdownContentProps) {
+function MarkdownContentView({ children, className }: MarkdownContentProps) {
   return (
     <div
       className={cn('scout-markdown-content w-full max-w-full min-w-0', className)}
@@ -214,3 +215,9 @@ export function MarkdownContent({ children, className }: MarkdownContentProps) {
     </div>
   );
 }
+
+// Markdown 解析和代码块/表格组件树较重；同样文本重复进入 render 时直接复用上一轮输出。
+export const MarkdownContent = memo(
+  MarkdownContentView,
+  (previous, next) => previous.children === next.children && previous.className === next.className,
+);
