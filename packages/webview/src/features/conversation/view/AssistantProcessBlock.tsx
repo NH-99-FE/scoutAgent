@@ -31,8 +31,8 @@ import type {
   AssistantProcessPhase,
   AssistantThinkingActivity,
   AssistantToolActivity,
-} from './conversation-view-model';
-import { hasExpandableToolDisplayDetail, hasToolDisplaySummary } from './tool-display';
+} from '../render-model/conversation-view-model';
+import { hasExpandableToolDisplayDetail, hasToolDisplaySummary } from '../tool-display';
 import type {
   DiffToolDisplayDetail,
   TextToolDisplayDetail,
@@ -40,7 +40,7 @@ import type {
   ToolDisplayIcon,
   ToolDisplayMetric,
   ToolDisplayResult,
-} from './tool-display';
+} from '../tool-display';
 import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
 
 const TOOL_DETAIL_PREVIEW_LINE_LIMIT = 400;

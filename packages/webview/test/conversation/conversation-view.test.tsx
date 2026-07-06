@@ -15,15 +15,14 @@ vi.mock('@/bridge/protocol-client', () => ({
   protocolClient: protocolClientMock,
 }));
 
-import { ConversationView } from '@/features/conversation/ConversationView';
-import type { ConversationTranscriptAddon } from '@/features/conversation/conversation-transcript-rows';
+import { ConversationView, type ConversationTranscriptAddon } from '@/features/conversation';
 import {
   buildConversationRows,
   createConversationRowsProjector,
   type AssistantConversationRow,
   type AssistantProcessActivity,
   type ConversationViewItem,
-} from '@/features/conversation/conversation-view-model';
+} from '@/features/conversation/render-model/conversation-view-model';
 import type {
   ConversationItem,
   ToolCallPreviewState,
@@ -4645,6 +4644,136 @@ describe('conversation rows projector', () => {
     expect(nextAssistant.entries[0]).toBe(firstAssistant.entries[0]);
     expect(nextAssistant.entries[1]).toBe(firstAssistant.entries[1]);
     expect(nextAssistant.entries[2]).not.toBe(firstAssistant.entries[2]);
+  });
+
+  it('invalidates assistant rows when changes review display fields change', () => {
+    const userMessage: ConversationItem['message'] = {
+      role: 'user',
+      content: 'review the edits',
+      timestamp: 1,
+    };
+    const firstReview: ScoutChangesReviewSummary = {
+      turnId: 'turn-1',
+      fileCount: 1,
+      additions: 1,
+      deletions: 0,
+      files: [{ path: 'src/app.ts', displayPath: 'app.ts', additions: 1, deletions: 0 }],
+    };
+    const nextReview: ScoutChangesReviewSummary = {
+      turnId: 'turn-1',
+      fileCount: 1,
+      additions: 2,
+      deletions: 0,
+      files: [{ path: 'src/app.ts', displayPath: 'app.ts', additions: 2, deletions: 0 }],
+    };
+    const assistantStart: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'done' }],
+      changesReviews: [firstReview],
+      timestamp: 2,
+    };
+    const assistantUpdate: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'done' }],
+      changesReviews: [nextReview],
+      timestamp: 2,
+    };
+    const projector = createConversationRowsProjector();
+
+    const firstRows = projector.project({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        { key: 'user-1', message: userMessage },
+        { key: 'assistant-1', message: assistantStart },
+      ],
+    });
+    const nextRows = projector.project({
+      isStreaming: false,
+      busyState: IDLE_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        { key: 'user-1', message: userMessage },
+        { key: 'assistant-1', message: assistantUpdate },
+      ],
+    });
+
+    const firstAssistant = firstRows[1] as AssistantConversationRow;
+    const nextAssistant = nextRows[1] as AssistantConversationRow;
+
+    expect(nextAssistant).not.toBe(firstAssistant);
+    expect(nextAssistant.changesReviews[0]?.additions).toBe(2);
+    expect(nextAssistant.changesReviews[0]?.files[0]?.additions).toBe(2);
+  });
+
+  it('invalidates process entries when tool preview display fields change', () => {
+    const userMessage: ConversationItem['message'] = {
+      role: 'user',
+      content: 'edit a file',
+      timestamp: 1,
+    };
+    const toolCall = {
+      type: 'toolCall' as const,
+      id: 'edit-1',
+      name: 'edit',
+      arguments: { path: 'src/app.ts' },
+    };
+    const assistantMessage: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [toolCall],
+      timestamp: 2,
+    };
+    const firstPreview: ToolCallPreviewState = {
+      toolCallId: 'edit-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        diff: '-old\n+new',
+        additions: 1,
+        deletions: 1,
+      },
+    };
+    const nextPreview: ToolCallPreviewState = {
+      toolCallId: 'edit-1',
+      toolName: 'edit',
+      preview: {
+        kind: 'file_edit',
+        path: 'src/app.ts',
+        diff: '-old\n+new\n+extra',
+        additions: 2,
+        deletions: 1,
+      },
+    };
+    const projector = createConversationRowsProjector();
+
+    const firstRows = projector.project({
+      isStreaming: true,
+      busyState: AGENT_BUSY_STATE,
+      toolExecutionsById: {},
+      toolPreviewsById: { 'edit-1': firstPreview },
+      items: [
+        { key: 'user-1', message: userMessage },
+        { key: 'assistant-1', message: assistantMessage },
+      ],
+    });
+    const nextRows = projector.project({
+      isStreaming: true,
+      busyState: AGENT_BUSY_STATE,
+      toolExecutionsById: {},
+      toolPreviewsById: { 'edit-1': nextPreview },
+      items: [
+        { key: 'user-1', message: userMessage },
+        { key: 'assistant-1', message: assistantMessage },
+      ],
+    });
+
+    const firstAssistant = firstRows[1] as AssistantConversationRow;
+    const nextAssistant = nextRows[1] as AssistantConversationRow;
+
+    expect(nextAssistant).not.toBe(firstAssistant);
+    expect(nextAssistant.entries[0]).not.toBe(firstAssistant.entries[0]);
   });
 });
 describe('buildConversationRows', () => {

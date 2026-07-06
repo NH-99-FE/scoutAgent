@@ -5,7 +5,7 @@ import type { ScoutExtensionUIRequest } from '@scout-agent/shared';
 
 const scrollerItemRenderCounts = vi.hoisted(() => new Map<string, number>());
 
-vi.mock('@/features/conversation/ConversationScroller', () => ({
+vi.mock('@/features/conversation/view/ConversationScroller', () => ({
   ConversationScrollerContent: ({ children, ...props }: ComponentProps<'div'>) => (
     <div data-slot="message-scroller-content" {...props}>
       {children}
@@ -34,8 +34,8 @@ vi.mock('@/bridge/protocol-client', () => ({
   protocolClient: protocolClientMock,
 }));
 
-import { ConversationTranscript } from '@/features/conversation/ConversationTranscript';
-import type { ConversationTranscriptRow } from '@/features/conversation/conversation-transcript-rows';
+import { ConversationTranscript } from '@/features/conversation/view/ConversationTranscript';
+import type { ConversationTranscriptRow } from '@/features/conversation/render-model/conversation-transcript-rows';
 
 describe('ConversationTranscript', () => {
   beforeEach(() => {

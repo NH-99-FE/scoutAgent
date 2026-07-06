@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AssistantProcessEntry } from '@/features/conversation/conversation-view-model';
+import type { AssistantProcessEntry } from '@/features/conversation/render-model/conversation-view-model';
 
 const { registerExpansionNode, setExpanded } = vi.hoisted(() => ({
   registerExpansionNode: vi.fn(),
@@ -16,11 +16,11 @@ vi.mock('@/store/conversation-expansion-store', () => ({
   },
 }));
 
-vi.mock('@/features/conversation/conversation-expansion-node', () => ({
+vi.mock('@/features/conversation/view/conversation-expansion-node', () => ({
   useRegisterConversationExpansionNode: registerExpansionNode,
 }));
 
-import { AssistantProcessBlock } from '@/features/conversation/AssistantProcessBlock';
+import { AssistantProcessBlock } from '@/features/conversation/view/AssistantProcessBlock';
 
 describe('AssistantProcessBlock', () => {
   beforeEach(() => {

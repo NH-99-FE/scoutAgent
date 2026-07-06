@@ -8,14 +8,9 @@ import { getConversationExpansionScope } from '@/store/conversation-expansion-st
 import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
 import { ConversationScroller } from './ConversationScroller';
 import { ConversationTranscript } from './ConversationTranscript';
-import {
-  createConversationRowsProjector,
-  type ConversationViewItem,
-} from './conversation-view-model';
-import {
-  createConversationTranscriptRows,
-  type ConversationTranscriptAddon,
-} from './conversation-transcript-rows';
+import type { ConversationViewItem } from '../render-model/conversation-view-model';
+import { createConversationViewProjector } from '../render-model/conversation-view-projector';
+import type { ConversationTranscriptAddon } from '../render-model/conversation-transcript-rows';
 
 interface ConversationViewProps {
   busyState: ScoutBusyState;
@@ -43,27 +38,31 @@ export function ConversationView({
   showScrollToBottomButton = false,
   transcriptAddons = EMPTY_TRANSCRIPT_ADDONS,
 }: ConversationViewProps) {
-  const projector = useMemo(() => createConversationRowsProjector(), []);
-  const rows = useMemo(() => {
-    return projector.project({
+  const projector = useMemo(() => createConversationViewProjector(), []);
+  const transcriptRows = useMemo(
+    () =>
+      projector.project({
+        items,
+        isStreaming,
+        busyState,
+        toolExecutionsById,
+        toolPreviewsById,
+        transcriptAddons,
+      }),
+    [
+      projector,
       items,
       isStreaming,
       busyState,
       toolExecutionsById,
       toolPreviewsById,
-    });
-  }, [projector, items, isStreaming, busyState, toolExecutionsById, toolPreviewsById]);
-  const transcriptRows = useMemo(
-    () => createConversationTranscriptRows({ addons: transcriptAddons, busyState, rows }),
-    [busyState, rows, transcriptAddons],
+      transcriptAddons,
+    ],
   );
 
   // 发送消息不隐式滚底；用户可用一键到底，已在底部时由 autoScroll 自然跟随。
   return (
-    <ConversationScroller
-      className={className}
-      showScrollToBottomButton={showScrollToBottomButton}
-    >
+    <ConversationScroller className={className} showScrollToBottomButton={showScrollToBottomButton}>
       <ConversationTranscript
         expansionScope={expansionScope}
         isStreaming={isStreaming}

@@ -12,7 +12,7 @@ vi.mock('@/bridge/protocol-client', () => ({
   },
 }));
 
-import { ConversationExtensionRequestCard } from '@/features/conversation/ConversationExtensionRequestsPanel';
+import { ConversationExtensionRequestCard } from '@/features/conversation/view/ConversationExtensionRequestsPanel';
 import { useUiStore } from '@/store/ui-store';
 
 describe('ConversationExtensionRequestCard', () => {

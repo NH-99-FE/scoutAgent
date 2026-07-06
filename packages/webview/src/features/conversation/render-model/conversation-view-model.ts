@@ -31,7 +31,7 @@ import {
   resolveRuntimeActivity,
   type AssistantRuntimeActivity,
 } from './conversation-turn-index';
-import { contentToText } from './tool-display';
+import { contentToText } from '../tool-display';
 
 export type {
   AssistantChangesReview,

@@ -35,18 +35,18 @@ import {
   type AssistantOutcomeConversationRow,
   type AssistantVisibleContent,
   type SystemConversationRow,
-} from './conversation-view-model';
+} from '../render-model/conversation-view-model';
 import { AssistantProcessBlock } from './AssistantProcessBlock';
 import { ConversationScrollerContent, ConversationScrollerItem } from './ConversationScroller';
 import {
   type ConversationExtensionRequestsTranscriptRow,
   type ConversationRuntimeStatusTranscriptRow,
   type ConversationTranscriptRow,
-} from './conversation-transcript-rows';
+} from '../render-model/conversation-transcript-rows';
 import { ConversationExtensionRequestsPanel } from './ConversationExtensionRequestsPanel';
 import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
 import { MarkdownContent } from './MarkdownContent';
-import { contentToText } from './tool-display';
+import { contentToText } from '../tool-display';
 
 const CHANGES_REVIEW_VISIBLE_FILE_LIMIT = 3;
 

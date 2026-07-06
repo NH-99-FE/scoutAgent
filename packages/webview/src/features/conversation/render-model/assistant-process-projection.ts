@@ -32,7 +32,7 @@ import {
   hasToolDisplaySummary,
   resolveToolActivitySummary,
   resolveToolDisplayResult,
-} from './tool-display';
+} from '../tool-display';
 
 type AssistantProcessSegment = Omit<
   AssistantProcessEntry,

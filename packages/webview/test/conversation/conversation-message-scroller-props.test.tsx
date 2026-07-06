@@ -72,7 +72,7 @@ vi.mock('@/components/ui/message-scroller', () => ({
   useMessageScrollerScrollable: () => ({ start: false, end: false }),
 }));
 
-import { ConversationView } from '@/features/conversation/ConversationView';
+import { ConversationView } from '@/features/conversation';
 import type { ConversationItem } from '@/store/conversation-store';
 
 const IDLE_BUSY_STATE: ScoutBusyState = { kind: 'idle', cancellable: false };

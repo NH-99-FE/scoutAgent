@@ -18,7 +18,7 @@ import type {
   ToolCallPreviewState,
   ToolExecutionState,
 } from '@/store/conversation-store';
-import type { ToolDisplayResult } from './tool-display';
+import type { ToolDisplayResult } from '../tool-display';
 
 export type ConversationViewItem = ConversationItem | ConversationNoticeItem;
 

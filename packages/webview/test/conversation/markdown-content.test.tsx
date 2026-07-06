@@ -11,7 +11,7 @@ vi.mock('react-markdown', () => ({
   },
 }));
 
-import { MarkdownContent } from '@/features/conversation/MarkdownContent';
+import { MarkdownContent } from '@/features/conversation/view/MarkdownContent';
 
 describe('MarkdownContent', () => {
   beforeEach(() => {

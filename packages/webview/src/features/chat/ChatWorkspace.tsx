@@ -42,9 +42,11 @@ import {
 } from '@/store/session-store';
 import { useExtensionUIRequests, useUiActions } from '@/store/ui-store';
 import { ChatComposer, ComposerActivityTrayContainer } from '@/features/composer';
-import { ConversationView } from '@/features/conversation/ConversationView';
-import { applyForkOriginNotice } from '@/features/conversation/conversation-notices';
-import { createExtensionRequestsTranscriptAddon } from '@/features/conversation/conversation-transcript-rows';
+import {
+  applyForkOriginNotice,
+  ConversationView,
+  createExtensionRequestsTranscriptAddon,
+} from '@/features/conversation';
 import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
 import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
 import { useTaskHistoryPanel } from '@/features/tasks/use-task-history-panel';
