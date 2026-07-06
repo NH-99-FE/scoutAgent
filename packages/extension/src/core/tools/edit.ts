@@ -105,7 +105,7 @@ export interface EditToolOptions {
 
 /**
  * 处理旧版 top-level oldText/newText 参数和 JSON 字符串形式的 edits。
- * 某些模型（Opus 4.6, GLM-5.1）会把 edits 发为 JSON 字符串而非数组。
+ * 只接受可无歧义还原的参数形态；非法 JSON 继续交给 schema 校验报错。
  */
 function prepareEditArguments(input: unknown): EditToolInput {
   if (!input || typeof input !== 'object') {
@@ -114,7 +114,7 @@ function prepareEditArguments(input: unknown): EditToolInput {
 
   const args = input as Record<string, unknown>;
 
-  // 某些模型把 edits 发为 JSON 字符串
+  // 某些 provider/transport 会把数组边界包装成 JSON 字符串。
   if (typeof args.edits === 'string') {
     try {
       const parsed = JSON.parse(args.edits);
@@ -157,9 +157,13 @@ export function createEditToolDefinition(
     label: 'edit',
     description:
       'Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.',
-    promptSnippet: 'Edit files with exact text replacement',
+    promptSnippet:
+      'Make precise file edits with exact text replacement, including multiple disjoint edits in one call',
     promptGuidelines: [
-      'Use edit for targeted replacements. Use write for new files or complete rewrites.',
+      'Use edit for precise changes (edits[].oldText must match exactly)',
+      'When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls',
+      'Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.',
+      'Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.',
     ],
     presentation: { pathArguments: ['path'] },
     parameters: editSchema,

@@ -130,6 +130,8 @@ export async function createAgentSessionFromServices(
     skills: options.services.resources.skills,
     promptTemplates: options.services.resources.promptTemplates,
     contextFiles: options.services.resources.contextFiles,
+    systemPrompt: options.services.resources.systemPrompt,
+    appendSystemPrompt: options.services.resources.appendSystemPrompt,
     extensionRunner: options.services.extensionRunner,
     loadExtensionResources: (resources) =>
       options.services.resourceLoader.extendResources(resources),

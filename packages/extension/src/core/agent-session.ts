@@ -215,6 +215,8 @@ export interface AgentSessionOptions {
   skills: ScoutSkill[];
   promptTemplates?: PromptTemplate[];
   contextFiles?: ScoutContextFile[];
+  systemPrompt?: string;
+  appendSystemPrompt?: string[];
   extensionRunner?: ScoutExtensionRunner;
   loadExtensionResources?: (
     resources: DiscoveredExtensionResources,
@@ -299,6 +301,8 @@ export class AgentSession implements CoreDisposable {
   private skills: ScoutSkill[];
   private promptTemplates: PromptTemplate[];
   private contextFiles: ScoutContextFile[];
+  private resourceSystemPrompt?: string;
+  private resourceAppendSystemPrompt: string[];
   private extensionRunner?: ScoutExtensionRunner;
   private loadExtensionResources?: (
     resources: DiscoveredExtensionResources,
@@ -381,6 +385,8 @@ export class AgentSession implements CoreDisposable {
     this.skills = options.skills;
     this.promptTemplates = options.promptTemplates ?? [];
     this.contextFiles = options.contextFiles ?? [];
+    this.resourceSystemPrompt = options.systemPrompt;
+    this.resourceAppendSystemPrompt = options.appendSystemPrompt ?? [];
     this.extensionRunner = options.extensionRunner;
     this.loadExtensionResources = options.loadExtensionResources;
     this.sessionStartEvent = options.sessionStartEvent ?? {
@@ -1238,10 +1244,14 @@ export class AgentSession implements CoreDisposable {
     skills?: ScoutSkill[];
     promptTemplates?: PromptTemplate[];
     contextFiles?: ScoutContextFile[];
+    systemPrompt?: string;
+    appendSystemPrompt?: string[];
   }): Promise<void> {
     this.skills = resources.skills ?? [];
     this.promptTemplates = resources.promptTemplates ?? [];
     this.contextFiles = resources.contextFiles ?? [];
+    this.resourceSystemPrompt = resources.systemPrompt;
+    this.resourceAppendSystemPrompt = resources.appendSystemPrompt ?? [];
     this.lastSystemPrompt = this.buildCurrentSystemPrompt();
     if (this.agent) {
       this.agent.state.systemPrompt = this.lastSystemPrompt;
@@ -1367,6 +1377,8 @@ export class AgentSession implements CoreDisposable {
       skills: loadedResources.skills,
       promptTemplates: loadedResources.promptTemplates,
       contextFiles: loadedResources.contextFiles,
+      systemPrompt: loadedResources.systemPrompt,
+      appendSystemPrompt: loadedResources.appendSystemPrompt,
     });
     for (const diag of loadedResources.diagnostics) {
       const prefix = diag.type === 'error' ? 'ERROR' : 'WARN';
@@ -2275,7 +2287,7 @@ export class AgentSession implements CoreDisposable {
     if (!this.extensionRunner) return undefined;
     const input =
       typeof context.args === 'object' && context.args !== null
-        ? ({ ...(context.args as Record<string, unknown>) } as Record<string, unknown>)
+        ? (context.args as Record<string, unknown>)
         : {};
     const result = await this.extensionRunner.emitToolCall({
       type: 'tool_call',
@@ -2968,18 +2980,23 @@ export class AgentSession implements CoreDisposable {
     for (const tool of activeTools) {
       if (tool.promptSnippet) {
         toolSnippets[tool.name] = tool.promptSnippet;
-      } else {
-        toolSnippets[tool.name] = tool.description;
       }
       if (tool.promptGuidelines) {
         toolGuidelines.push(...tool.promptGuidelines);
       }
     }
 
+    const appendSystemPrompt =
+      this.resourceAppendSystemPrompt.length > 0
+        ? this.resourceAppendSystemPrompt.join('\n\n')
+        : undefined;
+
     return buildSystemPrompt({
+      customPrompt: this.resourceSystemPrompt,
       selectedTools: activeTools.map((t) => t.name),
       toolSnippets,
       promptGuidelines: toolGuidelines,
+      appendSystemPrompt,
       cwd: this.cwd,
       skills: this.skills,
       contextFiles: this.contextFiles,

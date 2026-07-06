@@ -204,6 +204,43 @@ describe('ScoutExtensionRunner', () => {
     ).toBeUndefined();
   });
 
+  it('passes tool_call input mutations to later handlers', async () => {
+    const runtime = createExtensionRuntime();
+    const seen: unknown[] = [];
+    const first = await loadExtensionFromFactory(
+      async (scout) => {
+        scout.on('tool_call', async (event) => {
+          (event as { input: Record<string, unknown> }).input.command = 'echo patched';
+        });
+      },
+      runtime,
+      undefined,
+      '<first>',
+    );
+    const second = await loadExtensionFromFactory(
+      async (scout) => {
+        scout.on('tool_call', async (event) => {
+          seen.push((event as { input: Record<string, unknown> }).input.command);
+        });
+      },
+      runtime,
+      undefined,
+      '<second>',
+    );
+    const runner = createRunner([first, second]);
+    const input = { command: 'echo original' };
+
+    await runner.emitToolCall({
+      type: 'tool_call',
+      toolCallId: 'call-1',
+      toolName: 'bash',
+      input,
+    });
+
+    expect(input).toEqual({ command: 'echo patched' });
+    expect(seen).toEqual(['echo patched']);
+  });
+
   it('runs the permission gate example with Pi-style patterns', async () => {
     const runtime = createExtensionRuntime();
     const extension = await loadExtensionFromFactory(

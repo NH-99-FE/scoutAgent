@@ -335,9 +335,10 @@ export interface InputEvent {
 }
 
 /**
- * Fired before a tool executes. `input` is mutable within the extension hook
- * pipeline: later handlers observe earlier mutations, but mutations are not
- * written back to the actual tool execution arguments.
+ * Fired before a tool executes. Can block.
+ *
+ * `event.input` is mutable. Mutate it in place to patch tool arguments before execution.
+ * Later `tool_call` handlers see earlier mutations. No re-validation is performed after mutation.
  */
 export interface ToolCallEvent {
   type: 'tool_call';
@@ -406,6 +407,7 @@ export interface ContextEventResult {
 }
 
 export interface ToolCallEventResult {
+  /** Block tool execution. To modify arguments, mutate `event.input` in place instead. */
   block?: boolean;
   reason?: string;
 }

@@ -87,4 +87,41 @@ describe('ScoutResourceLoader', () => {
       resources.skills.find((skill) => skill.name === 'extension-skill')?.sourceInfo?.source,
     ).toBe('extension');
   });
+
+  it('discovers project SYSTEM.md before global SYSTEM.md', async () => {
+    fs.writeFileSync(path.join(agentDir, 'SYSTEM.md'), 'global system');
+    fs.mkdirSync(path.join(cwd, '.scout'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.scout', 'SYSTEM.md'), 'project system');
+
+    const loader = new ScoutResourceLoader({ cwd, agentDir });
+    const resources = await loader.load();
+
+    expect(resources.systemPrompt).toBe('project system');
+  });
+
+  it('discovers APPEND_SYSTEM.md', async () => {
+    fs.mkdirSync(path.join(cwd, '.scout'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.scout', 'APPEND_SYSTEM.md'), 'project append');
+
+    const loader = new ScoutResourceLoader({ cwd, agentDir });
+    const resources = await loader.load();
+
+    expect(resources.appendSystemPrompt).toEqual(['project append']);
+  });
+
+  it('resolves explicit system prompt and append prompt sources', async () => {
+    const appendPath = path.join(tempDir, 'append.md');
+    fs.writeFileSync(appendPath, 'append from file');
+
+    const loader = new ScoutResourceLoader({
+      cwd,
+      agentDir,
+      systemPrompt: 'literal system',
+      appendSystemPrompt: ['literal append', appendPath],
+    });
+    const resources = await loader.load();
+
+    expect(resources.systemPrompt).toBe('literal system');
+    expect(resources.appendSystemPrompt).toEqual(['literal append', 'append from file']);
+  });
 });

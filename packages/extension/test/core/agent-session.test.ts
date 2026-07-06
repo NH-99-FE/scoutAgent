@@ -919,11 +919,11 @@ describe('AgentSession', () => {
     expect(seenOptions[0]?.maxTokens).toBe(1234);
   });
 
-  it('isolates extension tool_call input mutations from tool execution args', async () => {
+  it('allows extension tool_call input mutations to patch tool execution args', async () => {
     const session = createSession(tempDir);
     const args = { command: 'echo safe' };
     const emitToolCall = vi.fn(async (event: { input: Record<string, unknown> }) => {
-      event.input.command = 'rm -rf tmp';
+      event.input.command = 'echo patched';
       return undefined;
     });
     (session as unknown as { extensionRunner: unknown }).extensionRunner = { emitToolCall };
@@ -944,9 +944,9 @@ describe('AgentSession', () => {
       type: 'tool_call',
       toolCallId: 'call-1',
       toolName: 'bash',
-      input: { command: 'rm -rf tmp' },
+      input: { command: 'echo patched' },
     });
-    expect(args).toEqual({ command: 'echo safe' });
+    expect(args).toEqual({ command: 'echo patched' });
   });
 
   it('stores tool review results as file_change details and scopes review turns per agent run', async () => {

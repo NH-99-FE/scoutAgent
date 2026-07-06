@@ -34,17 +34,32 @@ export interface LoadedScoutResources {
   skills: SourcedScoutSkill[];
   promptTemplates: SourcedPromptTemplate[];
   contextFiles: ScoutContextFile[];
+  systemPrompt?: string;
+  appendSystemPrompt: string[];
   diagnostics: AgentSessionRuntimeDiagnostic[];
 }
 
 export interface ScoutResourceLoaderOptions {
   cwd: string;
   agentDir: string;
+  systemPrompt?: string;
+  appendSystemPrompt?: string[];
 }
 
 // ---------- 项目上下文 ----------
 
 const CONTEXT_FILE_CANDIDATES = ['AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD'];
+
+function resolvePromptInput(input: string | undefined): string | undefined {
+  if (!input) return undefined;
+  if (!existsSync(input)) return input;
+
+  try {
+    return readFileSync(input, 'utf-8');
+  } catch {
+    return input;
+  }
+}
 
 function loadContextFileFromDir(dir: string): ScoutContextFile | null {
   for (const filename of CONTEXT_FILE_CANDIDATES) {
@@ -105,11 +120,15 @@ export function loadProjectContextFiles(options: {
 export class ScoutResourceLoader {
   private readonly cwd: string;
   private readonly agentDir: string;
+  private readonly systemPromptSource?: string;
+  private readonly appendSystemPromptSource?: string[];
   private discoveredResources: DiscoveredExtensionResources = ScoutResourceLoader.emptyDiscovered();
 
   constructor(options: ScoutResourceLoaderOptions) {
     this.cwd = options.cwd;
     this.agentDir = options.agentDir;
+    this.systemPromptSource = options.systemPrompt;
+    this.appendSystemPromptSource = options.appendSystemPrompt;
   }
 
   static emptyDiscovered(): DiscoveredExtensionResources {
@@ -199,8 +218,39 @@ export class ScoutResourceLoader {
       skills,
       promptTemplates: dedupedPromptResult.promptTemplates,
       contextFiles: loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }),
+      systemPrompt: resolvePromptInput(this.systemPromptSource ?? this.discoverSystemPromptFile()),
+      appendSystemPrompt: this.resolveAppendSystemPrompt(),
       diagnostics,
     };
+  }
+
+  private resolveAppendSystemPrompt(): string[] {
+    const discoveredAppendPrompt = this.discoverAppendSystemPromptFile();
+    const sources =
+      this.appendSystemPromptSource ?? (discoveredAppendPrompt ? [discoveredAppendPrompt] : []);
+    return sources
+      .map((source) => resolvePromptInput(source))
+      .filter((source): source is string => source !== undefined);
+  }
+
+  private discoverSystemPromptFile(): string | undefined {
+    const projectPath = join(this.cwd, '.scout', 'SYSTEM.md');
+    if (existsSync(projectPath)) return projectPath;
+
+    const globalPath = join(this.agentDir, 'SYSTEM.md');
+    if (existsSync(globalPath)) return globalPath;
+
+    return undefined;
+  }
+
+  private discoverAppendSystemPromptFile(): string | undefined {
+    const projectPath = join(this.cwd, '.scout', 'APPEND_SYSTEM.md');
+    if (existsSync(projectPath)) return projectPath;
+
+    const globalPath = join(this.agentDir, 'APPEND_SYSTEM.md');
+    if (existsSync(globalPath)) return globalPath;
+
+    return undefined;
   }
 
   private buildPromptTemplateInputs(

@@ -98,6 +98,71 @@ describe('createAgentSessionServices', () => {
     result.session.dispose();
   });
 
+  it('threads loaded system prompt resources into AgentSession', async () => {
+    fs.mkdirSync(path.join(cwd, '.scout'), { recursive: true });
+    fs.writeFileSync(path.join(cwd, '.scout', 'SYSTEM.md'), 'project system');
+    fs.writeFileSync(path.join(cwd, '.scout', 'APPEND_SYSTEM.md'), 'project append');
+    const session = CoreSessionManager.inMemory(cwd);
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      configManager: createConfigManager(cwd),
+      session,
+    });
+
+    const result = await createAgentSessionFromServices({
+      services,
+      session,
+      logger: { appendLine: () => undefined },
+      sessionStartEvent: { type: 'session_start', reason: 'new' },
+    });
+    const prompt = (
+      result.session as unknown as { buildCurrentSystemPrompt: () => string }
+    ).buildCurrentSystemPrompt();
+
+    expect(prompt).toContain('project system');
+    expect(prompt).toContain('project append');
+    result.session.dispose();
+  });
+
+  it('keeps extension tools active but omits them from prompt without promptSnippet', async () => {
+    fs.writeFileSync(
+      path.join(cwd, '.scout', 'extensions', 'hidden-tool.ts'),
+      `export default function(scout) {
+        void scout.registerTool({
+          name: "hidden_tool",
+          label: "Hidden Tool",
+          description: "Description should not appear in available tools",
+          parameters: { type: "object", properties: {}, additionalProperties: false },
+          execute: async () => ({ content: [{ type: "text", text: "ok" }], details: undefined }),
+        });
+      }`,
+    );
+    const session = CoreSessionManager.inMemory(cwd);
+    const services = await createAgentSessionServices({
+      cwd,
+      agentDir,
+      configManager: createConfigManager(cwd),
+      session,
+    });
+
+    const result = await createAgentSessionFromServices({
+      services,
+      session,
+      logger: { appendLine: () => undefined },
+      sessionStartEvent: { type: 'session_start', reason: 'new' },
+    });
+    const prompt = (
+      result.session as unknown as { buildCurrentSystemPrompt: () => string }
+    ).buildCurrentSystemPrompt();
+
+    expect(result.session.getAllToolInfos().map((tool) => tool.name)).toContain('hidden_tool');
+    expect(result.session.getActiveToolNames()).toContain('hidden_tool');
+    expect(prompt).not.toContain('hidden_tool');
+    expect(prompt).not.toContain('Description should not appear in available tools');
+    result.session.dispose();
+  });
+
   it('does not emit session lifecycle during session creation', async () => {
     const discoveredSkillDir = path.join(tempDir, 'discovered-skill');
     fs.mkdirSync(discoveredSkillDir, { recursive: true });
