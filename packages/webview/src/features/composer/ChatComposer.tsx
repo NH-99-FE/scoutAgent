@@ -27,6 +27,7 @@ import {
   useVisualIsStreaming,
 } from '@/store/runtime-overlay-store';
 import { useSessionId } from '@/store/session-store';
+import { useUiActions } from '@/store/ui-store';
 import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
 import { ComposerActivityTray } from './ComposerActivityTray';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
@@ -102,6 +103,7 @@ interface SlashSelectionState {
 }
 
 const ABORT_CONFIRM_TIMEOUT_MS = 1800;
+const COMPACTION_SEND_BLOCKED_MESSAGE = '正在压缩上下文，请等待压缩完成后再发送';
 const EMPTY_QUEUE_STATE = {
   messages: [],
   followUps: [],
@@ -160,6 +162,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const composerActions = useComposerActions();
   const pendingCommandEffect = usePendingComposerCommandEffect();
   const runtimeOverlayActions = useRuntimeOverlayActions();
+  const uiActions = useUiActions();
   const visualBusy = useVisualBusyState();
   const currentSessionStreaming = useIsStreaming();
   const currentSessionVisualStreaming = useVisualIsStreaming();
@@ -246,6 +249,18 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     options?: { clearFollowUpQueue?: boolean },
   ) => {
     if (isSubmitDisabled || submitBlockedRef.current) return;
+    if (isCurrentSessionMode && visualBusy.kind === 'compaction') {
+      if (payload.images && payload.images.length > 0 && images.length === 0) {
+        composerActions.addImages(sessionId, payload.images);
+      }
+      setPendingSubmit(null);
+      uiActions.setNotification({
+        type: 'notification',
+        level: 'error',
+        message: COMPACTION_SEND_BLOCKED_MESSAGE,
+      });
+      return;
+    }
     if (props.mode === 'newSession') {
       submitBlockedRef.current = true;
       props.onBeginNewSessionRequest();

@@ -2239,6 +2239,34 @@ describe('ChatApp', () => {
     });
   });
 
+  it('keeps the draft and shows an error instead of sending while compacting', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+      isStreaming: true,
+      busyState: {
+        kind: 'compaction',
+        label: 'Compacting',
+        cancellable: true,
+        reason: 'manual',
+      },
+    });
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: '  压缩中不要丢这条\n' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
+
+    expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
+    expect(screen.getByLabelText('要求后续变更')).toHaveValue('  压缩中不要丢这条\n');
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'error',
+      message: '正在压缩上下文，请等待压缩完成后再发送',
+    });
+  });
+
   it('sends steering messages with Ctrl Enter while streaming', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
       isStreaming: true,
