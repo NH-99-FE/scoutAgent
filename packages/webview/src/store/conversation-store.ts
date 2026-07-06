@@ -53,6 +53,9 @@ interface ConversationStore {
   messageKeys: string[];
   messageIndexByKey: Record<string, number>;
   conversationItems: ConversationItem[];
+  conversationTitle: string;
+  forkCandidateVersion: string;
+  userMessageCount: number;
   isStreaming: boolean;
   busyState: ScoutBusyState;
   queueState: ScoutQueueState;
@@ -67,8 +70,21 @@ interface ConversationStore {
 
 type ConversationMessageState = Pick<
   ConversationStore,
-  'messages' | 'messageKeys' | 'messageIndexByKey' | 'conversationItems'
+  | 'messages'
+  | 'messageKeys'
+  | 'messageIndexByKey'
+  | 'conversationItems'
+  | 'conversationTitle'
+  | 'forkCandidateVersion'
+  | 'userMessageCount'
 >;
+
+type ConversationReadModels = Pick<
+  ConversationStore,
+  'conversationTitle' | 'forkCandidateVersion' | 'userMessageCount'
+>;
+
+type ScoutUserMessage = Extract<ScoutMessage, { role: 'user' }>;
 
 export const IDLE_BUSY_STATE: ScoutBusyState = {
   kind: 'idle',
@@ -86,6 +102,9 @@ const initialState = {
   messageKeys: [] as string[],
   messageIndexByKey: createEmptyMessageIndexByKey(),
   conversationItems: [] as ConversationItem[],
+  conversationTitle: '',
+  forkCandidateVersion: '',
+  userMessageCount: 0,
   isStreaming: false,
   busyState: IDLE_BUSY_STATE,
   queueState: EMPTY_QUEUE_STATE,
@@ -145,7 +164,70 @@ function createConversationMessageState(
     messageKeys,
     messageIndexByKey: createMessageIndexByKey(messageKeys),
     conversationItems: createConversationItems(messages, messageKeys, previousItems),
+    ...createConversationReadModels(messages),
   };
+}
+
+function createConversationReadModels(messages: ScoutMessage[]): ConversationReadModels {
+  const forkCandidateIds: string[] = [];
+  let conversationTitle = '';
+  let titleResolved = false;
+  let userMessageCount = 0;
+
+  messages.forEach((message) => {
+    if (message.role !== 'user') return;
+    if (!titleResolved) {
+      conversationTitle = getUserMessageTitle(message);
+      titleResolved = true;
+    }
+    forkCandidateIds.push(getForkCandidateIdentity(message, userMessageCount));
+    userMessageCount += 1;
+  });
+
+  return {
+    conversationTitle,
+    forkCandidateVersion: forkCandidateIds.join('\n'),
+    userMessageCount,
+  };
+}
+
+function extendConversationReadModelsForAppend(
+  state: ConversationMessageState,
+  message: ScoutMessage,
+): ConversationReadModels {
+  if (message.role !== 'user') {
+    return {
+      conversationTitle: state.conversationTitle,
+      forkCandidateVersion: state.forkCandidateVersion,
+      userMessageCount: state.userMessageCount,
+    };
+  }
+
+  const forkCandidateIdentity = getForkCandidateIdentity(message, state.userMessageCount);
+  return {
+    conversationTitle:
+      state.userMessageCount === 0 ? getUserMessageTitle(message) : state.conversationTitle,
+    forkCandidateVersion: state.forkCandidateVersion
+      ? `${state.forkCandidateVersion}\n${forkCandidateIdentity}`
+      : forkCandidateIdentity,
+    userMessageCount: state.userMessageCount + 1,
+  };
+}
+
+function getForkCandidateIdentity(message: ScoutUserMessage, userIndex: number): string {
+  return message.entryId ?? `user:${userIndex}:${message.timestamp}`;
+}
+
+function getUserMessageTitle(message: ScoutUserMessage): string {
+  const content = message.content;
+  const text =
+    typeof content === 'string'
+      ? content
+      : content
+          .filter((item) => item.type === 'text')
+          .map((item) => item.text)
+          .join(' ');
+  return text.trim().slice(0, 32);
 }
 
 function replaceArrayItem<T>(items: T[], index: number, item: T): T[] {
@@ -173,20 +255,32 @@ function upsertProtocolMessage(
         state.messages.length,
       ),
       conversationItems: [...state.conversationItems, { key: messageId, message }],
+      ...extendConversationReadModelsForAppend(state, message),
     };
   }
 
   if (state.messages[index] === message) return undefined;
+  const previousMessage = state.messages[index];
   const previousItem = state.conversationItems[index];
   const nextItem =
     previousItem?.key === messageId && previousItem.message === message
       ? previousItem
       : { key: messageId, message };
+  const nextMessages = replaceArrayItem(state.messages, index, message);
+  const nextReadModels =
+    previousMessage?.role === 'user' || message.role === 'user'
+      ? createConversationReadModels(nextMessages)
+      : {
+          conversationTitle: state.conversationTitle,
+          forkCandidateVersion: state.forkCandidateVersion,
+          userMessageCount: state.userMessageCount,
+        };
   return {
-    messages: replaceArrayItem(state.messages, index, message),
+    messages: nextMessages,
     messageKeys: state.messageKeys,
     messageIndexByKey: state.messageIndexByKey,
     conversationItems: replaceArrayItem(state.conversationItems, index, nextItem),
+    ...nextReadModels,
   };
 }
 
@@ -353,12 +447,8 @@ function isEventForCurrentSession(
 export const useConversationMessages = () => useConversationStore((state) => state.messages);
 export const useConversationItems = () => useConversationStore((state) => state.conversationItems);
 export const useConversationForkCandidateVersion = () =>
-  useConversationStore((state) =>
-    state.messages
-      .filter((message) => message.role === 'user')
-      .map((message, index) => message.entryId ?? `user:${index}:${message.timestamp}`)
-      .join('\n'),
-  );
+  useConversationStore((state) => state.forkCandidateVersion);
+export const useConversationTitle = () => useConversationStore((state) => state.conversationTitle);
 export const useConversationMessageCount = () =>
   useConversationStore((state) => state.messages.length);
 export const useIsStreaming = () => useConversationStore((state) => state.isStreaming);

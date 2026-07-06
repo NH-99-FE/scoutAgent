@@ -2,7 +2,7 @@
 // Chat Workspace — 会话中页面布局
 // ============================================================
 
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   Download,
@@ -26,9 +26,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  useConversationMessages,
   useConversationItems,
-  useActiveChangesReview,
+  useConversationTitle,
   useToolExecutionsById,
   useToolPreviewsById,
 } from '@/store/conversation-store';
@@ -43,7 +42,7 @@ import {
 } from '@/store/session-store';
 import { useExtensionUIRequests, useUiActions } from '@/store/ui-store';
 import { ChatComposer } from '@/features/composer/ChatComposer';
-import { createComposerChangesReviewSummary } from '@/features/composer/composer-changes-review-summary';
+import { ComposerActivityTrayContainer } from '@/features/composer/ComposerActivityTrayContainer';
 import { ConversationView } from '@/features/conversation/ConversationView';
 import { applyForkOriginNotice } from '@/features/conversation/conversation-notices';
 import { createExtensionRequestsTranscriptAddon } from '@/features/conversation/conversation-transcript-rows';
@@ -60,19 +59,10 @@ interface ChatWorkspaceProps {
 
 export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspaceProps) {
   const [renameOpen, setRenameOpen] = useState(false);
-  const messages = useConversationMessages();
-  const conversationItems = useConversationItems();
-  const isStreaming = useVisualIsStreaming();
-  const toolExecutionsById = useToolExecutionsById();
-  const toolPreviewsById = useToolPreviewsById();
-  const activeChangesReview = useActiveChangesReview();
   const busyState = useVisualBusyState();
-  const extensionUIRequests = useExtensionUIRequests();
-  const sessionFile = useSessionFile();
-  const sessionId = useSessionId();
   const sessionName = useSessionName();
   const parentSessionPath = useParentSessionPath();
-  const forkPointEntryId = useForkPointEntryId();
+  const fallbackTitle = useConversationTitle();
   const {
     isRendered: taskHistoryRendered,
     isOpen: taskHistoryOpen,
@@ -88,25 +78,7 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
     toggle: toggleTaskHistory,
     setQuery: setTaskHistoryQuery,
   } = useTaskHistoryPanel();
-  const fallbackTitle = getConversationTitle(messages);
   const title = sessionName || fallbackTitle || '当前会话';
-  const conversationViewItems = useMemo(
-    () =>
-      applyForkOriginNotice({
-        forkPointEntryId,
-        hasParentSession: Boolean(parentSessionPath),
-        items: conversationItems,
-      }),
-    [conversationItems, forkPointEntryId, parentSessionPath],
-  );
-  const composerChangesReview = useMemo(
-    () => createComposerChangesReviewSummary(activeChangesReview, toolPreviewsById),
-    [activeChangesReview, toolPreviewsById],
-  );
-  const transcriptAddons = useMemo(() => {
-    const extensionRequestsAddon = createExtensionRequestsTranscriptAddon(extensionUIRequests);
-    return extensionRequestsAddon ? [extensionRequestsAddon] : [];
-  }, [extensionUIRequests]);
   const handleOpenTask = (task: ScoutTaskItem) => {
     if (task.isCurrent) {
       closeTaskHistory();
@@ -176,24 +148,55 @@ export function ChatWorkspace({ onBack, onNewSession, onOpenTask }: ChatWorkspac
         </div>
       ) : null}
 
-      <ConversationView
-        busyState={busyState}
-        className="min-h-0 flex-1"
-        expansionScope={getConversationExpansionScope({ sessionFile, sessionId })}
-        isStreaming={isStreaming}
-        items={conversationViewItems}
-        showScrollToBottomButton
-        transcriptAddons={transcriptAddons}
-        toolExecutionsById={toolExecutionsById}
-        toolPreviewsById={toolPreviewsById}
-      />
+      <ConversationPanel />
 
       <footer className="bg-background max-w-full min-w-0 shrink-0 px-3 pt-1 pb-3">
-        <ChatComposer changesReview={composerChangesReview} placeholder="要求后续变更" />
+        <ComposerActivityTrayContainer />
+        <ChatComposer placeholder="要求后续变更" />
       </footer>
     </main>
   );
 }
+
+const ConversationPanel = memo(function ConversationPanel() {
+  const conversationItems = useConversationItems();
+  const isStreaming = useVisualIsStreaming();
+  const busyState = useVisualBusyState();
+  const toolExecutionsById = useToolExecutionsById();
+  const toolPreviewsById = useToolPreviewsById();
+  const extensionUIRequests = useExtensionUIRequests();
+  const sessionFile = useSessionFile();
+  const sessionId = useSessionId();
+  const parentSessionPath = useParentSessionPath();
+  const forkPointEntryId = useForkPointEntryId();
+  const conversationViewItems = useMemo(
+    () =>
+      applyForkOriginNotice({
+        forkPointEntryId,
+        hasParentSession: Boolean(parentSessionPath),
+        items: conversationItems,
+      }),
+    [conversationItems, forkPointEntryId, parentSessionPath],
+  );
+  const transcriptAddons = useMemo(() => {
+    const extensionRequestsAddon = createExtensionRequestsTranscriptAddon(extensionUIRequests);
+    return extensionRequestsAddon ? [extensionRequestsAddon] : [];
+  }, [extensionUIRequests]);
+
+  return (
+    <ConversationView
+      busyState={busyState}
+      className="min-h-0 flex-1"
+      expansionScope={getConversationExpansionScope({ sessionFile, sessionId })}
+      isStreaming={isStreaming}
+      items={conversationViewItems}
+      showScrollToBottomButton
+      transcriptAddons={transcriptAddons}
+      toolExecutionsById={toolExecutionsById}
+      toolPreviewsById={toolPreviewsById}
+    />
+  );
+});
 
 function ConversationMoreMenu({
   onRename,
@@ -245,17 +248,4 @@ function ConversationMoreMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
-
-function getConversationTitle(messages: ReturnType<typeof useConversationMessages>): string {
-  const firstUserMessage = messages.find((message) => message.role === 'user');
-  if (!firstUserMessage) return '';
-  const text =
-    typeof firstUserMessage.content === 'string'
-      ? firstUserMessage.content
-      : firstUserMessage.content
-          .filter((content) => content.type === 'text')
-          .map((content) => content.text)
-          .join(' ');
-  return text.trim().slice(0, 32);
 }

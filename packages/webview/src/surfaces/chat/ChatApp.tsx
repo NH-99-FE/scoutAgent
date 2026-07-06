@@ -5,7 +5,7 @@
 import type { ScoutTaskItem } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { HOME_COMPOSER_SESSION_ID, useComposerActions } from '@/store/composer-store';
-import { useConversationMessages } from '@/store/conversation-store';
+import { useConversationMessageCount } from '@/store/conversation-store';
 import { useSessionFile } from '@/store/session-store';
 import {
   useChatView,
@@ -17,14 +17,14 @@ import { ChatWorkspace } from '@/features/chat/ChatWorkspace';
 import { TaskHome } from '@/features/tasks/TaskHome';
 
 export function ChatApp() {
-  const messages = useConversationMessages();
+  const messageCount = useConversationMessageCount();
   const sessionFile = useSessionFile();
   const chatView = useChatView();
   const newSessionPending = useNewSessionPending();
   const openingTaskSessionPath = useOpeningTaskSessionPath();
   const uiActions = useUiActions();
   const composerActions = useComposerActions();
-  const hasConversation = messages.length > 0;
+  const hasConversation = messageCount > 0;
   const isOpeningTask =
     openingTaskSessionPath !== undefined && openingTaskSessionPath !== sessionFile;
   const shouldShowHome =

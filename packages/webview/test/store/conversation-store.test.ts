@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { useConversationItems, useConversationStore } from '@/store/conversation-store';
+import {
+  useConversationForkCandidateVersion,
+  useConversationItems,
+  useConversationStore,
+  useConversationTitle,
+} from '@/store/conversation-store';
 import type { ScoutBusyState, ScoutMessage, ScoutWebviewState } from '@scout-agent/shared';
 
 function makeState(
@@ -189,6 +194,113 @@ describe('conversation store', () => {
     ]);
   });
 
+  it('keeps conversation read models stable across assistant stream updates', () => {
+    const actions = useConversationStore.getState().actions;
+    let titleRenderCount = 0;
+    let forkVersionRenderCount = 0;
+    const titleHook = renderHook(() => {
+      titleRenderCount += 1;
+      return useConversationTitle();
+    });
+    const forkVersionHook = renderHook(() => {
+      forkVersionRenderCount += 1;
+      return useConversationForkCandidateVersion();
+    });
+
+    act(() => {
+      actions.applyStateSnapshot(
+        makeState([
+          { role: 'user', content: 'first prompt', timestamp: 1, entryId: 'user-1' },
+          {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hel' }],
+            timestamp: 2,
+            entryId: 'assistant-1',
+          },
+        ]),
+      );
+    });
+
+    expect(titleHook.result.current).toBe('first prompt');
+    expect(forkVersionHook.result.current).toBe('user-1');
+    expect(titleRenderCount).toBe(2);
+    expect(forkVersionRenderCount).toBe(2);
+
+    act(() => {
+      actions.applyRuntimeEvent({
+        type: 'message_update',
+        messageId: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'hello' }],
+          timestamp: 2,
+          entryId: 'assistant-1',
+        },
+      });
+    });
+
+    expect(titleHook.result.current).toBe('first prompt');
+    expect(forkVersionHook.result.current).toBe('user-1');
+    expect(titleRenderCount).toBe(2);
+    expect(forkVersionRenderCount).toBe(2);
+
+    act(() => {
+      actions.applyRuntimeEvent({
+        type: 'message_start',
+        messageId: 'user-2-runtime',
+        message: { role: 'user', content: 'second prompt', timestamp: 3 },
+      });
+    });
+
+    expect(titleHook.result.current).toBe('first prompt');
+    expect(forkVersionHook.result.current).toBe('user-1\nuser:1:3');
+    expect(titleRenderCount).toBe(2);
+    expect(forkVersionRenderCount).toBe(3);
+  });
+
+  it('updates conversation read models when a runtime user message is replaced', () => {
+    const actions = useConversationStore.getState().actions;
+
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'runtime-user-1',
+      message: { role: 'user', content: 'draft prompt', timestamp: 1 },
+    });
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'assistant-1',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'working' }],
+        timestamp: 2,
+      },
+    });
+
+    expect(useConversationStore.getState().conversationTitle).toBe('draft prompt');
+    expect(useConversationStore.getState().forkCandidateVersion).toBe('user:0:1');
+
+    actions.applyRuntimeEvent({
+      type: 'message_update',
+      messageId: 'runtime-user-1',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'persisted prompt' }],
+        timestamp: 1,
+        entryId: 'entry-user-1',
+      },
+    });
+
+    const state = useConversationStore.getState();
+    expect(state.conversationTitle).toBe('persisted prompt');
+    expect(state.forkCandidateVersion).toBe('entry-user-1');
+    expect(state.messages[0]).toEqual({
+      role: 'user',
+      content: [{ type: 'text', text: 'persisted prompt' }],
+      timestamp: 1,
+      entryId: 'entry-user-1',
+    });
+  });
+
   it('replaces transient messages with the persisted state snapshot', () => {
     const actions = useConversationStore.getState().actions;
 
@@ -221,6 +333,50 @@ describe('conversation store', () => {
         entryId: 'entry-1',
       },
     ]);
+  });
+
+  it('rebuilds conversation read models when a snapshot replaces transient messages', () => {
+    const actions = useConversationStore.getState().actions;
+
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'runtime-user-1',
+      message: { role: 'user', content: 'transient prompt', timestamp: 1 },
+    });
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'runtime-assistant-1',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'streaming' }],
+        timestamp: 2,
+      },
+    });
+
+    expect(useConversationStore.getState().conversationTitle).toBe('transient prompt');
+    expect(useConversationStore.getState().forkCandidateVersion).toBe('user:0:1');
+
+    actions.applyStateSnapshot(
+      makeState([
+        {
+          role: 'user',
+          content: 'persisted prompt',
+          timestamp: 1,
+          entryId: 'entry-user-1',
+        },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'persisted answer' }],
+          timestamp: 2,
+          entryId: 'entry-assistant-1',
+        },
+      ]),
+    );
+
+    const state = useConversationStore.getState();
+    expect(state.messageKeys).toEqual(['entry-user-1', 'entry-assistant-1']);
+    expect(state.conversationTitle).toBe('persisted prompt');
+    expect(state.forkCandidateVersion).toBe('entry-user-1');
   });
 
   it('stores the follow-up queue snapshot from state updates', () => {

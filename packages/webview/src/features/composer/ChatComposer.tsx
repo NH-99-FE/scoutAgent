@@ -3,7 +3,7 @@
 // ============================================================
 
 import type { KeyboardEvent } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import type { ScoutImageContent } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
@@ -29,21 +29,16 @@ import {
 import { useSessionId } from '@/store/session-store';
 import { useUiActions } from '@/store/ui-store';
 import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
-import { ComposerActivityTray } from './ComposerActivityTray';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
 import { SlashCommandMenu } from './SlashCommandMenu';
-import type { ComposerChangesReviewSummary } from './composer-changes-review-summary';
 import { buildSlashCommandItems, type SlashCommandMenuItem } from './slash-command-options';
 import { useForkCandidateMenu } from './use-fork-candidate-menu';
 import { getSlashCommandTrigger } from './use-slash-command-trigger';
 
-export type { ComposerChangesReviewSummary } from './composer-changes-review-summary';
-
 interface BaseChatComposerProps {
-  changesReview?: ComposerChangesReviewSummary;
   draftSessionId?: string;
   onMessageSent?: () => void;
   placeholder: string;
@@ -65,7 +60,6 @@ interface NewSessionChatComposerProps extends BaseChatComposerProps {
 type ChatComposerProps = CurrentSessionChatComposerProps | NewSessionChatComposerProps;
 
 interface BaseChatComposerSessionProps {
-  changesReview?: ComposerChangesReviewSummary;
   onMessageSent?: () => void;
   placeholder: string;
   sessionId: string;
@@ -110,7 +104,7 @@ const EMPTY_QUEUE_STATE = {
   paused: false,
 } as const;
 
-export function ChatComposer(props: ChatComposerProps) {
+function ChatComposerView(props: ChatComposerProps) {
   const currentSessionId = useSessionId();
   const composerSessionId = props.draftSessionId ?? currentSessionId;
 
@@ -122,7 +116,6 @@ export function ChatComposer(props: ChatComposerProps) {
         placeholder={props.placeholder}
         sessionId={composerSessionId}
         submitDisabled={props.submitDisabled}
-        changesReview={undefined}
         onMessageSent={props.onMessageSent}
         onBeginNewSessionRequest={props.onBeginNewSessionRequest}
       />
@@ -136,14 +129,15 @@ export function ChatComposer(props: ChatComposerProps) {
       placeholder={props.placeholder}
       sessionId={composerSessionId}
       submitDisabled={props.submitDisabled ?? false}
-      changesReview={props.changesReview}
       onMessageSent={props.onMessageSent}
     />
   );
 }
 
+export const ChatComposer = memo(ChatComposerView);
+
 function ChatComposerSession(props: ChatComposerSessionProps) {
-  const { changesReview, mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
+  const { mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
   const [confirmAbort, setConfirmAbort] = useState(false);
   const [pendingSubmit, setPendingSubmit] = useState<PendingSubmit | null>(null);
   const [selectionStart, setSelectionStart] = useState(0);
@@ -452,7 +446,6 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   return (
     <>
       <div className="max-w-full min-w-0">
-        {isCurrentSessionMode ? <ComposerActivityTray changesReview={changesReview} /> : null}
         {forkMenu.open ? (
           <div ref={floatingPanelRef}>
             <ForkCandidateMenu
