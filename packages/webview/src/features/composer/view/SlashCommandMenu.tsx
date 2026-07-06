@@ -4,7 +4,7 @@
 
 import { cn } from '@/lib/utils';
 import { ComposerFloatingPanel, ComposerFloatingPanelHint } from './ComposerFloatingPanel';
-import type { SlashCommandMenuItem } from './slash-command-options';
+import type { SlashCommandMenuItem } from '../model/slash-command-options';
 
 interface SlashCommandMenuProps {
   activeIndex: number;

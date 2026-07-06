@@ -41,8 +41,7 @@ import {
   useSessionName,
 } from '@/store/session-store';
 import { useExtensionUIRequests, useUiActions } from '@/store/ui-store';
-import { ChatComposer } from '@/features/composer/ChatComposer';
-import { ComposerActivityTrayContainer } from '@/features/composer/ComposerActivityTrayContainer';
+import { ChatComposer, ComposerActivityTrayContainer } from '@/features/composer';
 import { ConversationView } from '@/features/conversation/ConversationView';
 import { applyForkOriginNotice } from '@/features/conversation/conversation-notices';
 import { createExtensionRequestsTranscriptAddon } from '@/features/conversation/conversation-transcript-rows';

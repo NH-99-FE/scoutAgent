@@ -5,7 +5,7 @@
 import { memo, useMemo } from 'react';
 import { useActiveChangesReview, useToolPreviewsById } from '@/store/conversation-store';
 import { ComposerActivityTray } from './ComposerActivityTray';
-import { createComposerChangesReviewSummary } from './composer-changes-review-summary';
+import { createComposerChangesReviewSummary } from '../model/composer-changes-review-summary';
 
 // ---------- Component ----------
 

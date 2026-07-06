@@ -34,9 +34,9 @@ import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
 import { SlashCommandMenu } from './SlashCommandMenu';
-import { buildSlashCommandItems, type SlashCommandMenuItem } from './slash-command-options';
-import { useForkCandidateMenu } from './use-fork-candidate-menu';
-import { getSlashCommandTrigger } from './use-slash-command-trigger';
+import { useForkCandidateMenu } from '../hooks/use-fork-candidate-menu';
+import { buildSlashCommandItems, type SlashCommandMenuItem } from '../model/slash-command-options';
+import { getSlashCommandTrigger } from '../model/slash-command-trigger';
 
 interface BaseChatComposerProps {
   draftSessionId?: string;
@@ -175,7 +175,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const canStop = isCurrentSessionMode && visualBusy.cancellable;
   const showStop = (visualIsStreaming || canStop) && !hasDraft;
   const hasPausedFollowUps = queueState.paused && queueState.followUps.length > 0;
-  const slashTrigger = getSlashCommandTrigger(text, selectionStart);
+  const slashTrigger = useMemo(
+    () => getSlashCommandTrigger(text, selectionStart),
+    [selectionStart, text],
+  );
   const slashKey = slashTrigger
     ? `${slashTrigger.range.start}:${slashTrigger.range.end}:${slashTrigger.query}`
     : null;
@@ -202,14 +205,16 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     prefetch: forkItemVisible,
     sessionId,
   });
+  const forkMenuOpen = forkMenu.open;
+  const closeForkMenu = forkMenu.close;
 
   useEffect(() => {
-    if (!forkMenu.open && !slashMenuOpen) return undefined;
+    if (!forkMenuOpen && !slashMenuOpen) return undefined;
     const closeFloatingPanelOnOutsidePointerDown = (event: PointerEvent) => {
       const panel = floatingPanelRef.current;
       if (event.target instanceof Node && panel?.contains(event.target)) return;
-      if (forkMenu.open) {
-        forkMenu.close();
+      if (forkMenuOpen) {
+        closeForkMenu();
         return;
       }
       setDismissedSlashKey(slashKey);
@@ -218,7 +223,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     return () => {
       document.removeEventListener('pointerdown', closeFloatingPanelOnOutsidePointerDown);
     };
-  }, [forkMenu, slashKey, slashMenuOpen]);
+  }, [closeForkMenu, forkMenuOpen, slashKey, slashMenuOpen]);
 
   useEffect(() => {
     if (!confirmAbort) return undefined;

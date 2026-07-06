@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoutChangesReviewSummary, ScoutFileEditPreview } from '@scout-agent/shared';
-import { createComposerChangesReviewSummary } from '@/features/composer/composer-changes-review-summary';
+import { createComposerChangesReviewSummary } from '@/features/composer/model/composer-changes-review-summary';
 
 function makeReview(
   files: ScoutChangesReviewSummary['files'],

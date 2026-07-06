@@ -8,7 +8,7 @@ import { IconButton } from '@/components/common/IconButton';
 import { Button } from '@/components/ui/button';
 import { useQueueState } from '@/store/conversation-store';
 import { cn } from '@/lib/utils';
-import type { ComposerChangesReviewSummary } from './composer-changes-review-summary';
+import type { ComposerChangesReviewSummary } from '../model/composer-changes-review-summary';
 
 interface ComposerActivityTrayProps {
   changesReview?: ComposerChangesReviewSummary;

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
-import { ChatComposer } from '@/features/composer/ChatComposer';
+import { ChatComposer } from '@/features/composer';
 import { useComposerStore } from '@/store/composer-store';
 
 describe('ChatComposer command effects', () => {
@@ -24,10 +24,7 @@ describe('ChatComposer command effects', () => {
     const textarea = screen.getByPlaceholderText('要求后续变更');
     await waitFor(() => {
       expect(textarea).toHaveFocus();
-      expect(textarea).toHaveAttribute(
-        'data-scout-suppress-focus-outline',
-        'true',
-      );
+      expect(textarea).toHaveAttribute('data-scout-suppress-focus-outline', 'true');
     });
     expect(useComposerStore.getState().pendingCommandEffect).toBeNull();
   });

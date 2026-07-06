@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoutCommandInfo } from '@scout-agent/shared';
-import { buildSlashCommandItems } from '@/features/composer/slash-command-options';
+import { buildSlashCommandItems } from '@/features/composer/model/slash-command-options';
 
 const BUILTIN_SOURCE_INFO = {
   path: '<builtin:webview>',

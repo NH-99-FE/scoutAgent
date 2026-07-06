@@ -2,7 +2,15 @@
 // Slash Command Options — 命令候选纯数据推导
 // ============================================================
 
-import { FileText, GitBranch, Lollipop, Plug, Sparkles, Split, type LucideIcon } from 'lucide-react';
+import {
+  FileText,
+  GitBranch,
+  Lollipop,
+  Plug,
+  Sparkles,
+  Split,
+  type LucideIcon,
+} from 'lucide-react';
 import type { ScoutCommandInfo } from '@scout-agent/shared';
 
 // ---------- 类型 ----------
