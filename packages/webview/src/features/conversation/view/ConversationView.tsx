@@ -9,7 +9,7 @@ import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversat
 import { ConversationScroller } from './ConversationScroller';
 import { ConversationTranscript } from './ConversationTranscript';
 import type { ConversationViewItem } from '../render-model/conversation-view-model';
-import { createConversationViewProjector } from '../render-model/conversation-view-projector';
+import { createConversationTranscriptProjector } from '../render-model/conversation-transcript-projector';
 import type { ConversationTranscriptAddon } from '../render-model/conversation-transcript-rows';
 
 interface ConversationViewProps {
@@ -38,7 +38,7 @@ export function ConversationView({
   showScrollToBottomButton = false,
   transcriptAddons = EMPTY_TRANSCRIPT_ADDONS,
 }: ConversationViewProps) {
-  const projector = useMemo(() => createConversationViewProjector(), []);
+  const projector = useMemo(() => createConversationTranscriptProjector(), []);
   const transcriptRows = useMemo(
     () =>
       projector.project({

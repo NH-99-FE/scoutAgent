@@ -1,37 +1,60 @@
 // ============================================================
-// Conversation Transcript Projector — transcript 行结构共享
+// Conversation Transcript Projector — transcript 投影流水线与结构共享
 // ============================================================
 
-import type { ScoutBusyState } from '@scout-agent/shared';
-import type { ConversationRow } from './conversation-view-model';
+import {
+  createConversationRowsProjector,
+  type BuildConversationRowsOptions,
+} from './conversation-view-model';
 import {
   createConversationTranscriptRows,
   type ConversationTranscriptAddon,
   type ConversationTranscriptRow,
 } from './conversation-transcript-rows';
+import { reuseListByKey } from './structural-sharing';
 
 export interface ConversationTranscriptProjector {
   project: (options: ConversationTranscriptProjectorOptions) => ConversationTranscriptRow[];
   reset: () => void;
 }
 
-interface ConversationTranscriptProjectorOptions {
-  addons?: ConversationTranscriptAddon[];
-  busyState: ScoutBusyState;
-  rows: ConversationRow[];
+export interface ConversationTranscriptProjectorOptions extends BuildConversationRowsOptions {
+  transcriptAddons: ConversationTranscriptAddon[];
 }
 
+const EMPTY_TOOL_PREVIEWS: NonNullable<BuildConversationRowsOptions['toolPreviewsById']> = {};
+
 class StructuralSharingConversationTranscriptProjector implements ConversationTranscriptProjector {
+  private readonly rowsProjector = createConversationRowsProjector();
   private previousRows: ConversationTranscriptRow[] = [];
 
-  project(options: ConversationTranscriptProjectorOptions): ConversationTranscriptRow[] {
-    const nextRows = createConversationTranscriptRows(options);
+  project({
+    busyState,
+    items,
+    isStreaming,
+    toolExecutionsById,
+    toolPreviewsById = EMPTY_TOOL_PREVIEWS,
+    transcriptAddons,
+  }: ConversationTranscriptProjectorOptions): ConversationTranscriptRow[] {
+    const baseRows = this.rowsProjector.project({
+      items,
+      isStreaming,
+      busyState,
+      toolExecutionsById,
+      toolPreviewsById,
+    });
+    const nextRows = createConversationTranscriptRows({
+      addons: transcriptAddons,
+      busyState,
+      rows: baseRows,
+    });
     const rows = reuseTranscriptRows(this.previousRows, nextRows);
     this.previousRows = rows;
     return rows;
   }
 
   reset(): void {
+    this.rowsProjector.reset();
     this.previousRows = [];
   }
 }
@@ -50,21 +73,12 @@ function reuseTranscriptRows(
   previousRows: ConversationTranscriptRow[],
   nextRows: ConversationTranscriptRow[],
 ): ConversationTranscriptRow[] {
-  const previousRowsByKey = new Map(previousRows.map((row) => [row.key, row]));
-  let reusedAnyRow = false;
-  const rows = nextRows.map((row) => {
-    const previous = previousRowsByKey.get(row.key);
-    if (!previous || previous.type !== row.type) return row;
-    if (!canReuseTranscriptRow(previous, row)) return row;
-    reusedAnyRow ||= previous !== row;
-    return previous;
+  return reuseListByKey({
+    previous: previousRows,
+    next: nextRows,
+    getKey: (row) => row.key,
+    canReuse: canReuseTranscriptRow,
   });
-
-  if (!reusedAnyRow) return nextRows;
-  return rows.every((row, index) => row === previousRows[index]) &&
-    rows.length === previousRows.length
-    ? previousRows
-    : rows;
 }
 
 function canReuseTranscriptRow(

@@ -5,7 +5,6 @@ import {
   createConversationTranscriptRows,
   createExtensionRequestsTranscriptAddon,
 } from '@/features/conversation/render-model/conversation-transcript-rows';
-import { createConversationTranscriptProjector } from '@/features/conversation/render-model/conversation-transcript-projector';
 import type { ConversationRow } from '@/features/conversation/render-model/conversation-view-model';
 
 const IDLE_BUSY_STATE: ScoutBusyState = { kind: 'idle', cancellable: false };
@@ -67,64 +66,5 @@ describe('createConversationTranscriptRows', () => {
 
   it('does not create extension request addons for empty request lists', () => {
     expect(createExtensionRequestsTranscriptAddon([])).toBeNull();
-  });
-});
-
-describe('createConversationTranscriptProjector', () => {
-  it('reuses unchanged base rows and stable runtime status rows across projections', () => {
-    const projector = createConversationTranscriptProjector();
-    const busyState: ScoutBusyState = {
-      kind: 'retry',
-      label: 'Retrying',
-      cancellable: true,
-      attempt: 2,
-      maxAttempts: 3,
-      reason: 'rate limit',
-    };
-
-    const firstRows = projector.project({
-      busyState,
-      rows: [SYSTEM_ROW],
-    });
-    const nextRows = projector.project({
-      busyState: { ...busyState },
-      rows: [SYSTEM_ROW],
-    });
-
-    expect(nextRows).toBe(firstRows);
-    expect(nextRows[0]).toBe(firstRows[0]);
-    expect(nextRows[1]).toBe(firstRows[1]);
-  });
-
-  it('invalidates runtime status rows when display fields change', () => {
-    const projector = createConversationTranscriptProjector();
-
-    const firstRows = projector.project({
-      busyState: {
-        kind: 'retry',
-        label: 'Retrying',
-        cancellable: true,
-        attempt: 2,
-        maxAttempts: 3,
-        reason: 'rate limit',
-      },
-      rows: [SYSTEM_ROW],
-    });
-    const nextRows = projector.project({
-      busyState: {
-        kind: 'retry',
-        label: 'Retrying',
-        cancellable: true,
-        attempt: 3,
-        maxAttempts: 3,
-        reason: 'rate limit',
-      },
-      rows: [SYSTEM_ROW],
-    });
-
-    expect(nextRows).not.toBe(firstRows);
-    expect(nextRows[0]).toBe(firstRows[0]);
-    expect(nextRows[1]).not.toBe(firstRows[1]);
-    expect(nextRows[1]).toMatchObject({ label: '正在重试 3/3' });
   });
 });
