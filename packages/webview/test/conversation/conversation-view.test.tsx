@@ -1,6 +1,10 @@
 import { act, cleanup, fireEvent as rtlFireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ScoutBusyState, ScoutChangesReviewSummary } from '@scout-agent/shared';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ScoutBusyState,
+  ScoutChangesReviewSummary,
+  ScoutExtensionUIRequest,
+} from '@scout-agent/shared';
 
 const protocolClientMock = vi.hoisted(() => ({
   copyText: vi.fn(),
@@ -12,9 +16,11 @@ vi.mock('@/bridge/protocol-client', () => ({
 }));
 
 import { ConversationView } from '@/features/conversation/ConversationView';
+import type { ConversationTranscriptAddon } from '@/features/conversation/conversation-transcript-rows';
 import {
   buildConversationRows,
   createConversationRowsProjector,
+  type AssistantConversationRow,
   type AssistantProcessActivity,
   type ConversationViewItem,
 } from '@/features/conversation/conversation-view-model';
@@ -27,6 +33,30 @@ import { useConversationExpansionStore } from '@/store/conversation-expansion-st
 
 const IDLE_BUSY_STATE: ScoutBusyState = { kind: 'idle', cancellable: false };
 const AGENT_BUSY_STATE: ScoutBusyState = { kind: 'agent', label: 'Working', cancellable: true };
+const resizeObserverCallbacks = new Set<ResizeObserverCallback>();
+
+class TriggerableResizeObserver implements ResizeObserver {
+  private readonly callback: ResizeObserverCallback;
+  readonly observe = vi.fn();
+  readonly unobserve = vi.fn();
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    resizeObserverCallbacks.add(callback);
+  }
+
+  disconnect = vi.fn(() => {
+    resizeObserverCallbacks.delete(this.callback);
+  });
+}
+
+function flushResizeObservers() {
+  act(() => {
+    for (const callback of Array.from(resizeObserverCallbacks)) {
+      callback([], {} as ResizeObserver);
+    }
+  });
+}
 
 const fireEvent = {
   click: (...args: Parameters<typeof rtlFireEvent.click>) => {
@@ -40,6 +70,13 @@ const fireEvent = {
     let result = false;
     act(() => {
       result = rtlFireEvent.scroll(...args);
+    });
+    return result;
+  },
+  keyDown: (...args: Parameters<typeof rtlFireEvent.keyDown>) => {
+    let result = false;
+    act(() => {
+      result = rtlFireEvent.keyDown(...args);
     });
     return result;
   },
@@ -62,19 +99,19 @@ const fireEvent = {
 function renderConversation({
   busyState,
   expansionScope,
-  forceScrollToBottomKey,
   items,
   isStreaming = false,
   showScrollToBottomButton = false,
+  transcriptAddons,
   toolExecutionsById = {},
   toolPreviewsById = {},
 }: {
   busyState?: ScoutBusyState;
   expansionScope?: string;
-  forceScrollToBottomKey?: unknown;
   items: ConversationViewItem[];
   isStreaming?: boolean;
   showScrollToBottomButton?: boolean;
+  transcriptAddons?: ConversationTranscriptAddon[];
   toolExecutionsById?: Record<string, ToolExecutionState>;
   toolPreviewsById?: Record<string, ToolCallPreviewState>;
 }) {
@@ -83,10 +120,10 @@ function renderConversation({
     <ConversationView
       busyState={resolvedBusyState}
       expansionScope={expansionScope}
-      forceScrollToBottomKey={forceScrollToBottomKey}
       isStreaming={isStreaming}
       items={items}
       showScrollToBottomButton={showScrollToBottomButton}
+      transcriptAddons={transcriptAddons}
       toolExecutionsById={toolExecutionsById}
       toolPreviewsById={toolPreviewsById}
     />,
@@ -136,7 +173,46 @@ function setViewportScrollMetrics(
       value: scrollTo,
     },
   });
+  setMessageScrollerContentGeometry(viewport, metrics.scrollHeight);
   return scrollTo;
+}
+
+function setMessageScrollerContentGeometry(viewport: HTMLElement, totalHeight: number) {
+  const content = viewport.querySelector<HTMLElement>('[data-slot="message-scroller-content"]');
+  if (!content) return;
+
+  Object.defineProperty(viewport, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => makeDomRect(0, viewport.clientHeight),
+  });
+  Object.defineProperty(content, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => makeDomRect(-viewport.scrollTop, totalHeight),
+  });
+
+  const layoutElement =
+    content.querySelector<HTMLElement>('[data-message-id]') ??
+    (content.firstElementChild instanceof HTMLElement ? content.firstElementChild : null);
+  if (!layoutElement) return;
+
+  Object.defineProperty(layoutElement, 'getBoundingClientRect', {
+    configurable: true,
+    value: () => makeDomRect(-viewport.scrollTop, totalHeight),
+  });
+}
+
+function makeDomRect(top: number, height: number): DOMRect {
+  return {
+    bottom: top + height,
+    height,
+    left: 0,
+    right: 320,
+    toJSON: () => ({}),
+    top,
+    width: 320,
+    x: 0,
+    y: top,
+  } as DOMRect;
 }
 
 function makeUserConversationItems(count: number, contentOverrides: Record<number, string> = {}) {
@@ -181,6 +257,14 @@ function makeChangesReviewSummary(
 }
 
 describe('ConversationView', () => {
+  beforeEach(() => {
+    resizeObserverCallbacks.clear();
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      value: TriggerableResizeObserver,
+    });
+  });
+
   afterEach(() => {
     useConversationExpansionStore.getState().actions.reset();
     protocolClientMock.copyText.mockReset();
@@ -692,7 +776,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
+    const viewport = container.querySelector('[data-slot="message-scroller-viewport"]');
     const content = container.querySelector('.scout-conversation-content');
     const markdownRoot = container.querySelector('[data-scout-markdown-content="true"]');
     const assistantTurn = markdownRoot?.closest('article');
@@ -818,7 +902,7 @@ describe('ConversationView', () => {
         },
       ],
     });
-    const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    const viewport = container.querySelector<HTMLElement>('[data-slot="message-scroller-viewport"]');
     expect(viewport).not.toBeNull();
     const resolvedViewport = viewport!;
     const scrollTo = setViewportScrollMetrics(resolvedViewport, {
@@ -832,8 +916,7 @@ describe('ConversationView', () => {
     const button = screen.getByRole('button', { name: '滚动到底部' });
     expect(button).toBeInTheDocument();
 
-    const requestAnimationFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
+    vi.spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
         callback(1);
         return 1;
@@ -841,31 +924,31 @@ describe('ConversationView', () => {
 
     fireEvent.click(button);
 
-    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(requestAnimationFrame).toHaveBeenCalled();
     expect(scrollTo).toHaveBeenCalledWith({ top: 840, behavior: 'auto' });
     expect(resolvedViewport.scrollTop).toBe(840);
-    expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
   });
 
-  it('keeps short conversations on the normal render path', () => {
+  it('keeps conversations on the stable transcript render path', () => {
     const { container } = renderConversation({ items: makeUserConversationItems(159) });
 
-    expect(container.querySelector('[data-scout-conversation-virtualized="false"]')).toBeTruthy();
-    expect(container.querySelector('[data-scout-conversation-virtual-row]')).toBeNull();
+    expect(container.querySelector('[data-scout-conversation-rendering="full"]')).toBeTruthy();
+    expect(container.querySelectorAll('[data-message-id^="user-"]')).toHaveLength(159);
   });
 
-  it('virtualizes top-level rows once the conversation reaches the threshold', () => {
+  it('renders long conversations on the stable transcript render path', () => {
     const { container } = renderConversation({ items: makeUserConversationItems(160) });
 
-    expect(container.querySelector('[data-scout-conversation-virtualized="true"]')).toBeTruthy();
+    expect(container.querySelector('[data-scout-conversation-rendering="full"]')).toBeTruthy();
+    expect(container.querySelectorAll('[data-message-id^="user-"]')).toHaveLength(160);
   });
 
-  it('scrolls virtualized conversations to the measured bottom from the scroll button', () => {
+  it('scrolls long conversations to the measured bottom from the scroll button', () => {
     const { container } = renderConversation({
       items: makeUserConversationItems(160),
       showScrollToBottomButton: true,
     });
-    const viewport = container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    const viewport = container.querySelector<HTMLElement>('[data-slot="message-scroller-viewport"]');
     expect(viewport).not.toBeNull();
     const resolvedViewport = viewport!;
     const scrollTo = setViewportScrollMetrics(resolvedViewport, {
@@ -879,10 +962,9 @@ describe('ConversationView', () => {
 
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 11_640, behavior: 'auto' });
     expect(resolvedViewport.scrollTop).toBe(11_640);
-    expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
   });
 
-  it('does not force virtualized conversations to the bottom after the user scrolls away', () => {
+  it('does not force long conversations to the bottom after the user scrolls away', () => {
     const firstItems = makeUserConversationItems(160);
     const nextItems = makeUserConversationItems(160, { 159: 'updated tail message' });
     const { rerender } = renderConversation({ items: firstItems, isStreaming: true });
@@ -895,8 +977,7 @@ describe('ConversationView', () => {
 
     fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
-    const requestAnimationFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
+    vi.spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
         callback(1);
         return 1;
@@ -911,45 +992,114 @@ describe('ConversationView', () => {
       />,
     );
 
-    expect(requestAnimationFrame).not.toHaveBeenCalled();
     expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollContainer.scrollTop).toBe(1_000);
   });
 
-  it('scrolls to the bottom when an explicit force scroll key changes', () => {
-    const items = makeUserConversationItems(4);
+  it('does not reapply the default scroll position when crossing the long-conversation boundary', () => {
+    const firstItems = makeUserConversationItems(159);
+    const nextItems = makeUserConversationItems(160);
+    const { rerender } = renderConversation({ items: firstItems, isStreaming: true });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = setViewportScrollMetrics(scrollContainer, {
+      clientHeight: 400,
+      scrollHeight: 12_000,
+      scrollTop: 1_000,
+    });
+
+    fireEvent.scroll(scrollContainer);
+    scrollTo.mockClear();
+    vi.spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollContainer.scrollTop).toBe(1_000);
+  });
+
+  it('keeps the reading position when a user row is appended while scrolled away', () => {
+    const firstItems = makeUserConversationItems(160);
+    const nextItems = makeUserConversationItems(161, { 160: 'new question' });
     const { rerender } = renderConversation({
-      forceScrollToBottomKey: 0,
-      items,
+      items: firstItems,
       showScrollToBottomButton: true,
     });
     const scrollContainer = screen.getByLabelText('会话滚动区域');
     const scrollTo = setViewportScrollMetrics(scrollContainer, {
       clientHeight: 400,
-      scrollHeight: 1000,
-      scrollTop: 100,
+      scrollHeight: 12_000,
+      scrollTop: 1_000,
     });
 
-    fireEvent.scroll(scrollContainer);
-    expect(screen.getByRole('button', { name: '滚动到底部' })).toBeInTheDocument();
-
+    fireEvent.wheel(scrollContainer, { deltaY: -120 });
+    scrollTo.mockClear();
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 12_064,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 12_064);
     scrollTo.mockClear();
     rerender(
       <ConversationView
-        busyState={IDLE_BUSY_STATE}
-        forceScrollToBottomKey={1}
-        isStreaming={false}
-        items={items}
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
         showScrollToBottomButton
         toolExecutionsById={{}}
       />,
     );
+    flushResizeObservers();
 
-    expect(scrollTo).toHaveBeenLastCalledWith({ top: 600, behavior: 'auto' });
-    expect(scrollContainer.scrollTop).toBe(600);
-    expect(screen.queryByRole('button', { name: '滚动到底部' })).not.toBeInTheDocument();
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scrollContainer.scrollTop).toBe(1_000);
   });
 
-  it('keeps virtualized conversations pinned while the user is near the bottom', () => {
+  it('registers top-level rows without turn anchors for bottom-follow scrolling', () => {
+    const { container } = renderConversation({
+      items: [
+        {
+          key: 'user-1',
+          message: {
+            role: 'user',
+            content: 'hello',
+            timestamp: 1,
+          },
+        },
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: 'hi' }],
+            timestamp: 2,
+          },
+        },
+      ],
+    });
+
+    const viewport = screen.getByLabelText('会话滚动区域');
+    const content = container.querySelector('[data-slot="message-scroller-content"]');
+    const userItem = container.querySelector('[data-message-id="user-1"]');
+    const assistantItem = container.querySelector('[data-message-id="assistant-turn:user-1"]');
+
+    expect(viewport).toHaveAttribute('data-slot', 'message-scroller-viewport');
+    expect(content).toHaveAttribute('role', 'log');
+    expect(content).toHaveAttribute('aria-relevant', 'additions');
+    expect(userItem).toHaveAttribute('data-scroll-anchor', 'false');
+    expect(assistantItem).toHaveAttribute('data-scroll-anchor', 'false');
+  });
+
+  it('keeps long conversations pinned while the user is near the bottom', () => {
     const firstItems = makeUserConversationItems(160);
     const nextItems = makeUserConversationItems(160, { 159: 'updated tail message' });
     const { rerender } = renderConversation({ items: firstItems, isStreaming: true });
@@ -962,8 +1112,7 @@ describe('ConversationView', () => {
 
     fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
-    const requestAnimationFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
+    vi.spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
         callback(1);
         return 1;
@@ -977,8 +1126,8 @@ describe('ConversationView', () => {
         toolExecutionsById={{}}
       />,
     );
+    flushResizeObservers();
 
-    expect(requestAnimationFrame).toHaveBeenCalled();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 11_600, behavior: 'auto' });
   });
 
@@ -2688,6 +2837,7 @@ describe('ConversationView', () => {
       value: 100,
       writable: true,
     });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
 
     fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
@@ -2746,6 +2896,7 @@ describe('ConversationView', () => {
       value: 560,
       writable: true,
     });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
     const requestAnimationFrame = vi
       .spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
@@ -2811,11 +2962,12 @@ describe('ConversationView', () => {
       value: 600,
       writable: true,
     });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
 
-    fireEvent.wheel(scrollContainer, { deltaY: 120 });
+    fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
-    const requestAnimationFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
+    fireEvent.wheel(scrollContainer, { deltaY: 120 });
+    vi.spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
         callback(1);
         return 1;
@@ -2829,9 +2981,85 @@ describe('ConversationView', () => {
         toolExecutionsById={{}}
       />,
     );
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1100,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1100);
+    flushResizeObservers();
 
-    expect(requestAnimationFrame).toHaveBeenCalled();
-    expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' });
+  });
+
+  it('keeps following when the user presses a downward scroll key at the bottom', () => {
+    const firstItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段\n\n第二段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const { rerender } = renderConversation({ items: firstItems });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = vi.fn();
+
+    Object.defineProperty(scrollContainer, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      value: 600,
+      writable: true,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
+
+    fireEvent.scroll(scrollContainer);
+    scrollTo.mockClear();
+    fireEvent.keyDown(scrollContainer, { key: 'ArrowDown' });
+    vi.spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1100,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1100);
+    flushResizeObservers();
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' });
   });
 
   it('keeps following when a nested scroll area consumes the wheel gesture', () => {
@@ -2876,9 +3104,10 @@ describe('ConversationView', () => {
       value: 600,
       writable: true,
     });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
 
     const nestedScrollArea = document.createElement('div');
-    nestedScrollArea.dataset.slot = 'scroll-area-viewport';
+    nestedScrollArea.dataset.scoutNestedScroll = 'vertical';
     scrollContainer.appendChild(nestedScrollArea);
     Object.defineProperty(nestedScrollArea, 'scrollHeight', {
       configurable: true,
@@ -2894,10 +3123,10 @@ describe('ConversationView', () => {
       writable: true,
     });
 
-    fireEvent.wheel(nestedScrollArea, { deltaY: -120 });
+    fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
-    const requestAnimationFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
+    fireEvent.wheel(nestedScrollArea, { deltaY: -120 });
+    vi.spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
         callback(1);
         return 1;
@@ -2911,9 +3140,278 @@ describe('ConversationView', () => {
         toolExecutionsById={{}}
       />,
     );
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1100,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1100);
+    flushResizeObservers();
 
-    expect(requestAnimationFrame).toHaveBeenCalled();
-    expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
+    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' });
+  });
+
+  it('keeps following when a nested scroll area consumes a keyboard scroll gesture', () => {
+    const firstItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段\n\n第二段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const { rerender } = renderConversation({ items: firstItems });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = vi.fn();
+
+    Object.defineProperty(scrollContainer, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      value: 600,
+      writable: true,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
+
+    const nestedScrollArea = document.createElement('div');
+    nestedScrollArea.dataset.scoutNestedScroll = 'vertical';
+    scrollContainer.appendChild(nestedScrollArea);
+    Object.defineProperty(nestedScrollArea, 'scrollHeight', {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(nestedScrollArea, 'clientHeight', {
+      configurable: true,
+      value: 240,
+    });
+    Object.defineProperty(nestedScrollArea, 'scrollTop', {
+      configurable: true,
+      value: 120,
+      writable: true,
+    });
+
+    fireEvent.scroll(scrollContainer);
+    scrollTo.mockClear();
+    fireEvent.keyDown(nestedScrollArea, { key: 'ArrowDown' });
+    vi.spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1100,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1100);
+    flushResizeObservers();
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' });
+  });
+
+  it('keeps following when an extension request form control receives a scroll key', () => {
+    const firstItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段\n\n第二段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const request: ScoutExtensionUIRequest = {
+      type: 'extension_ui_request',
+      id: 'input-1',
+      method: 'input',
+      title: '需要输入',
+      placeholder: 'Name',
+    };
+    const transcriptAddons: ConversationTranscriptAddon[] = [
+      {
+        type: 'extension_requests',
+        key: 'conversation-extension-requests',
+        requests: [request],
+      },
+    ];
+    const { rerender } = renderConversation({
+      items: firstItems,
+      transcriptAddons,
+    });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = vi.fn();
+
+    Object.defineProperty(scrollContainer, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      value: 600,
+      writable: true,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
+
+    fireEvent.scroll(scrollContainer);
+    scrollTo.mockClear();
+    fireEvent.keyDown(screen.getByPlaceholderText('Name'), { key: 'ArrowDown' });
+    vi.spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        transcriptAddons={transcriptAddons}
+        toolExecutionsById={{}}
+      />,
+    );
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1100,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1100);
+    flushResizeObservers();
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 700, behavior: 'auto' });
+  });
+
+  it('does not treat unmarked scrollable descendants as nested scroll containers', () => {
+    const firstItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const nextItems: ConversationItem[] = [
+      {
+        key: 'assistant-1',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: '第一段\n\n第二段' }],
+          timestamp: 1,
+        },
+      },
+    ];
+    const { rerender } = renderConversation({ items: firstItems });
+    const scrollContainer = screen.getByLabelText('会话滚动区域');
+    const scrollTo = vi.fn();
+
+    Object.defineProperty(scrollContainer, 'scrollTo', {
+      configurable: true,
+      value: scrollTo,
+    });
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollContainer, 'clientHeight', {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollContainer, 'scrollTop', {
+      configurable: true,
+      value: 600,
+      writable: true,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
+
+    const unmarkedScrollArea = document.createElement('div');
+    scrollContainer.appendChild(unmarkedScrollArea);
+    Object.defineProperty(unmarkedScrollArea, 'scrollHeight', {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(unmarkedScrollArea, 'clientHeight', {
+      configurable: true,
+      value: 240,
+    });
+    Object.defineProperty(unmarkedScrollArea, 'scrollTop', {
+      configurable: true,
+      value: 120,
+      writable: true,
+    });
+
+    fireEvent.scroll(scrollContainer);
+    scrollTo.mockClear();
+    fireEvent.wheel(unmarkedScrollArea, { deltaY: -120 });
+    vi.spyOn(window, 'requestAnimationFrame')
+      .mockImplementation((callback: FrameRequestCallback) => {
+        callback(1);
+        return 1;
+      });
+
+    rerender(
+      <ConversationView
+        busyState={AGENT_BUSY_STATE}
+        isStreaming={true}
+        items={nextItems}
+        toolExecutionsById={{}}
+      />,
+    );
+    Object.defineProperty(scrollContainer, 'scrollHeight', {
+      configurable: true,
+      value: 1100,
+    });
+    setMessageScrollerContentGeometry(scrollContainer, 1100);
+    flushResizeObservers();
+
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it('keeps following streaming updates while the user is near the bottom', () => {
@@ -2958,11 +3456,11 @@ describe('ConversationView', () => {
       value: 560,
       writable: true,
     });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
 
     fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
-    const requestAnimationFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
+    vi.spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
         callback(1);
         return 1;
@@ -2976,8 +3474,8 @@ describe('ConversationView', () => {
         toolExecutionsById={{}}
       />,
     );
+    flushResizeObservers();
 
-    expect(requestAnimationFrame).toHaveBeenCalled();
     expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
   });
 
@@ -3019,11 +3517,11 @@ describe('ConversationView', () => {
       value: 560,
       writable: true,
     });
+    setMessageScrollerContentGeometry(scrollContainer, 1000);
 
     fireEvent.scroll(scrollContainer);
     scrollTo.mockClear();
-    const requestAnimationFrame = vi
-      .spyOn(window, 'requestAnimationFrame')
+    vi.spyOn(window, 'requestAnimationFrame')
       .mockImplementation((callback: FrameRequestCallback) => {
         callback(1);
         return 1;
@@ -3044,9 +3542,9 @@ describe('ConversationView', () => {
         toolExecutionsById={toolExecutionsById}
       />,
     );
+    flushResizeObservers();
 
     expect(screen.getByText('正在重试 2/3')).toBeInTheDocument();
-    expect(requestAnimationFrame).toHaveBeenCalled();
     expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: 'auto' });
   });
 
@@ -4089,6 +4587,64 @@ describe('conversation rows projector', () => {
     expect(nextRows[1]).toBe(firstRows[1]);
     expect(nextRows[2]).toBe(firstRows[2]);
     expect(nextRows[3]).not.toBe(firstRows[3]);
+  });
+
+  it('reuses stable assistant entries when later content in the same turn streams', () => {
+    const userMessage: ConversationItem['message'] = {
+      role: 'user',
+      content: 'question',
+      timestamp: 1,
+    };
+    const stableIntro = { type: 'text' as const, text: 'stable intro' };
+    const stableToolCall = {
+      type: 'toolCall' as const,
+      id: 'read-1',
+      name: 'read',
+      arguments: { path: 'src/app.ts' },
+    };
+    const assistantStart: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [stableIntro, stableToolCall, { type: 'text', text: 'hel' }],
+      timestamp: 2,
+    };
+    const assistantUpdate: ConversationItem['message'] = {
+      role: 'assistant',
+      content: [stableIntro, stableToolCall, { type: 'text', text: 'hello' }],
+      timestamp: 2,
+    };
+    const projector = createConversationRowsProjector();
+
+    const firstRows = projector.project({
+      isStreaming: true,
+      busyState: AGENT_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        { key: 'user-1', message: userMessage },
+        { key: 'assistant-1', message: assistantStart },
+      ],
+    });
+    const nextRows = projector.project({
+      isStreaming: true,
+      busyState: AGENT_BUSY_STATE,
+      toolExecutionsById: {},
+      items: [
+        { key: 'user-1', message: userMessage },
+        { key: 'assistant-1', message: assistantUpdate },
+      ],
+    });
+
+    const firstAssistant = firstRows[1] as AssistantConversationRow;
+    const nextAssistant = nextRows[1] as AssistantConversationRow;
+
+    expect(firstAssistant.entries.map((entry) => entry.type)).toEqual([
+      'content',
+      'process',
+      'content',
+    ]);
+    expect(nextAssistant).not.toBe(firstAssistant);
+    expect(nextAssistant.entries[0]).toBe(firstAssistant.entries[0]);
+    expect(nextAssistant.entries[1]).toBe(firstAssistant.entries[1]);
+    expect(nextAssistant.entries[2]).not.toBe(firstAssistant.entries[2]);
   });
 });
 describe('buildConversationRows', () => {

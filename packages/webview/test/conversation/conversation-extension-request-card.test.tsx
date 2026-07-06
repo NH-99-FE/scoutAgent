@@ -12,10 +12,10 @@ vi.mock('@/bridge/protocol-client', () => ({
   },
 }));
 
-import { ExtensionUIRequestCard } from '@/features/chat/ExtensionUIRequestsPanel';
+import { ConversationExtensionRequestCard } from '@/features/conversation/ConversationExtensionRequestsPanel';
 import { useUiStore } from '@/store/ui-store';
 
-describe('ExtensionUIRequestCard', () => {
+describe('ConversationExtensionRequestCard', () => {
   afterEach(() => {
     cleanup();
     extensionUIResponse.mockClear();
@@ -24,7 +24,7 @@ describe('ExtensionUIRequestCard', () => {
 
   it('renders danger code body without parsing the title', () => {
     render(
-      <ExtensionUIRequestCard
+      <ConversationExtensionRequestCard
         request={{
           type: 'extension_ui_request',
           id: 'approval-1',
@@ -38,12 +38,17 @@ describe('ExtensionUIRequestCard', () => {
     );
 
     expect(screen.getByText('危险命令')).toBeInTheDocument();
-    expect(screen.getByText('sudo rm -rf tmp')).toBeInTheDocument();
+    expect(screen.getByText('sudo rm -rf tmp')).toHaveAttribute(
+      'data-scout-nested-scroll',
+      'vertical',
+    );
   });
 
   it('sends confirm, select, input, and cancel actions', () => {
     const { rerender } = render(
-      <ExtensionUIRequestCard request={makeRequest({ method: 'confirm', message: 'Proceed?' })} />,
+      <ConversationExtensionRequestCard
+        request={makeRequest({ method: 'confirm', message: 'Proceed?' })}
+      />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: '批准' }));
@@ -53,7 +58,7 @@ describe('ExtensionUIRequestCard', () => {
     });
 
     rerender(
-      <ExtensionUIRequestCard
+      <ConversationExtensionRequestCard
         request={makeRequest({ method: 'select', options: ['Option A', 'Option B'] })}
       />,
     );
@@ -65,7 +70,9 @@ describe('ExtensionUIRequestCard', () => {
     });
 
     rerender(
-      <ExtensionUIRequestCard request={makeRequest({ method: 'input', placeholder: 'Name' })} />,
+      <ConversationExtensionRequestCard
+        request={makeRequest({ method: 'input', placeholder: 'Name' })}
+      />,
     );
     fireEvent.change(screen.getByPlaceholderText('Name'), { target: { value: 'Scout' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));

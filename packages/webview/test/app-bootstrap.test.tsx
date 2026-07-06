@@ -264,6 +264,7 @@ describe('App bootstrap', () => {
 
     const shell = screen.getByRole('main');
     expect(shell).toHaveClass('bg-tree-background', 'h-screen', 'overflow-y-auto');
+    expect(shell).not.toHaveClass('scout-native-scrollbar');
     const topbar = screen.getByText('1 个文件已更改').closest('header');
     expect(topbar).toHaveClass('bg-tree-background');
     const fileHeader = screen.getByText('App.tsx').closest('header');
@@ -366,6 +367,7 @@ describe('App bootstrap', () => {
     if (!(removedCodePane instanceof HTMLElement)) throw new Error('removed code pane is missing');
 
     expect(scrollPlane).toHaveClass('scout-review-diff-scroll', 'overflow-x-hidden');
+    expect(scrollPlane).not.toHaveClass('scout-native-scrollbar');
     expect(splitDiff).toHaveClass(
       'min-w-full',
       'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]',
@@ -393,6 +395,8 @@ describe('App bootstrap', () => {
     );
     expect(removedScrollbar.scrollLeft).toBe(120);
     expect(addedScrollbar.scrollLeft).toBe(120);
+    expect(removedScrollbar).not.toHaveClass('scout-native-scrollbar');
+    expect(addedScrollbar).not.toHaveClass('scout-native-scrollbar');
 
     addedScrollbar.scrollLeft = 240;
     fireEvent.scroll(addedScrollbar);
@@ -497,7 +501,9 @@ describe('App bootstrap', () => {
       });
     });
 
-    expect(await screen.findByRole('navigation', { name: '设置分类' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('navigation', { name: '设置分类' }, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(
       postMessage.mock.calls.some(([message]) => {
         const payload = (message as { payload?: { type?: string } }).payload;

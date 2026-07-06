@@ -36,6 +36,7 @@ const TEST_SOURCE_INFO: SourceInfo = {
   origin: 'top-level',
 };
 const intersectionObservers: MockIntersectionObserver[] = [];
+const resizeObserverCallbacks = new Set<ResizeObserverCallback>();
 
 class MockIntersectionObserver {
   readonly root: Element | Document | null = null;
@@ -63,6 +64,29 @@ class MockIntersectionObserver {
       this as unknown as IntersectionObserver,
     );
   }
+}
+
+class TriggerableResizeObserver implements ResizeObserver {
+  private readonly callback: ResizeObserverCallback;
+  readonly observe = vi.fn();
+  readonly unobserve = vi.fn();
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+    resizeObserverCallbacks.add(callback);
+  }
+
+  disconnect = vi.fn(() => {
+    resizeObserverCallbacks.delete(this.callback);
+  });
+}
+
+function flushResizeObservers(): void {
+  act(() => {
+    for (const callback of Array.from(resizeObserverCallbacks)) {
+      callback([], {} as ResizeObserver);
+    }
+  });
 }
 
 function makeState(
@@ -102,6 +126,33 @@ function makeState(
     forkPointEntryId: overrides.forkPointEntryId,
     cwd: '/workspace',
   };
+}
+
+function makeUserMessages(count: number): ScoutMessage[] {
+  return Array.from({ length: count }, (_, index) => ({
+    role: 'user',
+    content: `message ${index}`,
+    timestamp: index + 1,
+  }));
+}
+
+function setConversationViewportScrollMetrics(
+  viewport: HTMLElement,
+  metrics: { clientHeight: number; scrollHeight: number; scrollTop: number },
+) {
+  const scrollTo = vi.fn((options: ScrollToOptions) => {
+    viewport.scrollTop = options.top ?? viewport.scrollTop;
+  });
+  Object.defineProperties(viewport, {
+    clientHeight: { configurable: true, value: metrics.clientHeight },
+    scrollHeight: { configurable: true, value: metrics.scrollHeight },
+    scrollTop: { configurable: true, value: metrics.scrollTop, writable: true },
+    scrollTo: {
+      configurable: true,
+      value: scrollTo,
+    },
+  });
+  return scrollTo;
 }
 
 function getLatestSearchTaskMessage() {
@@ -253,10 +304,15 @@ describe('ChatApp', () => {
       configurable: true,
       value: MockIntersectionObserver,
     });
+    Object.defineProperty(globalThis, 'ResizeObserver', {
+      configurable: true,
+      value: TriggerableResizeObserver,
+    });
   });
 
   beforeEach(() => {
     intersectionObservers.length = 0;
+    resizeObserverCallbacks.clear();
     postMessage.mockClear();
   });
 
@@ -2145,6 +2201,18 @@ describe('ChatApp', () => {
     expect(screen.getByText('rate limit')).toBeInTheDocument();
   });
 
+  it('does not render an empty extension request tail row', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    const { container } = render(<ChatApp />);
+
+    expect(
+      container.querySelector('[data-message-id="conversation-extension-requests"]'),
+    ).toBeNull();
+  });
+
   it('does not surface internal agent busy labels in the header loading action', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
       isStreaming: true,
@@ -2237,6 +2305,60 @@ describe('ChatApp', () => {
       deliverAs: undefined,
       images: [TEST_IMAGE],
     });
+  });
+
+  it('keeps the reading position after sending while scrolled into history', () => {
+    const state = makeState(makeUserMessages(160));
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    const viewport = screen.getByLabelText('会话滚动区域');
+    const scrollTo = setConversationViewportScrollMetrics(viewport, {
+      clientHeight: 400,
+      scrollHeight: 12_000,
+      scrollTop: 1_000,
+    });
+
+    fireEvent.wheel(viewport, { deltaY: -120 });
+    scrollTo.mockClear();
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: '继续处理' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
+
+    expectPostedPayload('user_message', {
+      type: 'user_message',
+      text: '继续处理',
+      deliverAs: undefined,
+    });
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(viewport.scrollTop).toBe(1_000);
+
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      value: 12_064,
+    });
+    scrollTo.mockClear();
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState(
+          [
+            ...makeUserMessages(160),
+            { role: 'user', content: '继续处理', timestamp: 161 },
+          ],
+          {
+            isStreaming: true,
+            busyState: { kind: 'agent', label: 'Working', cancellable: true },
+          },
+        ),
+      });
+    });
+    flushResizeObservers();
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(viewport.scrollTop).toBe(1_000);
   });
 
   it('keeps the draft and shows an error instead of sending while compacting', () => {
