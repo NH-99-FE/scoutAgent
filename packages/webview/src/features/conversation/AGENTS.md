@@ -2,7 +2,7 @@
 
 本目录只负责 webview 展示投影，不改变 `shared` 协议、extension runtime、agent loop 的生命周期语义。
 
-消息滚动组件的 API 可参考同目录的 [message-scroller-api.md](./message-scroller-api.md)。
+消息滚动组件的 API 可参考 [message-scroller-api.md](./docs/message-scroller-api.md)。
 
 ## 滚动语义
 
