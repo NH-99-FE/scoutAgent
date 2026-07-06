@@ -2,6 +2,8 @@
 
 本目录只负责 webview 展示投影，不改变 `shared` 协议、extension runtime、agent loop 的生命周期语义。
 
+消息滚动组件的 API 可参考同目录的 [message-scroller-api.md](./message-scroller-api.md)。
+
 ## Assistant 过程状态
 
 - `busyState` 是宿主全局运行态，只表达 `idle / agent / retry / compaction`。
