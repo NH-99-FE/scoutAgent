@@ -603,10 +603,10 @@ function AssistantChangesReviewCard({ review }: { review: AssistantChangesReview
         </div>
         <Button
           aria-label="Review Changes"
-          className="h-7 rounded-md px-2.5 text-xs font-medium shadow-none"
+          className="text-foreground hover:text-foreground h-7 rounded-md px-2.5 text-xs font-medium shadow-none"
           data-changes-review-button="true"
           type="button"
-          variant="secondary"
+          variant="ghost"
           onClick={() => protocolClient.openChangesReview(review.turnId)}
         >
           审核

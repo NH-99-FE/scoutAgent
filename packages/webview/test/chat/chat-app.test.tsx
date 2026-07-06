@@ -1999,7 +1999,13 @@ describe('ChatApp', () => {
     expect(within(summary).getByText('+19')).toBeInTheDocument();
     expect(within(summary).getByText('-19')).toBeInTheDocument();
     expect(within(summary).getByRole('button', { name: '审查' })).toBeInTheDocument();
-    expect(screen.getByText('正在编辑 src/app.ts')).toBeInTheDocument();
+    const liveEditTitle = screen.getByText('正在编辑 src/app.ts');
+    expect(liveEditTitle).toBeInTheDocument();
+    const liveEditRow = liveEditTitle.parentElement as HTMLElement;
+    const liveEditMetrics = within(liveEditRow).getByText('+19').parentElement as HTMLElement;
+    expect(liveEditMetrics).toHaveClass('ml-auto');
+    expect(liveEditRow.lastElementChild).toBe(liveEditMetrics);
+    expect(within(liveEditRow).getByText('-19')).toBeInTheDocument();
     expect(screen.queryByText('正在编辑 /workspace/src/app.ts')).not.toBeInTheDocument();
 
     act(() => {

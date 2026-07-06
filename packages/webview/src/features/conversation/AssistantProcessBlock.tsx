@@ -394,6 +394,11 @@ function ToolActivitySummary({
   hasDetail: boolean;
   hideIcon?: boolean;
 }) {
+  const placeMetricsAtEnd = display.metricsPlacement === 'end';
+  const disclosureIcon = hasDetail ? (
+    <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-[opacity,transform] duration-220 ease-out group-hover/tool-action:opacity-100 group-focus-visible/tool-action:opacity-100 group-data-[state=open]/tool-action:rotate-90 group-data-[state=open]/tool-action:opacity-100" />
+  ) : null;
+
   return (
     <>
       {hideIcon ? null : <ToolDisplayIconView icon={display.icon} />}
@@ -407,10 +412,9 @@ function ToolActivitySummary({
       >
         {display.summaryTitle}
       </span>
+      {placeMetricsAtEnd ? disclosureIcon : null}
       <ToolDisplayMetrics metrics={display.metrics} placement={display.metricsPlacement} />
-      {hasDetail ? (
-        <ChevronRight className="size-3.5 shrink-0 opacity-0 transition-[opacity,transform] duration-220 ease-out group-hover/tool-action:opacity-100 group-focus-visible/tool-action:opacity-100 group-data-[state=open]/tool-action:rotate-90 group-data-[state=open]/tool-action:opacity-100" />
-      ) : null}
+      {placeMetricsAtEnd ? null : disclosureIcon}
     </>
   );
 }
