@@ -563,6 +563,8 @@ describe('ConversationView', () => {
     const actionBar = container.querySelector('[data-message-actions="user"]');
     expect(actionBar).toHaveClass('opacity-0');
     expect(actionBar).toHaveClass('group-hover/message:opacity-100');
+    expect(actionBar).toHaveClass('has-[:focus-visible]:opacity-100');
+    expect(actionBar).not.toHaveClass('group-focus-within/message:opacity-100');
     expect(actionBar?.textContent).toMatch(/\d{2}:\d{2}/);
 
     fireEvent.click(screen.getByRole('button', { name: '复制' }));
@@ -610,6 +612,8 @@ describe('ConversationView', () => {
 
     expect(actionBars).toHaveLength(2);
     expect(actionBars[0]).toHaveClass('opacity-0');
+    expect(actionBars[0]).toHaveClass('has-[:focus-visible]:opacity-100');
+    expect(actionBars[0]).not.toHaveClass('group-focus-within/message:opacity-100');
     expect(actionBars[1]).toHaveClass('opacity-100');
     expect(actionBars[1]).toHaveAttribute('data-latest-assistant-actions', 'true');
   });

@@ -12,7 +12,6 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  ExternalLink,
   FileDiff,
   LoaderCircle,
   Split,
@@ -833,7 +832,7 @@ function CopyActionButton({ text }: { text: string }) {
 function UserMessageActions({ text, timestamp }: { text: string; timestamp: number }) {
   return (
     <div
-      className="text-muted-foreground/70 mt-1 flex items-center gap-0.5 text-[11px] opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100"
+      className="text-muted-foreground/70 mt-1 flex items-center gap-0.5 text-[11px] opacity-0 transition-opacity group-hover/message:opacity-100 has-[:focus-visible]:opacity-100"
       data-message-actions="user"
     >
       <span className="mr-1">{formatTime(timestamp)}</span>
@@ -857,7 +856,7 @@ function MessageActions({
         'text-muted-foreground/70 mt-1 flex flex-wrap items-center gap-0.5 text-[11px] transition-opacity',
         persistent
           ? 'opacity-100'
-          : 'opacity-0 group-focus-within/message:opacity-100 group-hover/message:opacity-100',
+          : 'opacity-0 group-hover/message:opacity-100 has-[:focus-visible]:opacity-100',
       )}
       data-message-actions="assistant"
       data-latest-assistant-actions={persistent ? 'true' : undefined}
@@ -880,15 +879,6 @@ function MessageActions({
         variant="ghost"
       >
         <ThumbsDown />
-      </Button>
-      <Button
-        aria-label="打开"
-        className="rounded-full text-current"
-        size="icon-xs"
-        type="button"
-        variant="ghost"
-      >
-        <ExternalLink />
       </Button>
       <span className="ml-1">{formatTime(timestamp)}</span>
     </div>
