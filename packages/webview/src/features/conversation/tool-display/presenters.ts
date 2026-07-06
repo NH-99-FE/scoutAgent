@@ -5,11 +5,11 @@
 import {
   createFileChangeDisplayFromDetails,
   createFileEditDisplayFromPreview,
+  createToolExecutionSummary,
   createGenericDisplay,
   createPathOnlyToolDisplay,
   formatBashDetailText,
   formatDefaultDetailText,
-  formatToolExecutionSummary,
   getToolDisplayIcon,
 } from './helpers';
 import type { ToolDisplayContext, ToolDisplayPresenter, ToolDisplayResult } from './types';
@@ -139,7 +139,7 @@ function presentWriteTool(context: ToolDisplayContext): ToolDisplayResult {
       : undefined,
     detailLabel: '工具输出',
     detailTarget: path,
-    summaryTitle: formatToolExecutionSummary(context.status, context.toolName, context.args),
+    summary: createToolExecutionSummary(context.status, context.toolName, context.args),
   };
 }
 

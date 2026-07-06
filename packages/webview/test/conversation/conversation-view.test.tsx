@@ -96,6 +96,14 @@ function expandCompletedTurn() {
   fireEvent.click(screen.getByRole('button', { name: /展开回复 已处理/ }));
 }
 
+function expectToolErrorSummary(action: string, target: string) {
+  const actionLabel = screen.getByText(action, { selector: '[data-tool-summary-action]' });
+  const targetLabel = screen.getByText(target, { selector: '[data-tool-summary-target]' });
+
+  expect(actionLabel).toHaveClass('text-destructive');
+  expect(targetLabel.closest('.text-destructive')).toBeNull();
+}
+
 function ensureFileChangeDiffExpanded(pathPattern: RegExp) {
   const closedToggle = screen.queryByRole('button', {
     name: new RegExp(`展开文件变更 ${pathPattern.source}`),
@@ -1374,7 +1382,7 @@ describe('ConversationView', () => {
     });
 
     expandCompletedTurn();
-    expect(screen.getByText('阅读失败 missing.md')).toBeInTheDocument();
+    expectToolErrorSummary('阅读失败', 'missing.md');
     expect(
       screen.queryByRole('button', { name: /展开过程 阅读失败 missing\.md/ }),
     ).not.toBeInTheDocument();
@@ -1727,7 +1735,7 @@ describe('ConversationView', () => {
     });
 
     expandCompletedTurn();
-    expect(screen.getByText('写入失败 src/generated.ts')).toBeInTheDocument();
+    expectToolErrorSummary('写入失败', 'src/generated.ts');
     expect(
       screen.queryByRole('button', { name: /展开过程 写入失败 src\/generated\.ts/ }),
     ).not.toBeInTheDocument();
@@ -3148,7 +3156,7 @@ describe('ConversationView', () => {
       screen.queryByRole('button', { name: /收起过程 搜索失败 hello/ }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText('正在搜索 hello')).not.toBeInTheDocument();
-    expect(screen.getByText('搜索失败 hello')).toBeInTheDocument();
+    expectToolErrorSummary('搜索失败', 'hello');
   });
 
   it('renders edit previews with change counts without an expandable diff', () => {
@@ -3662,7 +3670,7 @@ describe('ConversationView', () => {
     });
 
     expandCompletedTurn();
-    expect(screen.getByText('运行失败 pnpm test')).toBeInTheDocument();
+    expectToolErrorSummary('运行失败', 'pnpm test');
     expect(
       screen.queryByRole('button', { name: /展开过程 运行失败 pnpm test/ }),
     ).not.toBeInTheDocument();

@@ -5,7 +5,7 @@
 import type { ToolDisplayDetail, ToolDisplayResult } from './types';
 
 export function hasToolDisplaySummary(display: ToolDisplayResult): boolean {
-  return display.summaryTitle.trim().length > 0;
+  return display.summary.title.trim().length > 0;
 }
 
 export function hasExpandableToolDisplayDetail(display: ToolDisplayResult): boolean {

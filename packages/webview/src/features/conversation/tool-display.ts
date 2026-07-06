@@ -24,5 +24,7 @@ export type {
   ToolDisplayMetricTone,
   ToolDisplayResult,
   ToolDisplayStatus,
+  ToolDisplaySummary,
+  ToolDisplaySummaryParts,
   ToolActivitySummarySpec,
 } from './tool-display/index';

@@ -25,6 +25,16 @@ export interface ToolDisplayMetric {
   tone?: ToolDisplayMetricTone;
 }
 
+export interface ToolDisplaySummaryParts {
+  action: string;
+  target?: string;
+}
+
+export interface ToolDisplaySummary {
+  title: string;
+  parts?: ToolDisplaySummaryParts;
+}
+
 export interface TextToolDisplayDetail {
   kind: 'text';
   title: string;
@@ -48,7 +58,7 @@ export interface ToolDisplayResult {
   kind: string;
   status: ToolDisplayStatus;
   toolName: string;
-  summaryTitle: string;
+  summary: ToolDisplaySummary;
   icon: ToolDisplayIcon;
   detail?: ToolDisplayDetail;
   detailLabel?: string;

@@ -442,7 +442,7 @@ function resolveActivitySummary(phases: AssistantProcessPhase[]): AssistantProce
       tools.push({
         key: activity.key,
         icon: summary.icon,
-        label: activity.display.summaryTitle,
+        label: activity.display.summary.title,
       });
       const existing = counts.get(summary.key);
       counts.set(summary.key, {

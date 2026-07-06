@@ -11,6 +11,7 @@ import type {
   ToolDisplayIcon,
   ToolDisplayMetric,
   ToolDisplayResult,
+  ToolDisplaySummary,
   ToolDisplayStatus,
 } from './types';
 
@@ -20,13 +21,12 @@ export function createGenericDisplay(
   context: ToolDisplayContext,
   options: { detailTitle: string; detailText: string; summaryTitle?: string },
 ): GenericToolDisplayResult {
+  const summary = createToolExecutionSummary(context.status, context.toolName, context.args);
   return {
     kind: 'generic',
     status: context.status,
     toolName: context.toolName,
-    summaryTitle:
-      options.summaryTitle ??
-      formatToolExecutionSummary(context.status, context.toolName, context.args),
+    summary: options.summaryTitle ? { title: options.summaryTitle } : summary,
     icon: getToolDisplayIcon(context.toolName),
     detail: options.detailText.trim()
       ? {
@@ -54,7 +54,7 @@ export function createPathOnlyToolDisplay({
     kind: 'generic',
     status,
     toolName,
-    summaryTitle: formatToolExecutionSummary(status, toolName, args),
+    summary: createToolExecutionSummary(status, toolName, args),
     icon: getToolDisplayIcon(toolName),
     metricsPlacement: 'inline',
   };
@@ -83,7 +83,7 @@ export function createFileChangeDisplayFromDetails({
     metricsPlacement: 'end',
     detailLabel: '文件变更',
     detailTarget: displayPath,
-    summaryTitle: formatToolExecutionSummary(status, toolName, summaryArgs),
+    summary: createToolExecutionSummary(status, toolName, summaryArgs),
   };
 }
 
@@ -100,6 +100,12 @@ export function createFileEditDisplayFromPreview({
   const previewError = fileEdit.error;
   const displayPath = fileEdit.displayPath ?? fileEdit.path;
   const actionLabel = getToolActionLabel(toolName, { path: displayPath });
+  const summary = previewError
+    ? createToolDisplaySummary({
+        action: '预览失败',
+        target: actionLabel ?? `${toolName} ${fileEdit.path}`,
+      })
+    : createToolExecutionSummary(status, toolName, { path: displayPath });
 
   return {
     kind: 'file_edit',
@@ -113,9 +119,7 @@ export function createFileEditDisplayFromPreview({
     metricsPlacement: 'end',
     detailLabel: toolName === 'write' ? '写入差异' : '编辑差异',
     detailTarget: displayPath,
-    summaryTitle: previewError
-      ? `预览失败 ${actionLabel ?? `${toolName} ${fileEdit.path}`}`
-      : formatToolExecutionSummary(status, toolName, { path: displayPath }),
+    summary,
   };
 }
 
@@ -244,14 +248,37 @@ export function formatToolExecutionSummary(
   toolName: string,
   args: Record<string, unknown> | undefined,
 ): string {
+  return createToolExecutionSummary(status, toolName, args).title;
+}
+
+export function createToolExecutionSummary(
+  status: ToolDisplayStatus,
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): ToolDisplaySummary {
+  return createToolDisplaySummary(createToolExecutionSummaryParts(status, toolName, args));
+}
+
+export function createToolExecutionSummaryParts(
+  status: ToolDisplayStatus,
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): { action: string; target?: string } {
   if (toolName === 'bash') {
     const command = getFirstArgText(args, ['command', 'cmd', 'script']) || '命令';
-    return `${getCommandStatusPrefix(status)} ${command}`;
+    return { action: getCommandStatusPrefix(status), target: command };
   }
 
   const actionLabel = getToolActionLabel(toolName, args);
-  if (!actionLabel) return `${getCommandStatusPrefix(status)} ${toolName}`;
-  return formatActionStatusSummary(status, actionLabel);
+  if (!actionLabel) return { action: getCommandStatusPrefix(status), target: toolName };
+  return formatActionStatusSummaryParts(status, actionLabel);
+}
+
+function createToolDisplaySummary(parts: { action: string; target?: string }): ToolDisplaySummary {
+  return {
+    title: parts.target ? `${parts.action} ${parts.target}` : parts.action,
+    parts,
+  };
 }
 
 function getToolActionLabel(
@@ -276,14 +303,25 @@ function getToolActionLabel(
   return undefined;
 }
 
-function formatActionStatusSummary(status: ToolDisplayStatus, actionLabel: string): string {
-  if (status === 'running' || status === 'pending') return `正在${actionLabel}`;
-  if (status === 'done') return `已${actionLabel}`;
-
+function formatActionStatusSummaryParts(
+  status: ToolDisplayStatus,
+  actionLabel: string,
+): { action: string; target?: string } {
   const { target, verb } = splitActionLabel(actionLabel);
-  if (status === 'error') return target ? `${verb}失败 ${target}` : `${actionLabel}失败`;
-  if (status === 'stopped') return target ? `已停止${verb} ${target}` : `已停止${actionLabel}`;
-  return `正在${actionLabel}`;
+  if (status === 'running' || status === 'pending') {
+    return target ? { action: `正在${verb}`, target } : { action: `正在${actionLabel}` };
+  }
+  if (status === 'done') {
+    return target ? { action: `已${verb}`, target } : { action: `已${actionLabel}` };
+  }
+
+  if (status === 'error') {
+    return target ? { action: `${verb}失败`, target } : { action: `${actionLabel}失败` };
+  }
+  if (status === 'stopped') {
+    return target ? { action: `已停止${verb}`, target } : { action: `已停止${actionLabel}` };
+  }
+  return target ? { action: `正在${verb}`, target } : { action: `正在${actionLabel}` };
 }
 
 function splitActionLabel(actionLabel: string): { target: string; verb: string } {

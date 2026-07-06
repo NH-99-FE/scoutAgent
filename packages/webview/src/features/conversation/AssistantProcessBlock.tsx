@@ -402,20 +402,46 @@ function ToolActivitySummary({
   return (
     <>
       {hideIcon ? null : <ToolDisplayIconView icon={display.icon} />}
-      <span
-        className={cn(
-          'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
-          display.status === 'error' && 'text-destructive',
-          (display.status === 'pending' || display.status === 'running') &&
-            'scout-running-text-shimmer',
-        )}
-      >
-        {display.summaryTitle}
-      </span>
+      <ToolActivitySummaryTitle display={display} />
       {placeMetricsAtEnd ? disclosureIcon : null}
       <ToolDisplayMetrics metrics={display.metrics} placement={display.metricsPlacement} />
       {placeMetricsAtEnd ? null : disclosureIcon}
     </>
+  );
+}
+
+function ToolActivitySummaryTitle({ display }: { display: ToolDisplayResult }) {
+  const summaryParts = display.summary.parts;
+  const shouldSplitErrorSummary =
+    display.status === 'error' && summaryParts?.action && summaryParts.target;
+
+  if (shouldSplitErrorSummary) {
+    return (
+      <span
+        aria-label={display.summary.title}
+        className="group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground inline-flex min-w-0 gap-1 truncate transition-colors"
+      >
+        <span className="text-destructive shrink-0" data-tool-summary-action>
+          {summaryParts.action}
+        </span>
+        <span className="min-w-0 truncate" data-tool-summary-target>
+          {summaryParts.target}
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className={cn(
+        'group-hover/tool-action:text-foreground group-focus-visible/tool-action:text-foreground min-w-0 truncate transition-colors',
+        display.status === 'error' && 'text-destructive',
+        (display.status === 'pending' || display.status === 'running') &&
+          'scout-running-text-shimmer',
+      )}
+    >
+      {display.summary.title}
+    </span>
   );
 }
 
