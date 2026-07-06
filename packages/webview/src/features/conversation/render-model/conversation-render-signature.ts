@@ -21,29 +21,6 @@ export type RenderSignature = readonly unknown[];
 type SignatureSink = unknown[];
 type SignatureBuilder<T> = (value: T, sink: SignatureSink) => void;
 
-type AssistantEntrySignatureBuilders = {
-  [Type in AssistantTurnEntry['type']]: SignatureBuilder<
-    Extract<AssistantTurnEntry, { type: Type }>
-  >;
-};
-
-type AssistantActivitySignatureBuilders = {
-  [Type in AssistantProcessActivity['type']]: SignatureBuilder<
-    Extract<AssistantProcessActivity, { type: Type }>
-  >;
-};
-
-const ASSISTANT_ENTRY_SIGNATURE_BUILDERS: AssistantEntrySignatureBuilders = {
-  content: appendContentEntrySignature,
-  process: appendProcessEntrySignature,
-};
-
-const ASSISTANT_ACTIVITY_SIGNATURE_BUILDERS: AssistantActivitySignatureBuilders = {
-  status: appendStatusActivitySignature,
-  thinking: appendThinkingActivitySignature,
-  tool: appendToolActivitySignature,
-};
-
 export function createAssistantRowSignature(row: AssistantConversationRow): RenderSignature {
   return createRenderSignature(row, appendAssistantRowSignature);
 }
@@ -94,11 +71,16 @@ function appendAssistantRowSignature(row: AssistantConversationRow, sink: Signat
 
 function appendAssistantEntrySignature(entry: AssistantTurnEntry, sink: SignatureSink): void {
   sink.push(entry.type, entry.key);
-  if (entry.type === 'content') {
-    ASSISTANT_ENTRY_SIGNATURE_BUILDERS.content(entry, sink);
-    return;
+  switch (entry.type) {
+    case 'content':
+      appendContentEntrySignature(entry, sink);
+      return;
+    case 'process':
+      appendProcessEntrySignature(entry, sink);
+      return;
+    default:
+      assertNever(entry);
   }
-  ASSISTANT_ENTRY_SIGNATURE_BUILDERS.process(entry, sink);
 }
 
 function appendContentEntrySignature(entry: AssistantContentEntry, sink: SignatureSink): void {
@@ -111,11 +93,16 @@ function appendVisibleContentSignature(
   sink: SignatureSink,
 ): void {
   sink.push(content.type);
-  if (content.type === 'text') {
-    sink.push(content.text);
-    return;
+  switch (content.type) {
+    case 'text':
+      sink.push(content.text);
+      return;
+    case 'image':
+      sink.push(content.mimeType, content.data);
+      return;
+    default:
+      assertNever(content);
   }
-  sink.push(content.mimeType, content.data);
 }
 
 function appendProcessEntrySignature(entry: AssistantProcessEntry, sink: SignatureSink): void {
@@ -158,15 +145,19 @@ function appendProcessActivitySignature(
   sink: SignatureSink,
 ): void {
   sink.push(activity.type, activity.key);
-  if (activity.type === 'status') {
-    ASSISTANT_ACTIVITY_SIGNATURE_BUILDERS.status(activity, sink);
-    return;
+  switch (activity.type) {
+    case 'status':
+      appendStatusActivitySignature(activity, sink);
+      return;
+    case 'thinking':
+      appendThinkingActivitySignature(activity, sink);
+      return;
+    case 'tool':
+      appendToolActivitySignature(activity, sink);
+      return;
+    default:
+      assertNever(activity);
   }
-  if (activity.type === 'thinking') {
-    ASSISTANT_ACTIVITY_SIGNATURE_BUILDERS.thinking(activity, sink);
-    return;
-  }
-  ASSISTANT_ACTIVITY_SIGNATURE_BUILDERS.tool(activity, sink);
 }
 
 function appendStatusActivitySignature(
@@ -271,4 +262,8 @@ function appendStableValue(value: unknown, sink: SignatureSink): void {
     sink.push(key);
     appendStableValue(record[key], sink);
   });
+}
+
+function assertNever(value: never): never {
+  throw new Error(`未处理的会话展示签名类型: ${JSON.stringify(value)}`);
 }
