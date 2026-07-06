@@ -99,6 +99,7 @@ export type ScoutGenericCommandResultType =
   | 'open_task_result'
   | 'open_settings_panel_result'
   | 'open_tree_panel_result'
+  | 'copy_text_result'
   | 'open_changes_review_result'
   | 'open_current_changes_review_result'
   | 'restore_session_result'

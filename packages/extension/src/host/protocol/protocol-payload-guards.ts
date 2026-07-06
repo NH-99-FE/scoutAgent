@@ -95,6 +95,7 @@ const PAYLOAD_VALIDATORS = {
   open_extension_file: combine(fields('type', 'path'), requiredString('path')),
   open_settings_panel: fields('type'),
   open_tree_panel: fields('type'),
+  copy_text: combine(fields('type', 'text'), requiredString('text')),
   open_changes_review: combine(
     fields('type', 'turnId', 'recordId'),
     requiredString('turnId'),

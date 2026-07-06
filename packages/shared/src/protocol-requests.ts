@@ -113,6 +113,7 @@ export type WebviewRequestPayload =
   | { type: 'open_extension_file'; path: string }
   | { type: 'open_settings_panel' }
   | { type: 'open_tree_panel' }
+  | { type: 'copy_text'; text: string }
   | { type: 'open_changes_review'; turnId: string; recordId?: string }
   | { type: 'open_current_changes_review' }
   | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
@@ -365,6 +366,13 @@ export const SCOUT_PROTOCOL = {
     method: 'open_tree_panel',
     response: 'open_tree_panel_result',
     surfaces: ['chat', 'settings'],
+  },
+  copy_text: {
+    kind: 'command',
+    service: 'ui',
+    method: 'copy_text',
+    response: 'copy_text_result',
+    surfaces: ['chat', 'settings', 'tree'],
   },
   open_changes_review: {
     kind: 'command',

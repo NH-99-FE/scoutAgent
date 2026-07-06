@@ -2,12 +2,13 @@
 // Conversation View — 会话 turn 与 assistant 过程渲染
 // ============================================================
 
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import {
   Archive,
   ArrowDown,
   CircleAlert,
+  Check,
   ChevronDown,
   ChevronRight,
   Copy,
@@ -325,11 +326,13 @@ const UserMessage = memo(function UserMessage({
 }: {
   message: Extract<ScoutMessage, { role: 'user' }>;
 }) {
+  const text = contentToText(message.content);
   return (
-    <article className="flex w-full max-w-full min-w-0 justify-end">
+    <article className="group/message flex w-full max-w-full min-w-0 flex-col items-end">
       <div className="scout-user-message bg-foreground/[0.06] max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
-        {contentToText(message.content)}
+        {text}
       </div>
+      <UserMessageActions text={text} timestamp={message.timestamp} />
     </article>
   );
 });
@@ -503,23 +506,25 @@ function AssistantTurn({
 
   return (
     <article className="scout-assistant-turn group/message flex w-full max-w-full min-w-0 flex-col">
-      <button
-        aria-expanded={open}
-        aria-label={`${open ? '收起' : '展开'}回复 ${turnSummary.label}`}
-        className={cn(
-          'text-muted-foreground/80 hover:text-muted-foreground focus-visible:text-muted-foreground mb-1 inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded text-left text-xs leading-5 transition-colors',
-          turnSummary.tone === 'error' && 'text-destructive hover:text-destructive',
-        )}
-        type="button"
-        onClick={handleToggleProcessVisibility}
-      >
-        <span className="min-w-0 truncate">{turnSummary.label}</span>
-        {open ? (
-          <ChevronDown className="size-3.5 shrink-0" data-assistant-turn-disclosure-icon />
-        ) : (
-          <ChevronRight className="size-3.5 shrink-0" data-assistant-turn-disclosure-icon />
-        )}
-      </button>
+      <div className="border-border/60 mb-2 border-b pb-1.5">
+        <button
+          aria-expanded={open}
+          aria-label={`${open ? '收起' : '展开'}回复 ${turnSummary.label}`}
+          className={cn(
+            'text-muted-foreground/80 hover:text-muted-foreground focus-visible:text-muted-foreground inline-flex min-h-5 max-w-full min-w-0 items-center gap-1.5 rounded text-left text-xs leading-5 transition-colors',
+            turnSummary.tone === 'error' && 'text-destructive hover:text-destructive',
+          )}
+          type="button"
+          onClick={handleToggleProcessVisibility}
+        >
+          <span className="min-w-0 truncate">{turnSummary.label}</span>
+          {open ? (
+            <ChevronDown className="size-3.5 shrink-0" data-assistant-turn-disclosure-icon />
+          ) : (
+            <ChevronRight className="size-3.5 shrink-0" data-assistant-turn-disclosure-icon />
+          )}
+        </button>
+      </div>
       {content}
     </article>
   );
@@ -758,6 +763,85 @@ const SystemBlock = memo(function SystemBlock({ row }: { row: SystemConversation
   );
 });
 
+function CopyActionButton({ text }: { text: string }) {
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const copyResetTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== undefined) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const setTemporaryCopyState = useCallback((state: 'copied' | 'failed') => {
+    setCopyState(state);
+    setTooltipOpen(true);
+    if (copyResetTimerRef.current !== undefined) {
+      window.clearTimeout(copyResetTimerRef.current);
+    }
+    copyResetTimerRef.current = window.setTimeout(() => {
+      setCopyState('idle');
+      copyResetTimerRef.current = undefined;
+    }, 1600);
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    protocolClient.copyText(
+      text,
+      (payload) => {
+        setTemporaryCopyState(payload.success ? 'copied' : 'failed');
+      },
+      () => {
+        setTemporaryCopyState('failed');
+      },
+    );
+  }, [setTemporaryCopyState, text]);
+
+  const copyLabel =
+    copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制';
+
+  return (
+    <TooltipProvider>
+      <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
+        <TooltipTrigger asChild>
+          <Button
+            aria-label={copyLabel}
+            className="rounded-full text-current"
+            size="icon-xs"
+            type="button"
+            variant="ghost"
+            onClick={handleCopy}
+          >
+            {copyState === 'copied' ? (
+              <Check />
+            ) : copyState === 'failed' ? (
+              <CircleAlert />
+            ) : (
+              <Copy />
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{copyLabel}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function UserMessageActions({ text, timestamp }: { text: string; timestamp: number }) {
+  return (
+    <div
+      className="text-muted-foreground/70 mt-1 flex items-center gap-0.5 text-[11px] opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100"
+      data-message-actions="user"
+    >
+      <span className="mr-1">{formatTime(timestamp)}</span>
+      <CopyActionButton text={text} />
+    </div>
+  );
+}
+
 function MessageActions({
   persistent,
   text,
@@ -778,16 +862,7 @@ function MessageActions({
       data-message-actions="assistant"
       data-latest-assistant-actions={persistent ? 'true' : undefined}
     >
-      <Button
-        aria-label="复制"
-        className="rounded-full text-current"
-        size="icon-xs"
-        type="button"
-        variant="ghost"
-        onClick={() => void navigator.clipboard?.writeText(text)}
-      >
-        <Copy />
-      </Button>
+      <CopyActionButton text={text} />
       <Button
         aria-label="赞同"
         className="rounded-full text-current"

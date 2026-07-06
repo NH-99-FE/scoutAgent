@@ -2,6 +2,7 @@
 // UI protocol service — 宿主 UI 面板与命令查询请求
 // ============================================================
 
+import * as vscode from 'vscode';
 import type {
   ExtensionEventMessage,
   ScoutCommandInfo,
@@ -221,6 +222,19 @@ export class UiProtocolService implements UiProtocolHost {
     } catch (error) {
       respond({
         type: 'open_tree_panel_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  async copyText(message: ProtocolPayload<'copy_text'>, respond: ProtocolResponder): Promise<void> {
+    try {
+      await vscode.env.clipboard.writeText(message.text);
+      respond({ type: 'copy_text_result', success: true });
+    } catch (error) {
+      respond({
+        type: 'copy_text_result',
         success: false,
         error: error instanceof Error ? error.message : String(error),
       });

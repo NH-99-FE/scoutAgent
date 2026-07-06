@@ -80,6 +80,7 @@ type OpenExtensionFileResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'open_extension_file_result' }
 >;
+type CopyTextResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'copy_text_result' }>;
 
 interface PromoteFollowUpOptions extends ContinueSessionOptions {
   resume?: boolean;
@@ -329,6 +330,21 @@ export const protocolClient = {
   exportSession: () =>
     sendRouted({ type: 'export_session', format: 'jsonl' }, projectProtocolResponsePayload),
   openTreePanel: () => sendRouted({ type: 'open_tree_panel' }, projectProtocolResponsePayload),
+  copyText: (
+    text: string,
+    onResult?: (payload: CopyTextResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'copy_text', text },
+      (payload) => {
+        if (payload.type === 'copy_text_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
   openChangesReview: (turnId: string, recordId?: string) => {
     const payload: WebviewRequestPayload = { type: 'open_changes_review', turnId };
     if (recordId) payload.recordId = recordId;

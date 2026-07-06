@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScoutBusyState, ScoutChangesReviewSummary } from '@scout-agent/shared';
 
 const protocolClientMock = vi.hoisted(() => ({
+  copyText: vi.fn(),
   openChangesReview: vi.fn(),
 }));
 
@@ -182,6 +183,7 @@ function makeChangesReviewSummary(
 describe('ConversationView', () => {
   afterEach(() => {
     useConversationExpansionStore.getState().actions.reset();
+    protocolClientMock.copyText.mockReset();
     protocolClientMock.openChangesReview.mockReset();
     cleanup();
     vi.restoreAllMocks();
@@ -222,6 +224,7 @@ describe('ConversationView', () => {
     expect(turnSummaryButton.className).not.toContain('-ml-1');
     expect(turnSummaryButton.className).not.toContain('px-1');
     expect(turnSummaryButton.className).not.toContain('py-0.5');
+    expect(turnSummaryButton.parentElement).toHaveClass('border-b');
     expect(container.querySelector('[data-assistant-turn-disclosure-icon]')).toBeTruthy();
     expect(screen.queryByText('分析当前布局')).not.toBeInTheDocument();
 
@@ -530,7 +533,7 @@ describe('ConversationView', () => {
       ],
     });
 
-    const userBubble = container.querySelector('article > div');
+    const userBubble = container.querySelector('.scout-user-message');
     expect(userBubble).toHaveClass('scout-user-message');
     expect(userBubble).toHaveClass('min-w-0', 'max-w-[77%]');
     expect(userBubble).toHaveClass('whitespace-pre-wrap');
@@ -538,6 +541,39 @@ describe('ConversationView', () => {
     expect(userBubble).not.toHaveClass('overflow-hidden');
     expect(userBubble?.className).not.toContain('sm:max-w');
     expect(userBubble?.className).not.toContain('lg:max-w');
+  });
+
+  it('shows user message actions on hover and copies user text through the extension protocol', () => {
+    protocolClientMock.copyText.mockImplementation((_text, onResult) => {
+      onResult?.({ type: 'copy_text_result', success: true });
+    });
+    const { container } = renderConversation({
+      items: [
+        {
+          key: 'user-1',
+          message: {
+            role: 'user',
+            content: '要复制的用户消息',
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    const actionBar = container.querySelector('[data-message-actions="user"]');
+    expect(actionBar).toHaveClass('opacity-0');
+    expect(actionBar).toHaveClass('group-hover/message:opacity-100');
+    expect(actionBar?.textContent).toMatch(/\d{2}:\d{2}/);
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+
+    expect(protocolClientMock.copyText).toHaveBeenCalledWith(
+      '要复制的用户消息',
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(screen.getByRole('button', { name: '已复制' })).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent('已复制');
   });
 
   it('keeps only the latest assistant message actions visible by default', () => {
@@ -605,6 +641,34 @@ describe('ConversationView', () => {
     const actionBar = container.querySelector('[data-message-actions="assistant"]');
     expect(actionBar).toHaveClass('opacity-100');
     expect(actionBar).toHaveAttribute('data-latest-assistant-actions', 'true');
+  });
+
+  it('copies assistant message text through the extension protocol', () => {
+    protocolClientMock.copyText.mockImplementation((_text, onResult) => {
+      onResult?.({ type: 'copy_text_result', success: true });
+    });
+    renderConversation({
+      items: [
+        {
+          key: 'assistant-1',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'text', text: '要复制的回复' }],
+            timestamp: 1,
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '复制' }));
+
+    expect(protocolClientMock.copyText).toHaveBeenCalledWith(
+      '要复制的回复',
+      expect.any(Function),
+      expect.any(Function),
+    );
+    expect(screen.getByRole('button', { name: '已复制' })).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent('已复制');
   });
 
   it('keeps assistant markdown in a wrapping boundary', () => {

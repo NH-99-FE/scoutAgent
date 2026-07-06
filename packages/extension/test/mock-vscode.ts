@@ -26,6 +26,12 @@ export const commands = {
   executeCommand: vi.fn(),
 };
 
+export const env = {
+  clipboard: {
+    writeText: vi.fn(async () => undefined),
+  },
+};
+
 export const window = {
   createWebviewPanel: vi.fn(),
   createOutputChannel: vi.fn(),

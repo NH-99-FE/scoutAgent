@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as vscode from 'vscode';
 import type { FileReviewTurnSnapshot } from '../../../../src/core/review/file-review.ts';
 import type { FileReviewArtifact } from '../../../../src/host/review/file-review-artifact.ts';
 import { UiProtocolService } from '../../../../src/host/protocol/services/ui-service.ts';
@@ -69,6 +70,10 @@ function makeReviewArtifact(turnId: string, recordId: string): FileReviewArtifac
 }
 
 describe('UiProtocolService', () => {
+  afterEach(() => {
+    vi.mocked(vscode.env.clipboard.writeText).mockClear();
+  });
+
   it('responds with builtin and extension commands', () => {
     const publishEvent = vi.fn();
     const respond = vi.fn();
@@ -151,6 +156,36 @@ describe('UiProtocolService', () => {
       type: 'open_tree_panel_result',
       success: false,
       error: 'Tree panel is not registered',
+    });
+  });
+
+  it('writes requested text to the VS Code clipboard', async () => {
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+    });
+    const respond = vi.fn();
+
+    await service.copyText({ type: 'copy_text', text: 'assistant reply' }, respond);
+
+    expect(vscode.env.clipboard.writeText).toHaveBeenCalledWith('assistant reply');
+    expect(respond).toHaveBeenCalledWith({ type: 'copy_text_result', success: true });
+  });
+
+  it('returns an error when clipboard writing fails', async () => {
+    vi.mocked(vscode.env.clipboard.writeText).mockRejectedValueOnce(new Error('clipboard locked'));
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+    });
+    const respond = vi.fn();
+
+    await service.copyText({ type: 'copy_text', text: 'assistant reply' }, respond);
+
+    expect(respond).toHaveBeenCalledWith({
+      type: 'copy_text_result',
+      success: false,
+      error: 'clipboard locked',
     });
   });
 

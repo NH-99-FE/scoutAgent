@@ -173,6 +173,7 @@ export interface UiProtocolHost {
   extensionUIResponse: (message: ProtocolPayload<'extension_ui_response'>) => void;
   openSettingsPanel: (respond: ProtocolResponder) => Promise<void>;
   openTreePanel: (respond: ProtocolResponder) => Promise<void>;
+  copyText: (message: ProtocolPayload<'copy_text'>, respond: ProtocolResponder) => Promise<void>;
   openChangesReview: (
     message: ProtocolPayload<'open_changes_review'>,
     respond: ProtocolResponder,
