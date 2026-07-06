@@ -51,6 +51,7 @@ interface ConversationActions {
 interface ConversationStore {
   messages: ScoutMessage[];
   messageKeys: string[];
+  messageIndexByKey: Record<string, number>;
   conversationItems: ConversationItem[];
   isStreaming: boolean;
   busyState: ScoutBusyState;
@@ -63,6 +64,11 @@ interface ConversationStore {
   toolPreviewsById: Record<string, ToolCallPreviewState>;
   actions: ConversationActions;
 }
+
+type ConversationMessageState = Pick<
+  ConversationStore,
+  'messages' | 'messageKeys' | 'messageIndexByKey' | 'conversationItems'
+>;
 
 export const IDLE_BUSY_STATE: ScoutBusyState = {
   kind: 'idle',
@@ -78,6 +84,7 @@ const EMPTY_QUEUE_STATE: ScoutQueueState = {
 const initialState = {
   messages: [] as ScoutMessage[],
   messageKeys: [] as string[],
+  messageIndexByKey: createEmptyMessageIndexByKey(),
   conversationItems: [] as ConversationItem[],
   isStreaming: false,
   busyState: IDLE_BUSY_STATE,
@@ -94,6 +101,27 @@ function getStateMessageKeys(messages: ScoutMessage[]): string[] {
   return messages.map((message, index) => message.entryId ?? `state:${index}`);
 }
 
+function createMessageIndexByKey(messageKeys: string[]): Record<string, number> {
+  const messageIndexByKey = createEmptyMessageIndexByKey();
+  messageKeys.forEach((key, index) => {
+    // 协议层应保证 key 唯一；若历史快照异常重复，保留 indexOf 的首个命中语义。
+    messageIndexByKey[key] ??= index;
+  });
+  return messageIndexByKey;
+}
+
+function createEmptyMessageIndexByKey(): Record<string, number> {
+  return Object.create(null) as Record<string, number>;
+}
+
+function appendMessageIndex(
+  messageIndexByKey: Record<string, number>,
+  key: string,
+  index: number,
+): Record<string, number> {
+  return Object.assign(createEmptyMessageIndexByKey(), messageIndexByKey, { [key]: index });
+}
+
 function createConversationItems(
   messages: ScoutMessage[],
   messageKeys: string[],
@@ -107,30 +135,58 @@ function createConversationItems(
   });
 }
 
-function upsertProtocolMessage(
+function createConversationMessageState(
   messages: ScoutMessage[],
-  messageKeys: string[],
-  conversationItems: ConversationItem[],
+  previousItems: ConversationItem[] = [],
+): ConversationMessageState {
+  const messageKeys = getStateMessageKeys(messages);
+  return {
+    messages,
+    messageKeys,
+    messageIndexByKey: createMessageIndexByKey(messageKeys),
+    conversationItems: createConversationItems(messages, messageKeys, previousItems),
+  };
+}
+
+function replaceArrayItem<T>(items: T[], index: number, item: T): T[] {
+  if (items[index] === item) return items;
+  const nextItems = [...items];
+  nextItems[index] = item;
+  return nextItems;
+}
+
+function upsertProtocolMessage(
+  state: ConversationMessageState,
   messageId: string,
   message: ScoutMessage,
-): Pick<ConversationStore, 'messages' | 'messageKeys' | 'conversationItems'> {
-  const index = messageKeys.indexOf(messageId);
-  if (index < 0) {
-    const nextMessages = [...messages, message];
-    const nextMessageKeys = [...messageKeys, messageId];
+): ConversationMessageState | undefined {
+  const index = state.messageIndexByKey[messageId];
+  if (index === undefined || index < 0 || index >= state.messages.length) {
+    const nextMessages = [...state.messages, message];
+    const nextMessageKeys = [...state.messageKeys, messageId];
     return {
       messages: nextMessages,
       messageKeys: nextMessageKeys,
-      conversationItems: createConversationItems(nextMessages, nextMessageKeys, conversationItems),
+      messageIndexByKey: appendMessageIndex(
+        state.messageIndexByKey,
+        messageId,
+        state.messages.length,
+      ),
+      conversationItems: [...state.conversationItems, { key: messageId, message }],
     };
   }
 
-  const nextMessages = [...messages];
-  nextMessages[index] = message;
+  if (state.messages[index] === message) return undefined;
+  const previousItem = state.conversationItems[index];
+  const nextItem =
+    previousItem?.key === messageId && previousItem.message === message
+      ? previousItem
+      : { key: messageId, message };
   return {
-    messages: nextMessages,
-    messageKeys,
-    conversationItems: createConversationItems(nextMessages, messageKeys, conversationItems),
+    messages: replaceArrayItem(state.messages, index, message),
+    messageKeys: state.messageKeys,
+    messageIndexByKey: state.messageIndexByKey,
+    conversationItems: replaceArrayItem(state.conversationItems, index, nextItem),
   };
 }
 
@@ -146,12 +202,13 @@ export const useConversationStore = create<ConversationStore>((set) => ({
   ...initialState,
   actions: {
     applyStateSnapshot: (state) =>
-      set(() => {
-        const messageKeys = getStateMessageKeys(state.messages);
+      set((current) => {
+        const conversationState = createConversationMessageState(
+          state.messages,
+          current.conversationItems,
+        );
         return {
-          messages: state.messages,
-          messageKeys,
-          conversationItems: createConversationItems(state.messages, messageKeys),
+          ...conversationState,
           isStreaming: state.isStreaming,
           busyState: state.busyState,
           queueState: state.queueState ?? EMPTY_QUEUE_STATE,
@@ -189,13 +246,9 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           event.type === 'message_update' ||
           event.type === 'message_end'
         ) {
-          const nextMessages = upsertProtocolMessage(
-            state.messages,
-            state.messageKeys,
-            state.conversationItems,
-            event.messageId,
-            event.message,
-          );
+          const nextMessages = upsertProtocolMessage(state, event.messageId, event.message);
+          // 相同 message 引用的重复 runtime update 直接复用当前 state，让 Zustand 跳过通知。
+          if (!nextMessages) return state;
           return {
             ...nextMessages,
           };

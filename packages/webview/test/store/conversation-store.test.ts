@@ -846,6 +846,117 @@ describe('conversation store', () => {
     expect(useConversationStore.getState().toolExecutionsById).toEqual({});
   });
 
+  it('updates snapshot entry ids without replacing unrelated conversation items', () => {
+    const actions = useConversationStore.getState().actions;
+    const userMessage: ScoutMessage = {
+      role: 'user',
+      content: 'hello',
+      timestamp: 1,
+      entryId: 'entry-user',
+    };
+    const assistantMessage: ScoutMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hel' }],
+      timestamp: 2,
+      entryId: 'entry-assistant',
+    };
+    const updatedAssistantMessage: ScoutMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello' }],
+      timestamp: 2,
+      entryId: 'entry-assistant',
+    };
+
+    actions.applyStateSnapshot(makeState([userMessage, assistantMessage]));
+    const previousItems = useConversationStore.getState().conversationItems;
+
+    actions.applyRuntimeEvent({
+      type: 'message_update',
+      messageId: 'entry-assistant',
+      message: updatedAssistantMessage,
+    });
+
+    const state = useConversationStore.getState();
+    expect(state.messages).toEqual([userMessage, updatedAssistantMessage]);
+    expect(state.messageKeys).toEqual(['entry-user', 'entry-assistant']);
+    expect(state.conversationItems[0]).toBe(previousItems[0]);
+    expect(state.conversationItems[1]).not.toBe(previousItems[1]);
+    expect(state.conversationItems[1]).toEqual({
+      key: 'entry-assistant',
+      message: updatedAssistantMessage,
+    });
+  });
+
+  it('indexes protocol message ids without object prototype collisions', () => {
+    const actions = useConversationStore.getState().actions;
+    const firstMessage: ScoutMessage = { role: 'user', content: 'hello', timestamp: 1 };
+    const secondMessage: ScoutMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hel' }],
+      timestamp: 2,
+    };
+    const updatedSecondMessage: ScoutMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello' }],
+      timestamp: 2,
+    };
+
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'constructor',
+      message: firstMessage,
+    });
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: '__proto__',
+      message: secondMessage,
+    });
+    actions.applyRuntimeEvent({
+      type: 'message_update',
+      messageId: '__proto__',
+      message: updatedSecondMessage,
+    });
+
+    const state = useConversationStore.getState();
+    expect(state.messages).toEqual([firstMessage, updatedSecondMessage]);
+    expect(state.messageKeys).toEqual(['constructor', '__proto__']);
+    expect(state.conversationItems).toEqual([
+      { key: 'constructor', message: firstMessage },
+      { key: '__proto__', message: updatedSecondMessage },
+    ]);
+  });
+
+  it('skips repeated runtime updates that keep the same message reference', () => {
+    const actions = useConversationStore.getState().actions;
+    const message: ScoutMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello' }],
+      timestamp: 1,
+    };
+
+    actions.applyRuntimeEvent({
+      type: 'message_start',
+      messageId: 'message-1',
+      message,
+    });
+
+    let notificationCount = 0;
+    const unsubscribe = useConversationStore.subscribe(() => {
+      notificationCount += 1;
+    });
+
+    actions.applyRuntimeEvent({
+      type: 'message_update',
+      messageId: 'message-1',
+      message,
+    });
+    unsubscribe();
+
+    expect(notificationCount).toBe(0);
+    expect(useConversationStore.getState().messages[0]).toBe(message);
+    expect(useConversationStore.getState().conversationItems[0]?.message).toBe(message);
+  });
+
   it('preserves unchanged conversation item references across message updates', () => {
     const actions = useConversationStore.getState().actions;
 
