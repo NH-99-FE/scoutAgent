@@ -66,7 +66,7 @@ export function ConversationScrollerContent({
   return (
     <MessageScrollerContent
       className={cn(
-        'scout-conversation-content flex w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden px-2.5 py-2 pb-2 sm:px-3 md:px-4 md:py-3 md:pb-2',
+        'scout-conversation-content flex w-full max-w-full min-w-0 flex-col gap-3 overflow-x-hidden py-2 pr-0.5 pb-2 pl-3 md:py-3 md:pr-1.5 md:pb-2 md:pl-4',
         className,
       )}
       data-scout-conversation-rendering="full"
