@@ -6,10 +6,10 @@ import {
   Archive,
   Bot,
   ClipboardList,
+  ClipboardPen,
   FileText,
   FolderOpen,
   GitBranch,
-  PencilLine,
   Search,
   SquareTerminal,
   User,
@@ -55,7 +55,7 @@ function renderToolIcon(toolName: string | undefined, className: string) {
   if (toolName === 'bash') return <SquareTerminal className={className} />;
   if (toolName === 'grep' || toolName === 'find') return <Search className={className} />;
   if (toolName === 'read') return <FileText className={className} />;
-  if (toolName === 'edit' || toolName === 'write') return <PencilLine className={className} />;
+  if (toolName === 'edit' || toolName === 'write') return <ClipboardPen className={className} />;
   if (toolName === 'ls') return <FolderOpen className={className} />;
   if (toolName === 'todo' || toolName === 'task') return <ClipboardList className={className} />;
   return <Wrench className={className} />;

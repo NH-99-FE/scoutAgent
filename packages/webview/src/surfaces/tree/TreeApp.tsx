@@ -5,7 +5,6 @@
 import { useCallback, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import {
   FILTERS,
@@ -81,27 +80,16 @@ export function TreeApp() {
 
       <section className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(280px,360px)]">
         <div className="bg-tree-background min-h-0 p-3">
-          <ScrollArea
-            className="border-border bg-card h-full min-h-0 rounded-md border shadow-sm"
-            viewportClassName="p-2"
-          >
-            {controller.visibleNodes.length === 0 ? (
-              <div className="text-muted-foreground px-2 py-8 text-center text-sm">
-                暂无会话树节点
-              </div>
-            ) : (
-              <TreeList
-                effectiveSelectedId={controller.effectiveSelectedId}
-                foldedIds={controller.foldedIds}
-                highlightedFoldAnchorId={highlightedFoldAnchorId}
-                leafId={controller.leafId}
-                visibleNodes={controller.visibleNodes}
-                onFoldAnchorHighlightEnd={handleFoldAnchorHighlightEnd}
-                onSelectNode={handleSelectNode}
-                onToggleFoldNode={handleToggleFoldNode}
-              />
-            )}
-          </ScrollArea>
+          <TreeList
+            effectiveSelectedId={controller.effectiveSelectedId}
+            foldedIds={controller.foldedIds}
+            highlightedFoldAnchorId={highlightedFoldAnchorId}
+            leafId={controller.leafId}
+            visibleNodes={controller.visibleNodes}
+            onFoldAnchorHighlightEnd={handleFoldAnchorHighlightEnd}
+            onSelectNode={handleSelectNode}
+            onToggleFoldNode={handleToggleFoldNode}
+          />
         </div>
 
         <aside className="bg-tree-background min-h-0 p-3">

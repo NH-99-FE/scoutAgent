@@ -6,6 +6,7 @@ import { memo } from 'react';
 import { ChevronDown, ChevronRight, Leaf, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TreeNodeIcon } from './TreeNodeIcon';
+import { TREE_ROW_HEIGHT_PX } from './tree-layout';
 import { formatNodeLine } from '../model/tree-node-format';
 import type { VisibleTreeNode } from '../model/tree-types';
 
@@ -47,11 +48,12 @@ export const TreeRow = memo(function TreeRow({
       aria-current={current ? 'true' : undefined}
       aria-selected={selected}
       className={cn(
-        'group/tree-row grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-transparent px-2 text-sm transition-[background-color,box-shadow,border-color] duration-200',
+        'group/tree-row grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-transparent px-2 text-sm transition-[background-color,box-shadow,border-color] duration-200',
         selected ? 'bg-control-selected' : 'hover:bg-control-hover',
         highlighted && 'scout-fold-anchor-highlight bg-primary/10 ring-primary/25 ring-2',
       )}
       role="treeitem"
+      style={{ height: `${TREE_ROW_HEIGHT_PX}px` }}
       aria-expanded={foldable || folded ? !folded : undefined}
       tabIndex={0}
       onAnimationEnd={handleAnimationEnd}
@@ -124,8 +126,11 @@ function TreeGraphRail({
 
   return (
     <span
-      className="relative block h-8 shrink-0"
-      style={{ width: `${laneCount * GRAPH_LANE_WIDTH}px` }}
+      className="relative block shrink-0"
+      style={{
+        height: `${TREE_ROW_HEIGHT_PX}px`,
+        width: `${laneCount * GRAPH_LANE_WIDTH}px`,
+      }}
     >
       {entry.graph.activeLanes
         .filter((lane) => lane !== parentConnectorLane)
