@@ -31,16 +31,16 @@ export interface SlashCommandMenuItem {
 
 export function buildSlashCommandItems(options: {
   allowExtensionCommands?: boolean;
-  allowForkCommand?: boolean;
+  allowSessionCommands?: boolean;
   commands: ScoutCommandInfo[];
   query: string;
 }): SlashCommandMenuItem[] {
   const allowExtensionCommands = options.allowExtensionCommands ?? true;
-  const allowForkCommand = options.allowForkCommand ?? true;
+  const allowSessionCommands = options.allowSessionCommands ?? true;
   const query = options.query.trim().toLowerCase();
   const commandItems = options.commands
     .filter((command) => allowExtensionCommands || command.source !== 'extension')
-    .map((command) => toSlashCommandItem(command, { allowForkCommand }))
+    .map((command) => toSlashCommandItem(command, { allowSessionCommands }))
     .filter((item): item is SlashCommandMenuItem => item !== null);
 
   if (!query) return commandItems;
@@ -57,7 +57,7 @@ export function buildSlashCommandItems(options: {
 
 function toSlashCommandItem(
   command: ScoutCommandInfo,
-  options: { allowForkCommand: boolean },
+  options: { allowSessionCommands: boolean },
 ): SlashCommandMenuItem | null {
   if (command.source === 'builtin') {
     return toBuiltinCommandItem(command, options);
@@ -81,11 +81,11 @@ function toSlashCommandItem(
 
 function toBuiltinCommandItem(
   command: ScoutCommandInfo,
-  options: { allowForkCommand: boolean },
+  options: { allowSessionCommands: boolean },
 ): SlashCommandMenuItem | null {
   const action = getSupportedBuiltinAction(command.name);
   if (!action) return null;
-  if (action === 'fork' && !options.allowForkCommand) return null;
+  if (isSessionBoundBuiltinAction(action) && !options.allowSessionCommands) return null;
   const meta = BUILTIN_META[action];
 
   return {
@@ -104,6 +104,10 @@ function getSupportedBuiltinAction(name: string): SlashBuiltinAction | undefined
     return name;
   }
   return undefined;
+}
+
+function isSessionBoundBuiltinAction(action: SlashBuiltinAction): boolean {
+  return action === 'tree' || action === 'compact' || action === 'fork';
 }
 
 function getSourceDescription(source: ScoutCommandInfo['source']): string {

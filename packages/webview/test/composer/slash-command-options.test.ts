@@ -18,23 +18,23 @@ function builtinCommand(name: string): ScoutCommandInfo {
 }
 
 describe('buildSlashCommandItems', () => {
-  it('includes fork for the current-session composer', () => {
+  it('includes session-bound builtins for the current-session composer', () => {
     const items = buildSlashCommandItems({
-      allowForkCommand: true,
-      commands: [builtinCommand('fork')],
+      allowSessionCommands: true,
+      commands: [builtinCommand('tree'), builtinCommand('compact'), builtinCommand('fork')],
       query: '',
     });
 
-    expect(items.map((item) => item.builtinAction)).toContain('fork');
+    expect(items.map((item) => item.builtinAction)).toEqual(['tree', 'compact', 'fork']);
   });
 
-  it('hides fork for the new-session composer', () => {
+  it('hides session-bound builtins for the new-session composer', () => {
     const items = buildSlashCommandItems({
-      allowForkCommand: false,
-      commands: [builtinCommand('tree'), builtinCommand('fork')],
+      allowSessionCommands: false,
+      commands: [builtinCommand('tree'), builtinCommand('compact'), builtinCommand('fork')],
       query: '',
     });
 
-    expect(items.map((item) => item.builtinAction)).toEqual(['tree']);
+    expect(items).toEqual([]);
   });
 });

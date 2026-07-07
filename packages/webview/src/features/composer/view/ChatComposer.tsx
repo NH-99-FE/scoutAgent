@@ -187,7 +187,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
       slashTrigger
         ? buildSlashCommandItems({
             allowExtensionCommands: !isStreaming,
-            allowForkCommand: isCurrentSessionMode,
+            allowSessionCommands: isCurrentSessionMode,
             commands,
             query: slashTrigger.query,
           })

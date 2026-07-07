@@ -415,9 +415,10 @@ describe('ChatApp', () => {
       makeCommand('model', 'builtin', 'Change the active model'),
       makeCommand('continue', 'builtin', 'Continue the current response'),
     ]);
+    routeDetailState();
     render(<ChatApp />);
 
-    typeComposerText('随心输入', '/');
+    typeComposerText('要求后续变更', '/');
 
     expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
     expect(screen.getByRole('option', { name: /压缩/ })).toBeInTheDocument();
@@ -426,11 +427,29 @@ describe('ChatApp', () => {
     expect(screen.queryByRole('option', { name: /model/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /continue/ })).not.toBeInTheDocument();
 
-    typeComposerText('随心输入', '/co');
+    typeComposerText('要求后续变更', '/co');
 
     expect(screen.getByRole('option', { name: /压缩/ })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /settings/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /review/ })).not.toBeInTheDocument();
+  });
+
+  it('hides session-bound builtin slash commands on the task home', () => {
+    routeCommands([
+      makeCommand('tree', 'builtin', 'Open the conversation tree'),
+      makeCommand('compact', 'builtin', 'Manually compact the current session'),
+      makeCommand('fork', 'builtin', 'Create a branch'),
+      makeCommand('review', 'prompt', 'Review pending changes'),
+    ]);
+    render(<ChatApp />);
+
+    typeComposerText('随心输入', '/');
+
+    expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /review/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /会话树/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /压缩/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /分叉/ })).not.toBeInTheDocument();
   });
 
   it('hides extension slash commands while the current session is streaming', () => {
@@ -623,14 +642,15 @@ describe('ChatApp', () => {
       makeCommand('tree', 'builtin', 'Open the conversation tree'),
       makeCommand('compact', 'builtin', 'Manually compact the current session'),
     ]);
+    routeDetailState();
     render(<ChatApp />);
-    const textarea = typeComposerText('随心输入', '/');
+    const textarea = typeComposerText('要求后续变更', '/');
 
     fireEvent.keyDown(textarea, { key: 'ArrowDown' });
     expect(screen.getByRole('option', { name: /压缩/ })).toHaveAttribute('aria-selected', 'true');
 
-    typeComposerText('随心输入', '');
-    typeComposerText('随心输入', '/');
+    typeComposerText('要求后续变更', '');
+    typeComposerText('要求后续变更', '/');
 
     expect(screen.getByRole('option', { name: /会话树/ })).toHaveAttribute('aria-selected', 'true');
   });
@@ -2344,10 +2364,7 @@ describe('ChatApp', () => {
       routeExtensionMessage({
         type: 'state_update',
         state: makeState(
-          [
-            ...makeUserMessages(160),
-            { role: 'user', content: '继续处理', timestamp: 161 },
-          ],
+          [...makeUserMessages(160), { role: 'user', content: '继续处理', timestamp: 161 }],
           {
             isStreaming: true,
             busyState: { kind: 'agent', label: 'Working', cancellable: true },
