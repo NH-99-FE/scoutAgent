@@ -36,7 +36,7 @@ export function ReviewFileSection({
       id={file.id}
     >
       <header className="bg-tree-background sticky top-10 z-20 w-full">
-        <div className="group/file-row hover:bg-muted focus-within:bg-muted dark:hover:bg-muted/50 dark:focus-within:bg-muted/50 grid min-h-9 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-md px-2 py-1 transition-colors sm:px-[22px]">
+        <div className="group/file-row hover:bg-control-hover focus-within:bg-control-hover grid min-h-9 w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2.5 rounded-md px-2 py-1 transition-colors sm:px-[22px]">
           <button
             className="flex min-w-0 cursor-pointer items-center gap-1.5 overflow-hidden border-0 bg-transparent p-0 text-left font-[inherit] text-inherit focus-visible:outline-none"
             onClick={() => onToggleFile(fileKey)}
@@ -52,8 +52,8 @@ export function ReviewFileSection({
             ) : null}
           </button>
           <span className="inline-flex items-center gap-[5px] text-sm font-normal">
-            <span className="text-chart-2">+{file.additions}</span>
-            <span className="text-chart-5">-{file.deletions}</span>
+            <span className="text-diff-added">+{file.additions}</span>
+            <span className="text-diff-removed">-{file.deletions}</span>
           </span>
           <button
             aria-label="Toggle file diff"

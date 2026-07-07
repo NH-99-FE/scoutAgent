@@ -162,7 +162,7 @@ const UserMessage = memo(function UserMessage({
   const text = contentToText(message.content);
   return (
     <article className="group/message flex w-full max-w-full min-w-0 flex-col items-end">
-      <div className="scout-user-message bg-foreground/[0.06] max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
+      <div className="scout-user-message bg-user-message max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
         {text}
       </div>
       <UserMessageActions text={text} timestamp={message.timestamp} />
@@ -423,7 +423,7 @@ function AssistantChangesReviewCard({ review }: { review: AssistantChangesReview
     : review.files.slice(0, CHANGES_REVIEW_VISIBLE_FILE_LIMIT);
 
   return (
-    <div className="border-border/80 bg-foreground/[0.035] max-w-[32rem] overflow-hidden rounded-lg border shadow-sm">
+    <div className="border-border/80 bg-surface-subtle max-w-[32rem] overflow-hidden rounded-lg border shadow-sm">
       <div className="border-border/70 flex min-h-11 items-center gap-2.5 border-b px-3 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5 text-[13px] leading-5 font-semibold">
@@ -433,9 +433,9 @@ function AssistantChangesReviewCard({ review }: { review: AssistantChangesReview
               strokeWidth={2}
             />
             <span className="min-w-0 truncate">已编辑 {review.fileCount} 个文件</span>
-            <span className="shrink-0 font-mono text-[var(--chart-2)]">+{review.additions}</span>
+            <span className="text-diff-added shrink-0 font-mono">+{review.additions}</span>
             {review.deletions > 0 ? (
-              <span className="shrink-0 font-mono text-[var(--chart-5)]">-{review.deletions}</span>
+              <span className="text-diff-removed shrink-0 font-mono">-{review.deletions}</span>
             ) : null}
           </div>
         </div>
@@ -493,11 +493,11 @@ function AssistantChangesReviewFileRow({
           {pathParts.fileName}
         </span>
       </span>
-      <span className="shrink-0 font-mono text-xs font-semibold text-[var(--chart-2)]">
+      <span className="text-diff-added shrink-0 font-mono text-xs font-semibold">
         +{file.additions}
       </span>
       {file.deletions > 0 ? (
-        <span className="shrink-0 font-mono text-xs font-semibold text-[var(--chart-5)]">
+        <span className="text-diff-removed shrink-0 font-mono text-xs font-semibold">
           -{file.deletions}
         </span>
       ) : null}

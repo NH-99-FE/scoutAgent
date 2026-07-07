@@ -23,8 +23,7 @@ import {
 
 const UNIFIED_GRID_COLUMNS = 'grid-cols-[var(--changes-review-line-gutter)_minmax(0,1fr)]';
 const SPLIT_COLUMN_GRID = 'grid-cols-[var(--changes-review-line-gutter)_minmax(0,1fr)]';
-const SPLIT_EMPTY_SIDE_CLASS =
-  'col-span-2 bg-[var(--changes-review-empty-split-bg)] [background-image:var(--changes-review-empty-split-pattern)] [background-size:10px_10px]';
+const SPLIT_EMPTY_SIDE_CLASS = 'scout-review-empty-split col-span-2';
 const GUTTER_GAP_CLASS = 'border-r-[2px] border-r-tree-background';
 const SPLIT_LINE_HEIGHT_CLASS =
   'min-h-[var(--changes-review-line-height)] leading-[var(--changes-review-line-height)]';
@@ -44,7 +43,7 @@ export function ReviewDiff({
 }) {
   if (file.unavailableReason) {
     return (
-      <div className="border-l-chart-3 text-muted-foreground bg-chart-3/10 mx-2 mt-2 mb-2.5 border-l-[3px] px-2.5 py-2">
+      <div className="border-l-status-warning text-muted-foreground bg-status-warning-muted mx-2 mt-2 mb-2.5 border-l-[3px] px-2.5 py-2">
         {file.unavailableReason}
       </div>
     );
@@ -53,7 +52,7 @@ export function ReviewDiff({
   return (
     <>
       {file.statusNote ? (
-        <div className="border-l-chart-3 text-muted-foreground bg-chart-3/10 mx-2 mt-2 mb-2.5 border-l-[3px] px-2.5 py-2">
+        <div className="border-l-status-warning text-muted-foreground bg-status-warning-muted mx-2 mt-2 mb-2.5 border-l-[3px] px-2.5 py-2">
           {file.statusNote}
         </div>
       ) : null}
@@ -536,18 +535,16 @@ function ReviewDataRow({ row }: { row: ScoutChangesReviewRow }) {
       className={cn(
         'grid min-h-[20px] min-w-max whitespace-pre',
         UNIFIED_GRID_COLUMNS,
-        row.type === 'added' &&
-          'bg-changes-review-added-muted shadow-[inset_4px_0_0_var(--chart-2)]',
-        row.type === 'removed' &&
-          'bg-changes-review-removed-muted shadow-[inset_4px_0_0_var(--chart-5)]',
+        row.type === 'added' && 'bg-diff-added-muted shadow-diff-added',
+        row.type === 'removed' && 'bg-diff-removed-muted shadow-diff-removed',
       )}
     >
       <span
         className={cn(
           'pr-3 text-right select-none',
           GUTTER_GAP_CLASS,
-          row.type === 'added' && 'text-chart-2',
-          row.type === 'removed' && 'text-chart-5',
+          row.type === 'added' && 'text-diff-added',
+          row.type === 'removed' && 'text-diff-removed',
           row.type === 'context' && 'text-muted-foreground',
         )}
       >
@@ -556,7 +553,7 @@ function ReviewDataRow({ row }: { row: ScoutChangesReviewRow }) {
       <span
         className={cn(
           'text-foreground/90 min-w-0 py-0 pr-[18px] pl-2.5',
-          row.type === 'removed' && 'text-chart-5',
+          row.type === 'removed' && 'text-diff-removed',
         )}
       >
         <ReviewLineText row={row} />
@@ -589,10 +586,8 @@ function getSplitLineGutterClass(lineType: SplitDiffLineType): string {
     'pr-3 text-right select-none',
     GUTTER_GAP_CLASS,
     lineType === 'context' && 'text-muted-foreground',
-    lineType === 'removed' &&
-      'bg-changes-review-removed-muted text-chart-5 shadow-[inset_4px_0_0_var(--chart-5)]',
-    lineType === 'added' &&
-      'bg-changes-review-added-muted text-chart-2 shadow-[inset_4px_0_0_var(--chart-2)]',
+    lineType === 'removed' && 'bg-diff-removed-muted text-diff-removed shadow-diff-removed',
+    lineType === 'added' && 'bg-diff-added-muted text-diff-added shadow-diff-added',
   );
 }
 
@@ -600,8 +595,8 @@ function getSplitLineContentClass(lineType: SplitDiffLineType): string {
   return cn(
     SPLIT_LINE_HEIGHT_CLASS,
     'text-foreground/90 overflow-hidden py-0 pr-[18px] pl-2.5',
-    lineType === 'removed' && 'bg-changes-review-removed-muted text-chart-5',
-    lineType === 'added' && 'bg-changes-review-added-muted',
+    lineType === 'removed' && 'bg-diff-removed-muted text-diff-removed',
+    lineType === 'added' && 'bg-diff-added-muted',
   );
 }
 

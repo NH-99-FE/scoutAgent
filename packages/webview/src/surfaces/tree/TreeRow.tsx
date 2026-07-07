@@ -48,9 +48,8 @@ export const TreeRow = memo(function TreeRow({
       aria-selected={selected}
       className={cn(
         'group/tree-row grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border border-transparent px-2 text-sm transition-[background-color,box-shadow,border-color] duration-200',
-        selected ? 'bg-muted dark:bg-muted/50' : 'hover:bg-muted dark:hover:bg-muted/50',
-        highlighted &&
-          'scout-fold-anchor-highlight bg-primary/10 ring-2 ring-primary/25 dark:bg-primary/10',
+        selected ? 'bg-control-selected' : 'hover:bg-control-hover',
+        highlighted && 'scout-fold-anchor-highlight bg-primary/10 ring-primary/25 ring-2',
       )}
       role="treeitem"
       aria-expanded={foldable || folded ? !folded : undefined}
@@ -82,13 +81,13 @@ export const TreeRow = memo(function TreeRow({
       </div>
       <div className="flex min-w-0 shrink-0 items-center gap-1.5">
         {node.label ? (
-          <span className="flex max-w-32 items-center gap-1 truncate text-[11px] text-yellow-700/65 dark:text-yellow-200/60">
+          <span className="text-status-warning flex max-w-32 items-center gap-1 truncate text-[11px]">
             <Tag className="size-3 shrink-0" />
             <span className="min-w-0 truncate">{node.label}</span>
           </span>
         ) : null}
         {current ? (
-          <span className="flex shrink-0 items-center gap-1 text-[11px] text-emerald-700/70 dark:text-emerald-300/60">
+          <span className="text-status-success flex shrink-0 items-center gap-1 text-[11px]">
             <Leaf className="size-3 shrink-0" />
             <span>now</span>
           </span>
@@ -153,9 +152,7 @@ function TreeGraphRail({
               : entry.graph.isBranchPoint
                 ? 'border-muted-foreground/55 bg-background'
                 : 'border-border bg-muted-foreground/55',
-          folded
-            ? 'opacity-0'
-            : canToggleFold && 'group-hover/tree-row:opacity-0',
+          folded ? 'opacity-0' : canToggleFold && 'group-hover/tree-row:opacity-0',
         )}
         style={{ left: dotLeft }}
       />

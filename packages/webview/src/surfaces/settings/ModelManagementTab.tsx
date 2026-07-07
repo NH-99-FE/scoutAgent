@@ -262,9 +262,9 @@ function ModelList({
               type="button"
               variant="ghost"
               className={cn(
-                'border-border/50 hover:bg-muted/40 dark:hover:bg-muted/25 h-auto w-full justify-start border px-3 py-2.5 text-left',
+                'border-border/50 hover:bg-control-hover h-auto w-full justify-start border px-3 py-2.5 text-left',
                 model.clientId === selectedModelClientId &&
-                  'bg-muted/35 text-foreground dark:bg-muted/20',
+                  'bg-control-selected-subtle text-foreground',
               )}
               data-model-client-id={model.clientId}
               onClick={() => onSelectModel(model.clientId)}

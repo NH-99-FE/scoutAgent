@@ -22,8 +22,8 @@ export function ReviewTopbar({
           {model.totals.fileCount} 个文件已更改
         </span>
         <span className="inline-flex items-center gap-[5px]">
-          <span className="text-chart-2">+{model.totals.additions}</span>
-          <span className="text-chart-5">-{model.totals.deletions}</span>
+          <span className="text-diff-added">+{model.totals.additions}</span>
+          <span className="text-diff-removed">-{model.totals.deletions}</span>
         </span>
       </div>
       <span

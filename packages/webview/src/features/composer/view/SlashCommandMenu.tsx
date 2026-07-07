@@ -51,7 +51,7 @@ function SlashCommandMenuRow({
       aria-selected={active}
       className={cn(
         'flex h-8 w-full items-center gap-1 rounded-lg px-2 text-left text-xs outline-hidden',
-        active ? 'bg-muted dark:bg-muted/50' : 'hover:bg-muted dark:hover:bg-muted/50',
+        active ? 'bg-control-selected' : 'hover:bg-control-hover',
       )}
       role="option"
       type="button"

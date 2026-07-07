@@ -1,0 +1,211 @@
+@custom-variant dark (&:is(.dark *, .vscode-dark *, .vscode-high-contrast *));
+
+/* VS Code workbench 语义色。主按钮使用前景/背景反色，保持中性且不使用 VS Code 蓝色按钮。 */
+:root {
+  --scout-font-family: var(--vscode-font-family, var(--vscode-editor-font-family, sans-serif));
+  --scout-monospace-font: var(
+    --vscode-editor-font-family,
+    'SF Mono',
+    Monaco,
+    Menlo,
+    Consolas,
+    'Courier New',
+    monospace
+  );
+  --scout-shadow-sm: 0 0 4px rgba(0, 0, 0, 0.08);
+  --scout-shadow-md: 0 0 6px rgba(0, 0, 0, 0.08);
+  --scout-shadow-lg: 0 0 12px rgba(0, 0, 0, 0.14);
+  --scout-shadow-xl: 0 0 20px rgba(0, 0, 0, 0.15);
+  --scout-fallback-background: #ffffff;
+  --scout-fallback-foreground: #1f1f1f;
+  --scout-fallback-surface: #ffffff;
+  --scout-fallback-hover: #f3f3f3;
+  --scout-fallback-muted-foreground: #616161;
+  --scout-fallback-border: #e5e5e5;
+  --scout-fallback-input-border: #cecece;
+  --scout-fallback-error: #a1260d;
+  --scout-action-background: var(--vscode-foreground, var(--scout-fallback-foreground));
+  --scout-action-foreground: var(--vscode-editor-background, var(--scout-fallback-background));
+  color: var(--foreground);
+  background: var(--background);
+  --background: var(
+    --vscode-sideBar-background,
+    var(--vscode-editor-background, var(--scout-fallback-background))
+  );
+  --foreground: var(--vscode-foreground, var(--scout-fallback-foreground));
+  --tree-background: var(--vscode-tab-activeBackground, var(--background));
+  --card: var(
+    --vscode-editorWidget-background,
+    var(--vscode-sideBar-background, var(--scout-fallback-surface))
+  );
+  --card-foreground: var(--vscode-editorWidget-foreground, var(--foreground));
+  --popover: var(
+    --vscode-menu-background,
+    var(--vscode-dropdown-background, var(--vscode-editorWidget-background, var(--card)))
+  );
+  --popover-foreground: var(
+    --vscode-menu-foreground,
+    var(--vscode-dropdown-foreground, var(--foreground))
+  );
+  --primary: var(--scout-action-background);
+  --primary-foreground: var(--scout-action-foreground);
+  --secondary: var(--vscode-toolbar-hoverBackground, var(--scout-fallback-hover));
+  --secondary-foreground: var(--foreground);
+  --muted: var(
+    --vscode-toolbar-hoverBackground,
+    var(--vscode-list-hoverBackground, var(--scout-fallback-hover))
+  );
+  --muted-foreground: var(--vscode-descriptionForeground, var(--scout-fallback-muted-foreground));
+  --accent: var(--muted);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--vscode-errorForeground, var(--scout-fallback-error));
+  --border: var(
+    --vscode-contrastBorder,
+    var(--vscode-widget-border, var(--vscode-panel-border, var(--scout-fallback-border)))
+  );
+  --input: var(--vscode-input-border, var(--scout-fallback-input-border));
+  --ring: transparent;
+  --scout-surface-subtle: color-mix(in srgb, var(--foreground) 3.5%, transparent);
+  --scout-user-message-background: color-mix(in srgb, var(--foreground) 6%, transparent);
+  --scout-diff-added: var(--vscode-charts-green, #89d185);
+  --scout-diff-removed: var(--vscode-charts-red, #f14c4c);
+  --scout-diff-added-muted: color-mix(in srgb, var(--scout-diff-added) 18%, var(--background));
+  --scout-diff-removed-muted: color-mix(in srgb, var(--scout-diff-removed) 16%, var(--background));
+  --scout-status-warning: var(--vscode-charts-yellow, #cca700);
+  --scout-status-warning-muted: color-mix(in srgb, var(--scout-status-warning) 10%, transparent);
+  --scout-status-success: var(--scout-diff-added);
+  --scout-overlay-background: rgb(0 0 0 / 0.1);
+  --scout-control-background: var(--background);
+  --scout-control-border: var(--border);
+  --scout-control-hover: var(--muted);
+  --scout-control-selected: var(--muted);
+  --scout-control-selected-subtle: color-mix(in srgb, var(--muted) 35%, transparent);
+  --scout-field-background: transparent;
+  --scout-field-disabled-background: color-mix(in srgb, var(--input) 50%, transparent);
+  --scout-option-background: color-mix(in srgb, var(--background) 70%, transparent);
+  --scout-option-hover-background: var(--background);
+  --scout-option-selected-background: color-mix(in srgb, var(--muted) 60%, transparent);
+  --scout-option-selected-border: color-mix(in srgb, var(--foreground) 20%, transparent);
+  --scout-invalid-border: var(--destructive);
+  --scout-invalid-ring: color-mix(in srgb, var(--destructive) 20%, transparent);
+  --scout-danger-background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  --scout-danger-hover-background: color-mix(in srgb, var(--destructive) 20%, transparent);
+  --scout-switch-unchecked-background: var(--input);
+  --scout-switch-thumb-checked-background: var(--background);
+  --scout-switch-thumb-unchecked-background: var(--background);
+  --scout-shadow-diff-added: inset 4px 0 0 var(--scout-diff-added);
+  --scout-shadow-diff-removed: inset 4px 0 0 var(--scout-diff-removed);
+  --radius: 0.625rem;
+}
+
+.vscode-light,
+body.vscode-light,
+html.vscode-light {
+  color: var(--foreground);
+  background: var(--background);
+}
+
+.dark,
+.vscode-dark,
+.vscode-high-contrast,
+body.vscode-dark,
+body.vscode-high-contrast,
+html.vscode-dark,
+html.vscode-high-contrast {
+  color: var(--foreground);
+  background: var(--background);
+  --scout-fallback-background: #252526;
+  --scout-fallback-foreground: #cccccc;
+  --scout-fallback-surface: #2d2d30;
+  --scout-fallback-hover: #2a2d2e;
+  --scout-fallback-muted-foreground: #8c8c8c;
+  --scout-fallback-border: #3c3c3c;
+  --scout-fallback-input-border: #3c3c3c;
+  --scout-fallback-error: #f14c4c;
+  --scout-action-background: var(--vscode-foreground, #d4d4d4);
+  --scout-action-foreground: var(--vscode-editor-background, #1f1f1f);
+  --scout-control-background: color-mix(in srgb, var(--input) 30%, transparent);
+  --scout-control-border: var(--input);
+  --scout-control-hover: color-mix(in srgb, var(--muted) 50%, transparent);
+  --scout-control-selected: color-mix(in srgb, var(--muted) 50%, transparent);
+  --scout-control-selected-subtle: color-mix(in srgb, var(--muted) 20%, transparent);
+  --scout-field-background: color-mix(in srgb, var(--input) 30%, transparent);
+  --scout-field-disabled-background: color-mix(in srgb, var(--input) 80%, transparent);
+  --scout-option-background: color-mix(in srgb, var(--input) 30%, transparent);
+  --scout-option-hover-background: color-mix(in srgb, var(--input) 50%, transparent);
+  --scout-option-selected-background: color-mix(in srgb, var(--input) 50%, transparent);
+  --scout-invalid-border: color-mix(in srgb, var(--destructive) 50%, transparent);
+  --scout-invalid-ring: color-mix(in srgb, var(--destructive) 40%, transparent);
+  --scout-danger-background: color-mix(in srgb, var(--destructive) 20%, transparent);
+  --scout-danger-hover-background: color-mix(in srgb, var(--destructive) 30%, transparent);
+  --scout-switch-unchecked-background: color-mix(in srgb, var(--input) 80%, transparent);
+  --scout-switch-thumb-checked-background: var(--primary-foreground);
+  --scout-switch-thumb-unchecked-background: var(--foreground);
+}
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: 'Geist Variable', sans-serif;
+  --font-mono: var(--scout-monospace-font);
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --shadow-sm: var(--scout-shadow-sm);
+  --shadow-md: var(--scout-shadow-md);
+  --shadow-lg: var(--scout-shadow-lg);
+  --shadow-xl: var(--scout-shadow-xl);
+  --shadow-diff-added: var(--scout-shadow-diff-added);
+  --shadow-diff-removed: var(--scout-shadow-diff-removed);
+  --color-diff-added: var(--scout-diff-added);
+  --color-diff-removed: var(--scout-diff-removed);
+  --color-diff-added-muted: var(--scout-diff-added-muted);
+  --color-diff-removed-muted: var(--scout-diff-removed-muted);
+  --color-surface-subtle: var(--scout-surface-subtle);
+  --color-user-message: var(--scout-user-message-background);
+  --color-status-warning: var(--scout-status-warning);
+  --color-status-warning-muted: var(--scout-status-warning-muted);
+  --color-status-success: var(--scout-status-success);
+  --color-overlay-background: var(--scout-overlay-background);
+  --color-control-background: var(--scout-control-background);
+  --color-control-border: var(--scout-control-border);
+  --color-control-hover: var(--scout-control-hover);
+  --color-control-selected: var(--scout-control-selected);
+  --color-control-selected-subtle: var(--scout-control-selected-subtle);
+  --color-field-background: var(--scout-field-background);
+  --color-field-disabled: var(--scout-field-disabled-background);
+  --color-option-background: var(--scout-option-background);
+  --color-option-hover: var(--scout-option-hover-background);
+  --color-option-selected: var(--scout-option-selected-background);
+  --color-option-selected-border: var(--scout-option-selected-border);
+  --color-invalid-border: var(--scout-invalid-border);
+  --color-invalid-ring: var(--scout-invalid-ring);
+  --color-danger-background: var(--scout-danger-background);
+  --color-danger-hover: var(--scout-danger-hover-background);
+  --color-switch-unchecked: var(--scout-switch-unchecked-background);
+  --color-switch-thumb-checked: var(--scout-switch-thumb-checked-background);
+  --color-switch-thumb-unchecked: var(--scout-switch-thumb-unchecked-background);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-tree-background: var(--tree-background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+}

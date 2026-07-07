@@ -1,0 +1,103 @@
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--scout-font-family);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  *:focus {
+    outline: none;
+  }
+  *:focus:not(:focus-visible) {
+    box-shadow: none !important;
+  }
+  *:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder, var(--border)) !important;
+    outline-offset: 2px;
+  }
+  .task-search-field input[data-slot='input']:focus,
+  .task-search-field input[data-slot='input']:focus-visible {
+    outline: none !important;
+    outline-offset: 0 !important;
+    box-shadow: none !important;
+  }
+  .scout-subtle-input-focus:focus,
+  .scout-subtle-input-focus:focus-visible {
+    outline: none !important;
+    outline-offset: 0 !important;
+    border-color: color-mix(in srgb, var(--foreground) 28%, transparent) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent) !important;
+  }
+  .task-search-field:focus-within + div [data-slot='separator'] {
+    background: var(--vscode-focusBorder, var(--border));
+  }
+  [data-scout-suppress-focus-outline='true']:focus,
+  [data-scout-suppress-focus-outline='true']:focus-visible,
+  :where(
+    [data-slot='dropdown-menu-content'],
+    [data-slot='dropdown-menu-sub-content'],
+    [data-slot='dropdown-menu-item'],
+    [data-slot='dropdown-menu-checkbox-item'],
+    [data-slot='dropdown-menu-radio-item'],
+    [data-slot='dropdown-menu-sub-trigger'],
+    [data-slot='popover-content'],
+    [data-slot='dialog-content'],
+    [data-slot='tooltip-content'],
+    [data-slot='scroll-area-viewport']
+  ):focus,
+  :where(
+    [data-slot='dropdown-menu-content'],
+    [data-slot='dropdown-menu-sub-content'],
+    [data-slot='dropdown-menu-item'],
+    [data-slot='dropdown-menu-checkbox-item'],
+    [data-slot='dropdown-menu-radio-item'],
+    [data-slot='dropdown-menu-sub-trigger'],
+    [data-slot='popover-content'],
+    [data-slot='dialog-content'],
+    [data-slot='tooltip-content'],
+    [data-slot='scroll-area-viewport']
+  ):focus-visible,
+  :where(
+      [data-slot='dropdown-menu-trigger'],
+      [data-slot='popover-trigger'],
+      [data-slot='dialog-trigger'],
+      [data-slot='collapsible-trigger']
+    )[data-state='open']:focus,
+  :where(
+      [data-slot='dropdown-menu-trigger'],
+      [data-slot='popover-trigger'],
+      [data-slot='dialog-trigger'],
+      [data-slot='collapsible-trigger']
+    )[data-state='open']:focus-visible {
+    outline: none !important;
+    outline-offset: 0 !important;
+    box-shadow: none !important;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  input,
+  textarea,
+  button,
+  select {
+    font: inherit;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--vscode-input-placeholderForeground, var(--muted-foreground));
+  }
+  html {
+    @apply font-sans;
+  }
+}

@@ -1,6 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import WEBVIEW_CSS from '../src/index.css?raw';
 import App from '@/App';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectProtocolResponsePayload } from '@/bridge/protocol-response-projector';
@@ -18,6 +17,7 @@ import type {
   ScoutProtocolRequest,
   ScoutWebviewState,
 } from '@scout-agent/shared';
+import { expectCssRule, expectNoCssRule } from './webview-css';
 
 const postMessage = vi.fn();
 
@@ -323,14 +323,14 @@ describe('App bootstrap', () => {
     if (!(removedCodePane instanceof HTMLElement)) throw new Error('removed code cell is missing');
     if (!(addedCodePane instanceof HTMLElement)) throw new Error('added code cell is missing');
     expect(removedCode).toHaveClass('scout-review-split-code');
-    expect(removedCodePane).toHaveClass('bg-changes-review-removed-muted', 'overflow-hidden');
+    expect(removedCodePane).toHaveClass('bg-diff-removed-muted', 'overflow-hidden');
     expect(removedLineNumber).toHaveClass('border-r-[2px]', 'border-r-tree-background');
     expect(addedLineNumber).toHaveClass(
-      'shadow-[inset_4px_0_0_var(--chart-2)]',
+      'shadow-diff-added',
       'border-r-[2px]',
       'border-r-tree-background',
     );
-    expect(addedCodePane).toHaveClass('bg-changes-review-added-muted', 'overflow-hidden');
+    expect(addedCodePane).toHaveClass('bg-diff-added-muted', 'overflow-hidden');
   });
 
   it('keeps split diff chrome continuous while syncing both code scrollbars', () => {
@@ -436,10 +436,10 @@ describe('App bootstrap', () => {
       'scout-review-token-diff-added',
     );
     expectNoCssRule('.scout-review-token-diff-added', [
-      'background: var(--changes-review-token-diff-added);',
+      'background: var(--scout-review-token-diff-added);',
     ]);
     expectNoCssRule('.scout-review-token-diff-removed', [
-      'background: var(--changes-review-token-diff-removed);',
+      'background: var(--scout-review-token-diff-removed);',
     ]);
   });
 
@@ -484,10 +484,10 @@ describe('App bootstrap', () => {
     expect(removedToken.closest('.scout-review-split-code')).toBeInstanceOf(HTMLElement);
     expect(addedToken.closest('.scout-review-split-code')).toBeInstanceOf(HTMLElement);
     expectCssRule('.scout-review-split-code .scout-review-token-diff-added', [
-      'background: var(--changes-review-token-diff-added);',
+      'background: var(--scout-review-token-diff-added);',
     ]);
     expectCssRule('.scout-review-split-code .scout-review-token-diff-removed', [
-      'background: var(--changes-review-token-diff-removed);',
+      'background: var(--scout-review-token-diff-removed);',
     ]);
   });
 
@@ -523,12 +523,7 @@ describe('App bootstrap', () => {
     const emptySide = document.querySelector('[data-split-buffer-side="added"]');
     if (!(emptySide instanceof HTMLElement)) throw new Error('split diff added buffer is missing');
     expect(emptySide).toHaveAttribute('data-split-buffer-size', '1');
-    expect(emptySide).toHaveClass(
-      'col-span-2',
-      'bg-[var(--changes-review-empty-split-bg)]',
-      '[background-image:var(--changes-review-empty-split-pattern)]',
-      '[background-size:10px_10px]',
-    );
+    expect(emptySide).toHaveClass('col-span-2', 'scout-review-empty-split');
   });
 
   it('does not mount non-chat surfaces before bootstrap state arrives', async () => {
@@ -623,34 +618,3 @@ describe('App bootstrap', () => {
     expect(useUiStore.getState().bootstrapStatus).toBe('failed');
   });
 });
-
-function expectCssRule(selector: string, declarations: string[]): void {
-  const matchingRule = findCssRuleBodies(selector).some((body) =>
-    declarations.every((declaration) => body.includes(declaration)),
-  );
-  expect(matchingRule).toBe(true);
-}
-
-function expectNoCssRule(selector: string, declarations: string[]): void {
-  const matchingRule = findCssRuleBodies(selector).some((body) =>
-    declarations.every((declaration) => body.includes(declaration)),
-  );
-  expect(matchingRule).toBe(false);
-}
-
-function findCssRuleBodies(selector: string): string[] {
-  const bodies: string[] = [];
-  let bodyStart = WEBVIEW_CSS.indexOf('{');
-  while (bodyStart >= 0) {
-    const bodyEnd = WEBVIEW_CSS.indexOf('}', bodyStart);
-    if (bodyEnd < 0) break;
-    const previousRuleEnd = WEBVIEW_CSS.lastIndexOf('}', bodyStart - 1);
-    const selectorText = WEBVIEW_CSS.slice(previousRuleEnd + 1, bodyStart).trim();
-    const selectors = selectorText.split(',').map((candidate) => candidate.trim());
-    if (selectors.includes(selector)) {
-      bodies.push(WEBVIEW_CSS.slice(bodyStart + 1, bodyEnd));
-    }
-    bodyStart = WEBVIEW_CSS.indexOf('{', bodyEnd + 1);
-  }
-  return bodies;
-}

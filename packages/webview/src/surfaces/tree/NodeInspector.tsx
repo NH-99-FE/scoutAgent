@@ -91,7 +91,7 @@ export function NodeInspector({
 
           <section className="space-y-1.5">
             <h3 className="text-muted-foreground text-[11px] leading-none font-medium">预览</h3>
-            <p className="border-border bg-background/70 dark:bg-input/30 min-h-12 rounded-md border px-2.5 py-2 text-xs leading-5 whitespace-pre-wrap">
+            <p className="border-border bg-option-background min-h-12 rounded-md border px-2.5 py-2 text-xs leading-5 whitespace-pre-wrap">
               {node.preview || formatNodeLine(node)}
             </p>
           </section>
@@ -109,7 +109,7 @@ export function NodeInspector({
             </RadioGroup>
             {summaryMode === 'custom' ? (
               <Textarea
-                className="bg-background/70 dark:bg-input/30 mt-1 min-h-20 rounded-md text-xs"
+                className="bg-option-background mt-1 min-h-20 rounded-md text-xs"
                 placeholder="自定义摘要指令"
                 value={customInstructions}
                 onChange={(event) => onCustomInstructionsChange(event.target.value)}

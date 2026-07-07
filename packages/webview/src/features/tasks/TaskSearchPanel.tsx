@@ -48,7 +48,7 @@ export function TaskSearchPanel({
         <Search className="text-muted-foreground pointer-events-none size-3 shrink-0" />
         <Input
           aria-label="搜索历史任务"
-          className="h-7 flex-1 rounded-none border-0 bg-transparent px-0 py-0 text-xs shadow-none dark:bg-transparent"
+          className="h-7 flex-1 rounded-none border-0 bg-transparent px-0 py-0 text-xs shadow-none"
           placeholder="搜索历史任务"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
@@ -117,7 +117,7 @@ export function TaskRow({
       data-forked={isForked ? 'true' : undefined}
       className={cn(
         'task-row grid h-6.5 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded px-2 text-left outline-none',
-        isCurrent ? 'bg-muted dark:bg-muted/50' : 'hover:bg-muted dark:hover:bg-muted/50',
+        isCurrent ? 'bg-control-selected' : 'hover:bg-control-hover',
       )}
       type="button"
       onClick={() => {

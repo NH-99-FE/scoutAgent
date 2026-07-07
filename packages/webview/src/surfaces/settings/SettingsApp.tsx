@@ -111,7 +111,7 @@ function SettingsSidebar({
         aria-label={collapsed ? '展开设置侧边栏' : '折叠设置侧边栏'}
         title={collapsed ? '展开' : '折叠'}
         onClick={onToggle}
-        className="text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 ml-1 flex size-8 items-center justify-center rounded-full transition-colors"
+        className="text-muted-foreground hover:bg-control-hover hover:text-foreground ml-1 flex size-8 items-center justify-center rounded-full transition-colors"
       >
         <PanelLeft className="size-4" />
       </button>
@@ -163,8 +163,8 @@ function SidebarButton({
       title={label}
       onClick={onClick}
       className={cn(
-        'text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 flex h-9 w-full items-center gap-2 overflow-hidden rounded-full px-3 text-sm font-medium transition-colors',
-        active && 'bg-muted text-foreground dark:bg-muted/50',
+        'text-muted-foreground hover:bg-control-hover hover:text-foreground flex h-9 w-full items-center gap-2 overflow-hidden rounded-full px-3 text-sm font-medium transition-colors',
+        active && 'bg-control-selected text-foreground',
       )}
     >
       {icon}

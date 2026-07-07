@@ -101,8 +101,8 @@ function ComposerChangesReviewRow({ review }: { review: ComposerChangesReviewSum
       <span className="text-muted-foreground min-w-0 truncate">
         {review.fileCount} 个文件已更改
       </span>
-      <span className="shrink-0 font-mono text-[var(--chart-2)]">+{review.additions}</span>
-      <span className="shrink-0 font-mono text-[var(--chart-5)]">-{review.deletions}</span>
+      <span className="text-diff-added shrink-0 font-mono">+{review.additions}</span>
+      <span className="text-diff-removed shrink-0 font-mono">-{review.deletions}</span>
       <Button
         className="text-foreground hover:text-foreground ml-auto h-6 shrink-0 px-1.5"
         size="xs"

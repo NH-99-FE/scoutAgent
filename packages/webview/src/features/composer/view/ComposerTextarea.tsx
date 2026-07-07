@@ -48,7 +48,7 @@ export function ComposerTextarea({
   return (
     <Textarea
       aria-label={placeholder}
-      className="scout-composer-textarea placeholder:text-muted-foreground/60 max-h-40 min-h-12 resize-none border-0 bg-transparent px-1 py-1 text-sm shadow-none dark:bg-transparent"
+      className="scout-composer-textarea placeholder:text-muted-foreground/60 max-h-40 min-h-12 resize-none border-0 bg-transparent px-1 py-1 text-sm shadow-none"
       placeholder={placeholder}
       ref={textareaRef}
       value={value}

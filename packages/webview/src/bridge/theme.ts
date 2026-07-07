@@ -6,6 +6,9 @@ type ScoutThemeKind = 'light' | 'dark' | 'high-contrast';
 
 const THEME_CLASSES = ['vscode-light', 'vscode-dark', 'vscode-high-contrast'] as const;
 const THEME_VARIABLES = [
+  '--vscode-font-family',
+  '--vscode-editor-font-family',
+  '--vscode-editor-font-size',
   '--vscode-tab-activeBackground',
   '--vscode-sideBar-background',
   '--vscode-editor-background',
@@ -17,7 +20,6 @@ const THEME_VARIABLES = [
   '--vscode-dropdown-background',
   '--vscode-dropdown-foreground',
   '--vscode-toolbar-hoverBackground',
-  '--vscode-toolbar-activeBackground',
   '--vscode-list-hoverBackground',
   '--vscode-descriptionForeground',
   '--vscode-contrastBorder',
@@ -27,10 +29,8 @@ const THEME_VARIABLES = [
   '--vscode-input-placeholderForeground',
   '--vscode-focusBorder',
   '--vscode-errorForeground',
-  '--vscode-charts-blue',
   '--vscode-charts-green',
   '--vscode-charts-yellow',
-  '--vscode-charts-orange',
   '--vscode-charts-red',
 ] as const;
 

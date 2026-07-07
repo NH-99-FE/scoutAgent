@@ -1,0 +1,172 @@
+:root {
+  --scout-running-text-highlight: color-mix(in srgb, var(--foreground) 18%, var(--background));
+}
+
+.dark,
+.vscode-dark,
+.vscode-high-contrast,
+body.vscode-dark,
+body.vscode-high-contrast,
+html.vscode-dark,
+html.vscode-high-contrast {
+  --scout-running-text-highlight: color-mix(in srgb, var(--foreground) 88%, var(--background));
+}
+
+.scout-conversation-viewport {
+  scroll-behavior: auto;
+  overscroll-behavior: contain;
+}
+
+.scout-conversation-content > [data-slot='message-scroller-item'] {
+  overflow-anchor: none;
+}
+
+.scout-conversation-content,
+.scout-assistant-turn,
+.scout-assistant-content,
+.scout-assistant-content-segment,
+.scout-markdown-content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.scout-user-message {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 77%;
+  min-inline-size: 0;
+  max-inline-size: 77%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-assistant-turn,
+.scout-assistant-turn * {
+  min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.scout-assistant-content,
+.scout-assistant-content-segment,
+.scout-markdown-content {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-markdown-content {
+  width: 100%;
+  max-width: 100%;
+  inline-size: 100%;
+}
+
+.scout-markdown-content * {
+  min-width: 0;
+  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.scout-markdown-content :where(p, li, blockquote, h1, h2, h3, h4, h5, h6, a, strong, em, span),
+.scout-markdown-content :where(th, td),
+.scout-markdown-content :where(:not(pre) > code) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-markdown-table-wrapper,
+.scout-markdown-table {
+  inline-size: 100%;
+  max-inline-size: 100%;
+}
+
+.scout-markdown-table {
+  table-layout: fixed;
+}
+
+.scout-markdown-table-cell {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scout-markdown-table-cell > * {
+  max-inline-size: 100%;
+}
+
+.scout-markdown-code-scroll {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.scout-markdown-code-scroll [data-slot='scroll-area-viewport'] > div {
+  display: block !important;
+  width: max-content;
+  min-width: 100%;
+  max-width: none !important;
+}
+
+.scout-markdown-code-scroll pre,
+.scout-markdown-code-scroll pre * {
+  max-width: none;
+  max-inline-size: none;
+}
+
+.scout-markdown-content :where(pre) {
+  overflow: visible;
+}
+
+.scout-markdown-content :where(pre, pre *) {
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.scout-running-text-shimmer {
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 34%,
+    var(--foreground) 46%,
+    var(--scout-running-text-highlight) 50%,
+    var(--foreground) 54%,
+    var(--muted-foreground) 66%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 240% 100%;
+  background-position: 120% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: scout-running-text-shimmer 1.8s ease-in-out infinite;
+}
+
+.scout-conversation-diff-line-added {
+  color: var(--scout-diff-added);
+  background-color: color-mix(in srgb, var(--scout-diff-added) 8%, transparent);
+  border-left-color: currentColor;
+}
+
+.scout-conversation-diff-line-removed {
+  color: var(--scout-diff-removed);
+  background-color: color-mix(in srgb, var(--scout-diff-removed) 8%, transparent);
+  border-left-color: currentColor;
+}
+
+@keyframes scout-running-text-shimmer {
+  from {
+    background-position: 120% 0;
+  }
+  to {
+    background-position: -120% 0;
+  }
+}

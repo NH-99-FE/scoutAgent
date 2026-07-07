@@ -79,7 +79,7 @@ export function TaskHome({
 
         {!taskHistoryRendered ? (
           <Button
-            className="text-muted-foreground/75 hover:text-muted-foreground mt-1 ml-1.5 h-5 px-0 text-[11px] hover:bg-transparent dark:hover:bg-transparent"
+            className="text-muted-foreground/75 hover:text-muted-foreground mt-1 ml-1.5 h-5 px-0 text-[11px] hover:bg-transparent"
             size="xs"
             type="button"
             variant="ghost"

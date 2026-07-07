@@ -2,7 +2,7 @@
 // Assistant Process Block — assistant 过程与工具活动渲染
 // ============================================================
 
-import { memo, type CSSProperties, useCallback, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -474,7 +474,7 @@ function ToolDisplayMetrics({
       )}
     >
       {metrics.map((metric) => (
-        <span key={metric.key} style={getMetricStyle(metric)}>
+        <span className={getMetricClassName(metric)} key={metric.key}>
           {`${metric.prefix ?? ''}${metric.value}${metric.label ? ` ${metric.label}` : ''}`}
         </span>
       ))}
@@ -482,9 +482,9 @@ function ToolDisplayMetrics({
   );
 }
 
-function getMetricStyle(metric: ToolDisplayMetric): CSSProperties | undefined {
-  if (metric.tone === 'added') return ADDED_TEXT_STYLE;
-  if (metric.tone === 'deleted') return DELETED_TEXT_STYLE;
+function getMetricClassName(metric: ToolDisplayMetric): string | undefined {
+  if (metric.tone === 'added') return 'text-diff-added';
+  if (metric.tone === 'deleted') return 'text-diff-removed';
   return undefined;
 }
 
@@ -509,7 +509,7 @@ function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
 
   return (
     <div
-      className="border-border/70 bg-foreground/[0.035] max-w-full min-w-0 overflow-hidden rounded-lg border shadow-sm"
+      className="border-border/70 bg-surface-subtle max-w-full min-w-0 overflow-hidden rounded-lg border shadow-sm"
       data-file-edit-diff-panel="true"
     >
       <FileEditDiffHeader detail={detail} />
@@ -523,10 +523,12 @@ function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {
         <pre className="m-0 w-max min-w-full py-1 font-mono text-[12px] leading-5">
           {visibleLines.map((line, index) => (
             <span
-              className="block min-h-5 min-w-full border-l-2 border-transparent px-2.5 whitespace-pre"
+              className={cn(
+                'block min-h-5 min-w-full border-l-2 border-transparent px-2.5 whitespace-pre',
+                getDiffLineClassName(line),
+              )}
               data-diff-line-content
               key={`${index}:${line.slice(0, 16)}`}
-              style={getDiffLineStyle(line)}
             >
               {line || ' '}
             </span>
@@ -563,10 +565,10 @@ function FileEditDiffHeader({ detail }: { detail: DiffToolDisplayDetail }) {
           />
           <span className="text-foreground min-w-0 flex-1 truncate font-mono">{detail.path}</span>
           {typeof detail.additions === 'number' && detail.additions > 0 ? (
-            <span className="shrink-0 font-mono text-[var(--chart-2)]">+{detail.additions}</span>
+            <span className="text-diff-added shrink-0 font-mono">+{detail.additions}</span>
           ) : null}
           {typeof detail.deletions === 'number' && detail.deletions > 0 ? (
-            <span className="shrink-0 font-mono text-[var(--chart-5)]">-{detail.deletions}</span>
+            <span className="text-diff-removed shrink-0 font-mono">-{detail.deletions}</span>
           ) : null}
         </div>
       ) : null}
@@ -619,7 +621,7 @@ function FileEditPreviewErrorPanel({
   message: string;
 }) {
   return (
-    <div className="border-border/70 bg-foreground/[0.035] max-w-full min-w-0 overflow-hidden rounded-lg border shadow-sm">
+    <div className="border-border/70 bg-surface-subtle max-w-full min-w-0 overflow-hidden rounded-lg border shadow-sm">
       <FileEditDiffHeader detail={detail} />
       <div className="text-muted-foreground/80 px-2.5 py-1 text-[11px] leading-4">预览错误</div>
       <pre className="text-destructive/90 max-w-full px-2.5 pb-2 font-mono text-[12px] leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
@@ -733,29 +735,13 @@ function ToolDisplayIconView({ icon }: { icon: ToolDisplayIcon }) {
   }
 }
 
-const ADDED_TEXT_STYLE: CSSProperties = {
-  color: '#6fba7c',
-};
-
-const DELETED_TEXT_STYLE: CSSProperties = {
-  color: '#df7b7b',
-};
-
-function getDiffLineStyle(line: string): CSSProperties | undefined {
+function getDiffLineClassName(line: string): string | undefined {
   if (line.startsWith('+') && !line.startsWith('+++')) {
-    return {
-      ...ADDED_TEXT_STYLE,
-      backgroundColor: 'rgba(111, 186, 124, 0.08)',
-      borderLeft: '2px solid currentColor',
-    };
+    return 'scout-conversation-diff-line-added';
   }
 
   if (line.startsWith('-') && !line.startsWith('---')) {
-    return {
-      ...DELETED_TEXT_STYLE,
-      backgroundColor: 'rgba(223, 123, 123, 0.08)',
-      borderLeft: '2px solid currentColor',
-    };
+    return 'scout-conversation-diff-line-removed';
   }
 
   return undefined;

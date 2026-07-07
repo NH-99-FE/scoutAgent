@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { startWebviewThemeSync } from '@/bridge/theme';
 
+const WEBVIEW_SOURCES = import.meta.glob('../../src/**/*.{css,ts,tsx}', {
+  eager: true,
+  import: 'default',
+  query: '?raw',
+}) as Record<string, string>;
+
 describe('startWebviewThemeSync', () => {
   afterEach(() => {
     document.documentElement.className = '';
@@ -24,4 +30,41 @@ describe('startWebviewThemeSync', () => {
 
     stop();
   });
+
+  it('syncs every VS Code variable referenced outside the theme bridge', () => {
+    const referencedVariables = getReferencedVscodeVariables();
+    const variables = Object.fromEntries(
+      referencedVariables.map((name, index) => [name, `scout-theme-value-${index}`]),
+    );
+
+    const stop = startWebviewThemeSync();
+
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: {
+          type: 'scout_theme_update',
+          theme: 'dark',
+          variables,
+        },
+      }),
+    );
+
+    for (const [name, value] of Object.entries(variables)) {
+      expect(document.documentElement.style.getPropertyValue(name)).toBe(value);
+      expect(document.body.style.getPropertyValue(name)).toBe(value);
+    }
+
+    stop();
+  });
 });
+
+function getReferencedVscodeVariables(): string[] {
+  const names = new Set<string>();
+  for (const [filePath, source] of Object.entries(WEBVIEW_SOURCES)) {
+    if (filePath.endsWith('/bridge/theme.ts')) continue;
+    for (const match of source.matchAll(/--vscode-[a-zA-Z0-9-]+/g)) {
+      names.add(match[0]);
+    }
+  }
+  return Array.from(names).sort();
+}

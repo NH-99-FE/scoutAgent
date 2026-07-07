@@ -1,0 +1,132 @@
+:root {
+  --scout-review-token-comment: #008000;
+  --scout-review-token-keyword: #0000ff;
+  --scout-review-token-string: #a31515;
+  --scout-review-token-number: #098658;
+  --scout-review-token-title: #795e26;
+  --scout-review-token-function: #795e26;
+  --scout-review-token-property: #001080;
+  --scout-review-token-variable: #001080;
+  --scout-review-token-meta: #800000;
+  --scout-review-token-symbol: #267f99;
+  --scout-review-token-name: #800000;
+  --scout-review-token-diff-added: color-mix(in srgb, var(--scout-diff-added) 22%, transparent);
+  --scout-review-token-diff-removed: color-mix(in srgb, var(--scout-diff-removed) 20%, transparent);
+  --scout-review-empty-split-bg: color-mix(in srgb, var(--muted) 34%, transparent);
+  --scout-review-empty-split-line: color-mix(in srgb, var(--muted-foreground) 24%, transparent);
+  --scout-review-empty-split-pattern: linear-gradient(
+    135deg,
+    transparent 0 calc(50% - 0.5px),
+    var(--scout-review-empty-split-line) calc(50% - 0.5px) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+
+.dark,
+.vscode-dark,
+.vscode-high-contrast,
+body.vscode-dark,
+body.vscode-high-contrast,
+html.vscode-dark,
+html.vscode-high-contrast {
+  --scout-review-token-comment: #6a9955;
+  --scout-review-token-keyword: #569cd6;
+  --scout-review-token-string: #ce9178;
+  --scout-review-token-number: #b5cea8;
+  --scout-review-token-title: #dcdcaa;
+  --scout-review-token-function: #dcdcaa;
+  --scout-review-token-property: #9cdcfe;
+  --scout-review-token-variable: #9cdcfe;
+  --scout-review-token-meta: #c586c0;
+  --scout-review-token-symbol: #4ec9b0;
+  --scout-review-token-name: #4ec9b0;
+}
+
+.scout-review-diff-scroll {
+  overscroll-behavior-x: contain;
+}
+
+.scout-review-empty-split {
+  background-color: var(--scout-review-empty-split-bg);
+  background-image: var(--scout-review-empty-split-pattern);
+  background-size: 10px 10px;
+}
+
+.scout-review-split-diff {
+  --changes-review-line-height: calc(var(--vscode-editor-font-size, 14px) * 1.42);
+}
+
+.scout-review-split-code {
+  display: inline-block;
+  min-width: max-content;
+  transform: translateX(calc(var(--changes-review-split-code-scroll-left, 0px) * -1));
+  will-change: transform;
+}
+
+.scout-review-split-code-scrollbar {
+  height: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.scout-review-split-code-scrollbar-spacer {
+  height: 1px;
+}
+
+.scout-review-token-comment {
+  color: var(--scout-review-token-comment);
+}
+
+.scout-review-token-keyword {
+  color: var(--scout-review-token-keyword);
+}
+
+.scout-review-token-string {
+  color: var(--scout-review-token-string);
+}
+
+.scout-review-token-number {
+  color: var(--scout-review-token-number);
+}
+
+.scout-review-token-title {
+  color: var(--scout-review-token-title);
+}
+
+.scout-review-token-function {
+  color: var(--scout-review-token-function);
+}
+
+.scout-review-token-property {
+  color: var(--scout-review-token-property);
+}
+
+.scout-review-token-variable {
+  color: var(--scout-review-token-variable);
+}
+
+.scout-review-token-meta {
+  color: var(--scout-review-token-meta);
+}
+
+.scout-review-token-symbol {
+  color: var(--scout-review-token-symbol);
+}
+
+.scout-review-token-name {
+  color: var(--scout-review-token-name);
+}
+
+.scout-review-split-code .scout-review-token-diff-added,
+.scout-review-split-code .scout-review-token-diff-removed {
+  border-radius: 2px;
+  padding-inline: 1px;
+}
+
+.scout-review-split-code .scout-review-token-diff-added {
+  background: var(--scout-review-token-diff-added);
+}
+
+.scout-review-split-code .scout-review-token-diff-removed {
+  background: var(--scout-review-token-diff-removed);
+}

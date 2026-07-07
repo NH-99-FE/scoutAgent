@@ -57,9 +57,7 @@ export function ForkCandidateMenu({
           aria-selected={index === activeIndex}
           className={cn(
             'flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs outline-hidden',
-            index === activeIndex
-              ? 'bg-muted dark:bg-muted/50'
-              : 'hover:bg-muted dark:hover:bg-muted/50',
+            index === activeIndex ? 'bg-control-selected' : 'hover:bg-control-hover',
           )}
           role="option"
           type="button"

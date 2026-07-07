@@ -144,7 +144,7 @@ export function SettingsAdvancedOptions({
           variant="ghost"
           size="sm"
           aria-expanded={open}
-          className="aria-expanded:text-foreground h-auto w-fit justify-start gap-2 bg-transparent px-0 py-0 text-sm font-semibold hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent"
+          className="aria-expanded:text-foreground h-auto w-fit justify-start gap-2 bg-transparent px-0 py-0 text-sm font-semibold hover:bg-transparent aria-expanded:bg-transparent"
           onClick={() => setOpen((current) => !current)}
         >
           <ChevronRight className={cn('size-4 transition-transform', open && 'rotate-90')} />

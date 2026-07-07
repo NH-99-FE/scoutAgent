@@ -1,0 +1,203 @@
+.task-history-panel-shell {
+  transform-origin: top center;
+  will-change: opacity, transform;
+}
+
+.task-row-fork-marker {
+  opacity: 0;
+}
+
+.task-row[data-forked='true']:hover .task-row-fork-marker {
+  opacity: 1;
+}
+
+.task-row[data-forked='true']:hover .task-row-metadata {
+  opacity: 0;
+}
+
+.scout-native-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 34%, transparent) transparent;
+  scrollbar-gutter: stable;
+}
+
+.scout-native-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.scout-native-scrollbar::-webkit-scrollbar-track,
+.scout-native-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.scout-native-scrollbar::-webkit-scrollbar-thumb {
+  min-height: 24px;
+  min-width: 24px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
+  background-clip: content-box;
+}
+
+.scout-native-scrollbar:hover::-webkit-scrollbar-thumb,
+.scout-native-scrollbar:focus-visible::-webkit-scrollbar-thumb,
+.scout-native-scrollbar:focus-within::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--muted-foreground) 48%, transparent);
+}
+
+.scout-scroll-area-thumb {
+  background-color: color-mix(in srgb, var(--muted-foreground) 30%, transparent);
+}
+
+[data-slot='scroll-area-scrollbar']:hover .scout-scroll-area-thumb,
+[data-slot='scroll-area-viewport']:focus-visible
+  ~ [data-slot='scroll-area-scrollbar']
+  .scout-scroll-area-thumb {
+  background-color: color-mix(in srgb, var(--muted-foreground) 48%, transparent);
+}
+
+.task-history-panel-shell[data-state='open'] {
+  animation: scout-task-history-panel-enter 140ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.task-history-panel-shell[data-state='closed'] {
+  pointer-events: none;
+  animation: scout-task-history-panel-exit 120ms ease-in both;
+}
+
+.scout-process-collapse-content {
+  overflow: hidden;
+  transform-origin: top;
+}
+
+.scout-process-collapse-content[data-state='open'] {
+  animation: scout-process-collapse-down 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.scout-process-collapse-content[data-state='closed'] {
+  animation: scout-process-collapse-up 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.scout-settings-collapse-content {
+  overflow: hidden;
+  transform-origin: top;
+}
+
+.scout-settings-collapse-content[data-state='open'] {
+  animation: scout-settings-collapse-down 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scout-settings-collapse-content[data-state='closed'] {
+  animation: scout-settings-collapse-up 140ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.scout-fold-anchor-highlight {
+  animation: scout-fold-anchor-highlight 1.2s ease-out both;
+}
+
+@keyframes scout-task-history-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes scout-task-history-panel-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.99);
+  }
+}
+
+@keyframes scout-process-collapse-down {
+  from {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-4px) scaleY(0.985);
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+}
+
+@keyframes scout-process-collapse-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
+  to {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-3px) scaleY(0.99);
+  }
+}
+
+@keyframes scout-settings-collapse-down {
+  from {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scout-settings-collapse-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes scout-fold-anchor-highlight {
+  0% {
+    background-color: color-mix(in srgb, var(--primary) 16%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 35%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 28%, transparent);
+  }
+  70% {
+    background-color: color-mix(in srgb, var(--primary) 8%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 22%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 16%, transparent);
+  }
+  100% {
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-history-panel-shell[data-state='open'],
+  .task-history-panel-shell[data-state='closed'],
+  .scout-process-collapse-content[data-state='open'],
+  .scout-process-collapse-content[data-state='closed'],
+  .scout-settings-collapse-content[data-state='open'],
+  .scout-settings-collapse-content[data-state='closed'] {
+    animation: none;
+  }
+  .scout-fold-anchor-highlight {
+    animation-duration: 1ms;
+  }
+}
