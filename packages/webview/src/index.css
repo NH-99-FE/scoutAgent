@@ -89,10 +89,8 @@
   --changes-review-token-meta: #800000;
   --changes-review-token-symbol: #267f99;
   --changes-review-token-name: #800000;
-  --changes-review-token-diff-added: color-mix(in srgb, var(--chart-2) 46%, transparent);
-  --changes-review-token-diff-added-border: color-mix(in srgb, var(--chart-2) 54%, transparent);
-  --changes-review-token-diff-removed: color-mix(in srgb, var(--chart-5) 44%, transparent);
-  --changes-review-token-diff-removed-border: color-mix(in srgb, var(--chart-5) 52%, transparent);
+  --changes-review-token-diff-added: color-mix(in srgb, var(--chart-2) 22%, transparent);
+  --changes-review-token-diff-removed: color-mix(in srgb, var(--chart-5) 20%, transparent);
   --changes-review-empty-split-bg: color-mix(in srgb, var(--muted) 34%, transparent);
   --changes-review-empty-split-line: color-mix(in srgb, var(--muted-foreground) 24%, transparent);
   --changes-review-empty-split-pattern: linear-gradient(
@@ -659,20 +657,18 @@ body,
   color: var(--changes-review-token-name);
 }
 
-.scout-review-token-diff-added,
-.scout-review-token-diff-removed {
+.scout-review-split-code .scout-review-token-diff-added,
+.scout-review-split-code .scout-review-token-diff-removed {
   border-radius: 2px;
   padding-inline: 1px;
 }
 
-.scout-review-token-diff-added {
+.scout-review-split-code .scout-review-token-diff-added {
   background: var(--changes-review-token-diff-added);
-  box-shadow: inset 0 0 0 1px var(--changes-review-token-diff-added-border);
 }
 
-.scout-review-token-diff-removed {
+.scout-review-split-code .scout-review-token-diff-removed {
   background: var(--changes-review-token-diff-removed);
-  box-shadow: inset 0 0 0 1px var(--changes-review-token-diff-removed-border);
 }
 
 @keyframes scout-task-history-panel-enter {

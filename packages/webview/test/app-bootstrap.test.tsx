@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import WEBVIEW_CSS from '../src/index.css?raw';
 import App from '@/App';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectProtocolResponsePayload } from '@/bridge/protocol-response-projector';
@@ -407,7 +408,7 @@ describe('App bootstrap', () => {
     expect(removedScrollbar.scrollLeft).toBe(240);
   });
 
-  it('renders changes review syntax and intraline diff tokens', () => {
+  it('renders unified syntax and intraline diff token classes without token backgrounds', () => {
     window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
     const model = makeChangesReviewModel();
     const file = model.files[0];
@@ -434,6 +435,60 @@ describe('App bootstrap', () => {
       'scout-review-token-number',
       'scout-review-token-diff-added',
     );
+    expectNoCssRule('.scout-review-token-diff-added', [
+      'background: var(--changes-review-token-diff-added);',
+    ]);
+    expectNoCssRule('.scout-review-token-diff-removed', [
+      'background: var(--changes-review-token-diff-removed);',
+    ]);
+  });
+
+  it('renders split intraline diff token backgrounds inside split code columns', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
+    const model = makeChangesReviewModel();
+    model.viewMode = 'split';
+    const file = model.files[0];
+    if (!file) throw new Error('changes review fixture file is missing');
+    file.rows = [
+      {
+        type: 'removed',
+        oldLineNumber: 1,
+        text: 'const value = oldValue;',
+        tokens: [
+          { text: 'const', syntaxScopes: ['hljs-keyword'] },
+          { text: ' value = ' },
+          { text: 'oldValue', diff: 'removed' },
+          { text: ';' },
+        ],
+      },
+      {
+        type: 'added',
+        newLineNumber: 1,
+        text: 'const value = newValue;',
+        tokens: [
+          { text: 'const', syntaxScopes: ['hljs-keyword'] },
+          { text: ' value = ' },
+          { text: 'newValue', diff: 'added' },
+          { text: ';' },
+        ],
+      },
+    ];
+    window.__SCOUT_CHANGES_REVIEW__ = model;
+
+    render(<App />);
+
+    const removedToken = screen.getByText('oldValue');
+    const addedToken = screen.getByText('newValue');
+    expect(removedToken).toHaveClass('scout-review-token-diff-removed');
+    expect(addedToken).toHaveClass('scout-review-token-diff-added');
+    expect(removedToken.closest('.scout-review-split-code')).toBeInstanceOf(HTMLElement);
+    expect(addedToken.closest('.scout-review-split-code')).toBeInstanceOf(HTMLElement);
+    expectCssRule('.scout-review-split-code .scout-review-token-diff-added', [
+      'background: var(--changes-review-token-diff-added);',
+    ]);
+    expectCssRule('.scout-review-split-code .scout-review-token-diff-removed', [
+      'background: var(--changes-review-token-diff-removed);',
+    ]);
   });
 
   it('renders split diff empty sides with hatched placeholders', () => {
@@ -568,3 +623,34 @@ describe('App bootstrap', () => {
     expect(useUiStore.getState().bootstrapStatus).toBe('failed');
   });
 });
+
+function expectCssRule(selector: string, declarations: string[]): void {
+  const matchingRule = findCssRuleBodies(selector).some((body) =>
+    declarations.every((declaration) => body.includes(declaration)),
+  );
+  expect(matchingRule).toBe(true);
+}
+
+function expectNoCssRule(selector: string, declarations: string[]): void {
+  const matchingRule = findCssRuleBodies(selector).some((body) =>
+    declarations.every((declaration) => body.includes(declaration)),
+  );
+  expect(matchingRule).toBe(false);
+}
+
+function findCssRuleBodies(selector: string): string[] {
+  const bodies: string[] = [];
+  let bodyStart = WEBVIEW_CSS.indexOf('{');
+  while (bodyStart >= 0) {
+    const bodyEnd = WEBVIEW_CSS.indexOf('}', bodyStart);
+    if (bodyEnd < 0) break;
+    const previousRuleEnd = WEBVIEW_CSS.lastIndexOf('}', bodyStart - 1);
+    const selectorText = WEBVIEW_CSS.slice(previousRuleEnd + 1, bodyStart).trim();
+    const selectors = selectorText.split(',').map((candidate) => candidate.trim());
+    if (selectors.includes(selector)) {
+      bodies.push(WEBVIEW_CSS.slice(bodyStart + 1, bodyEnd));
+    }
+    bodyStart = WEBVIEW_CSS.indexOf('{', bodyEnd + 1);
+  }
+  return bodies;
+}
