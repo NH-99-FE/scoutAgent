@@ -1,8 +1,8 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScoutSessionTreeNode } from '@scout-agent/shared';
-import { TreeRow } from '@/surfaces/tree/TreeRow';
-import type { VisibleTreeNode } from '@/surfaces/tree/tree-types';
+import type { VisibleTreeNode } from '@/features/tree/model/tree-types';
+import { TreeRow } from '@/features/tree/view/TreeRow';
 
 function makeVisibleNode(
   preview: string,

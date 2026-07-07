@@ -1,5 +1,5 @@
 // ============================================================
-// Changes Review Surface — 文件路径展示
+// Changes Review Feature — 文件路径展示
 // ============================================================
 
 export function ReviewPath({ path }: { path: string }) {

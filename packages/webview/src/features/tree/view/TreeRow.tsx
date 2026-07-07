@@ -6,8 +6,8 @@ import { memo } from 'react';
 import { ChevronDown, ChevronRight, Leaf, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TreeNodeIcon } from './TreeNodeIcon';
-import { formatNodeLine } from './tree-node-format';
-import type { VisibleTreeNode } from './tree-types';
+import { formatNodeLine } from '../model/tree-node-format';
+import type { VisibleTreeNode } from '../model/tree-types';
 
 const GRAPH_LANE_WIDTH = 18;
 

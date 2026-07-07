@@ -28,7 +28,7 @@ import {
 } from '@/store/runtime-overlay-store';
 import { useSessionId } from '@/store/session-store';
 import { useUiActions } from '@/store/ui-store';
-import { ModelStatusMenu } from '@/features/model-menu/ModelStatusMenu';
+import { ModelStatusMenu } from '@/features/model-menu';
 import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';

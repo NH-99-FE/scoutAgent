@@ -10,7 +10,7 @@ import { IconButton } from '@/components/common/IconButton';
 import { HOME_COMPOSER_SESSION_ID } from '@/store/composer-store';
 import { useRecentTasks } from '@/store/task-store';
 import { ChatComposer } from '@/features/composer';
-import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
+import { SettingsActionsMenu } from '@/features/settings';
 import { TaskRow, TaskSearchPanel } from './TaskSearchPanel';
 import { useTaskHistoryPanel } from './use-task-history-panel';
 

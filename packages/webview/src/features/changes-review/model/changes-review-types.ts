@@ -1,5 +1,5 @@
 // ============================================================
-// Changes Review Surface — 局部类型
+// Changes Review Feature — 局部类型
 // ============================================================
 
 import type { ScoutChangesReviewViewMode } from '@scout-agent/shared';

@@ -16,7 +16,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { ScoutSessionTreeNode } from '@scout-agent/shared';
-import { normalizePreview } from './tree-node-format';
+import { normalizePreview } from '../model/tree-node-format';
 
 export function TreeNodeIcon({
   node,

@@ -1,5 +1,5 @@
 // ============================================================
-// Changes Review Surface — 文件稳定键
+// Changes Review Feature — 文件稳定键
 // ============================================================
 
 import type { ScoutChangesReviewFile } from '@scout-agent/shared';

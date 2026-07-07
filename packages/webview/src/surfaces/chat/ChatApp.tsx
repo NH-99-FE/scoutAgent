@@ -13,8 +13,8 @@ import {
   useOpeningTaskSessionPath,
   useUiActions,
 } from '@/store/ui-store';
-import { ChatWorkspace } from '@/features/chat/ChatWorkspace';
-import { TaskHome } from '@/features/tasks/TaskHome';
+import { ChatWorkspace } from '@/features/chat';
+import { TaskHome } from '@/features/tasks';
 
 export function ChatApp() {
   const messageCount = useConversationMessageCount();

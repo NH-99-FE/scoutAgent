@@ -7,11 +7,13 @@ import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { NodeInspector } from './NodeInspector';
-import { TreeActionsMenu } from './TreeActionsMenu';
-import { TreeList } from './TreeList';
-import { FILTERS } from './tree-types';
-import { useTreePanelController } from './use-tree-panel-controller';
+import {
+  FILTERS,
+  NodeInspector,
+  TreeActionsMenu,
+  TreeList,
+  useTreePanelController,
+} from '@/features/tree';
 
 export function TreeApp() {
   const controller = useTreePanelController();

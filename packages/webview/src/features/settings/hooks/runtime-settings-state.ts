@@ -11,7 +11,7 @@ import {
   toRuntimeSettingsPatch,
   type EditableRuntimeSettings,
   type EditableRuntimeSettingsState,
-} from './runtime-settings-draft';
+} from '../model/runtime-settings-draft';
 
 export interface RuntimeSettingsController {
   draft: EditableRuntimeSettingsState;

@@ -4,7 +4,7 @@
 
 import { memo } from 'react';
 import { TreeRow } from './TreeRow';
-import type { VisibleTreeNode } from './tree-types';
+import type { VisibleTreeNode } from '../model/tree-types';
 
 interface TreeListProps {
   effectiveSelectedId: string | null;

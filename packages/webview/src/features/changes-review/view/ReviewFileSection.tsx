@@ -1,11 +1,11 @@
 // ============================================================
-// Changes Review Surface — 文件区块
+// Changes Review Feature — 文件区块
 // ============================================================
 
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ScoutChangesReviewFile, ScoutChangesReviewViewMode } from '@scout-agent/shared';
-import { ReviewDiff } from '@/surfaces/changes-review/ReviewDiff';
-import { ReviewPath } from '@/surfaces/changes-review/ReviewPath';
+import { ReviewDiff } from './ReviewDiff';
+import { ReviewPath } from './ReviewPath';
 
 export function ReviewFileSection({
   expanded,

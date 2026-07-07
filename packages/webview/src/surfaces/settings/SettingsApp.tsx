@@ -16,12 +16,14 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { ExtensionsTab } from './ExtensionsTab';
-import { ModelManagementTab } from './ModelManagementTab';
-import { RuntimeSettingsTab } from './RuntimeSettingsTab';
-import { useCustomModelsController } from './custom-models-state';
-import { useExtensionSettingsController } from './extension-settings-state';
-import { useRuntimeSettingsController } from './runtime-settings-state';
+import {
+  ExtensionsTab,
+  ModelManagementTab,
+  RuntimeSettingsTab,
+  useCustomModelsController,
+  useExtensionSettingsController,
+  useRuntimeSettingsController,
+} from '@/features/settings';
 
 type SettingsTab = 'models' | 'runtime' | 'extensions';
 

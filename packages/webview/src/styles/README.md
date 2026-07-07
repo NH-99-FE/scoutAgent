@@ -46,8 +46,8 @@ Scout 语义变量描述跨 surface 可复用的 UI 意图。它们在 `theme.cs
 
 Feature 私有变量只能留在所属 feature 内：
 
-- `--scout-review-*` 属于 `styles/features/changes-review.css` 和 `surfaces/changes-review`。
-- `--changes-review-*` 属于 `styles/features/changes-review.css` 和 `surfaces/changes-review`。
+- `--scout-review-*` 属于 `styles/features/changes-review.css` 和 `features/changes-review`。
+- `--changes-review-*` 属于 `styles/features/changes-review.css` 和 `features/changes-review`。
 - `--scout-running-text-*` 属于 `styles/features/conversation.css`。
 
 Feature 私有变量不应通过 `@theme inline` 暴露。所属 feature 之外的组件必须改用全局语义 Tailwind class。

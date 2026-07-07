@@ -28,8 +28,8 @@ import {
   toTransport,
   updateNested,
   type EditableRuntimeSettings,
-} from './runtime-settings-draft';
-import type { RuntimeSettingsController } from './runtime-settings-state';
+} from '../model/runtime-settings-draft';
+import type { RuntimeSettingsController } from '../hooks/runtime-settings-state';
 import { SettingsField, SettingsSelectField, type SettingsSelectOption } from './settings-fields';
 
 const SCOPE_LABELS: Record<ScoutSettingsScope, string> = {

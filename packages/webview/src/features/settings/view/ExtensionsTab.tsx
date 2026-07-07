@@ -9,7 +9,7 @@ import type {
   ScoutExtensionTemplateInfo,
 } from '@scout-agent/shared';
 import { Button } from '@/components/ui/button';
-import type { ExtensionSettingsController } from './extension-settings-state';
+import type { ExtensionSettingsController } from '../hooks/extension-settings-state';
 
 const SCOPE_LABELS: Record<ScoutExtensionScope, string> = {
   project: '项目',

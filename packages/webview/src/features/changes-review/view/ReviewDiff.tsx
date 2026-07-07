@@ -1,5 +1,5 @@
 // ============================================================
-// Changes Review Surface — Diff 行渲染
+// Changes Review Feature — Diff 行渲染
 // ============================================================
 
 import { useLayoutEffect, useMemo, useState } from 'react';
@@ -19,7 +19,7 @@ import {
   type SplitDiffLineType,
   type SplitDiffSide,
   type SplitDiffSourceRow,
-} from '@/surfaces/changes-review/split-diff-model';
+} from '../model/split-diff-model';
 
 const UNIFIED_GRID_COLUMNS = 'grid-cols-[var(--changes-review-line-gutter)_minmax(0,1fr)]';
 const SPLIT_COLUMN_GRID = 'grid-cols-[var(--changes-review-line-gutter)_minmax(0,1fr)]';

@@ -4,7 +4,7 @@ import {
   getModelApiOptions,
   toCustomModelsSettings,
   toEditableCustomModels,
-} from '@/surfaces/settings/custom-models-draft';
+} from '@/features/settings/model/custom-models-draft';
 
 describe('custom-models-draft', () => {
   it('returns provider-specific model API options', () => {

@@ -12,7 +12,7 @@ import {
   type EditableCustomModels,
   type EditableModel,
   type EditableProvider,
-} from './custom-models-draft';
+} from '../model/custom-models-draft';
 import type { ScoutModelProvider } from '@scout-agent/shared';
 
 export interface CustomModelsController {

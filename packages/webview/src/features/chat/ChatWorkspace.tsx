@@ -47,9 +47,8 @@ import {
   ConversationView,
   createExtensionRequestsTranscriptAddon,
 } from '@/features/conversation';
-import { SettingsActionsMenu } from '@/features/settings/SettingsActionsMenu';
-import { TaskSearchPanel } from '@/features/tasks/TaskSearchPanel';
-import { useTaskHistoryPanel } from '@/features/tasks/use-task-history-panel';
+import { SettingsActionsMenu } from '@/features/settings';
+import { TaskSearchPanel, useTaskHistoryPanel } from '@/features/tasks';
 import { RenameSessionDialog } from './RenameSessionDialog';
 
 interface ChatWorkspaceProps {

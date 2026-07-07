@@ -10,8 +10,8 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { TreeNodeIcon } from './TreeNodeIcon';
-import { formatNodeKind, formatNodeLine } from './tree-node-format';
-import type { SummaryMode } from './tree-types';
+import { formatNodeKind, formatNodeLine } from '../model/tree-node-format';
+import type { SummaryMode } from '../model/tree-types';
 
 export function NodeInspector({
   customInstructions,

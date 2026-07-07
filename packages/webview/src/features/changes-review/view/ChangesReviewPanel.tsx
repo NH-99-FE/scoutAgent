@@ -1,13 +1,13 @@
 // ============================================================
-// Changes Review Surface — 面板布局
+// Changes Review Feature — 面板布局
 // ============================================================
 
 import type { ScoutChangesReviewModel, ScoutChangesReviewViewMode } from '@scout-agent/shared';
 import { LoaderCircle } from 'lucide-react';
-import { ReviewFileSection } from '@/surfaces/changes-review/ReviewFileSection';
-import { ReviewTopbar } from '@/surfaces/changes-review/ReviewTopbar';
-import { getChangesReviewFileKey } from '@/surfaces/changes-review/changes-review-file-key';
-import type { ChangesReviewActions } from '@/surfaces/changes-review/changes-review-types';
+import { ReviewFileSection } from './ReviewFileSection';
+import { ReviewTopbar } from './ReviewTopbar';
+import { getChangesReviewFileKey } from '../model/changes-review-file-key';
+import type { ChangesReviewActions } from '../model/changes-review-types';
 
 const CHANGES_REVIEW_PANEL_CLASS =
   'bg-tree-background text-foreground box-border h-screen min-h-0 overflow-x-hidden overflow-y-auto pb-[18px] [--changes-review-line-gutter:54px] max-[640px]:[--changes-review-line-gutter:44px]';

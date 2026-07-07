@@ -4,7 +4,7 @@ import type { ScoutSessionTreeNode, ScoutSessionTreeNodeKind } from '@scout-agen
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { TreeApp } from '@/surfaces/tree/TreeApp';
-import { TREE_SEARCH_DEBOUNCE_MS } from '@/surfaces/tree/use-tree-panel-controller';
+import { TREE_SEARCH_DEBOUNCE_MS } from '@/features/tree/hooks/use-tree-panel-controller';
 import { useSessionStore } from '@/store/session-store';
 import { useTreeStore } from '@/store/tree-store';
 

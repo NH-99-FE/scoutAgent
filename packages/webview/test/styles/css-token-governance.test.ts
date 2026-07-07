@@ -70,11 +70,11 @@ const CSS_COLOR_LITERAL_ALLOWLIST: Array<{ file: RegExp; line: RegExp }> = [
 const FEATURE_PRIVATE_TOKEN_SCOPES: Array<{ prefix: string; allowedFile: RegExp }> = [
   {
     prefix: '--scout-review-',
-    allowedFile: /\/src\/(?:styles\/features\/changes-review\.css|surfaces\/changes-review\/)/,
+    allowedFile: /\/src\/(?:styles\/features\/changes-review\.css|features\/changes-review\/)/,
   },
   {
     prefix: '--changes-review-',
-    allowedFile: /\/src\/(?:styles\/features\/changes-review\.css|surfaces\/changes-review\/)/,
+    allowedFile: /\/src\/(?:styles\/features\/changes-review\.css|features\/changes-review\/)/,
   },
   {
     prefix: '--scout-running-text-',

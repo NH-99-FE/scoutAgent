@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoutSessionTreeNode, ScoutSessionTreeNodeKind } from '@scout-agent/shared';
-import { buildVisibleNodes, flattenTree } from '@/surfaces/tree/tree-model';
+import { buildVisibleNodes, flattenTree } from '@/features/tree/model/tree-model';
 
 function makeNode(
   id: string,
@@ -80,12 +80,19 @@ describe('tree-model', () => {
     const innerFirstLeaf = makeNode('inner-first-leaf', 'assistant', [], { role: 'assistant' });
     const innerFirst = makeNode('inner-first', 'user', [innerFirstLeaf], { role: 'user' });
     const innerSecond = makeNode('inner-second', 'assistant', [], { role: 'assistant' });
-    const innerBranchPoint = makeNode('inner-branch-point', 'assistant', [innerFirst, innerSecond], {
-      role: 'assistant',
-    });
+    const innerBranchPoint = makeNode(
+      'inner-branch-point',
+      'assistant',
+      [innerFirst, innerSecond],
+      {
+        role: 'assistant',
+      },
+    );
     const outerFirst = makeNode('outer-first', 'user', [innerBranchPoint], { role: 'user' });
     const outerSecond = makeNode('outer-second', 'assistant', [], { role: 'assistant' });
-    const root = linkChildren(makeNode('root', 'user', [outerFirst, outerSecond], { role: 'user' }));
+    const root = linkChildren(
+      makeNode('root', 'user', [outerFirst, outerSecond], { role: 'user' }),
+    );
 
     const visibleNodes = buildVisibleNodes(flattenTree([root]), new Set(), 'default', '');
     const graphById = new Map(visibleNodes.map((entry) => [entry.node.id, entry.graph]));

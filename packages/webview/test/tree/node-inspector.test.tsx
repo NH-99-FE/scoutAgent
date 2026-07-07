@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ScoutSessionTreeNode } from '@scout-agent/shared';
-import { NodeInspector } from '@/surfaces/tree/NodeInspector';
+import { NodeInspector } from '@/features/tree/view/NodeInspector';
 
 function makeAssistantNode(): ScoutSessionTreeNode {
   return {

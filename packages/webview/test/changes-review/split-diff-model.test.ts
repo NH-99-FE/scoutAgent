@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createSplitDiffModel,
   projectSplitDiffRows,
-} from '@/surfaces/changes-review/split-diff-model';
+} from '@/features/changes-review/model/split-diff-model';
 import type { ScoutChangesReviewRow } from '@scout-agent/shared';
 
 describe('split-diff-model', () => {

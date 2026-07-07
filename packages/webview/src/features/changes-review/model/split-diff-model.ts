@@ -1,5 +1,5 @@
 // ============================================================
-// Changes Review Surface — Split diff 投影模型
+// Changes Review Feature — Split diff 投影模型
 // ============================================================
 
 import type { ScoutChangesReviewRow } from '@scout-agent/shared';

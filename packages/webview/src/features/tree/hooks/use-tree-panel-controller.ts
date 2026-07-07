@@ -12,8 +12,13 @@ import {
   getEffectiveSelectedId,
   indexNodes,
   isVisibleDescendant,
-} from './tree-model';
-import type { FilterMode, LabelDraftState, SummaryDraftState, SummaryMode } from './tree-types';
+} from '../model/tree-model';
+import type {
+  FilterMode,
+  LabelDraftState,
+  SummaryDraftState,
+  SummaryMode,
+} from '../model/tree-types';
 
 export const TREE_SEARCH_DEBOUNCE_MS = 160;
 
@@ -58,40 +63,49 @@ export function useTreePanelController() {
     [selectedNode, summaryDraft],
   );
 
-  const toggleFold = useCallback((entryId: string) => {
-    const shouldFold = !foldedIds.has(entryId);
-    if (
-      shouldFold &&
-      effectiveSelectedId &&
-      effectiveSelectedId !== entryId &&
-      isVisibleDescendant(effectiveSelectedId, entryId, visibleNodes)
-    ) {
-      setSelectedId(entryId);
-    }
-    setFoldedIds((current) => {
-      const next = new Set(current);
-      if (next.has(entryId)) {
-        next.delete(entryId);
-      } else {
-        next.add(entryId);
+  const toggleFold = useCallback(
+    (entryId: string) => {
+      const shouldFold = !foldedIds.has(entryId);
+      if (
+        shouldFold &&
+        effectiveSelectedId &&
+        effectiveSelectedId !== entryId &&
+        isVisibleDescendant(effectiveSelectedId, entryId, visibleNodes)
+      ) {
+        setSelectedId(entryId);
       }
-      return next;
-    });
-  }, [effectiveSelectedId, foldedIds, visibleNodes]);
+      setFoldedIds((current) => {
+        const next = new Set(current);
+        if (next.has(entryId)) {
+          next.delete(entryId);
+        } else {
+          next.add(entryId);
+        }
+        return next;
+      });
+    },
+    [effectiveSelectedId, foldedIds, visibleNodes],
+  );
 
-  const updateQuery = useCallback((value: string) => {
-    if (value !== query) {
-      setFoldedIds(new Set());
-    }
-    setQuery(value);
-  }, [query]);
+  const updateQuery = useCallback(
+    (value: string) => {
+      if (value !== query) {
+        setFoldedIds(new Set());
+      }
+      setQuery(value);
+    },
+    [query],
+  );
 
-  const updateFilterMode = useCallback((mode: FilterMode) => {
-    if (mode !== filterMode) {
-      setFoldedIds(new Set());
-    }
-    setFilterMode(mode);
-  }, [filterMode]);
+  const updateFilterMode = useCallback(
+    (mode: FilterMode) => {
+      if (mode !== filterMode) {
+        setFoldedIds(new Set());
+      }
+      setFilterMode(mode);
+    },
+    [filterMode],
+  );
 
   const revealCurrentLeaf = useCallback(() => {
     if (!leafId) return;
@@ -129,29 +143,38 @@ export function useTreePanelController() {
     });
   }, [effectiveSummaryDraft, selectedNode]);
 
-  const updateCustomInstructions = useCallback((value: string) => {
-    if (!selectedNode) return;
-    setSummaryDraft({
-      nodeId: selectedNode.id,
-      mode: 'custom',
-      customInstructions: value,
-    });
-  }, [selectedNode]);
+  const updateCustomInstructions = useCallback(
+    (value: string) => {
+      if (!selectedNode) return;
+      setSummaryDraft({
+        nodeId: selectedNode.id,
+        mode: 'custom',
+        customInstructions: value,
+      });
+    },
+    [selectedNode],
+  );
 
-  const updateLabelDraft = useCallback((value: string) => {
-    if (!selectedNode) return;
-    setLabelDraft({ nodeId: selectedNode.id, value });
-    setLabelSavedNodeId(null);
-  }, [selectedNode]);
+  const updateLabelDraft = useCallback(
+    (value: string) => {
+      if (!selectedNode) return;
+      setLabelDraft({ nodeId: selectedNode.id, value });
+      setLabelSavedNodeId(null);
+    },
+    [selectedNode],
+  );
 
-  const updateSummaryMode = useCallback((mode: SummaryMode) => {
-    if (!selectedNode) return;
-    setSummaryDraft({
-      nodeId: selectedNode.id,
-      mode,
-      customInstructions: mode === 'custom' ? effectiveSummaryDraft.customInstructions : '',
-    });
-  }, [effectiveSummaryDraft.customInstructions, selectedNode]);
+  const updateSummaryMode = useCallback(
+    (mode: SummaryMode) => {
+      if (!selectedNode) return;
+      setSummaryDraft({
+        nodeId: selectedNode.id,
+        mode,
+        customInstructions: mode === 'custom' ? effectiveSummaryDraft.customInstructions : '',
+      });
+    },
+    [effectiveSummaryDraft.customInstructions, selectedNode],
+  );
 
   return {
     effectiveLabelDraft,

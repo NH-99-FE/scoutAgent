@@ -10,9 +10,8 @@ import type {
   ScoutChangesReviewWebviewMessage,
 } from '@scout-agent/shared';
 import { getVsCodeApi } from '@/bridge/vscode-api';
-import { ChangesReviewPanel } from '@/surfaces/changes-review/ChangesReviewPanel';
-import { getChangesReviewFileKey } from '@/surfaces/changes-review/changes-review-file-key';
-import type { ChangesReviewActions } from '@/surfaces/changes-review/changes-review-types';
+import { ChangesReviewPanel, getChangesReviewFileKey } from '@/features/changes-review';
+import type { ChangesReviewActions } from '@/features/changes-review';
 
 declare global {
   interface Window {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ScoutSessionTreeNode, ScoutSessionTreeToolCall } from '@scout-agent/shared';
-import { formatNodeKind, formatNodeLine } from '@/surfaces/tree/tree-node-format';
+import { formatNodeKind, formatNodeLine } from '@/features/tree/model/tree-node-format';
 
 function makeToolNode(toolCall: ScoutSessionTreeToolCall): ScoutSessionTreeNode {
   return {

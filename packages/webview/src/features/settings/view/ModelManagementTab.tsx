@@ -14,8 +14,8 @@ import {
   readNumberInput,
   type EditableModel,
   type EditableProvider,
-} from './custom-models-draft';
-import type { CustomModelsController } from './custom-models-state';
+} from '../model/custom-models-draft';
+import type { CustomModelsController } from '../hooks/custom-models-state';
 import {
   SettingsAdvancedOptions,
   SettingsCheckField,
