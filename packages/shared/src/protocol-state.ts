@@ -35,11 +35,20 @@ export interface ScoutImageContent {
   mimeType: string;
 }
 
+export interface ScoutSkillInvocationContent {
+  type: 'skillInvocation';
+  name: string;
+  location: string;
+  content: string;
+  userMessage?: string;
+}
+
 export type ScoutContent =
   | ScoutTextContent
   | ScoutThinkingContent
   | ScoutToolCallContent
-  | ScoutImageContent;
+  | ScoutImageContent
+  | ScoutSkillInvocationContent;
 
 // ---------- 可序列化消息 ----------
 

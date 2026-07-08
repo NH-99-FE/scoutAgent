@@ -53,6 +53,7 @@ export type {
 export type {
   ScoutExtensionListItem,
   ScoutExtensionsSettings,
+  ScoutExtensionResourceScope,
   ScoutExtensionScope,
   ScoutExtensionTemplateInfo,
   ScoutExtensionTemplateId,

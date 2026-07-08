@@ -104,6 +104,32 @@ describe('conversation store', () => {
     ]);
   });
 
+  it('derives titles from skill invocation user instructions', () => {
+    const actions = useConversationStore.getState().actions;
+
+    actions.applyStateSnapshot(
+      makeState([
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'skillInvocation',
+              name: 'deploy',
+              location: '/workspace/.scout/skills/deploy/SKILL.md',
+              content:
+                'References are relative to /workspace/.scout/skills/deploy.\n\nLong skill body',
+              userMessage: 'Use staging safely',
+            },
+          ],
+          timestamp: 1,
+        },
+      ]),
+    );
+
+    expect(useConversationStore.getState().conversationTitle).toBe('Use staging safely');
+    expect(useConversationStore.getState().conversationTitle).not.toContain('Long skill body');
+  });
+
   it('does not derive global runtime state from agent lifecycle events', () => {
     const actions = useConversationStore.getState().actions;
 

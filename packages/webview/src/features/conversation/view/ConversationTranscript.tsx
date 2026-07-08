@@ -14,6 +14,7 @@ import {
   FileDiff,
   LoaderCircle,
   Split,
+  Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from 'lucide-react';
@@ -160,15 +161,95 @@ const UserMessage = memo(function UserMessage({
   message: Extract<ScoutMessage, { role: 'user' }>;
 }) {
   const text = contentToText(message.content);
+  const hasStructuredContent =
+    Array.isArray(message.content) && message.content.some((item) => item.type !== 'text');
   return (
     <article className="group/message flex w-full max-w-full min-w-0 flex-col items-end">
       <div className="scout-user-message bg-user-message max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
-        {text}
+        {hasStructuredContent && Array.isArray(message.content) ? (
+          <UserStructuredContent content={message.content} />
+        ) : (
+          text
+        )}
       </div>
       <UserMessageActions text={text} timestamp={message.timestamp} />
     </article>
   );
 });
+
+function UserStructuredContent({ content }: { content: ScoutContent[] }) {
+  return (
+    <div className="flex max-w-full min-w-0 flex-col gap-2">
+      {content.map((item, index) => {
+        if (item.type === 'skillInvocation') {
+          return <SkillInvocationBlock key={`skill-${index}-${item.name}`} skill={item} />;
+        }
+        if (item.type === 'text' && item.text.trim()) {
+          return (
+            <div key={`text-${index}`} className="whitespace-pre-wrap">
+              {item.text}
+            </div>
+          );
+        }
+        if (item.type === 'image') {
+          return <ImageBlock alt="User attached image" content={item} key={`image-${index}`} />;
+        }
+        const fallbackText = contentToText([item]);
+        if (fallbackText) {
+          return (
+            <div key={`fallback-${index}`} className="whitespace-pre-wrap">
+              {fallbackText}
+            </div>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+function SkillInvocationBlock({
+  skill,
+}: {
+  skill: Extract<ScoutContent, { type: 'skillInvocation' }>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-primary/15 bg-background/75 text-foreground max-w-full min-w-0 overflow-hidden rounded-md border shadow-sm">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <button
+            className="hover:bg-muted/70 flex w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left"
+            type="button"
+          >
+            {open ? (
+              <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
+            ) : (
+              <ChevronRight className="text-muted-foreground size-3.5 shrink-0" />
+            )}
+            <Sparkles className="text-primary size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold">{skill.name}</span>
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="border-border/70 border-t px-2.5 py-2">
+            <div className="text-muted-foreground mb-2 max-w-full truncate text-[11px]">
+              {skill.location}
+            </div>
+            <pre className="bg-muted/70 max-h-64 overflow-auto rounded p-2 text-[11px] leading-4 whitespace-pre-wrap">
+              {skill.content}
+            </pre>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      {skill.userMessage ? (
+        <div className="border-border/70 border-t px-2.5 py-2 text-sm leading-5 whitespace-pre-wrap">
+          {skill.userMessage}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 interface AssistantOutcomeRenderer {
   render: (row: AssistantOutcomeConversationRow) => ReactElement;
@@ -547,10 +628,16 @@ const MemoizedVisibleContentBlock = memo(
   (previous, next) => previous.content === next.content,
 );
 
-function ImageBlock({ content }: { content: Extract<ScoutContent, { type: 'image' }> }) {
+function ImageBlock({
+  alt = 'Assistant image',
+  content,
+}: {
+  alt?: string;
+  content: Extract<ScoutContent, { type: 'image' }>;
+}) {
   return (
     <img
-      alt="Assistant image"
+      alt={alt}
       className="border-border/70 my-3 max-h-64 max-w-full rounded-xl border object-contain sm:max-h-80"
       src={toImageSource(content)}
     />

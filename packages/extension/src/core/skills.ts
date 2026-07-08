@@ -1,366 +1,373 @@
 // ============================================================
-// Skills 加载器 — 从文件系统发现和加载 SKILL.md
-// 等价 Pi skills.ts 的简化版（去掉扩展注册）
+// Skills 加载器 — Pi coding-agent core 对齐的文件系统技能发现
+// 负责：扫描 SKILL.md / 根级 markdown，解析 frontmatter，生成资源诊断。
 // ============================================================
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
-import { parse as yamlParse } from 'yaml';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import {
+  parseSkillFrontmatter,
+  prefixSkillIgnorePattern,
+  SKILL_IGNORE_FILE_NAMES,
+  validateSkillDescription,
+  validateSkillName,
+  type SkillFrontmatter as AgentSkillFrontmatter,
+} from '@scout-agent/agent';
 import ignore from 'ignore';
+import { createSyntheticSourceInfo, type SourceInfo } from './source-info.ts';
 
 // ---------- 类型 ----------
 
-export interface SkillFrontmatter {
-  name?: string;
-  description?: string;
-  'disable-model-invocation'?: boolean;
-  [key: string]: unknown;
-}
+export type SkillFrontmatter = AgentSkillFrontmatter;
 
 export interface Skill {
-  /** 技能名称 */
   name: string;
-  /** 简短描述 */
   description: string;
-  /** 完整的技能指令 */
-  content: string;
-  /** 技能文件的绝对路径 */
   filePath: string;
-  /** 技能目录（SKILL.md 所在目录） */
   baseDir: string;
-  /** 是否对模型隐藏（只能显式调用） */
+  sourceInfo: SourceInfo;
   disableModelInvocation: boolean;
 }
 
-/** 资源加载诊断信息 */
+export interface ResourceCollision {
+  resourceType: 'skill' | 'prompt' | 'extension';
+  name: string;
+  winnerPath: string;
+  loserPath: string;
+}
+
 export interface ResourceDiagnostic {
-  /** 出问题的文件路径 */
-  filePath: string;
-  /** 诊断消息 */
+  type: 'warning' | 'error' | 'collision';
   message: string;
-  /** 严重程度 */
-  severity: 'error' | 'warning';
+  path?: string;
+  collision?: ResourceCollision;
+}
+
+export interface LoadSkillsFromDirOptions {
+  dir: string;
+  source: string;
+}
+
+export interface LoadSkillsResult {
+  skills: Skill[];
+  diagnostics: ResourceDiagnostic[];
 }
 
 export interface LoadSkillsOptions {
-  /** 工作目录（用于项目级 skills） */
   cwd: string;
-  /** Agent 配置目录（用于全局 skills） */
   agentDir: string;
-  /** 自定义路径 */
-  customPaths?: string[];
+  skillPaths: string[];
+  includeDefaults: boolean;
 }
 
-const MAX_NAME_LENGTH = 64;
-const MAX_DESCRIPTION_LENGTH = 1024;
+type IgnoreMatcher = ReturnType<typeof ignore>;
 
-// ---------- Frontmatter 解析 ----------
+// ---------- 路径与 ignore ----------
 
-/**
- * 使用 yaml 包解析 YAML frontmatter。
- * 提取 `---` 之间的 YAML 内容，解析为 frontmatter 对象。
- */
-function parseFrontmatter(rawContent: string): { frontmatter: SkillFrontmatter; body: string } {
-  const frontmatter: SkillFrontmatter = {};
-  let body = rawContent;
+function toPosixPath(path: string): string {
+  return path.split(sep).join('/');
+}
 
-  const match = rawContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!match) return { frontmatter, body };
-
-  body = rawContent.slice(match[0].length);
-  const yamlStr = match[1];
-
+function canonicalizePath(path: string): string {
   try {
-    const parsed = yamlParse(yamlStr);
-    if (parsed && typeof parsed === 'object') {
-      Object.assign(frontmatter, parsed);
-    }
+    return realpathSync(path);
   } catch {
-    // YAML 解析失败，返回空 frontmatter
+    return resolve(path);
   }
-
-  return { frontmatter, body };
 }
 
-// ---------- .gitignore 支持 ----------
+function addIgnoreRules(ig: IgnoreMatcher, dir: string, rootDir: string): void {
+  const relativeDir = relative(rootDir, dir);
+  const prefix = relativeDir ? `${toPosixPath(relativeDir)}/` : '';
 
-/**
- * 从目录及其父目录读取 .gitignore / .ignore / .fdignore 规则。
- * 返回 ignore 实例，用于过滤被忽略的路径。
- */
-function loadIgnorePatterns(rootDir: string): ReturnType<typeof ignore> {
-  const ig = ignore();
-  const ignoreFiles = ['.gitignore', '.ignore', '.fdignore'];
-
-  // 仅读取 rootDir 下的忽略文件
-  for (const fileName of ignoreFiles) {
-    const filePath = join(rootDir, fileName);
-    if (existsSync(filePath)) {
-      try {
-        const content = readFileSync(filePath, 'utf-8');
-        ig.add(content);
-      } catch {
-        // 读取失败则跳过
-      }
+  for (const filename of SKILL_IGNORE_FILE_NAMES) {
+    const ignorePath = join(dir, filename);
+    if (!existsSync(ignorePath)) continue;
+    try {
+      const content = readFileSync(ignorePath, 'utf-8');
+      const patterns = content
+        .split(/\r?\n/)
+        .map((line) => prefixSkillIgnorePattern(line, prefix))
+        .filter((line): line is string => Boolean(line));
+      if (patterns.length > 0) ig.add(patterns);
+    } catch {
+      // Ignore unreadable ignore files; skills discovery should remain best-effort.
     }
   }
-
-  // 始终忽略 node_modules 和 .git
-  ig.add(['node_modules', '.git']);
-
-  return ig;
 }
 
-// ---------- 验证 ----------
-
-function validateName(name: string): string[] {
-  const errors: string[] = [];
-  if (name.length > MAX_NAME_LENGTH) {
-    errors.push(`name exceeds ${MAX_NAME_LENGTH} characters (${name.length})`);
+function resolveKind(
+  path: string,
+  entry: { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean },
+): 'file' | 'directory' | undefined {
+  if (entry.isFile()) return 'file';
+  if (entry.isDirectory()) return 'directory';
+  if (!entry.isSymbolicLink()) return undefined;
+  try {
+    const stats = statSync(path);
+    if (stats.isFile()) return 'file';
+    if (stats.isDirectory()) return 'directory';
+  } catch {
+    return undefined;
   }
-  if (!/^[a-z0-9-]+$/.test(name)) {
-    errors.push('name contains invalid characters (must be lowercase a-z, 0-9, hyphens only)');
-  }
-  if (name.startsWith('-') || name.endsWith('-')) {
-    errors.push('name must not start or end with a hyphen');
-  }
-  if (name.includes('--')) {
-    errors.push('name must not contain consecutive hyphens');
-  }
-  return errors;
+  return undefined;
 }
 
-function validateDescription(description: string | undefined): string[] {
-  const errors: string[] = [];
-  if (!description || description.trim() === '') {
-    errors.push('description is required');
-  } else if (description.length > MAX_DESCRIPTION_LENGTH) {
-    errors.push(`description exceeds ${MAX_DESCRIPTION_LENGTH} characters (${description.length})`);
+export function stripFrontmatter(rawContent: string): string {
+  const parsed = parseSkillFrontmatter(rawContent);
+  return parsed.ok ? parsed.value.body : rawContent;
+}
+
+function createSkillSourceInfo(filePath: string, baseDir: string, source: string): SourceInfo {
+  switch (source) {
+    case 'user':
+      return createSyntheticSourceInfo(filePath, {
+        source: 'local',
+        scope: 'user',
+        baseDir,
+      });
+    case 'project':
+      return createSyntheticSourceInfo(filePath, {
+        source: 'local',
+        scope: 'project',
+        baseDir,
+      });
+    case 'path':
+      return createSyntheticSourceInfo(filePath, {
+        source: 'local',
+        baseDir,
+      });
+    default:
+      return createSyntheticSourceInfo(filePath, { source, baseDir });
   }
-  return errors;
 }
-
-// ---------- XML 转义 ----------
-
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-// ---------- 文件加载 ----------
 
 function loadSkillFromFile(
   filePath: string,
   source: string,
-  diagnostics: ResourceDiagnostic[],
-): Skill | null {
+): { skill: Skill | null; diagnostics: ResourceDiagnostic[] } {
+  const diagnostics: ResourceDiagnostic[] = [];
+
   try {
     const rawContent = readFileSync(filePath, 'utf-8');
-    const { frontmatter, body } = parseFrontmatter(rawContent);
-    const skillDir = dirname(filePath);
-    const parentDirName = basename(skillDir);
-
-    // 验证 description
-    const descErrors = validateDescription(frontmatter.description);
-    if (
-      descErrors.length > 0 ||
-      !frontmatter.description ||
-      frontmatter.description.trim() === ''
-    ) {
-      diagnostics.push({
-        filePath,
-        message: `Missing or invalid description: ${descErrors.join(', ')}`,
-        severity: 'warning',
-      });
-      return null;
+    const parsed = parseSkillFrontmatter<SkillFrontmatter>(rawContent);
+    if (!parsed.ok) {
+      diagnostics.push({ type: 'warning', message: parsed.error.message, path: filePath });
+      return { skill: null, diagnostics };
     }
 
-    // 名称：frontmatter > 父目录名
-    const name = (frontmatter.name as string) || parentDirName;
-    const nameErrors = validateName(name);
-    if (nameErrors.length > 0) {
-      diagnostics.push({
-        filePath,
-        message: `Invalid skill name "${name}": ${nameErrors.join(', ')}`,
-        severity: 'warning',
-      });
+    const { frontmatter } = parsed.value;
+    const skillDir = dirname(filePath);
+    const parentDirName = basename(skillDir);
+    const description =
+      typeof frontmatter.description === 'string' ? frontmatter.description : undefined;
+    const descriptionErrors = validateSkillDescription(description);
+    for (const error of descriptionErrors) {
+      diagnostics.push({ type: 'warning', message: error, path: filePath });
+    }
+
+    const frontmatterName = typeof frontmatter.name === 'string' ? frontmatter.name : undefined;
+    const name = frontmatterName || parentDirName;
+    for (const error of validateSkillName(name)) {
+      diagnostics.push({ type: 'warning', message: error, path: filePath });
+    }
+
+    if (descriptionErrors.length > 0 || description === undefined) {
+      return { skill: null, diagnostics };
     }
 
     return {
-      name,
-      description: frontmatter.description!,
-      content: body.trim(),
-      filePath,
-      baseDir: skillDir,
-      disableModelInvocation: frontmatter['disable-model-invocation'] === true,
+      skill: {
+        name,
+        description,
+        filePath,
+        baseDir: skillDir,
+        sourceInfo: createSkillSourceInfo(filePath, skillDir, source),
+        disableModelInvocation: frontmatter['disable-model-invocation'] === true,
+      },
+      diagnostics,
     };
   } catch (error) {
     diagnostics.push({
-      filePath,
-      message: `Failed to load: ${error instanceof Error ? error.message : String(error)}`,
-      severity: 'error',
+      type: 'warning',
+      message: error instanceof Error ? error.message : 'failed to parse skill file',
+      path: filePath,
     });
-    return null;
+    return { skill: null, diagnostics };
   }
 }
 
 // ---------- 目录扫描 ----------
 
-/**
- * 从目录加载 skills。
- * 发现规则：
- * - 如果目录包含 SKILL.md，视为技能根，不再递归
- * - 否则，加载根目录的直接 .md 子文件
- * - 递归子目录查找 SKILL.md
- * - 遵循 .gitignore / .ignore / .fdignore 规则
- */
-export function loadSkillsFromDir(
-  dir: string,
-  source: string,
-  diagnostics?: ResourceDiagnostic[],
-): Skill[] {
-  return loadSkillsFromDirInternal(dir, source, true, diagnostics ?? []);
+export function loadSkillsFromDir(options: LoadSkillsFromDirOptions): LoadSkillsResult {
+  return loadSkillsFromDirInternal(options.dir, options.source, true);
 }
 
 function loadSkillsFromDirInternal(
   dir: string,
   source: string,
   includeRootFiles: boolean,
-  diagnostics: ResourceDiagnostic[],
-): Skill[] {
+  ignoreMatcher?: IgnoreMatcher,
+  rootDir?: string,
+): LoadSkillsResult {
   const skills: Skill[] = [];
+  const diagnostics: ResourceDiagnostic[] = [];
 
-  if (!existsSync(dir)) return skills;
+  if (!existsSync(dir)) return { skills, diagnostics };
+
+  const root = rootDir ?? dir;
+  const ig = ignoreMatcher ?? ignore();
+  addIgnoreRules(ig, dir, root);
 
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
-    // 加载 .gitignore 规则
-    const ig = loadIgnorePatterns(dir);
 
-    // 优先检查 SKILL.md
     for (const entry of entries) {
       if (entry.name !== 'SKILL.md') continue;
-
       const fullPath = join(dir, entry.name);
-      let isFile = entry.isFile();
-      if (entry.isSymbolicLink()) {
-        try {
-          isFile = statSync(fullPath).isFile();
-        } catch {
-          continue;
-        }
-      }
+      const kind = resolveKind(fullPath, entry);
+      const relPath = toPosixPath(relative(root, fullPath));
+      if (kind !== 'file' || ig.ignores(relPath)) continue;
 
-      if (!isFile) continue;
-
-      const skill = loadSkillFromFile(fullPath, source, diagnostics);
-      if (skill) skills.push(skill);
-      return skills;
+      const result = loadSkillFromFile(fullPath, source);
+      if (result.skill) skills.push(result.skill);
+      diagnostics.push(...result.diagnostics);
+      return { skills, diagnostics };
     }
 
-    // 遍历其他条目
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-
-      // 使用 ignore 检查路径
-      const relPath = entry.name;
-      if (ig.ignores(relPath)) continue;
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
 
       const fullPath = join(dir, entry.name);
+      const kind = resolveKind(fullPath, entry);
+      if (!kind) continue;
 
-      let isDirectory = entry.isDirectory();
-      let isFile = entry.isFile();
-      if (entry.isSymbolicLink()) {
-        try {
-          const stats = statSync(fullPath);
-          isDirectory = stats.isDirectory();
-          isFile = stats.isFile();
-        } catch {
-          continue;
-        }
-      }
+      const relPath = toPosixPath(relative(root, fullPath));
+      const ignorePath = kind === 'directory' ? `${relPath}/` : relPath;
+      if (ig.ignores(ignorePath)) continue;
 
-      if (isDirectory) {
-        const subSkills = loadSkillsFromDirInternal(fullPath, source, false, diagnostics);
-        skills.push(...subSkills);
+      if (kind === 'directory') {
+        const subResult = loadSkillsFromDirInternal(fullPath, source, false, ig, root);
+        skills.push(...subResult.skills);
+        diagnostics.push(...subResult.diagnostics);
         continue;
       }
 
-      if (!isFile || !includeRootFiles || !entry.name.endsWith('.md')) continue;
-
-      const skill = loadSkillFromFile(fullPath, source, diagnostics);
-      if (skill) skills.push(skill);
+      if (kind !== 'file' || !includeRootFiles || !entry.name.endsWith('.md')) continue;
+      const result = loadSkillFromFile(fullPath, source);
+      if (result.skill) skills.push(result.skill);
+      diagnostics.push(...result.diagnostics);
     }
   } catch {
-    // 忽略读取错误
+    // Pi 行为：无法读取目录时跳过，让其它资源继续加载。
   }
 
-  return skills;
+  return { skills, diagnostics };
 }
 
 // ---------- 公开 API ----------
 
-/**
- * 从所有配置的位置加载 skills。
- * 1. 全局默认：{agentDir}/skills（source: "user"）
- * 2. 项目级：{cwd}/.scout/skills（source: "project"）
- * 3. 自定义路径
- */
-export function loadSkills(options: LoadSkillsOptions): {
-  skills: Skill[];
-  diagnostics: ResourceDiagnostic[];
-} {
-  const { cwd, agentDir, customPaths } = options;
+export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
+  const resolvedCwd = resolve(options.cwd);
+  const resolvedAgentDir = resolve(options.agentDir);
   const skillMap = new Map<string, Skill>();
-  const diagnostics: ResourceDiagnostic[] = [];
+  const realPathSet = new Set<string>();
+  const allDiagnostics: ResourceDiagnostic[] = [];
+  const collisionDiagnostics: ResourceDiagnostic[] = [];
 
-  function addSkills(newSkills: Skill[]) {
-    for (const skill of newSkills) {
-      if (!skillMap.has(skill.name)) {
-        skillMap.set(skill.name, skill);
+  const addSkills = (result: LoadSkillsResult) => {
+    allDiagnostics.push(...result.diagnostics);
+    for (const skill of result.skills) {
+      const realPath = canonicalizePath(skill.filePath);
+      if (realPathSet.has(realPath)) continue;
+
+      const existing = skillMap.get(skill.name);
+      if (existing) {
+        collisionDiagnostics.push({
+          type: 'collision',
+          message: `name "${skill.name}" collision`,
+          path: skill.filePath,
+          collision: {
+            resourceType: 'skill',
+            name: skill.name,
+            winnerPath: existing.filePath,
+            loserPath: skill.filePath,
+          },
+        });
+        continue;
       }
+
+      skillMap.set(skill.name, skill);
+      realPathSet.add(realPath);
     }
+  };
+
+  if (options.includeDefaults) {
+    addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, 'skills'), 'user', true));
+    addSkills(loadSkillsFromDirInternal(join(resolvedCwd, '.scout', 'skills'), 'project', true));
   }
 
-  // 全局 skills
-  const userSkillsDir = join(agentDir, 'skills');
-  addSkills(loadSkillsFromDirInternal(userSkillsDir, 'user', true, diagnostics));
+  const userSkillsDir = join(resolvedAgentDir, 'skills');
+  const projectSkillsDir = join(resolvedCwd, '.scout', 'skills');
+  const isUnderPath = (target: string, root: string): boolean => {
+    const normalizedRoot = resolve(root);
+    if (target === normalizedRoot) return true;
+    const prefix = normalizedRoot.endsWith(sep) ? normalizedRoot : `${normalizedRoot}${sep}`;
+    return target.startsWith(prefix);
+  };
 
-  // 项目级 skills
-  const projectSkillsDir = resolve(cwd, '.scout', 'skills');
-  addSkills(loadSkillsFromDirInternal(projectSkillsDir, 'project', true, diagnostics));
+  const getSource = (resolvedPath: string): 'user' | 'project' | 'path' => {
+    if (!options.includeDefaults) {
+      if (isUnderPath(resolvedPath, userSkillsDir)) return 'user';
+      if (isUnderPath(resolvedPath, projectSkillsDir)) return 'project';
+    }
+    return 'path';
+  };
 
-  // 自定义路径
-  for (const rawPath of customPaths ?? []) {
-    const resolvedPath = resolve(cwd, rawPath);
-    if (!existsSync(resolvedPath)) continue;
+  for (const rawPath of options.skillPaths) {
+    const resolvedPath = resolve(resolvedCwd, rawPath.trim());
+    if (!existsSync(resolvedPath)) {
+      allDiagnostics.push({
+        type: 'warning',
+        message: 'skill path does not exist',
+        path: resolvedPath,
+      });
+      continue;
+    }
 
     try {
       const stats = statSync(resolvedPath);
+      const source = getSource(resolvedPath);
       if (stats.isDirectory()) {
-        addSkills(loadSkillsFromDirInternal(resolvedPath, 'path', true, diagnostics));
+        addSkills(loadSkillsFromDirInternal(resolvedPath, source, true));
       } else if (stats.isFile() && resolvedPath.endsWith('.md')) {
-        const skill = loadSkillFromFile(resolvedPath, 'path', diagnostics);
-        if (skill) addSkills([skill]);
+        const result = loadSkillFromFile(resolvedPath, source);
+        if (result.skill) addSkills({ skills: [result.skill], diagnostics: result.diagnostics });
+        else allDiagnostics.push(...result.diagnostics);
+      } else {
+        allDiagnostics.push({
+          type: 'warning',
+          message: 'skill path is not a markdown file',
+          path: resolvedPath,
+        });
       }
-    } catch {
-      // 忽略
+    } catch (error) {
+      allDiagnostics.push({
+        type: 'warning',
+        message: error instanceof Error ? error.message : 'failed to read skill path',
+        path: resolvedPath,
+      });
     }
   }
 
-  return { skills: Array.from(skillMap.values()), diagnostics };
+  return {
+    skills: Array.from(skillMap.values()),
+    diagnostics: [...allDiagnostics, ...collisionDiagnostics],
+  };
 }
 
-/**
- * 格式化 skills 为系统提示中的 XML 块。
- * 符合 Agent Skills 标准 (agentskills.io)。
- */
 export function formatSkillsForPrompt(skills: Skill[]): string {
-  const visibleSkills = skills.filter((s) => !s.disableModelInvocation);
+  const visibleSkills = skills.filter((skill) => !skill.disableModelInvocation);
   if (visibleSkills.length === 0) return '';
 
   const lines = [
@@ -382,6 +389,14 @@ export function formatSkillsForPrompt(skills: Skill[]): string {
   }
 
   lines.push('</available_skills>');
-
   return lines.join('\n');
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }

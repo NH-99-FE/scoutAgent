@@ -224,8 +224,11 @@ function getUserMessageTitle(message: ScoutUserMessage): string {
     typeof content === 'string'
       ? content
       : content
-          .filter((item) => item.type === 'text')
-          .map((item) => item.text)
+          .map((item) => {
+            if (item.type === 'text') return item.text;
+            if (item.type === 'skillInvocation') return item.userMessage || `/skill:${item.name}`;
+            return '';
+          })
           .join(' ');
   return text.trim().slice(0, 32);
 }

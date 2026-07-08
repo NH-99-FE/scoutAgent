@@ -15,7 +15,6 @@ import type {
   AgentMessage,
   AgentToolResult,
   AgentToolUpdateCallback,
-  Skill,
   PromptTemplate,
   ThinkingLevel,
   ToolExecutionMode,
@@ -34,6 +33,7 @@ import type { Static, TSchema } from '@sinclair/typebox';
 import type { EventBus } from './event-bus.ts';
 import type { ScoutCoreConfig } from '../config.ts';
 import type { SourceInfo } from '../source-info.ts';
+import type { Skill } from '../skills.ts';
 
 // ---------- 工具定义 ----------
 
@@ -394,7 +394,6 @@ export type ScoutExtensionEvent =
 export interface ResourcesDiscoverResult {
   skillPaths?: string[];
   promptPaths?: string[];
-  themePaths?: string[];
 }
 
 export interface BeforeAgentStartEventResult {
@@ -484,7 +483,7 @@ export interface AutocompleteItem {
 }
 
 export interface ResourceCollision {
-  resourceType: 'extension' | 'skill' | 'prompt' | 'theme';
+  resourceType: 'extension' | 'skill' | 'prompt';
   name: string;
   winnerPath: string;
   loserPath: string;

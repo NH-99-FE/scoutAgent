@@ -9,6 +9,23 @@ export interface SourceInfo {
   baseDir?: string;
 }
 
+export interface PathMetadataLike {
+  source: string;
+  scope: SourceScope;
+  origin: SourceOrigin;
+  baseDir?: string;
+}
+
+export function createSourceInfo(path: string, metadata: PathMetadataLike): SourceInfo {
+  return {
+    path,
+    source: metadata.source,
+    scope: metadata.scope,
+    origin: metadata.origin,
+    baseDir: metadata.baseDir,
+  };
+}
+
 export function createSyntheticSourceInfo(
   path: string,
   options: {

@@ -107,7 +107,6 @@ type RunnerEmitResult<TEvent extends RunnerEmitEvent> = TEvent extends {
 interface ResourcesDiscoverCombinedResult {
   skillPaths: Array<{ path: string; extensionPath: string }>;
   promptPaths: Array<{ path: string; extensionPath: string }>;
-  themePaths: Array<{ path: string; extensionPath: string }>;
 }
 
 const noOpUIContext: ExtensionUIContext = {
@@ -569,7 +568,6 @@ export class ScoutExtensionRunner {
     const ctx = this.createContext();
     const skillPaths: Array<{ path: string; extensionPath: string }> = [];
     const promptPaths: Array<{ path: string; extensionPath: string }> = [];
-    const themePaths: Array<{ path: string; extensionPath: string }> = [];
 
     for (const ext of this.extensions) {
       const handlers = ext.handlers.get('resources_discover');
@@ -590,18 +588,13 @@ export class ScoutExtensionRunner {
               ...result.promptPaths.map((path) => ({ path, extensionPath: ext.path })),
             );
           }
-          if (result?.themePaths?.length) {
-            themePaths.push(
-              ...result.themePaths.map((path) => ({ path, extensionPath: ext.path })),
-            );
-          }
         } catch (err) {
           this.emitHandlerError(ext.path, 'resources_discover', err);
         }
       }
     }
 
-    return { skillPaths, promptPaths, themePaths };
+    return { skillPaths, promptPaths };
   }
 
   async emitInput(

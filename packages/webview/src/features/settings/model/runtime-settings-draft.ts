@@ -29,10 +29,11 @@ const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
 
 export interface EditableRuntimeSettings extends Omit<
   ScoutRuntimeSettings,
-  'thinkingBudgets' | 'extensions'
+  'thinkingBudgets' | 'extensions' | 'skills'
 > {
   thinkingBudgetsJson: string;
   extensionsText: string;
+  skillsText: string;
 }
 
 export interface EditableRuntimeSettingsState {
@@ -48,6 +49,7 @@ export interface EditableRuntimeSettingsState {
 export const EMPTY_RUNTIME_SETTINGS: EditableRuntimeSettings = {
   thinkingBudgetsJson: '',
   extensionsText: '',
+  skillsText: '',
 };
 
 export const EMPTY_RUNTIME_SETTINGS_STATE: EditableRuntimeSettingsState = {
@@ -131,15 +133,16 @@ function toEditableRuntimeSettings(settings: ScoutRuntimeSettings): EditableRunt
     ...settings,
     thinkingBudgetsJson: stringifyOptionalJsonObject(settings.thinkingBudgets),
     extensionsText: settings.extensions?.join('\n') ?? '',
+    skillsText: settings.skills?.join('\n') ?? '',
   };
 }
 
-function readExtensions(value: string): string[] | undefined {
-  const extensions = value
+function readStringList(value: string): string[] | undefined {
+  const items = value
     .split('\n')
     .map((item) => item.trim())
     .filter(Boolean);
-  return extensions.length > 0 ? extensions : undefined;
+  return items.length > 0 ? items : undefined;
 }
 
 function readRuntimeSettingsPatchValue(
@@ -150,7 +153,8 @@ function readRuntimeSettingsPatchValue(
     const parsed = parseOptionalJsonObject(settings.thinkingBudgetsJson, 'thinkingBudgets');
     return typeof parsed === 'string' ? { ok: false, error: parsed } : { ok: true, value: parsed };
   }
-  if (path === 'extensions') return { ok: true, value: readExtensions(settings.extensionsText) };
+  if (path === 'extensions') return { ok: true, value: readStringList(settings.extensionsText) };
+  if (path === 'skills') return { ok: true, value: readStringList(settings.skillsText) };
   if (path === 'defaultModel' && settings.defaultModel) {
     const scopedDefaultModel = readScopedDefaultModel(settings.defaultModel);
     if (scopedDefaultModel) {

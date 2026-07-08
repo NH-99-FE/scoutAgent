@@ -5,11 +5,7 @@
 
 import type { ScoutCoreConfig } from './config.ts';
 import { AgentSession } from './agent-session.ts';
-import {
-  ScoutExtensionRunner,
-  discoverAndLoadExtensions,
-  type SessionStartEvent,
-} from './extensions/index.ts';
+import { ScoutExtensionRunner, type SessionStartEvent } from './extensions/index.ts';
 import { ScoutResourceLoader, type LoadedScoutResources } from './resource-loader.ts';
 import type {
   AgentSessionRuntimeDiagnostic,
@@ -58,12 +54,14 @@ export async function createAgentSessionServices(
   options: CreateAgentSessionServicesOptions,
 ): Promise<AgentSessionServices> {
   const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
-  const configuredPaths = options.configManager.getExtensionPaths();
-  const extensionResult = await discoverAndLoadExtensions(
-    configuredPaths,
-    options.cwd,
-    options.agentDir,
-  );
+  const resourceSettings = options.configManager.getResourceSettings();
+  const resourceLoader = new ScoutResourceLoader({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    resourceSettings,
+  });
+  const resources = await resourceLoader.load();
+  const extensionResult = resourceLoader.getExtensions();
 
   for (const error of extensionResult.errors) {
     diagnostics.push({
@@ -79,12 +77,6 @@ export async function createAgentSessionServices(
     options.session,
     options.configManager,
   );
-
-  const resourceLoader = new ScoutResourceLoader({
-    cwd: options.cwd,
-    agentDir: options.agentDir,
-  });
-  const resources = await resourceLoader.load();
   diagnostics.push(...resources.diagnostics);
 
   return {
@@ -134,7 +126,7 @@ export async function createAgentSessionFromServices(
     appendSystemPrompt: options.services.resources.appendSystemPrompt,
     extensionRunner: options.services.extensionRunner,
     loadExtensionResources: (resources) =>
-      options.services.resourceLoader.extendResources(resources),
+      options.services.resourceLoader.replaceExtensionResources(resources),
     activeToolNames: options.activeToolNames,
     includeAllExtensionTools: options.includeAllExtensionTools,
     initialModel: options.initialModel,

@@ -107,7 +107,7 @@ export type WebviewRequestPayload =
   | {
       type: 'create_extension_from_template';
       templateId: ScoutExtensionTemplateId;
-      scope: Exclude<ScoutExtensionScope, 'configured'>;
+      scope: ScoutExtensionScope;
       overwrite?: boolean;
     }
   | { type: 'open_extension_file'; path: string }

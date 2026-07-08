@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentMessage } from '@scout-agent/agent';
 import { projectSessionBranchToScoutMessages } from '../../../src/host/protocol/session-message-projector.ts';
 import { SessionManager } from '../../../src/core/session/index.ts';
 import { assistantMessage, mockModel, userMessage } from '../../core/test-utils.ts';
@@ -145,6 +146,64 @@ describe('session message projector', () => {
       afterCompactionId,
     ]);
     expect(projectedMessages.map((message) => message.role)).toEqual(['compactionSummary', 'user']);
+  });
+
+  it('projects expanded skill user messages as structured skill invocations', () => {
+    const session = SessionManager.inMemory();
+    const skillText =
+      '<skill name="deploy" location="/workspace/.scout/skills/deploy/SKILL.md">\nReferences are relative to /workspace/.scout/skills/deploy.\n\nDeploy carefully.\n</skill>\n\nUse staging';
+    const entryId = session.appendMessage(userMessage(skillText));
+
+    const [message] = projectSessionBranchToScoutMessages(session.getBranch());
+
+    expect(message).toEqual({
+      role: 'user',
+      timestamp: 1,
+      entryId,
+      content: [
+        {
+          type: 'skillInvocation',
+          name: 'deploy',
+          location: '/workspace/.scout/skills/deploy/SKILL.md',
+          content:
+            'References are relative to /workspace/.scout/skills/deploy.\n\nDeploy carefully.',
+          userMessage: 'Use staging',
+        },
+      ],
+    });
+  });
+
+  it('projects expanded skill text blocks as structured skill invocations', () => {
+    const session = SessionManager.inMemory();
+    const skillText =
+      '<skill name="deploy" location="/workspace/.scout/skills/deploy/SKILL.md">\nReferences are relative to /workspace/.scout/skills/deploy.\n\nDeploy carefully.\n</skill>\n\nUse staging';
+    const entryId = session.appendMessage({
+      role: 'user',
+      content: [
+        { type: 'text', text: skillText },
+        { type: 'image', data: 'base64-image', mimeType: 'image/png' },
+      ],
+      timestamp: 1,
+    } satisfies AgentMessage);
+
+    const [message] = projectSessionBranchToScoutMessages(session.getBranch());
+
+    expect(message).toEqual({
+      role: 'user',
+      timestamp: 1,
+      entryId,
+      content: [
+        {
+          type: 'skillInvocation',
+          name: 'deploy',
+          location: '/workspace/.scout/skills/deploy/SKILL.md',
+          content:
+            'References are relative to /workspace/.scout/skills/deploy.\n\nDeploy carefully.',
+          userMessage: 'Use staging',
+        },
+        { type: 'image', data: 'base64-image', mimeType: 'image/png' },
+      ],
+    });
   });
 
   it('does not project older compaction summaries retained by the latest compaction range', () => {

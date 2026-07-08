@@ -26,6 +26,7 @@ import type {
   ScoutCoreConfig,
   ScoutStreamOptions,
 } from './core/config.ts';
+import type { ScoutResourceSettingsSnapshot } from './core/package-manager.ts';
 import type { QueueMode } from '@scout-agent/agent';
 
 const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
@@ -204,6 +205,21 @@ export class ConfigManager implements ScoutCoreConfig {
 
   getExtensionPaths(): string[] {
     return this.settingsManager.getEffectiveSettings().extensions ?? [];
+  }
+
+  getResourceSettings(): ScoutResourceSettingsSnapshot {
+    const pickResourceSettings = (
+      settings: ReturnType<SettingsManager['getEffectiveSettings']>,
+    ) => ({
+      packages: settings.packages,
+      extensions: settings.extensions,
+      skills: settings.skills,
+      prompts: settings.prompts,
+    });
+    return {
+      global: pickResourceSettings(this.settingsManager.getGlobalSettings()),
+      project: pickResourceSettings(this.settingsManager.getProjectSettings()),
+    };
   }
 
   private reloadCustomModels(): void {

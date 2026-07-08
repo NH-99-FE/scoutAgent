@@ -29,7 +29,7 @@ export interface ExtensionSettingsController {
   save: () => void;
   createExtensionFromTemplate: (
     templateId: ScoutExtensionTemplateId,
-    scope: Exclude<ScoutExtensionScope, 'configured'>,
+    scope: ScoutExtensionScope,
   ) => void;
   openExtensionFile: (path: string) => void;
 }
@@ -84,7 +84,7 @@ export function useExtensionSettingsController(): ExtensionSettingsController {
   }, [requestSettings]);
 
   const createExtensionFromTemplate = useCallback(
-    (templateId: ScoutExtensionTemplateId, scope: Exclude<ScoutExtensionScope, 'configured'>) => {
+    (templateId: ScoutExtensionTemplateId, scope: ScoutExtensionScope) => {
       const requestId = saveRequestRef.current + 1;
       saveRequestRef.current = requestId;
       setIsSaving(true);

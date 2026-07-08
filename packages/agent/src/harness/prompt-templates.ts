@@ -249,7 +249,7 @@ export function parseCommandArgs(argsString: string): string[] {
       else current += char;
     } else if (char === '"' || char === "'") {
       inQuote = char;
-    } else if (char === ' ' || char === '\t') {
+    } else if (/\s/.test(char)) {
       if (current) {
         args.push(current);
         current = '';

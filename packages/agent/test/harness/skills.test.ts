@@ -101,6 +101,28 @@ Use this skill.
     ]);
   });
 
+  it('skips skills with overlong descriptions while reporting diagnostics', async () => {
+    const root = createTempDir();
+    const env = new NodeExecutionEnv({ cwd: root });
+    await env.createDir('skills/valid', { recursive: true });
+    await env.createDir('skills/overlong', { recursive: true });
+    await env.writeFile(
+      'skills/valid/SKILL.md',
+      '---\nname: valid\ndescription: Valid skill\n---\nUse this skill.',
+    );
+    await env.writeFile(
+      'skills/overlong/SKILL.md',
+      `---\nname: overlong\ndescription: ${'x'.repeat(1025)}\n---\nDo not load.`,
+    );
+
+    const { skills, diagnostics } = await loadSkills(env, 'skills');
+
+    expect(skills.map((skill) => skill.name)).toEqual(['valid']);
+    expect(
+      diagnostics.some((diagnostic) => diagnostic.message.includes('description exceeds 1024')),
+    ).toBe(true);
+  });
+
   it('loads direct markdown children only from the root directory', async () => {
     const root = createTempDir();
     const env = new NodeExecutionEnv({ cwd: root });

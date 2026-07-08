@@ -1,16 +1,26 @@
 // ============================================================
 // ResourceLoader — Scout 资源加载协调
-// 负责：Skills / Prompt Templates 加载、扩展发现资源合并、诊断收集。
-//       形状对齐 Pi ResourceLoader，先覆盖 Scout 已启用的资源类型。
+// 负责：解析加载 Skills / Prompt Templates / 上下文文件。
 // ============================================================
 
-import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
 import type { PromptTemplate } from '@scout-agent/agent';
 import { loadSourcedPromptTemplates } from '@scout-agent/agent';
 import { NodeExecutionEnv } from '@scout-agent/agent/node';
-import { loadSkills, type Skill as ScoutSkill } from './skills.ts';
-import { createSyntheticSourceInfo, type SourceInfo } from './source-info.ts';
+import { loadSkills, type ResourceDiagnostic, type Skill as ScoutSkill } from './skills.ts';
+import {
+  createExtensionRuntime,
+  loadExtensions,
+  type LoadExtensionsResult,
+} from './extensions/index.ts';
+import {
+  ScoutPackageManager,
+  type PathMetadata,
+  type ResolvedResource,
+  type ScoutResourceSettingsSnapshot,
+} from './package-manager.ts';
+import { createSourceInfo, createSyntheticSourceInfo, type SourceInfo } from './source-info.ts';
 import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
 
 // ---------- 类型 ----------
@@ -20,7 +30,6 @@ export type SourcedPromptTemplate = PromptTemplate & { sourceInfo?: SourceInfo }
 export interface DiscoveredExtensionResources {
   skillPaths: Array<{ path: string; extensionPath: string }>;
   promptPaths: Array<{ path: string; extensionPath: string }>;
-  themePaths: Array<{ path: string; extensionPath: string }>;
 }
 
 export type SourcedScoutSkill = ScoutSkill & { sourceInfo?: SourceInfo };
@@ -42,8 +51,15 @@ export interface LoadedScoutResources {
 export interface ScoutResourceLoaderOptions {
   cwd: string;
   agentDir: string;
+  resourceSettings?: ScoutResourceSettingsSnapshot;
   systemPrompt?: string;
   appendSystemPrompt?: string[];
+}
+
+interface ResolvedResourceState {
+  skillPaths: string[];
+  promptInputs: Array<{ path: string; source: SourceInfo }>;
+  metadataByPath: Map<string, PathMetadata>;
 }
 
 // ---------- 项目上下文 ----------
@@ -120,34 +136,43 @@ export function loadProjectContextFiles(options: {
 export class ScoutResourceLoader {
   private readonly cwd: string;
   private readonly agentDir: string;
+  private readonly resourceSettings: ScoutResourceSettingsSnapshot;
+  private readonly packageManager: ScoutPackageManager;
   private readonly systemPromptSource?: string;
   private readonly appendSystemPromptSource?: string[];
   private discoveredResources: DiscoveredExtensionResources = ScoutResourceLoader.emptyDiscovered();
+  private baseResolvedResources: ResolvedResourceState | undefined;
+  private extensionsResult: LoadExtensionsResult = {
+    extensions: [],
+    errors: [],
+    runtime: createExtensionRuntime(),
+  };
 
   constructor(options: ScoutResourceLoaderOptions) {
-    this.cwd = options.cwd;
-    this.agentDir = options.agentDir;
+    this.cwd = resolve(options.cwd);
+    this.agentDir = resolve(options.agentDir);
+    this.resourceSettings = options.resourceSettings ?? { global: {}, project: {} };
+    this.packageManager = new ScoutPackageManager({
+      cwd: this.cwd,
+      agentDir: this.agentDir,
+      resourceSettings: this.resourceSettings,
+    });
     this.systemPromptSource = options.systemPrompt;
     this.appendSystemPromptSource = options.appendSystemPrompt;
   }
 
   static emptyDiscovered(): DiscoveredExtensionResources {
-    return { skillPaths: [], promptPaths: [], themePaths: [] };
+    return { skillPaths: [], promptPaths: [] };
   }
 
   static hasDiscoveredResources(resources: DiscoveredExtensionResources): boolean {
-    return (
-      resources.skillPaths.length > 0 ||
-      resources.promptPaths.length > 0 ||
-      resources.themePaths.length > 0
-    );
+    return resources.skillPaths.length > 0 || resources.promptPaths.length > 0;
   }
 
   getDiscoveredResources(): DiscoveredExtensionResources {
     return {
       skillPaths: [...this.discoveredResources.skillPaths],
       promptPaths: [...this.discoveredResources.promptPaths],
-      themePaths: [...this.discoveredResources.themePaths],
     };
   }
 
@@ -155,12 +180,16 @@ export class ScoutResourceLoader {
     this.discoveredResources = {
       skillPaths: [...resources.skillPaths],
       promptPaths: [...resources.promptPaths],
-      themePaths: [...resources.themePaths],
     };
   }
 
+  getExtensions(): LoadExtensionsResult {
+    return this.extensionsResult;
+  }
+
   async load(): Promise<LoadedScoutResources> {
-    return this.loadWithDiscoveredResources(this.discoveredResources);
+    this.baseResolvedResources = await this.resolveBaseResources();
+    return this.loadWithResolvedResources(this.baseResolvedResources, this.discoveredResources);
   }
 
   async extendResources(resources: DiscoveredExtensionResources): Promise<LoadedScoutResources> {
@@ -173,44 +202,57 @@ export class ScoutResourceLoader {
         this.discoveredResources.promptPaths,
         resources.promptPaths,
       ),
-      themePaths: this.mergeResourcePaths(
-        this.discoveredResources.themePaths,
-        resources.themePaths,
-      ),
     });
-    return this.load();
+    const baseResolved = await this.getBaseResolvedResources();
+    return this.loadWithResolvedResources(baseResolved, this.discoveredResources);
   }
 
-  private async loadWithDiscoveredResources(
+  async replaceExtensionResources(
+    resources: DiscoveredExtensionResources,
+  ): Promise<LoadedScoutResources> {
+    this.setDiscoveredResources(resources);
+    const baseResolved = await this.getBaseResolvedResources();
+    return this.loadWithResolvedResources(baseResolved, this.discoveredResources);
+  }
+
+  private async loadWithResolvedResources(
+    baseResolved: ResolvedResourceState,
     discoveredResources: DiscoveredExtensionResources,
   ): Promise<LoadedScoutResources> {
     const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
-    const { skills: loadedSkills, diagnostics: skillDiagnostics } = loadSkills({
+    const resolved = this.extendResolvedResources(baseResolved, discoveredResources);
+
+    const skillResult = loadSkills({
       cwd: this.cwd,
       agentDir: this.agentDir,
-      customPaths: discoveredResources.skillPaths.map((entry) => entry.path),
+      skillPaths: resolved.skillPaths,
+      includeDefaults: false,
     });
-    const skills = loadedSkills.map((skill) => ({
-      ...skill,
-      sourceInfo: this.getSkillSourceInfo(skill, discoveredResources),
-    }));
-    for (const diag of skillDiagnostics) {
-      diagnostics.push({
-        type: diag.severity === 'error' ? 'error' : 'warning',
-        message: `${diag.filePath}: ${diag.message}`,
-      });
+    for (const diag of skillResult.diagnostics) {
+      diagnostics.push(this.toRuntimeDiagnostic(diag));
     }
+    const skills = skillResult.skills.map((skill) => ({
+      ...skill,
+      sourceInfo:
+        this.findSourceInfoForPath(skill.filePath, resolved.metadataByPath) ??
+        skill.sourceInfo ??
+        this.getDefaultSourceInfoForPath(skill.filePath),
+    }));
 
     const promptResult = await loadSourcedPromptTemplates(
       new NodeExecutionEnv({ cwd: this.cwd }),
-      this.buildPromptTemplateInputs(discoveredResources),
+      resolved.promptInputs,
       (promptTemplate, sourceInfo): SourcedPromptTemplate => ({ ...promptTemplate, sourceInfo }),
     );
     const dedupedPromptResult = this.dedupePromptTemplates(
       promptResult.promptTemplates.map((entry) => entry.promptTemplate),
     );
     for (const diag of promptResult.diagnostics) {
-      diagnostics.push({ type: 'warning', message: `${diag.path}: ${diag.message}` });
+      diagnostics.push({
+        type: 'warning',
+        message: `${diag.path}: ${diag.message}`,
+        path: diag.path,
+      });
     }
     diagnostics.push(...dedupedPromptResult.diagnostics);
 
@@ -221,6 +263,102 @@ export class ScoutResourceLoader {
       systemPrompt: resolvePromptInput(this.systemPromptSource ?? this.discoverSystemPromptFile()),
       appendSystemPrompt: this.resolveAppendSystemPrompt(),
       diagnostics,
+    };
+  }
+
+  private async getBaseResolvedResources(): Promise<ResolvedResourceState> {
+    if (!this.baseResolvedResources) {
+      this.baseResolvedResources = await this.resolveBaseResources();
+    }
+    return this.baseResolvedResources;
+  }
+
+  private async resolveBaseResources(): Promise<ResolvedResourceState> {
+    const resolvedPaths = this.packageManager.resolve();
+    const metadataByPath = new Map<string, PathMetadata>();
+    const recordMetadata = (resources: ResolvedResource[]) => {
+      for (const resource of resources) {
+        if (!metadataByPath.has(resolve(resource.path))) {
+          metadataByPath.set(resolve(resource.path), resource.metadata);
+        }
+      }
+    };
+
+    recordMetadata(resolvedPaths.extensions);
+    recordMetadata(resolvedPaths.skills);
+    recordMetadata(resolvedPaths.prompts);
+
+    const extensionSourceInfos = new Map<string, SourceInfo>();
+    const extensionPaths = resolvedPaths.extensions
+      .filter((resource) => resource.enabled)
+      .map((resource) => {
+        const resolvedPath = resolve(resource.path);
+        extensionSourceInfos.set(
+          resolvedPath,
+          createSourceInfo(resolvedPath, {
+            ...resource.metadata,
+            baseDir: resource.metadata.baseDir ?? dirname(resolvedPath),
+          }),
+        );
+        return resolvedPath;
+      });
+    this.extensionsResult = await loadExtensions(extensionPaths, undefined, extensionSourceInfos);
+
+    return {
+      skillPaths: resolvedPaths.skills
+        .filter((resource) => resource.enabled)
+        .map((resource) => resource.path),
+      promptInputs: resolvedPaths.prompts
+        .filter((resource) => resource.enabled)
+        .map((resource) => ({
+          path: resource.path,
+          source: createSourceInfo(resource.path, resource.metadata),
+        })),
+      metadataByPath,
+    };
+  }
+
+  private extendResolvedResources(
+    baseResolved: ResolvedResourceState,
+    discoveredResources: DiscoveredExtensionResources,
+  ): ResolvedResourceState {
+    const metadataByPath = new Map(baseResolved.metadataByPath);
+    const extensionSkillResources = discoveredResources.skillPaths.map(
+      (entry): ResolvedResource => {
+        const path = resolve(this.cwd, entry.path);
+        const metadata: PathMetadata = {
+          source: 'extension',
+          scope: 'temporary',
+          origin: 'top-level',
+          baseDir: entry.extensionPath.replace(/[\\/][^\\/]*$/, ''),
+        };
+        metadataByPath.set(path, metadata);
+        return { path, enabled: true, metadata };
+      },
+    );
+
+    const extensionPromptInputs = discoveredResources.promptPaths.map((entry) => {
+      const path = resolve(this.cwd, entry.path);
+      const metadata: PathMetadata = {
+        source: 'extension',
+        scope: 'temporary',
+        origin: 'top-level',
+        baseDir: entry.extensionPath.replace(/[\\/][^\\/]*$/, ''),
+      };
+      metadataByPath.set(path, metadata);
+      return {
+        path,
+        source: createSourceInfo(path, metadata),
+      };
+    });
+
+    return {
+      skillPaths: [
+        ...baseResolved.skillPaths,
+        ...extensionSkillResources.map((resource) => resource.path),
+      ],
+      promptInputs: [...baseResolved.promptInputs, ...extensionPromptInputs],
+      metadataByPath,
     };
   }
 
@@ -253,91 +391,114 @@ export class ScoutResourceLoader {
     return undefined;
   }
 
-  private buildPromptTemplateInputs(
-    discoveredResources: DiscoveredExtensionResources,
-  ): Array<{ path: string; source: SourceInfo }> {
-    return [
-      {
-        path: join(this.agentDir, 'prompts'),
-        source: createSyntheticSourceInfo(join(this.agentDir, 'prompts'), {
-          source: 'user',
-          scope: 'user',
-          baseDir: this.agentDir,
-        }),
-      },
-      {
-        path: join(this.cwd, '.scout', 'prompts'),
-        source: createSyntheticSourceInfo(join(this.cwd, '.scout', 'prompts'), {
-          source: 'project',
-          scope: 'project',
-          baseDir: this.cwd,
-        }),
-      },
-      ...discoveredResources.promptPaths.map((entry) => ({
-        path: entry.path,
-        source: createSyntheticSourceInfo(entry.path, {
-          source: 'extension',
-          scope: 'temporary',
-          baseDir: entry.extensionPath.replace(/[\\/][^\\/]*$/, ''),
-        }),
-      })),
-    ];
+  private toRuntimeDiagnostic(diagnostic: ResourceDiagnostic): AgentSessionRuntimeDiagnostic {
+    if (diagnostic.type === 'collision') {
+      return {
+        type: 'collision',
+        message: diagnostic.message,
+        path: diagnostic.path,
+        collision: diagnostic.collision,
+      };
+    }
+    return {
+      type: diagnostic.type === 'error' ? 'error' : 'warning',
+      message: diagnostic.path ? `${diagnostic.path}: ${diagnostic.message}` : diagnostic.message,
+      path: diagnostic.path,
+    };
   }
 
-  private getSkillSourceInfo(
-    skill: ScoutSkill,
-    discoveredResources: DiscoveredExtensionResources,
-  ): SourceInfo {
-    const normalizedSkillPath = this.normalizePath(skill.filePath);
-    const extensionSource = discoveredResources.skillPaths.find((entry) =>
-      this.isPathAtOrUnder(normalizedSkillPath, this.normalizePath(entry.path)),
-    );
-    if (extensionSource) {
-      return createSyntheticSourceInfo(skill.filePath, {
-        source: 'extension',
+  private findSourceInfoForPath(
+    resourcePath: string,
+    metadataByPath: Map<string, PathMetadata>,
+  ): SourceInfo | undefined {
+    if (!resourcePath) return undefined;
+    if (resourcePath.startsWith('<')) return this.getDefaultSourceInfoForPath(resourcePath);
+
+    const normalizedResourcePath = resolve(resourcePath);
+    const exact = metadataByPath.get(normalizedResourcePath) ?? metadataByPath.get(resourcePath);
+    if (exact) return createSourceInfo(resourcePath, exact);
+
+    for (const [sourcePath, metadata] of metadataByPath.entries()) {
+      const normalizedSourcePath = resolve(sourcePath);
+      if (
+        normalizedResourcePath === normalizedSourcePath ||
+        normalizedResourcePath.startsWith(`${normalizedSourcePath}${sep}`)
+      ) {
+        return createSourceInfo(resourcePath, metadata);
+      }
+    }
+    return undefined;
+  }
+
+  private getDefaultSourceInfoForPath(filePath: string): SourceInfo {
+    if (filePath.startsWith('<') && filePath.endsWith('>')) {
+      return {
+        path: filePath,
+        source: filePath.slice(1, -1).split(':')[0] || 'temporary',
         scope: 'temporary',
-        baseDir: extensionSource.extensionPath.replace(/[\\/][^\\/]*$/, ''),
-      });
+        origin: 'top-level',
+      };
     }
 
-    const userSkillsRoot = this.normalizePath(join(this.agentDir, 'skills'));
-    if (this.isPathAtOrUnder(normalizedSkillPath, userSkillsRoot)) {
-      return createSyntheticSourceInfo(skill.filePath, {
-        source: 'user',
-        scope: 'user',
-        baseDir: userSkillsRoot,
-      });
+    const normalizedPath = resolve(filePath);
+    const agentRoots = [join(this.agentDir, 'skills'), join(this.agentDir, 'prompts')];
+    const projectRoots = [join(this.cwd, '.scout', 'skills'), join(this.cwd, '.scout', 'prompts')];
+
+    for (const root of agentRoots) {
+      if (this.isUnderPath(normalizedPath, root)) {
+        return {
+          path: filePath,
+          source: 'local',
+          scope: 'user',
+          origin: 'top-level',
+          baseDir: root,
+        };
+      }
     }
 
-    const projectSkillsRoot = this.normalizePath(join(this.cwd, '.scout', 'skills'));
-    if (this.isPathAtOrUnder(normalizedSkillPath, projectSkillsRoot)) {
-      return createSyntheticSourceInfo(skill.filePath, {
-        source: 'project',
-        scope: 'project',
-        baseDir: projectSkillsRoot,
-      });
+    for (const root of projectRoots) {
+      if (this.isUnderPath(normalizedPath, root)) {
+        return {
+          path: filePath,
+          source: 'local',
+          scope: 'project',
+          origin: 'top-level',
+          baseDir: root,
+        };
+      }
     }
 
-    return createSyntheticSourceInfo(skill.filePath, {
-      source: 'skill',
-      baseDir: skill.baseDir,
+    return createSyntheticSourceInfo(filePath, {
+      source: 'local',
+      baseDir: this.defaultBaseDir(filePath),
     });
   }
 
-  private normalizePath(path: string): string {
-    return path.replace(/\\/g, '/').replace(/\/+$/, '');
+  private defaultBaseDir(filePath: string): string {
+    try {
+      const normalizedPath = resolve(filePath);
+      return statSync(normalizedPath).isDirectory()
+        ? normalizedPath
+        : normalizedPath.replace(/[\\/][^\\/]*$/, '');
+    } catch {
+      return filePath.replace(/[\\/][^\\/]*$/, '');
+    }
   }
 
-  private isPathAtOrUnder(path: string, root: string): boolean {
-    return path === root || path.startsWith(`${root}/`);
+  private isUnderPath(target: string, root: string): boolean {
+    const normalizedRoot = resolve(root);
+    if (target === normalizedRoot) return true;
+    const prefix = normalizedRoot.endsWith(sep) ? normalizedRoot : `${normalizedRoot}${sep}`;
+    return target.startsWith(prefix);
   }
 
   private mergeResourcePaths<T extends { path: string }>(current: T[], incoming: T[]): T[] {
     const merged = [...current];
-    const seen = new Set(current.map((entry) => entry.path));
+    const seen = new Set(current.map((entry) => resolve(this.cwd, entry.path)));
     for (const entry of incoming) {
-      if (seen.has(entry.path)) continue;
-      seen.add(entry.path);
+      const resolvedPath = resolve(this.cwd, entry.path);
+      if (seen.has(resolvedPath)) continue;
+      seen.add(resolvedPath);
       merged.push(entry);
     }
     return merged;

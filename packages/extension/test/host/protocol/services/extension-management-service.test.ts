@@ -3,6 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigManager } from '../../../../src/config-manager.ts';
+import type { ScoutResourceSettingsSnapshot } from '../../../../src/core/package-manager.ts';
 import type { ExtensionSessionCoordinator } from '../../../../src/host/session-coordinator.ts';
 import { ExtensionManagementProtocolService } from '../../../../src/host/protocol/services/extension-management-service.ts';
 
@@ -23,7 +24,7 @@ describe('ExtensionManagementProtocolService', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it('lists project, global and configured extensions', async () => {
+  it('lists project, global and settings extensions from resolved resources', async () => {
     fs.writeFileSync(
       path.join(cwd, '.scout', 'extensions', 'project.ts'),
       'export default () => {}',
@@ -78,14 +79,24 @@ describe('ExtensionManagementProtocolService', () => {
           }),
         ]),
         extensions: expect.arrayContaining([
-          expect.objectContaining({ name: 'project', scope: 'project', exists: true }),
+          expect.objectContaining({
+            name: 'project',
+            scope: 'project',
+            exists: true,
+            sourceInfo: expect.objectContaining({ origin: 'top-level', scope: 'project' }),
+          }),
           expect.objectContaining({ name: 'project-package', scope: 'project', exists: true }),
-          expect.objectContaining({ name: 'entry', scope: 'project', exists: true }),
+          expect.objectContaining({
+            name: 'entry',
+            scope: 'project',
+            exists: true,
+            sourceInfo: expect.objectContaining({ origin: 'top-level', scope: 'project' }),
+          }),
           expect.objectContaining({ name: 'global', scope: 'global', exists: true }),
-          expect.objectContaining({ name: 'configured', scope: 'configured', exists: true }),
+          expect.objectContaining({ name: 'configured', scope: 'global', exists: true }),
           expect.objectContaining({
             name: 'configured-package',
-            scope: 'configured',
+            scope: 'global',
             exists: true,
           }),
         ]),
@@ -96,7 +107,7 @@ describe('ExtensionManagementProtocolService', () => {
     );
   });
 
-  it('lists configured directories using runtime discovery rules', async () => {
+  it('lists settings directories using runtime discovery rules', async () => {
     const configuredRootPackage = path.join(tempDir, 'configured-root-package');
     fs.mkdirSync(configuredRootPackage, { recursive: true });
     fs.writeFileSync(
@@ -127,12 +138,12 @@ describe('ExtensionManagementProtocolService', () => {
         expect.objectContaining({
           name: 'root',
           path: path.join(configuredRootPackage, 'src', 'root.ts'),
-          scope: 'configured',
+          scope: 'global',
         }),
         expect.objectContaining({
           name: 'child',
           path: path.join(configuredCollection, 'child', 'index.ts'),
-          scope: 'configured',
+          scope: 'global',
         }),
       ]),
     );
@@ -141,6 +152,130 @@ describe('ExtensionManagementProtocolService', () => {
     );
     expect(extensions).not.toContainEqual(
       expect.objectContaining({ path: path.join(configuredCollection, 'ignored.cjs') }),
+    );
+  });
+
+  it('lists project and global extension settings together', async () => {
+    const projectConfigured = path.join(tempDir, 'project-configured.ts');
+    const globalConfigured = path.join(tempDir, 'global-configured.ts');
+    fs.writeFileSync(projectConfigured, 'export default () => {}');
+    fs.writeFileSync(globalConfigured, 'export default () => {}');
+    const service = createService({
+      resourceSettings: {
+        project: { extensions: [projectConfigured] },
+        global: { extensions: [globalConfigured] },
+      },
+    });
+    const respond = vi.fn();
+
+    await service.requestExtensions(respond);
+
+    const result = respond.mock.calls[0]?.[0];
+    expect(result.settings.configuredPaths).toEqual([projectConfigured, globalConfigured]);
+    expect(result.settings.extensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'project-configured',
+          path: projectConfigured,
+          scope: 'project',
+        }),
+        expect.objectContaining({
+          name: 'global-configured',
+          path: globalConfigured,
+          scope: 'global',
+        }),
+      ]),
+    );
+  });
+
+  it('preserves missing configured extension paths in the protocol list', async () => {
+    const missingProject = path.join(cwd, '.scout', 'missing-project.ts');
+    const missingGlobal = path.join(agentDir, 'missing-global.ts');
+    const globEntry = './extensions/*.ts';
+    const service = createService({
+      resourceSettings: {
+        project: { extensions: [missingProject, globEntry] },
+        global: { extensions: [missingGlobal] },
+      },
+    });
+    const respond = vi.fn();
+
+    await service.requestExtensions(respond);
+
+    const result = respond.mock.calls[0]?.[0];
+    expect(result.settings.configuredPaths).toEqual([
+      missingProject,
+      path.join(cwd, '.scout', globEntry),
+      missingGlobal,
+    ]);
+    expect(result.settings.extensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'missing-project',
+          path: missingProject,
+          scope: 'project',
+          exists: false,
+          enabled: true,
+          sourceInfo: expect.objectContaining({
+            path: missingProject,
+            source: 'local',
+            scope: 'project',
+            origin: 'top-level',
+            baseDir: path.join(cwd, '.scout'),
+          }),
+        }),
+        expect.objectContaining({
+          name: 'missing-global',
+          path: missingGlobal,
+          scope: 'global',
+          exists: false,
+          enabled: true,
+          sourceInfo: expect.objectContaining({
+            path: missingGlobal,
+            source: 'local',
+            scope: 'user',
+            origin: 'top-level',
+            baseDir: agentDir,
+          }),
+        }),
+      ]),
+    );
+    expect(result.settings.extensions).not.toContainEqual(
+      expect.objectContaining({ path: path.join(cwd, '.scout', globEntry) }),
+    );
+  });
+
+  it('preserves disabled extension resources in the protocol list', async () => {
+    const enabledExtension = path.join(tempDir, 'enabled.ts');
+    const disabledExtension = path.join(tempDir, 'disabled.ts');
+    fs.writeFileSync(enabledExtension, 'export default () => {}');
+    fs.writeFileSync(disabledExtension, 'export default () => {}');
+    const service = createService({
+      resourceSettings: {
+        project: {},
+        global: {
+          extensions: [enabledExtension, disabledExtension, `-${disabledExtension}`],
+        },
+      },
+    });
+    const respond = vi.fn();
+
+    await service.requestExtensions(respond);
+
+    const result = respond.mock.calls[0]?.[0];
+    expect(result.settings.extensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'enabled',
+          path: enabledExtension,
+          enabled: true,
+        }),
+        expect.objectContaining({
+          name: 'disabled',
+          path: disabledExtension,
+          enabled: false,
+        }),
+      ]),
     );
   });
 
@@ -209,8 +344,53 @@ describe('ExtensionManagementProtocolService', () => {
     });
   });
 
+  it('opens package manifest extension files resolved by the package manager', async () => {
+    const packageDir = path.join(tempDir, 'package-extension');
+    const packageExtensionPath = path.join(packageDir, 'src', 'entry.ts');
+    fs.mkdirSync(path.dirname(packageExtensionPath), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageDir, 'package.json'),
+      JSON.stringify({ scout: { extensions: ['./src/entry.ts'] } }),
+    );
+    fs.writeFileSync(packageExtensionPath, 'export default () => {}');
+    const openTextFile = vi.fn(async () => undefined);
+    const service = createService({
+      openTextFile,
+      resourceSettings: {
+        project: {},
+        global: { packages: [packageDir] },
+      },
+    });
+    const respond = vi.fn();
+    const listRespond = vi.fn();
+
+    await service.requestExtensions(listRespond);
+
+    await service.openExtensionFile(
+      { type: 'open_extension_file', path: packageExtensionPath },
+      respond,
+    );
+
+    expect(listRespond.mock.calls[0]?.[0].settings.extensions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: packageExtensionPath,
+          scope: 'global',
+          sourceInfo: expect.objectContaining({ origin: 'package', scope: 'user' }),
+        }),
+      ]),
+    );
+    expect(openTextFile).toHaveBeenCalledWith(packageExtensionPath);
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_extension_file_result',
+      success: true,
+      path: packageExtensionPath,
+    });
+  });
+
   function createService({
     configuredPaths = [],
+    resourceSettings,
     reload = vi.fn(async () => ({ cancelled: false })),
     requestCommands = vi.fn(),
     pushState = vi.fn(async () => undefined),
@@ -218,6 +398,7 @@ describe('ExtensionManagementProtocolService', () => {
     openTextFile,
   }: {
     configuredPaths?: string[];
+    resourceSettings?: ScoutResourceSettingsSnapshot;
     reload?: () => Promise<{ cancelled: boolean }>;
     requestCommands?: () => void;
     pushState?: () => Promise<void>;
@@ -229,6 +410,13 @@ describe('ExtensionManagementProtocolService', () => {
       agentDir,
       configManager: {
         getExtensionPaths: vi.fn(() => configuredPaths),
+        getResourceSettings: vi.fn(
+          () =>
+            resourceSettings ?? {
+              project: {},
+              global: { extensions: configuredPaths },
+            },
+        ),
       } as unknown as ConfigManager,
       sessionManager: {
         reload,

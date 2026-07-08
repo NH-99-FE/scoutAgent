@@ -457,7 +457,7 @@ export const protocolClient = {
     ),
   createExtensionFromTemplate: (
     templateId: ScoutExtensionTemplateId,
-    scope: Exclude<ScoutExtensionScope, 'configured'>,
+    scope: ScoutExtensionScope,
     onResult?: (payload: CreateExtensionFromTemplateResultPayload) => void,
     onError?: (message: string) => void,
   ) =>

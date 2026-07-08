@@ -5,16 +5,23 @@
 import { FileCode2, Folder, Plus, RefreshCw } from 'lucide-react';
 import type {
   ScoutExtensionListItem,
+  ScoutExtensionResourceScope,
   ScoutExtensionScope,
   ScoutExtensionTemplateInfo,
+  SourceOrigin,
 } from '@scout-agent/shared';
 import { Button } from '@/components/ui/button';
 import type { ExtensionSettingsController } from '../hooks/extension-settings-state';
 
-const SCOPE_LABELS: Record<ScoutExtensionScope, string> = {
+const SCOPE_LABELS: Record<ScoutExtensionResourceScope, string> = {
   project: '项目',
   global: '全局',
-  configured: '配置',
+  temporary: '临时',
+};
+
+const ORIGIN_LABELS: Record<SourceOrigin, string> = {
+  package: '包',
+  'top-level': '目录',
 };
 
 export function ExtensionsTab({ controller }: { controller: ExtensionSettingsController }) {
@@ -88,10 +95,7 @@ function TemplateList({
 }: {
   templates: ScoutExtensionTemplateInfo[];
   disabled: boolean;
-  onCreate: (
-    templateId: ScoutExtensionTemplateInfo['id'],
-    scope: Exclude<ScoutExtensionScope, 'configured'>,
-  ) => void;
+  onCreate: (templateId: ScoutExtensionTemplateInfo['id'], scope: ScoutExtensionScope) => void;
   onOpen: (path: string) => void;
 }) {
   if (templates.length === 0) {
@@ -177,7 +181,7 @@ function ExtensionList({
         <button
           key={extension.path}
           type="button"
-          disabled={disabled || !extension.exists}
+          disabled={disabled || !extension.exists || !extension.enabled}
           onClick={() => onOpen(extension.path)}
           className="hover:bg-muted/60 disabled:text-muted-foreground flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent"
         >
@@ -189,6 +193,19 @@ function ExtensionList({
           <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
             {SCOPE_LABELS[extension.scope]}
           </span>
+          <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
+            {ORIGIN_LABELS[extension.sourceInfo.origin]}
+          </span>
+          {!extension.exists ? (
+            <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
+              缺失
+            </span>
+          ) : null}
+          {!extension.enabled ? (
+            <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-xs">
+              禁用
+            </span>
+          ) : null}
         </button>
       ))}
     </div>

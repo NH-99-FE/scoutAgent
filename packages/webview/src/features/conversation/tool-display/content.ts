@@ -11,6 +11,7 @@ export function contentToText(content: string | ScoutContent[]): string {
       if (item.type === 'text') return item.text;
       if (item.type === 'thinking') return item.redacted ? '思考内容已隐藏' : item.thinking;
       if (item.type === 'toolCall') return item.name;
+      if (item.type === 'skillInvocation') return item.userMessage || `/skill:${item.name}`;
       return '[image]';
     })
     .filter(Boolean)

@@ -2,21 +2,25 @@
 // Extension management service — Settings 扩展入口与文件管理
 // ============================================================
 
+import { existsSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
+import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type {
   ScoutExtensionListItem,
+  ScoutExtensionResourceScope,
   ScoutExtensionTemplateInfo,
   ScoutExtensionsSettings,
   ScoutExtensionScope,
   ScoutExtensionTemplateId,
+  SourceInfo,
 } from '@scout-agent/shared';
 import type { ConfigManager } from '../../../config-manager.ts';
 import {
-  discoverExtensionsInDir,
-  resolveExtensionEntries,
-  type DiscoveredExtensionEntry,
-} from '../../../core/extensions/index.ts';
+  ScoutPackageManager,
+  type ResolvedResource,
+  type ScoutResourceSettingsSnapshot,
+} from '../../../core/package-manager.ts';
 import type { ExtensionSessionCoordinator } from '../../session-coordinator.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
 import { getExtensionTemplate, listExtensionTemplates } from './extension-templates.ts';
@@ -34,6 +38,12 @@ export interface ExtensionManagementProtocolServiceOptions {
   requestCommands: (surface?: ScoutWebviewSurface) => void;
   pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
   pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
+}
+
+interface ConfiguredExtensionPathEntry {
+  path: string;
+  scope: ScoutExtensionScope;
+  sourceInfo: SourceInfo;
 }
 
 // ---------- Service ----------
@@ -128,10 +138,10 @@ export class ExtensionManagementProtocolService {
   private async getSettings(): Promise<ScoutExtensionsSettings> {
     const projectDir = this.getProjectExtensionsDir();
     const globalDir = this.getGlobalExtensionsDir();
-    const configuredPaths = this.configManager
-      .getExtensionPaths()
-      .map((item) => path.resolve(item));
-    const extensions = await this.listExtensions(projectDir, globalDir, configuredPaths);
+    const resourceSettings = this.configManager.getResourceSettings();
+    const configuredPathEntries = this.getConfiguredExtensionPathEntries(resourceSettings);
+    const configuredPaths = this.getConfiguredExtensionPaths(resourceSettings);
+    const extensions = this.listExtensions(resourceSettings, configuredPathEntries);
     return {
       projectDir,
       globalDir,
@@ -155,74 +165,83 @@ export class ExtensionManagementProtocolService {
     );
   }
 
-  private async listExtensions(
-    projectDir: string,
-    globalDir: string,
-    configuredPaths: string[],
-  ): Promise<ScoutExtensionListItem[]> {
-    const items = [
-      ...this.listDirectoryExtensions(projectDir, 'project'),
-      ...this.listDirectoryExtensions(globalDir, 'global'),
-    ];
-    for (const configuredPath of configuredPaths) {
-      items.push(...(await this.listConfiguredExtension(configuredPath)));
-    }
-    return dedupeExtensions(items);
-  }
-
-  private listDirectoryExtensions(
-    dir: string,
-    scope: ScoutExtensionListItem['scope'],
+  private listExtensions(
+    resourceSettings: ScoutResourceSettingsSnapshot,
+    configuredPathEntries = this.getConfiguredExtensionPathEntries(resourceSettings),
   ): ScoutExtensionListItem[] {
-    return discoverExtensionsInDir(dir)
-      .map((entry) => this.toExtensionListItem(entry, scope))
+    const resources = this.resolveExtensionResources(resourceSettings);
+    const missingConfiguredItems = this.getMissingConfiguredExtensionItems(
+      configuredPathEntries,
+      resources,
+    );
+    return resources
+      .map((resource) => this.toExtensionListItem(resource))
+      .concat(missingConfiguredItems)
       .sort(compareExtensionItems);
   }
 
-  private async listConfiguredExtension(configuredPath: string): Promise<ScoutExtensionListItem[]> {
-    const stat = await statOrUndefined(configuredPath);
-    if (!stat) {
-      return [
-        {
-          name: path.basename(configuredPath),
-          path: configuredPath,
-          scope: 'configured',
-          exists: false,
-        },
-      ];
-    }
-    if (stat.isDirectory()) {
-      const entries =
-        resolveExtensionEntries(configuredPath) ?? discoverExtensionsInDir(configuredPath);
-      return entries
-        .map((entry) => this.toExtensionListItem(entry, 'configured'))
-        .sort(compareExtensionItems);
-    }
-    return [
-      {
-        name: path.basename(configuredPath, path.extname(configuredPath)),
-        path: configuredPath,
-        scope: 'configured',
-        exists: true,
-      },
-    ];
+  private resolveExtensionResources(
+    resourceSettings = this.configManager.getResourceSettings(),
+  ): ResolvedResource[] {
+    return new ScoutPackageManager({
+      cwd: this.cwd,
+      agentDir: this.agentDir,
+      resourceSettings,
+    }).resolve().extensions;
   }
 
-  private toExtensionListItem(
-    entry: DiscoveredExtensionEntry,
-    scope: ScoutExtensionListItem['scope'],
-  ): ScoutExtensionListItem {
+  private toExtensionListItem(resource: ResolvedResource): ScoutExtensionListItem {
     return {
-      name: getExtensionDisplayName(entry),
-      path: entry.path,
-      scope,
+      name: getExtensionDisplayName(resource.path),
+      path: resource.path,
+      scope: toScoutExtensionResourceScope(resource),
+      sourceInfo: toScoutExtensionSourceInfo(resource),
       exists: true,
+      enabled: resource.enabled,
     };
+  }
+
+  private getConfiguredExtensionPaths(resourceSettings: ScoutResourceSettingsSnapshot): string[] {
+    return dedupePaths([
+      ...resolveConfiguredPaths(resourceSettings.project.extensions, path.join(this.cwd, '.scout')),
+      ...resolveConfiguredPaths(resourceSettings.global.extensions, this.agentDir),
+    ]);
+  }
+
+  private getConfiguredExtensionPathEntries(
+    resourceSettings: ScoutResourceSettingsSnapshot,
+  ): ConfiguredExtensionPathEntry[] {
+    return dedupeConfiguredExtensionPathEntries([
+      ...resolveConfiguredPathEntries(
+        resourceSettings.project.extensions,
+        path.join(this.cwd, '.scout'),
+        'project',
+      ),
+      ...resolveConfiguredPathEntries(resourceSettings.global.extensions, this.agentDir, 'global'),
+    ]);
+  }
+
+  private getMissingConfiguredExtensionItems(
+    configuredPathEntries: ConfiguredExtensionPathEntry[],
+    resources: ResolvedResource[],
+  ): ScoutExtensionListItem[] {
+    const resolvedPaths = new Set(resources.map((resource) => path.resolve(resource.path)));
+    return configuredPathEntries
+      .filter((entry) => !resolvedPaths.has(path.resolve(entry.path)))
+      .filter((entry) => !existsSync(entry.path))
+      .map((entry) => ({
+        name: getExtensionDisplayName(entry.path),
+        path: entry.path,
+        scope: entry.scope,
+        sourceInfo: entry.sourceInfo,
+        exists: false,
+        enabled: true,
+      }));
   }
 
   private getTemplatePath(
     templateId: ScoutExtensionTemplateId,
-    scope: Exclude<ScoutExtensionScope, 'configured'>,
+    scope: ScoutExtensionScope,
   ): string {
     const template = getExtensionTemplate(templateId);
     return path.join(
@@ -240,15 +259,18 @@ export class ExtensionManagementProtocolService {
   }
 
   private canOpenExtensionPath(filePath: string): boolean {
-    return this.getKnownExtensionRoots().some((root) => isPathInside(filePath, root));
+    const resolvedPath = path.resolve(filePath);
+    return (
+      this.resolveExtensionResources().some(
+        (resource) => path.resolve(resource.path) === resolvedPath,
+      ) || this.getKnownExtensionRoots().some((root) => isPathInside(resolvedPath, root))
+    );
   }
 
   private getKnownExtensionRoots(): string[] {
-    return [
-      this.getProjectExtensionsDir(),
-      this.getGlobalExtensionsDir(),
-      ...this.configManager.getExtensionPaths(),
-    ].map((item) => path.resolve(item));
+    return [this.getProjectExtensionsDir(), this.getGlobalExtensionsDir()].map((item) =>
+      path.resolve(item),
+    );
   }
 
   private async reloadAfterPersist(): Promise<{ succeeded: boolean; error?: string }> {
@@ -277,14 +299,28 @@ export class ExtensionManagementProtocolService {
   }
 }
 
-function dedupeExtensions(items: ScoutExtensionListItem[]): ScoutExtensionListItem[] {
+function dedupePaths(paths: string[]): string[] {
   const seen = new Set<string>();
-  const result: ScoutExtensionListItem[] = [];
-  for (const item of items) {
-    const key = path.resolve(item.path);
+  const result: string[] = [];
+  for (const item of paths) {
+    const key = path.resolve(item);
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(item);
+  }
+  return result;
+}
+
+function dedupeConfiguredExtensionPathEntries(
+  entries: ConfiguredExtensionPathEntry[],
+): ConfiguredExtensionPathEntry[] {
+  const seen = new Set<string>();
+  const result: ConfiguredExtensionPathEntry[] = [];
+  for (const entry of entries) {
+    const key = path.resolve(entry.path);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(entry);
   }
   return result;
 }
@@ -293,12 +329,76 @@ function compareExtensionItems(a: ScoutExtensionListItem, b: ScoutExtensionListI
   return a.path.localeCompare(b.path);
 }
 
-function getExtensionDisplayName(entry: DiscoveredExtensionEntry): string {
-  const baseName = path.basename(entry.path, path.extname(entry.path));
+function getExtensionDisplayName(filePath: string): string {
+  const baseName = path.basename(filePath, path.extname(filePath));
   if (baseName === 'index') {
-    return path.basename(entry.baseDir);
+    return path.basename(path.dirname(filePath));
   }
   return baseName;
+}
+
+function toScoutExtensionResourceScope(resource: ResolvedResource): ScoutExtensionResourceScope {
+  if (resource.metadata.scope === 'project') return 'project';
+  if (resource.metadata.scope === 'user') return 'global';
+  return 'temporary';
+}
+
+function toScoutExtensionSourceInfo(resource: ResolvedResource): SourceInfo {
+  return {
+    path: resource.path,
+    source: resource.metadata.source,
+    scope: resource.metadata.scope,
+    origin: resource.metadata.origin,
+    baseDir: resource.metadata.baseDir,
+  };
+}
+
+function resolveConfiguredPaths(entries: string[] | undefined, baseDir: string): string[] {
+  if (!entries) return [];
+  return entries
+    .map((entry) => entry.trim())
+    .filter((entry) => entry && !isResourceOverride(entry))
+    .map((entry) => resolveSettingsPath(entry, baseDir));
+}
+
+function resolveConfiguredPathEntries(
+  entries: string[] | undefined,
+  baseDir: string,
+  scope: ScoutExtensionScope,
+): ConfiguredExtensionPathEntry[] {
+  if (!entries) return [];
+  return entries
+    .map((entry) => entry.trim())
+    .filter((entry) => entry && !isResourceOverride(entry) && !hasGlobPattern(entry))
+    .map((entry) => {
+      const resolvedPath = resolveSettingsPath(entry, baseDir);
+      return {
+        path: resolvedPath,
+        scope,
+        sourceInfo: {
+          path: resolvedPath,
+          source: 'local',
+          scope: scope === 'project' ? 'project' : 'user',
+          origin: 'top-level',
+          baseDir,
+        },
+      };
+    });
+}
+
+function isResourceOverride(entry: string): boolean {
+  return entry.startsWith('!') || entry.startsWith('+') || entry.startsWith('-');
+}
+
+function hasGlobPattern(entry: string): boolean {
+  return entry.includes('*') || entry.includes('?');
+}
+
+function resolveSettingsPath(input: string, baseDir: string): string {
+  if (input === '~') return homedir();
+  if (input.startsWith('~/')) return path.resolve(homedir(), input.slice(2));
+  if (path.isAbsolute(input)) return path.resolve(input);
+  return path.resolve(baseDir, input);
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

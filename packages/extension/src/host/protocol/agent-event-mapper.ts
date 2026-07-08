@@ -42,6 +42,38 @@ export interface AgentEventMappingOptions {
 
 // ---------- 内容块转换 ----------
 
+interface ParsedSkillBlock {
+  name: string;
+  location: string;
+  content: string;
+  userMessage?: string;
+}
+
+function parseSkillBlock(text: string): ParsedSkillBlock | undefined {
+  const match = text.match(
+    /^<skill name="([^"]+)" location="([^"]+)">\n([\s\S]*?)\n<\/skill>(?:\n\n([\s\S]+))?$/,
+  );
+  if (!match) return undefined;
+  return {
+    name: match[1]!,
+    location: match[2]!,
+    content: match[3]!,
+    userMessage: match[4]?.trim() || undefined,
+  };
+}
+
+function convertSkillTextBlock(text: string): ScoutContent[] | undefined {
+  const skillBlock = parseSkillBlock(text);
+  if (skillBlock) return [{ type: 'skillInvocation', ...skillBlock }];
+  return undefined;
+}
+
+function convertUserTextBlock(text: string): ScoutContent[] {
+  const skillContent = convertSkillTextBlock(text);
+  if (skillContent) return skillContent;
+  return [{ type: 'text', text }];
+}
+
 function convertAssistantContent(
   content: AssistantMessage['content'],
   options: AgentEventMappingOptions,
@@ -74,9 +106,11 @@ function convertAssistantContent(
 }
 
 function convertUserContent(content: UserMessage['content']): string | ScoutContent[] {
-  if (typeof content === 'string') return content;
+  if (typeof content === 'string') {
+    return convertSkillTextBlock(content) ?? content;
+  }
   return content.flatMap((block): ScoutContent[] => {
-    if (block.type === 'text') return [{ type: 'text', text: block.text }];
+    if (block.type === 'text') return convertUserTextBlock(block.text);
     if (block.type === 'image') {
       return [{ type: 'image', data: block.data, mimeType: block.mimeType }];
     }

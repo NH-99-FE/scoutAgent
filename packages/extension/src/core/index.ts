@@ -43,14 +43,30 @@ export {
   type SessionFileInfo,
 } from './session-file.ts';
 export { ScoutResourceLoader, loadProjectContextFiles } from './resource-loader.ts';
+export {
+  ScoutPackageManager,
+  type PathMetadata,
+  type ResolvedPaths,
+  type ResolvedResource,
+  type ScoutPackageSource,
+  type ScoutResourceSettings,
+  type ScoutResourceSettingsSnapshot,
+} from './package-manager.ts';
 export { buildSystemPrompt } from './system-prompt.ts';
 export {
   DEFAULT_REASONING_THINKING_LEVEL,
   normalizeThinkingLevelForModel,
   normalizeThinkingLevelForModelSwitch,
 } from './thinking-level.ts';
-export { loadSkills, formatSkillsForPrompt, type Skill } from './skills.ts';
-export { createSyntheticSourceInfo, type SourceInfo } from './source-info.ts';
+export {
+  loadSkills,
+  loadSkillsFromDir,
+  formatSkillsForPrompt,
+  stripFrontmatter,
+  type ResourceDiagnostic,
+  type Skill,
+} from './skills.ts';
+export { createSourceInfo, createSyntheticSourceInfo, type SourceInfo } from './source-info.ts';
 export type { CoreDisposable, CoreLogger } from './logger.ts';
 export type {
   BranchSummarySettings,

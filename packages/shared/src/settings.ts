@@ -37,6 +37,15 @@ export interface ScoutBranchSummarySettings {
   skipPrompt?: boolean;
 }
 
+export type ScoutPackageSource =
+  | string
+  | {
+      source: string;
+      extensions?: string[];
+      skills?: string[];
+      prompts?: string[];
+    };
+
 export interface ScoutRuntimeSettings {
   defaultProvider?: ScoutModelProvider;
   /**
@@ -54,7 +63,10 @@ export interface ScoutRuntimeSettings {
   branchSummary?: ScoutBranchSummarySettings;
   retry?: ScoutRetrySettings;
   shellPath?: string;
+  packages?: ScoutPackageSource[];
   extensions?: string[];
+  skills?: string[];
+  prompts?: string[];
 }
 
 export const SCOUT_RUNTIME_SETTINGS_PATHS = [
@@ -78,7 +90,10 @@ export const SCOUT_RUNTIME_SETTINGS_PATHS = [
   'retry.provider.maxRetries',
   'retry.provider.maxRetryDelayMs',
   'shellPath',
+  'packages',
   'extensions',
+  'skills',
+  'prompts',
 ] as const;
 
 export type ScoutRuntimeSettingsPath = (typeof SCOUT_RUNTIME_SETTINGS_PATHS)[number];

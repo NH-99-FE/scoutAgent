@@ -5,7 +5,7 @@
 // ============================================================
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type {
   Api,
@@ -29,7 +29,6 @@ import type {
   CustomMessage,
   PromptTemplate,
   QueuedAgentMessageDelivery,
-  Skill,
   StreamFn,
   ThinkingLevel,
 } from '@scout-agent/agent';
@@ -40,7 +39,6 @@ import {
   convertToLlm,
   createCustomMessage,
   formatPromptTemplateInvocation,
-  formatSkillInvocation,
   parseCommandArgs,
 } from '@scout-agent/agent';
 import type { ScoutCoreConfig, ScoutStreamOptions } from './config.ts';
@@ -72,7 +70,7 @@ import type {
   ContextUsage,
   ExtensionUIContext,
 } from './extensions/types.ts';
-import type { Skill as ScoutSkill } from './skills.ts';
+import { stripFrontmatter, type Skill as ScoutSkill } from './skills.ts';
 import { createSyntheticSourceInfo } from './source-info.ts';
 import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
 import {
@@ -307,6 +305,7 @@ export class AgentSession implements CoreDisposable {
   private loadExtensionResources?: (
     resources: DiscoveredExtensionResources,
   ) => Promise<LoadedScoutResources>;
+  private hasExtensionDiscoveredResources = false;
   private sessionStartEvent: SessionStartEvent;
   private activeToolNames: string[];
   private activeToolsCustomized: boolean;
@@ -1369,10 +1368,17 @@ export class AgentSession implements CoreDisposable {
     reason: 'startup' | 'reload',
   ): Promise<AgentSessionRuntimeDiagnostic[]> {
     if (!this.extensionRunner || !this.loadExtensionResources) return [];
-    const discoveredResources = await this.extensionRunner.emitResourcesDiscover(this.cwd, reason);
-    if (!ScoutResourceLoader.hasDiscoveredResources(discoveredResources)) return [];
+    const hasResourceHandlers = this.extensionRunner.hasHandlers('resources_discover');
+    if (!hasResourceHandlers && !this.hasExtensionDiscoveredResources) return [];
+
+    const discoveredResources = hasResourceHandlers
+      ? await this.extensionRunner.emitResourcesDiscover(this.cwd, reason)
+      : ScoutResourceLoader.emptyDiscovered();
+    const hasDiscoveredResources = ScoutResourceLoader.hasDiscoveredResources(discoveredResources);
+    if (!hasDiscoveredResources && !this.hasExtensionDiscoveredResources) return [];
 
     const loadedResources = await this.loadExtensionResources(discoveredResources);
+    this.hasExtensionDiscoveredResources = hasDiscoveredResources;
     await this.setResources({
       skills: loadedResources.skills,
       promptTemplates: loadedResources.promptTemplates,
@@ -1930,7 +1936,7 @@ export class AgentSession implements CoreDisposable {
         images,
         systemPrompt,
         resources: {
-          skills: this.skills as Skill[],
+          skills: this.skills,
           promptTemplates: this.promptTemplates,
         },
       });
@@ -2005,15 +2011,23 @@ export class AgentSession implements CoreDisposable {
   private expandSkillCommand(text: string): string {
     if (!text.startsWith('/skill:')) return text;
 
-    const commandText = text.slice('/skill:'.length);
-    const spaceIndex = commandText.search(/\s/);
-    const skillName = spaceIndex === -1 ? commandText : commandText.slice(0, spaceIndex);
-    const additionalInstructions =
-      spaceIndex === -1 ? undefined : commandText.slice(spaceIndex + 1).trim();
+    const spaceIndex = text.search(/\s/);
+    const skillName =
+      spaceIndex === -1 ? text.slice('/skill:'.length) : text.slice('/skill:'.length, spaceIndex);
+    const additionalInstructions = spaceIndex === -1 ? '' : text.slice(spaceIndex + 1).trim();
     const skill = this.skills.find((candidate) => candidate.name === skillName);
     if (!skill) return text;
 
-    return formatSkillInvocation(skill as Skill, additionalInstructions || undefined);
+    try {
+      const content = readFileSync(skill.filePath, 'utf-8');
+      const body = stripFrontmatter(content).trim();
+      const skillBlock = `<skill name="${skill.name}" location="${skill.filePath}">\nReferences are relative to ${skill.baseDir}.\n\n${body}\n</skill>`;
+      return additionalInstructions ? `${skillBlock}\n\n${additionalInstructions}` : skillBlock;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.appendLine(`[scout] Skill expansion failed (${skill.filePath}): ${errorMessage}`);
+      return text;
+    }
   }
 
   private expandPromptTemplateCommand(text: string): string {

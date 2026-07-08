@@ -69,6 +69,71 @@ describe('ConversationTranscript', () => {
     expect(screen.getByText('Proceed?')).toBeInTheDocument();
   });
 
+  it('renders skill invocation user messages without raw wrapper text', () => {
+    const rows: ConversationTranscriptRow[] = [
+      {
+        type: 'user',
+        key: 'user-skill',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'skillInvocation',
+              name: 'deploy',
+              location: '/workspace/.scout/skills/deploy/SKILL.md',
+              content:
+                'References are relative to /workspace/.scout/skills/deploy.\n\nDeploy carefully.',
+              userMessage: 'Use staging',
+            },
+            { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+          ],
+          timestamp: 1,
+        },
+      },
+    ];
+
+    const { container } = render(
+      <ConversationTranscript expansionScope="test" isStreaming={false} rows={rows} />,
+    );
+
+    expect(screen.getByText('deploy')).toBeInTheDocument();
+    expect(screen.getByText('Use staging')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'User attached image' })).toHaveAttribute(
+      'src',
+      'data:image/png;base64,aW1hZ2U=',
+    );
+    expect(container.textContent).not.toContain('<skill');
+    expect(container.textContent).not.toContain('</skill>');
+  });
+
+  it('renders ordinary user image messages as images', () => {
+    const rows: ConversationTranscriptRow[] = [
+      {
+        type: 'user',
+        key: 'user-image',
+        message: {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Inspect this screenshot' },
+            { type: 'image', data: 'c2NyZWVuc2hvdA==', mimeType: 'image/png' },
+          ],
+          timestamp: 1,
+        },
+      },
+    ];
+
+    const { container } = render(
+      <ConversationTranscript expansionScope="test" isStreaming={false} rows={rows} />,
+    );
+
+    expect(screen.getByText('Inspect this screenshot')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'User attached image' })).toHaveAttribute(
+      'src',
+      'data:image/png;base64,c2NyZWVuc2hvdA==',
+    );
+    expect(container.textContent).not.toContain('[image]');
+  });
+
   it('does not rerender stable history rows when a streaming row changes', () => {
     const stableUserRow: ConversationTranscriptRow = {
       type: 'user',

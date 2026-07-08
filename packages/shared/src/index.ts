@@ -28,6 +28,7 @@ export {
 export type {
   ScoutBranchSummarySettings,
   ScoutCompactionSettings,
+  ScoutPackageSource,
   ScoutQueueMode,
   ScoutRetryProviderSettings,
   ScoutRetrySettings,
@@ -92,6 +93,7 @@ export type {
   ScoutExtensionTemplateId,
   ScoutExtensionsResult,
   ScoutExtensionsSettings,
+  ScoutExtensionResourceScope,
   ScoutExtensionScope,
   ScoutFileChangeDiffPreview,
   ScoutFileChangeDetails,

@@ -173,6 +173,43 @@ describe('SettingsManager', () => {
     });
   });
 
+  it('normalizes resource settings and exposes them to core config', () => {
+    writeJson(path.join(userConfigDir, 'settings.json'), {
+      skills: ['~/skills/global'],
+      packages: ['global-package'],
+    });
+    writeJson(path.join(cwd, '.scout', 'settings.json'), {
+      skills: ['./skills/project'],
+      packages: [{ source: '../package', skills: ['skills/*'] }],
+    });
+
+    const manager = new SettingsManager({ cwd, userConfigDir });
+    expect(manager.getGlobalSettings()).toMatchObject({
+      skills: ['~/skills/global'],
+      packages: ['global-package'],
+    });
+    expect(manager.getProjectSettings()).toMatchObject({
+      skills: ['./skills/project'],
+      packages: [{ source: '../package', skills: ['skills/*'] }],
+    });
+
+    const configManager = new ConfigManager({ cwd, userConfigDir });
+    expect(configManager.getResourceSettings()).toEqual({
+      global: {
+        packages: ['global-package'],
+        extensions: undefined,
+        skills: ['~/skills/global'],
+        prompts: undefined,
+      },
+      project: {
+        packages: [{ source: '../package', skills: ['skills/*'] }],
+        extensions: undefined,
+        skills: ['./skills/project'],
+        prompts: undefined,
+      },
+    });
+  });
+
   it('normalizes saving provider-scoped default model settings', () => {
     const globalSettingsPath = path.join(userConfigDir, 'settings.json');
     const manager = new SettingsManager({ cwd, userConfigDir });

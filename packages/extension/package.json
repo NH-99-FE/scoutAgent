@@ -65,10 +65,12 @@
     "@scout-agent/shared": "workspace:*",
     "@sinclair/typebox": "^0.34.0",
     "diff": "^9.0.0",
+    "glob": "13.0.6",
     "highlight.js": "^11.11.1",
     "ignore": "^6.0.0",
     "jiti": "^2.4.2",
     "lowlight": "^3.3.0",
+    "minimatch": "10.2.5",
     "yaml": "^2.9.0"
   },
   "devDependencies": {

@@ -2,14 +2,19 @@
 // Extension 管理协议契约
 // ============================================================
 
-export type ScoutExtensionScope = 'project' | 'global' | 'configured';
+import type { SourceInfo } from './protocol-core.ts';
+
+export type ScoutExtensionScope = 'project' | 'global';
+export type ScoutExtensionResourceScope = ScoutExtensionScope | 'temporary';
 export type ScoutExtensionTemplateId = 'permission-gate';
 
 export interface ScoutExtensionListItem {
   name: string;
   path: string;
-  scope: ScoutExtensionScope;
+  scope: ScoutExtensionResourceScope;
+  sourceInfo: SourceInfo;
   exists: boolean;
+  enabled: boolean;
 }
 
 export interface ScoutExtensionTemplateInfo {

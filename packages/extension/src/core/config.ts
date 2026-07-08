@@ -6,6 +6,7 @@
 import type { Model, Api, SimpleStreamOptions, ThinkingBudgets, Transport } from '@scout-agent/ai';
 import type { QueueMode, ThinkingLevel } from '@scout-agent/agent';
 import type { CompactionSettings } from './compaction/index.ts';
+import type { ScoutResourceSettingsSnapshot } from './package-manager.ts';
 
 export interface RetrySettings {
   enabled: boolean;
@@ -46,6 +47,7 @@ export interface ScoutCoreConfig {
   getRetrySettings(): RetrySettings;
   getStreamOptions(): ScoutStreamOptions;
   getExtensionPaths(): string[];
+  getResourceSettings(): ScoutResourceSettingsSnapshot;
   findDefaultModel(): Model<Api> | undefined;
   getAvailableModels(): { id: string; name: string; provider: string; model: Model<Api> }[];
   findModel(modelId: string): Model<Api> | undefined;

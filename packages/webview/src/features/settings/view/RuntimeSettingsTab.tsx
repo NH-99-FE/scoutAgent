@@ -390,7 +390,7 @@ function RuntimeSettingsForm({
         </SettingGroup>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 max-[840px]:grid-cols-1">
+      <div className="grid grid-cols-3 gap-4 max-[980px]:grid-cols-1">
         <SettingsField label="Thinking Budgets">
           <Textarea
             value={settings.thinkingBudgetsJson}
@@ -409,6 +409,15 @@ function RuntimeSettingsForm({
             placeholder={'C:\\path\\to\\extension\n./relative-extension'}
             className="min-h-28 resize-y font-mono text-xs"
             onChange={(event) => onChange({ extensionsText: event.target.value }, ['extensions'])}
+          />
+        </SettingsField>
+        <SettingsField label="Skills">
+          <Textarea
+            value={settings.skillsText}
+            disabled={disabled}
+            placeholder={'./skills/custom-skill\n../shared-skills'}
+            className="min-h-28 resize-y font-mono text-xs"
+            onChange={(event) => onChange({ skillsText: event.target.value }, ['skills'])}
           />
         </SettingsField>
       </div>

@@ -10,6 +10,7 @@ import {
   THINKING_LEVELS,
 } from '@scout-agent/shared';
 import type {
+  ScoutPackageSource,
   ScoutQueueMode,
   ScoutRuntimeSettings,
   ScoutRuntimeSettingsPatch,
@@ -40,7 +41,10 @@ export const RUNTIME_SETTINGS_KEYS = new Set<keyof ScoutRuntimeSettings>([
   'branchSummary',
   'retry',
   'shellPath',
+  'packages',
   'extensions',
+  'skills',
+  'prompts',
 ]);
 
 export interface RuntimeSettingsReadResult {
@@ -144,8 +148,17 @@ export function readRuntimeSettings(value: unknown): RuntimeSettingsReadResult {
   const shellPath = readNonEmptyString(record.shellPath, 'shellPath', errors);
   if (shellPath) settings.shellPath = shellPath;
 
+  const packages = readPackageSources(record.packages, 'packages', errors);
+  if (packages) settings.packages = packages;
+
   const extensions = readStringArray(record.extensions, 'extensions', errors);
   if (extensions) settings.extensions = extensions;
+
+  const skills = readStringArray(record.skills, 'skills', errors);
+  if (skills) settings.skills = skills;
+
+  const prompts = readStringArray(record.prompts, 'prompts', errors);
+  if (prompts) settings.prompts = prompts;
 
   return { settings, errors };
 }
@@ -470,6 +483,43 @@ function readStringArray(value: unknown, label: string, errors: string[]): strin
     return undefined;
   }
   return value;
+}
+
+function readPackageSources(
+  value: unknown,
+  label: string,
+  errors: string[],
+): ScoutPackageSource[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    errors.push(`${label} must be an array`);
+    return undefined;
+  }
+
+  const packages: ScoutPackageSource[] = [];
+  value.forEach((item, index) => {
+    const itemLabel = `${label}[${index}]`;
+    if (typeof item === 'string') {
+      if (item.trim()) packages.push(item);
+      else errors.push(`${itemLabel} must be a non-empty string`);
+      return;
+    }
+    if (!isRecord(item)) {
+      errors.push(`${itemLabel} must be a string or object`);
+      return;
+    }
+
+    const source = readNonEmptyString(item.source, `${itemLabel}.source`, errors);
+    if (!source) return;
+    const packageSource: Extract<ScoutPackageSource, { source: string }> = { source };
+    for (const key of ['extensions', 'skills', 'prompts'] as const) {
+      const value = readStringArray(item[key], `${itemLabel}.${key}`, errors);
+      if (value) packageSource[key] = value;
+    }
+    packages.push(packageSource);
+  });
+
+  return packages;
 }
 
 interface IntegerRange {

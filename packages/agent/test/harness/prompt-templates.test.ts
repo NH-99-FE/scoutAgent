@@ -6,6 +6,7 @@ import {
   formatPromptTemplateInvocation,
   loadPromptTemplates,
   loadSourcedPromptTemplates,
+  parseCommandArgs,
 } from '../../src/harness/prompt-templates.ts';
 import { createTempDir } from './session-test-utils.ts';
 
@@ -90,5 +91,22 @@ describe('formatPromptTemplateInvocation', () => {
     expect(formatPromptTemplateInvocation({ name: 'one', content }, ['hello world', 'test'])).toBe(
       'hello world test hello world test',
     );
+  });
+});
+
+describe('parseCommandArgs', () => {
+  it('splits unquoted newlines like other whitespace', () => {
+    expect(parseCommandArgs('label-2\n\nHere is some description #2.')).toEqual([
+      'label-2',
+      'Here',
+      'is',
+      'some',
+      'description',
+      '#2.',
+    ]);
+  });
+
+  it('preserves newlines inside quoted arguments', () => {
+    expect(parseCommandArgs('"line1\nline2" second')).toEqual(['line1\nline2', 'second']);
   });
 });
