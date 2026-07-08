@@ -113,6 +113,22 @@ interface FloatingPanelLayout {
   width: number;
 }
 
+function areFloatingPanelLayoutsEqual(
+  previous: FloatingPanelLayout | null,
+  next: FloatingPanelLayout,
+) {
+  return (
+    previous !== null &&
+    previous.bottom === next.bottom &&
+    previous.left === next.left &&
+    previous.width === next.width
+  );
+}
+
+function isEventFromFloatingPanel(event: Event, panel: HTMLElement | null) {
+  return event.target instanceof Node && panel !== null && panel.contains(event.target);
+}
+
 function measureFloatingPanelLayout(anchor: HTMLDivElement): FloatingPanelLayout {
   const rect = anchor.getBoundingClientRect();
   return {
@@ -229,19 +245,33 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const closeForkMenu = forkMenu.close;
   const floatingPanelOpen = forkMenuOpen || slashMenuOpen;
 
+  const applyFloatingPanelLayout = useCallback((layout: FloatingPanelLayout) => {
+    setFloatingPanelLayout((current) =>
+      areFloatingPanelLayoutsEqual(current, layout) ? current : layout,
+    );
+  }, []);
+
   const updateFloatingPanelLayout = useCallback(() => {
     const anchor = composerAnchorRef.current;
     if (!anchor) return;
-    setFloatingPanelLayout(measureFloatingPanelLayout(anchor));
-  }, []);
+    applyFloatingPanelLayout(measureFloatingPanelLayout(anchor));
+  }, [applyFloatingPanelLayout]);
+
+  const updateFloatingPanelLayoutForExternalScroll = useCallback(
+    (event: Event) => {
+      if (isEventFromFloatingPanel(event, floatingPanelRef.current)) return;
+      updateFloatingPanelLayout();
+    },
+    [updateFloatingPanelLayout],
+  );
 
   const setComposerAnchor = useCallback(
     (anchor: HTMLDivElement | null) => {
       composerAnchorRef.current = anchor;
       if (!anchor || !floatingPanelOpen) return;
-      setFloatingPanelLayout(measureFloatingPanelLayout(anchor));
+      applyFloatingPanelLayout(measureFloatingPanelLayout(anchor));
     },
-    [floatingPanelOpen],
+    [applyFloatingPanelLayout, floatingPanelOpen],
   );
 
   useLayoutEffect(() => {
@@ -255,17 +285,17 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     }
 
     window.addEventListener('resize', updateFloatingPanelLayout);
-    window.addEventListener('scroll', updateFloatingPanelLayout, true);
+    window.addEventListener('scroll', updateFloatingPanelLayoutForExternalScroll, true);
     window.visualViewport?.addEventListener('resize', updateFloatingPanelLayout);
     window.visualViewport?.addEventListener('scroll', updateFloatingPanelLayout);
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener('resize', updateFloatingPanelLayout);
-      window.removeEventListener('scroll', updateFloatingPanelLayout, true);
+      window.removeEventListener('scroll', updateFloatingPanelLayoutForExternalScroll, true);
       window.visualViewport?.removeEventListener('resize', updateFloatingPanelLayout);
       window.visualViewport?.removeEventListener('scroll', updateFloatingPanelLayout);
     };
-  }, [floatingPanelOpen, updateFloatingPanelLayout]);
+  }, [floatingPanelOpen, updateFloatingPanelLayout, updateFloatingPanelLayoutForExternalScroll]);
 
   useEffect(() => {
     if (!floatingPanelOpen) return undefined;

@@ -22,7 +22,7 @@ export function useComposerFloatingPanelOptionScroll(activeKey: PanelOptionKey |
   useLayoutEffect(() => {
     if (activeKey === null) return;
     scrollComposerFloatingPanelOptionIntoView(optionRefs.current.get(activeKey) ?? null);
-  });
+  }, [activeKey]);
 
   return { setOptionElement };
 }
