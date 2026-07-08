@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "pnpm -C packages/webview dev & pnpm -C packages/extension watch",
     "build": "pnpm -C packages/shared build && pnpm -C packages/ai build && pnpm -C packages/agent build && pnpm -C packages/webview build && pnpm -C packages/extension package",
+    "check-types": "pnpm -C packages/shared build && pnpm -C packages/extension check-types && pnpm -C packages/webview check-types",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
