@@ -101,6 +101,12 @@ describe('ScoutWebviewPanelManager', () => {
 
     await manager.openSettingsPanel();
 
+    expect(vscode.window.createWebviewPanel).toHaveBeenCalledWith(
+      'scout-agent.settings',
+      'Scout Settings',
+      vscode.ViewColumn.Active,
+      { enableScripts: true, retainContextWhenHidden: true },
+    );
     expect(receivedMessages).toEqual([
       {
         type: 'protocol_request',

@@ -14,6 +14,7 @@ interface ScoutPanelSpec {
   surface: ScoutPanelSurface;
   viewType: string;
   title: string;
+  retainContextWhenHidden: boolean;
 }
 
 interface ScoutPanelBinding {
@@ -42,12 +43,14 @@ const SETTINGS_PANEL: ScoutPanelSpec = {
   surface: 'settings',
   viewType: 'scout-agent.settings',
   title: 'Scout Settings',
+  retainContextWhenHidden: true,
 };
 
 const TREE_PANEL: ScoutPanelSpec = {
   surface: 'tree',
   viewType: 'scout-agent.tree',
   title: 'Scout Tree',
+  retainContextWhenHidden: false,
 };
 
 export class ScoutWebviewPanelManager implements vscode.Disposable {
@@ -102,8 +105,8 @@ export class ScoutWebviewPanelManager implements vscode.Disposable {
       this.getTargetColumn(spec.surface),
       {
         enableScripts: true,
-        // 隐藏 tab 时允许 VS Code 回收运行时；重新显示后由 ready/request_* 恢复权威数据。
-        retainContextWhenHidden: false,
+        // Settings 是表单型页面，隐藏时保留运行时；Tree 继续允许回收大结构数据。
+        retainContextWhenHidden: spec.retainContextWhenHidden,
       },
     );
     const pendingState: Extract<ScoutPanelState, { status: 'pending' }> = {
