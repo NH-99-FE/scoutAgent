@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import {
   Archive,
+  Box,
   CircleAlert,
   Check,
   ChevronDown,
@@ -14,7 +15,6 @@ import {
   FileDiff,
   LoaderCircle,
   Split,
-  Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from 'lucide-react';
@@ -227,7 +227,7 @@ function SkillInvocationBlock({
             ) : (
               <ChevronRight className="text-muted-foreground size-3.5 shrink-0" />
             )}
-            <Sparkles className="text-primary size-3.5 shrink-0" />
+            <Box className="text-primary size-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate text-xs font-semibold">{skill.name}</span>
           </button>
         </CollapsibleTrigger>

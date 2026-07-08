@@ -2,8 +2,9 @@
 // Chat Composer — 底部输入与运行控制
 // ============================================================
 
-import type { KeyboardEvent } from 'react';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent, ReactNode, RefObject } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, X } from 'lucide-react';
 import type { ScoutImageContent } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
@@ -103,6 +104,23 @@ const EMPTY_QUEUE_STATE = {
   followUps: [],
   paused: false,
 } as const;
+const FLOATING_PANEL_LAYER_CLASS = 'fixed z-50 min-w-0 max-w-full';
+const FLOATING_PANEL_GAP_PX = 6;
+
+interface FloatingPanelLayout {
+  bottom: number;
+  left: number;
+  width: number;
+}
+
+function measureFloatingPanelLayout(anchor: HTMLDivElement): FloatingPanelLayout {
+  const rect = anchor.getBoundingClientRect();
+  return {
+    bottom: Math.max(0, window.innerHeight - rect.top + FLOATING_PANEL_GAP_PX),
+    left: rect.left,
+    width: rect.width,
+  };
+}
 
 function ChatComposerView(props: ChatComposerProps) {
   const currentSessionId = useSessionId();
@@ -146,6 +164,8 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     index: 0,
   });
   const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
+  const [floatingPanelLayout, setFloatingPanelLayout] = useState<FloatingPanelLayout | null>(null);
+  const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const floatingPanelRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -207,9 +227,48 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   });
   const forkMenuOpen = forkMenu.open;
   const closeForkMenu = forkMenu.close;
+  const floatingPanelOpen = forkMenuOpen || slashMenuOpen;
+
+  const updateFloatingPanelLayout = useCallback(() => {
+    const anchor = composerAnchorRef.current;
+    if (!anchor) return;
+    setFloatingPanelLayout(measureFloatingPanelLayout(anchor));
+  }, []);
+
+  const setComposerAnchor = useCallback(
+    (anchor: HTMLDivElement | null) => {
+      composerAnchorRef.current = anchor;
+      if (!anchor || !floatingPanelOpen) return;
+      setFloatingPanelLayout(measureFloatingPanelLayout(anchor));
+    },
+    [floatingPanelOpen],
+  );
+
+  useLayoutEffect(() => {
+    if (!floatingPanelOpen) return undefined;
+
+    const anchor = composerAnchorRef.current;
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && anchor) {
+      resizeObserver = new ResizeObserver(updateFloatingPanelLayout);
+      resizeObserver.observe(anchor);
+    }
+
+    window.addEventListener('resize', updateFloatingPanelLayout);
+    window.addEventListener('scroll', updateFloatingPanelLayout, true);
+    window.visualViewport?.addEventListener('resize', updateFloatingPanelLayout);
+    window.visualViewport?.addEventListener('scroll', updateFloatingPanelLayout);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateFloatingPanelLayout);
+      window.removeEventListener('scroll', updateFloatingPanelLayout, true);
+      window.visualViewport?.removeEventListener('resize', updateFloatingPanelLayout);
+      window.visualViewport?.removeEventListener('scroll', updateFloatingPanelLayout);
+    };
+  }, [floatingPanelOpen, updateFloatingPanelLayout]);
 
   useEffect(() => {
-    if (!forkMenuOpen && !slashMenuOpen) return undefined;
+    if (!floatingPanelOpen) return undefined;
     const closeFloatingPanelOnOutsidePointerDown = (event: PointerEvent) => {
       const panel = floatingPanelRef.current;
       if (event.target instanceof Node && panel?.contains(event.target)) return;
@@ -223,7 +282,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     return () => {
       document.removeEventListener('pointerdown', closeFloatingPanelOnOutsidePointerDown);
     };
-  }, [closeForkMenu, forkMenuOpen, slashKey, slashMenuOpen]);
+  }, [closeForkMenu, floatingPanelOpen, forkMenuOpen, slashKey]);
 
   useEffect(() => {
     if (!confirmAbort) return undefined;
@@ -448,29 +507,29 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     return false;
   };
 
+  const floatingPanel = forkMenu.open ? (
+    <ForkCandidateMenu
+      activeIndex={forkMenu.activeIndex}
+      candidates={forkMenu.candidates}
+      onHover={forkMenu.onHover}
+      onSelect={forkMenu.confirm}
+    />
+  ) : slashMenuOpen ? (
+    <SlashCommandMenu
+      activeIndex={boundedSlashActiveIndex}
+      items={slashItems}
+      onSelect={selectSlashItem}
+    />
+  ) : null;
+
   return (
     <>
-      <div className="max-w-full min-w-0">
-        {forkMenu.open ? (
-          <div ref={floatingPanelRef}>
-            <ForkCandidateMenu
-              activeIndex={forkMenu.activeIndex}
-              candidates={forkMenu.candidates}
-              onHover={forkMenu.onHover}
-              onSelect={forkMenu.confirm}
-            />
-          </div>
-        ) : slashMenuOpen ? (
-          <div ref={floatingPanelRef}>
-            <SlashCommandMenu
-              activeIndex={boundedSlashActiveIndex}
-              items={slashItems}
-              onSelect={selectSlashItem}
-            />
-          </div>
-        ) : null}
+      <div ref={setComposerAnchor} className="relative w-full max-w-full min-w-0">
+        <ComposerFloatingLayer layout={floatingPanelLayout} panelRef={floatingPanelRef}>
+          {floatingPanel}
+        </ComposerFloatingLayer>
         <form
-          className="border-border bg-background max-w-full min-w-0 overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
+          className="border-border bg-background w-full max-w-full min-w-0 overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
@@ -562,6 +621,35 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
         onSend={() => sendPendingSubmit(false)}
       />
     </>
+  );
+}
+
+function ComposerFloatingLayer({
+  children,
+  layout,
+  panelRef,
+}: {
+  children: ReactNode;
+  layout: FloatingPanelLayout | null;
+  panelRef: RefObject<HTMLDivElement | null>;
+}) {
+  if (!children || !layout) return null;
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      className={FLOATING_PANEL_LAYER_CLASS}
+      style={
+        {
+          bottom: layout.bottom,
+          left: layout.left,
+          width: layout.width,
+        } satisfies CSSProperties
+      }
+    >
+      {children}
+    </div>,
+    document.body,
   );
 }
 

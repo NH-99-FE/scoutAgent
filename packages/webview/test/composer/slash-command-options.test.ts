@@ -17,6 +17,14 @@ function builtinCommand(name: string): ScoutCommandInfo {
   };
 }
 
+function command(name: string, source: ScoutCommandInfo['source']): ScoutCommandInfo {
+  return {
+    name,
+    source,
+    sourceInfo: BUILTIN_SOURCE_INFO,
+  };
+}
+
 describe('buildSlashCommandItems', () => {
   it('includes session-bound builtins for the current-session composer', () => {
     const items = buildSlashCommandItems({
@@ -36,5 +44,24 @@ describe('buildSlashCommandItems', () => {
     });
 
     expect(items).toEqual([]);
+  });
+
+  it('keeps skills after non-skill slash commands', () => {
+    const items = buildSlashCommandItems({
+      commands: [
+        command('handoff', 'skill'),
+        command('review', 'prompt'),
+        builtinCommand('tree'),
+        command('diagnosing-bugs', 'skill'),
+      ],
+      query: '',
+    });
+
+    expect(items.map((item) => item.key)).toEqual([
+      'prompt:review',
+      'builtin:tree',
+      'skill:handoff',
+      'skill:diagnosing-bugs',
+    ]);
   });
 });

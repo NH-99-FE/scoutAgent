@@ -470,6 +470,25 @@ describe('ChatApp', () => {
     expect(screen.queryByRole('option', { name: /deploy/ })).not.toBeInTheDocument();
   });
 
+  it('groups skill slash commands below other commands', () => {
+    routeCommands([
+      makeCommand('handoff', 'skill', 'Create a handoff'),
+      makeCommand('review', 'prompt', 'Review pending changes'),
+      makeCommand('docs', 'skill', 'Use docs skill'),
+    ]);
+    render(<ChatApp />);
+
+    typeComposerText('随心输入', '/');
+
+    const menu = screen.getByRole('listbox', { name: 'Slash commands' });
+    expect(within(menu).getByText('技能')).toBeInTheDocument();
+    expect(
+      within(menu)
+        .getAllByRole('option')
+        .map((option) => option.textContent),
+    ).toEqual(['reviewReview pending changes', 'handoffCreate a handoff', 'docsUse docs skill']);
+  });
+
   it('selects slash commands with the keyboard without sending the message', () => {
     routeCommands([
       makeCommand('tree', 'builtin', 'Open the conversation tree'),

@@ -4,11 +4,11 @@
 // 数据源为当前 session raw entries，不受压缩展示投影影响。
 // ============================================================
 
-import { useEffect, useRef } from 'react';
 import { Split } from 'lucide-react';
 import type { ScoutForkCandidate } from '@scout-agent/shared';
 import { cn } from '@/lib/utils';
 import { ComposerFloatingPanel, ComposerFloatingPanelHint } from './ComposerFloatingPanel';
+import { useComposerFloatingPanelOptionScroll } from './composer-floating-panel-scroll';
 
 interface ForkCandidateMenuProps {
   activeIndex: number;
@@ -26,12 +26,8 @@ export function ForkCandidateMenu({
   onHover,
   onSelect,
 }: ForkCandidateMenuProps) {
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-
-  // 选中项滚动进视野
-  useEffect(() => {
-    optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
-  }, [activeIndex]);
+  const activeKey = candidates?.[activeIndex]?.entryId ?? null;
+  const { setOptionElement } = useComposerFloatingPanelOptionScroll(activeKey);
 
   if (candidates === null) {
     return (
@@ -52,7 +48,7 @@ export function ForkCandidateMenu({
         <button
           key={candidate.entryId}
           ref={(el) => {
-            optionRefs.current[index] = el;
+            setOptionElement(candidate.entryId, el);
           }}
           aria-selected={index === activeIndex}
           className={cn(

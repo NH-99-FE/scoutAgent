@@ -2,15 +2,7 @@
 // Slash Command Options — 命令候选纯数据推导
 // ============================================================
 
-import {
-  FileText,
-  GitBranch,
-  Lollipop,
-  Plug,
-  Sparkles,
-  Split,
-  type LucideIcon,
-} from 'lucide-react';
+import { Box, FileText, GitBranch, Lollipop, Plug, Split, type LucideIcon } from 'lucide-react';
 import type { ScoutCommandInfo } from '@scout-agent/shared';
 
 // ---------- 类型 ----------
@@ -43,16 +35,25 @@ export function buildSlashCommandItems(options: {
     .map((command) => toSlashCommandItem(command, { allowSessionCommands }))
     .filter((item): item is SlashCommandMenuItem => item !== null);
 
-  if (!query) return commandItems;
+  if (!query) return orderSlashCommandItems(commandItems);
 
-  return commandItems.filter((item) => {
-    const commandName = item.type === 'command' ? item.command.name : item.label;
-    return (
-      commandName.toLowerCase().includes(query) ||
-      item.label.toLowerCase().includes(query) ||
-      item.description.toLowerCase().includes(query)
-    );
-  });
+  return orderSlashCommandItems(
+    commandItems.filter((item) => {
+      const commandName = item.type === 'command' ? item.command.name : item.label;
+      return (
+        commandName.toLowerCase().includes(query) ||
+        item.label.toLowerCase().includes(query) ||
+        item.description.toLowerCase().includes(query)
+      );
+    }),
+  );
+}
+
+function orderSlashCommandItems(items: SlashCommandMenuItem[]): SlashCommandMenuItem[] {
+  const skillItems = items.filter((item) => item.command.source === 'skill');
+  if (skillItems.length === 0) return items;
+  const primaryItems = items.filter((item) => item.command.source !== 'skill');
+  return [...primaryItems, ...skillItems];
 }
 
 function toSlashCommandItem(
@@ -66,7 +67,7 @@ function toSlashCommandItem(
   const iconBySource: Record<Exclude<ScoutCommandInfo['source'], 'builtin'>, LucideIcon> = {
     extension: Plug,
     prompt: FileText,
-    skill: Sparkles,
+    skill: Box,
   };
 
   return {
