@@ -30,6 +30,7 @@ const ROUTE_CASES = [
     { type: 'request_extensions' },
     { service: 'extensions', method: 'request_extensions' },
   ),
+  protocolCase({ type: 'request_skills' }, { service: 'skills', method: 'request_skills' }),
   protocolCase(
     { type: 'request_context_usage' },
     { service: 'state', method: 'request_context_usage' },
@@ -124,6 +125,19 @@ const ROUTE_CASES = [
   protocolCase(
     { type: 'open_extension_file', path: '/workspace/.scout/extensions/permission-gate.ts' },
     { service: 'extensions', method: 'open_extension_file' },
+  ),
+  protocolCase(
+    {
+      type: 'save_skills_settings',
+      scope: 'project',
+      entries: ['./skills'],
+      toggles: [{ path: '/workspace/.scout/skills/review/SKILL.md', enabled: false }],
+    },
+    { service: 'skills', method: 'save_skills_settings' },
+  ),
+  protocolCase(
+    { type: 'open_skill_file', path: '/workspace/.scout/skills/review/SKILL.md' },
+    { service: 'skills', method: 'open_skill_file' },
   ),
   protocolCase({ type: 'open_settings_panel' }, { service: 'ui', method: 'open_settings_panel' }),
   protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),

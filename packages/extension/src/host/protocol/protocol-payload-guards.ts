@@ -44,6 +44,7 @@ const PAYLOAD_VALIDATORS = {
   request_custom_models: fields('type'),
   request_runtime_settings: fields('type'),
   request_extensions: fields('type'),
+  request_skills: fields('type'),
   request_context_usage: fields('type'),
   user_message: combine(
     fields('type', 'text', 'images', 'deliverAs', 'clearFollowUpQueue'),
@@ -93,6 +94,13 @@ const PAYLOAD_VALIDATORS = {
     optionalBoolean('overwrite'),
   ),
   open_extension_file: combine(fields('type', 'path'), requiredString('path')),
+  save_skills_settings: combine(
+    fields('type', 'scope', 'entries', 'toggles'),
+    requiredEnum('scope', ['project', 'global']),
+    requiredStringArray('entries'),
+    optionalSkillToggleIntents('toggles'),
+  ),
+  open_skill_file: combine(fields('type', 'path'), requiredString('path')),
   open_settings_panel: fields('type'),
   open_tree_panel: fields('type'),
   copy_text: combine(fields('type', 'text'), requiredString('text')),
@@ -246,6 +254,27 @@ function requiredStringArray(key: string): PayloadValidator {
     Array.isArray(payload[key]) && payload[key].every((item) => typeof item === 'string')
       ? undefined
       : `${key} must be a string array`;
+}
+
+function optionalSkillToggleIntents(key: string): PayloadValidator {
+  return (payload) => {
+    const value = payload[key];
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) return `${key} must be a skill toggle intent array`;
+    for (const item of value) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) {
+        return `${key} must be a skill toggle intent array`;
+      }
+      const intent = item as Record<string, unknown>;
+      const keys = Object.keys(intent);
+      if (keys.some((itemKey) => itemKey !== 'path' && itemKey !== 'enabled')) {
+        return `${key} contains an unknown field`;
+      }
+      if (typeof intent.path !== 'string') return `${key}.path must be a string`;
+      if (typeof intent.enabled !== 'boolean') return `${key}.enabled must be a boolean`;
+    }
+    return undefined;
+  };
 }
 
 function requiredCustomModelsSettings(key: string): PayloadValidator {

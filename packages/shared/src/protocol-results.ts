@@ -4,6 +4,7 @@
 
 import type { ScoutCustomModelsSettings } from './models.ts';
 import type { ScoutExtensionsSettings } from './protocol-extensions.ts';
+import type { ScoutSkillsSettings } from './protocol-skills.ts';
 import type { ScoutRuntimeSettingsState } from './settings.ts';
 import type {
   ScoutCommandInfo,
@@ -55,6 +56,11 @@ export interface ScoutRuntimeSettingsResult {
 export interface ScoutExtensionsResult {
   type: 'extensions_result';
   settings: ScoutExtensionsSettings;
+}
+
+export interface ScoutSkillsResult {
+  type: 'skills_result';
+  settings: ScoutSkillsSettings;
 }
 
 export interface ScoutContextUsageResult {
@@ -111,6 +117,7 @@ export type ScoutGenericCommandResultType =
   | 'set_default_model_result'
   | 'create_extension_from_template_result'
   | 'open_extension_file_result'
+  | 'open_skill_file_result'
   | 'reload_result'
   | 'delete_session_result';
 
@@ -136,6 +143,11 @@ export interface ScoutSaveRuntimeSettingsResult extends ScoutCommandResultBase {
   settings?: ScoutRuntimeSettingsState;
 }
 
+export interface ScoutSaveSkillsSettingsResult extends ScoutCommandResultBase {
+  type: 'save_skills_settings_result';
+  settings?: ScoutSkillsSettings;
+}
+
 export interface ScoutForkResult {
   type: 'fork_result';
   success: boolean;
@@ -149,6 +161,7 @@ export type ScoutCommandResult =
   | ScoutGenericCommandResult
   | ScoutSaveCustomModelsResult
   | ScoutSaveRuntimeSettingsResult
+  | ScoutSaveSkillsSettingsResult
   | ScoutForkResult;
 
 // fork 候选：从当前 session raw entries 中提取的全部历史 user message。
@@ -171,6 +184,7 @@ export type ScoutProtocolResponsePayload =
   | ScoutCustomModelsResult
   | ScoutRuntimeSettingsResult
   | ScoutExtensionsResult
+  | ScoutSkillsResult
   | ScoutContextUsageResult
   | ScoutCommandsResult
   | ScoutTreeResult

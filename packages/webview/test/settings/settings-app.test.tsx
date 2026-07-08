@@ -6,6 +6,7 @@ import type {
   ScoutConfig,
   ScoutCustomModelsSettings,
   ScoutRuntimeSettingsState,
+  ScoutSkillsSettings,
   ScoutWebviewState,
 } from '@scout-agent/shared';
 import App from '@/App';
@@ -84,6 +85,39 @@ function makeRuntimeSettings(): ScoutRuntimeSettingsState {
       defaultModel: 'qwen3.7-max',
       steeringMode: 'one-at-a-time',
     },
+  };
+}
+
+function makeSkillsSettings(): ScoutSkillsSettings {
+  return {
+    projectDir: '/workspace/.scout/skills',
+    globalDir: '/home/me/.scout/agent/skills',
+    agentsDirs: ['/workspace/.agents/skills'],
+    globalEntries: ['../shared-skills'],
+    projectEntries: ['./skills/project-skill'],
+    configuredPaths: ['/workspace/.scout/skills/project-skill'],
+    diagnostics: [],
+    skills: [
+      {
+        name: 'review',
+        description: 'Review code changes',
+        path: '/workspace/.scout/skills/review/SKILL.md',
+        scope: 'project',
+        sourceKind: 'project_default',
+        sourceRoot: '/workspace/.scout/skills',
+        sourceInfo: {
+          path: '/workspace/.scout/skills/review/SKILL.md',
+          source: 'auto',
+          scope: 'project',
+          origin: 'top-level',
+          baseDir: '/workspace/.scout',
+        },
+        exists: true,
+        enabled: true,
+        status: 'active',
+        canToggle: true,
+      },
+    ],
   };
 }
 
@@ -182,6 +216,18 @@ function installImmediateSettingsHost(): void {
         }),
       );
     }
+
+    if (request.payload?.type === 'request_skills') {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'protocol_response',
+            requestId: request.requestId,
+            payload: { type: 'skills_result', settings: makeSkillsSettings() },
+          },
+        }),
+      );
+    }
   });
 }
 
@@ -209,9 +255,22 @@ async function resolveRuntimeSettings(settings = makeRuntimeSettings()): Promise
   });
 }
 
+async function resolveSkills(settings = makeSkillsSettings()): Promise<void> {
+  const request = getPostedRequests('request_skills').at(-1);
+  expect(request).toBeDefined();
+  await act(async () => {
+    routeProtocolResponse({
+      type: 'protocol_response',
+      requestId: request!.requestId as string,
+      payload: { type: 'skills_result', settings },
+    });
+  });
+}
+
 async function resolveInitialSettings(): Promise<void> {
   await resolveCustomModels();
   await resolveRuntimeSettings();
+  await resolveSkills();
 }
 
 async function resolveSaveCustomModels(
@@ -244,6 +303,20 @@ async function resolveSaveRuntimeSettings(
       payload: success
         ? { type: 'save_runtime_settings_result', success: true, settings }
         : { type: 'save_runtime_settings_result', success: false, error: '保存失败' },
+    });
+  });
+}
+
+async function resolveSaveSkills(settings = makeSkillsSettings(), success = true): Promise<void> {
+  const request = getPostedRequests('save_skills_settings').at(-1);
+  expect(request).toBeDefined();
+  await act(async () => {
+    routeProtocolResponse({
+      type: 'protocol_response',
+      requestId: request!.requestId as string,
+      payload: success
+        ? { type: 'save_skills_settings_result', success: true, settings }
+        : { type: 'save_skills_settings_result', success: false, error: '保存失败' },
     });
   });
 }
@@ -314,6 +387,17 @@ describe('SettingsApp', () => {
     expect(document.querySelector('[data-slot="scroll-area"]')).toHaveClass('min-h-0', 'flex-1');
   });
 
+  it('places Skills as the second settings tab', () => {
+    render(<SettingsApp />);
+
+    const labels = Array.from(
+      screen.getByRole('navigation', { name: '设置分类' }).querySelectorAll('button'),
+      (button) => button.textContent?.trim(),
+    );
+
+    expect(labels).toEqual(['模型管理', 'Skills', '运行设置', '扩展']);
+  });
+
   it('loads first-run settings through App bootstrap when the host responds immediately', async () => {
     installImmediateSettingsHost();
 
@@ -333,6 +417,7 @@ describe('SettingsApp', () => {
 
     expect(getPostedRequests('request_custom_models').length).toBeGreaterThan(1);
     expect(getPostedRequests('request_runtime_settings').length).toBeGreaterThan(1);
+    expect(getPostedRequests('request_skills').length).toBeGreaterThan(1);
 
     await resolveInitialSettings();
 
@@ -348,6 +433,9 @@ describe('SettingsApp', () => {
     });
     expect(getLatestPostedPayload('request_runtime_settings')).toEqual({
       type: 'request_runtime_settings',
+    });
+    expect(getLatestPostedPayload('request_skills')).toEqual({
+      type: 'request_skills',
     });
 
     await resolveInitialSettings();
@@ -448,6 +536,85 @@ describe('SettingsApp', () => {
       },
     });
     expect(getPostedRequests('save_custom_models')).toHaveLength(0);
+  });
+
+  it('saves only skills settings from the Skills tab', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    expect(screen.getByRole('heading', { name: '额外 Skills 路径' })).toBeInTheDocument();
+    expect(screen.getByText('Review code changes')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Skill path 1'), {
+      target: { value: './skills/review' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(getLatestPostedPayload('save_skills_settings')).toEqual({
+      type: 'save_skills_settings',
+      scope: 'project',
+      entries: ['./skills/review'],
+      toggles: [],
+    });
+    expect(getPostedRequests('save_runtime_settings')).toHaveLength(0);
+
+    const normalized = makeSkillsSettings();
+    normalized.projectEntries = ['./skills/review'];
+    await resolveSaveSkills(normalized);
+
+    expect(screen.getByDisplayValue('./skills/review')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '已保存' })).toBeDisabled();
+  });
+
+  it('opens resolved skill files from the Skills tab', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    fireEvent.click(screen.getByRole('button', { name: /review/ }));
+
+    expect(getLatestPostedPayload('open_skill_file')).toEqual({
+      type: 'open_skill_file',
+      path: '/workspace/.scout/skills/review/SKILL.md',
+    });
+  });
+
+  it('keeps skill enablement toggles as draft until saving the Skills tab', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    const reviewSwitch = screen.getByRole('switch', { name: '启用 review' });
+    expect(reviewSwitch).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(reviewSwitch);
+    expect(screen.queryByDisplayValue('-skills/review')).not.toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: '启用 review' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    expect(getPostedRequests('set_skill_enabled')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(getLatestPostedPayload('save_skills_settings')).toEqual({
+      type: 'save_skills_settings',
+      scope: 'project',
+      entries: ['./skills/project-skill'],
+      toggles: [{ path: '/workspace/.scout/skills/review/SKILL.md', enabled: false }],
+    });
+
+    const disabled = makeSkillsSettings();
+    disabled.projectEntries = ['./skills/project-skill', '-skills/review'];
+    disabled.skills[0] = { ...disabled.skills[0]!, enabled: false, status: 'disabled' };
+    await resolveSaveSkills(disabled);
+
+    expect(screen.getByRole('switch', { name: '启用 review' })).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
   });
 
   it('shows inherited enabled defaults and rejects provider-scoped runtime default models before saving', async () => {

@@ -20,6 +20,7 @@ export type {
   ScoutCommandSource,
   ScoutDiagnostic,
   ScoutDiagnosticType,
+  ScoutResourceCollision,
   ScoutFileMentionItem,
   ScoutFileMentionKind,
   ScoutSessionListItem,
@@ -58,6 +59,16 @@ export type {
   ScoutExtensionTemplateInfo,
   ScoutExtensionTemplateId,
 } from './protocol-extensions.ts';
+
+export type {
+  ScoutSkillListItem,
+  ScoutSkillResourceScope,
+  ScoutSkillScope,
+  ScoutSkillSourceKind,
+  ScoutSkillStatus,
+  ScoutSkillToggleIntent,
+  ScoutSkillsSettings,
+} from './protocol-skills.ts';
 
 export type {
   ScoutAssistantMessage,
@@ -110,7 +121,9 @@ export type {
   ScoutRuntimeSettingsResult,
   ScoutSaveCustomModelsResult,
   ScoutSaveRuntimeSettingsResult,
+  ScoutSaveSkillsSettingsResult,
   ScoutSessionsResult,
+  ScoutSkillsResult,
   ScoutStateResult,
   ScoutTaskHistoryResult,
   ScoutTreeResult,

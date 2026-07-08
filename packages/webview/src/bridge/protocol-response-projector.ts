@@ -45,6 +45,7 @@ export function projectProtocolResponsePayload(
     case 'custom_models_result':
     case 'runtime_settings_result':
     case 'extensions_result':
+    case 'skills_result':
       break;
     case 'commands_result':
       useConfigStore.getState().actions.setCommands(payload.commands);

@@ -6,16 +6,16 @@ import {
 } from '@/features/settings/model/runtime-settings-draft';
 
 describe('runtime settings draft', () => {
-  it('converts skills paths between settings state and patch operations', () => {
+  it('converts extension paths between settings state and patch operations', () => {
     const state: ScoutRuntimeSettingsState = {
       globalSettingsPath: '/home/me/.scout/agent/settings.json',
       projectSettingsPath: '/workspace/.scout/settings.json',
       global: {},
       project: {
-        skills: ['./skills/one', '../shared-skills'],
+        extensions: ['./extensions/one', '../shared-extensions'],
       },
       effective: {
-        skills: ['./skills/one', '../shared-skills'],
+        extensions: ['./extensions/one', '../shared-extensions'],
       },
     };
     const editable = toEditableRuntimeSettingsState(state, {
@@ -23,15 +23,17 @@ describe('runtime settings draft', () => {
       scope: 'project',
     });
 
-    expect(editable.project.skillsText).toBe('./skills/one\n../shared-skills');
+    expect(editable.project.extensionsText).toBe('./extensions/one\n../shared-extensions');
 
     const patch = toRuntimeSettingsPatch(
-      { ...editable.project, skillsText: './skills/two\n\n../shared-skills ' },
-      new Set(['skills']),
+      { ...editable.project, extensionsText: './extensions/two\n\n../shared-extensions ' },
+      new Set(['extensions']),
     );
 
     expect(patch).toEqual({
-      operations: [{ op: 'set', path: 'skills', value: ['./skills/two', '../shared-skills'] }],
+      operations: [
+        { op: 'set', path: 'extensions', value: ['./extensions/two', '../shared-extensions'] },
+      ],
     });
   });
 });

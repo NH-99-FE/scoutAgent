@@ -46,11 +46,18 @@ export interface ScoutCommandInfo {
 
 export type ScoutDiagnosticType = 'info' | 'warning' | 'error' | 'collision';
 
+export interface ScoutResourceCollision {
+  resourceType: 'skill' | 'prompt' | 'extension';
+  name: string;
+  winnerPath: string;
+  loserPath: string;
+}
+
 export interface ScoutDiagnostic {
   type: ScoutDiagnosticType;
   message: string;
   path?: string;
-  collision?: unknown;
+  collision?: ScoutResourceCollision;
 }
 
 // ---------- 会话树 ----------

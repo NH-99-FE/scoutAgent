@@ -9,6 +9,7 @@ import type { ScoutProtocolResponsePayloadType } from './protocol-results.ts';
 import type { ScoutImageContent } from './protocol-state.ts';
 import type { ScoutTaskHistoryPurpose, ScoutWebviewSurface } from './protocol-core.ts';
 import type { ScoutExtensionScope, ScoutExtensionTemplateId } from './protocol-extensions.ts';
+import type { ScoutSkillScope, ScoutSkillToggleIntent } from './protocol-skills.ts';
 
 // ---------- Webview 到 Extension ----------
 
@@ -21,6 +22,7 @@ export type ScoutProtocolService =
   | 'tree'
   | 'mention'
   | 'extensions'
+  | 'skills'
   | 'ui';
 
 export type ScoutProtocolKind = 'lifecycle' | 'query' | 'command';
@@ -71,6 +73,7 @@ export type WebviewRequestPayload =
   | { type: 'request_custom_models' }
   | { type: 'request_runtime_settings' }
   | { type: 'request_extensions' }
+  | { type: 'request_skills' }
   | { type: 'request_context_usage' }
   | {
       type: 'user_message';
@@ -111,6 +114,13 @@ export type WebviewRequestPayload =
       overwrite?: boolean;
     }
   | { type: 'open_extension_file'; path: string }
+  | {
+      type: 'save_skills_settings';
+      scope: ScoutSkillScope;
+      entries: string[];
+      toggles?: ScoutSkillToggleIntent[];
+    }
+  | { type: 'open_skill_file'; path: string }
   | { type: 'open_settings_panel' }
   | { type: 'open_tree_panel' }
   | { type: 'copy_text'; text: string }
@@ -203,6 +213,13 @@ export const SCOUT_PROTOCOL = {
     service: 'extensions',
     method: 'request_extensions',
     response: 'extensions_result',
+    surfaces: ['settings'],
+  },
+  request_skills: {
+    kind: 'query',
+    service: 'skills',
+    method: 'request_skills',
+    response: 'skills_result',
     surfaces: ['settings'],
   },
   request_context_usage: {
@@ -351,6 +368,21 @@ export const SCOUT_PROTOCOL = {
     service: 'extensions',
     method: 'open_extension_file',
     response: 'open_extension_file_result',
+    surfaces: ['settings'],
+  },
+  save_skills_settings: {
+    kind: 'command',
+    service: 'skills',
+    method: 'save_skills_settings',
+    response: 'save_skills_settings_result',
+    emits: ['config_update', 'commands_update', 'state_update', 'tree_update'],
+    surfaces: ['settings'],
+  },
+  open_skill_file: {
+    kind: 'command',
+    service: 'skills',
+    method: 'open_skill_file',
+    response: 'open_skill_file_result',
     surfaces: ['settings'],
   },
   open_settings_panel: {

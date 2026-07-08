@@ -168,6 +168,18 @@ export interface ExtensionManagementProtocolHost {
   ) => Promise<void>;
 }
 
+export interface SkillManagementProtocolHost {
+  requestSkills: (respond: ProtocolResponder) => Promise<void>;
+  saveSkillsSettings: (
+    message: ProtocolPayload<'save_skills_settings'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+  openSkillFile: (
+    message: ProtocolPayload<'open_skill_file'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+}
+
 export interface UiProtocolHost {
   requestCommands: (respond: ProtocolResponder) => void;
   extensionUIResponse: (message: ProtocolPayload<'extension_ui_response'>) => void;

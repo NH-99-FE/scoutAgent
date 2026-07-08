@@ -10,6 +10,8 @@ import type {
   ScoutProtocolResponsePayload,
   ScoutImageContent,
   ScoutRuntimeSettingsPatch,
+  ScoutSkillScope,
+  ScoutSkillToggleIntent,
   ScoutSettingsScope,
   ScoutTaskHistoryPurpose,
   ScoutTaskItem,
@@ -68,9 +70,14 @@ type RuntimeSettingsResultPayload = Extract<
   { type: 'runtime_settings_result' }
 >;
 type ExtensionsResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'extensions_result' }>;
+type SkillsResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'skills_result' }>;
 type SaveRuntimeSettingsResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'save_runtime_settings_result' }
+>;
+type SaveSkillsSettingsResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'save_skills_settings_result' }
 >;
 type CreateExtensionFromTemplateResultPayload = Extract<
   ScoutProtocolResponsePayload,
@@ -79,6 +86,10 @@ type CreateExtensionFromTemplateResultPayload = Extract<
 type OpenExtensionFileResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'open_extension_file_result' }
+>;
+type OpenSkillFileResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'open_skill_file_result' }
 >;
 type CopyTextResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'copy_text_result' }>;
 
@@ -262,6 +273,21 @@ export const protocolClient = {
       (payload) => {
         projectProtocolResponsePayload(payload);
         if (payload.type === 'extensions_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  requestSkills: (
+    onResult?: (payload: SkillsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'request_skills' },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'skills_result') onResult?.(payload);
       },
       (message) => {
         reportProtocolError(message);
@@ -455,6 +481,24 @@ export const protocolClient = {
         onError?.(message);
       },
     ),
+  saveSkillsSettings: (
+    scope: ScoutSkillScope,
+    entries: string[],
+    toggles: ScoutSkillToggleIntent[],
+    onResult?: (payload: SaveSkillsSettingsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'save_skills_settings', scope, entries, toggles },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'save_skills_settings_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
   createExtensionFromTemplate: (
     templateId: ScoutExtensionTemplateId,
     scope: ScoutExtensionScope,
@@ -482,6 +526,22 @@ export const protocolClient = {
       (payload) => {
         projectProtocolResponsePayload(payload);
         if (payload.type === 'open_extension_file_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  openSkillFile: (
+    path: string,
+    onResult?: (payload: OpenSkillFileResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'open_skill_file', path },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'open_skill_file_result') onResult?.(payload);
       },
       (message) => {
         reportProtocolError(message);

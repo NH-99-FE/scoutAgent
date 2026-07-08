@@ -88,6 +88,43 @@ describe('validateWebviewMessage', () => {
     });
   });
 
+  it('validates skill settings payloads', () => {
+    expect(
+      validateWebviewMessage(
+        request({
+          type: 'save_skills_settings',
+          scope: 'project',
+          entries: ['./skills'],
+          toggles: [{ path: '/workspace/.scout/skills/review/SKILL.md', enabled: false }],
+        }),
+      ),
+    ).toMatchObject({ ok: true });
+
+    expect(
+      validateWebviewMessage(
+        request({ type: 'save_skills_settings', scope: 'project', entries: [1] }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      requestId: 'request-1',
+      error: 'save_skills_settings.entries must be a string array',
+    });
+    expect(
+      validateWebviewMessage(
+        request({
+          type: 'save_skills_settings',
+          scope: 'project',
+          entries: [],
+          toggles: [{ path: '/workspace/.scout/skills/review/SKILL.md', enabled: 'nope' }],
+        }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      requestId: 'request-1',
+      error: 'save_skills_settings.toggles.enabled must be a boolean',
+    });
+  });
+
   it('keeps route mismatch errors separate from payload schema errors', () => {
     const route = SCOUT_PROTOCOL.request_config;
     const result = validateWebviewMessage({

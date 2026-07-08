@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
+  Box,
   Check,
   PackagePlus,
   PanelLeft,
@@ -20,22 +21,38 @@ import {
   ExtensionsTab,
   ModelManagementTab,
   RuntimeSettingsTab,
+  SkillsTab,
   useCustomModelsController,
   useExtensionSettingsController,
   useRuntimeSettingsController,
+  useSkillSettingsController,
 } from '@/features/settings';
 
-type SettingsTab = 'models' | 'runtime' | 'extensions';
+type SettingsTab = 'models' | 'runtime' | 'skills' | 'extensions';
 
 export function SettingsApp() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<SettingsTab>('models');
   const customModels = useCustomModelsController();
   const runtimeSettings = useRuntimeSettingsController();
+  const skills = useSkillSettingsController();
   const extensions = useExtensionSettingsController();
   const activeController =
-    activeTab === 'models' ? customModels : activeTab === 'runtime' ? runtimeSettings : extensions;
-  const title = activeTab === 'models' ? '模型管理' : activeTab === 'runtime' ? '运行设置' : '扩展';
+    activeTab === 'models'
+      ? customModels
+      : activeTab === 'runtime'
+        ? runtimeSettings
+        : activeTab === 'skills'
+          ? skills
+          : extensions;
+  const title =
+    activeTab === 'models'
+      ? '模型管理'
+      : activeTab === 'runtime'
+        ? '运行设置'
+        : activeTab === 'skills'
+          ? 'Skills'
+          : '扩展';
 
   return (
     <div
@@ -86,6 +103,8 @@ export function SettingsApp() {
             <ModelManagementTab controller={customModels} />
           ) : activeTab === 'runtime' ? (
             <RuntimeSettingsTab controller={runtimeSettings} />
+          ) : activeTab === 'skills' ? (
+            <SkillsTab controller={skills} />
           ) : (
             <ExtensionsTab controller={extensions} />
           )}
@@ -125,6 +144,13 @@ function SettingsSidebar({
           icon={<PackagePlus className="size-4 shrink-0" />}
           label="模型管理"
           onClick={() => onSelectTab('models')}
+        />
+        <SidebarButton
+          active={activeTab === 'skills'}
+          collapsed={collapsed}
+          icon={<Box className="size-4 shrink-0" />}
+          label="Skills"
+          onClick={() => onSelectTab('skills')}
         />
         <SidebarButton
           active={activeTab === 'runtime'}

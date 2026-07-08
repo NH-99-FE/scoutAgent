@@ -6,7 +6,9 @@ import type {
   ExtensionEventMessage,
   ScoutBusyState,
   ScoutCommandInfo,
+  ScoutDiagnostic,
   ScoutExtensionUIRequest,
+  ScoutResourceCollision,
   ScoutWebviewState,
 } from '@scout-agent/shared';
 import type { ConfigManager } from '../../../config-manager.ts';
@@ -104,10 +106,53 @@ export class StateProtocolService implements StateProtocolHost {
       leafId,
       contextUsage: sessionStats?.contextUsage,
       sessionStats,
-      diagnostics: [...this.sessionManager.diagnostics],
+      diagnostics: toScoutDiagnostics(this.sessionManager.diagnostics),
       extensionUIRequests: this.getExtensionUIRequests(),
       modelFallbackMessage: this.sessionManager.modelFallbackMessage,
       activeChangesReview: this.sessionManager.getActiveChangesReview(),
     };
   }
+}
+
+function toScoutDiagnostics(
+  diagnostics: ReadonlyArray<{
+    type: ScoutDiagnostic['type'];
+    message: string;
+    path?: string;
+    collision?: unknown;
+  }>,
+): ScoutDiagnostic[] {
+  return diagnostics.map((diagnostic) => ({
+    type: diagnostic.type,
+    message: diagnostic.message,
+    path: diagnostic.path,
+    collision: toScoutResourceCollision(diagnostic.collision),
+  }));
+}
+
+function toScoutResourceCollision(value: unknown): ScoutResourceCollision | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    !isResourceType(value.resourceType) ||
+    typeof value.name !== 'string' ||
+    typeof value.winnerPath !== 'string' ||
+    typeof value.loserPath !== 'string'
+  ) {
+    return undefined;
+  }
+
+  return {
+    resourceType: value.resourceType,
+    name: value.name,
+    winnerPath: value.winnerPath,
+    loserPath: value.loserPath,
+  };
+}
+
+function isResourceType(value: unknown): value is ScoutResourceCollision['resourceType'] {
+  return value === 'skill' || value === 'prompt' || value === 'extension';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

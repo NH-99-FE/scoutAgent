@@ -19,6 +19,7 @@ import { ExtensionManagementProtocolService } from './services/extension-managem
 import { LifecycleProtocolService } from './services/lifecycle-service.ts';
 import { MentionProtocolService } from './services/mention-service.ts';
 import { SessionProtocolService } from './services/session-service.ts';
+import { SkillManagementProtocolService } from './services/skill-management-service.ts';
 import { StateProtocolService } from './services/state-service.ts';
 import { TaskProtocolService } from './services/task-service.ts';
 import { TreeProtocolService } from './services/tree-service.ts';
@@ -53,6 +54,7 @@ export interface ScoutProtocolHostServices {
   state: StateProtocolService;
   config: ConfigProtocolService;
   extensions: ExtensionManagementProtocolService;
+  skills: SkillManagementProtocolService;
   session: SessionProtocolService;
   task: TaskProtocolService;
   tree: TreeProtocolService;
@@ -183,6 +185,18 @@ export function createScoutProtocolHostServices(
     pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
   });
 
+  bundle.skills = new SkillManagementProtocolService({
+    cwd: options.cwd,
+    agentDir: options.agentDir,
+    sessionManager: options.sessionManager,
+    configManager: options.configManager,
+    openTextFile: options.openTextFile,
+    pushConfig: (surface) => bundle.state.pushConfig(surface),
+    requestCommands: (surface) => bundle.ui.pushCommands(surface),
+    pushState: (surface) => bundle.state.pushState(surface),
+    pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
+  });
+
   bundle.lifecycle = new LifecycleProtocolService({
     sessionManager: options.sessionManager,
     getConfig: () => bundle.config.getConfig(),
@@ -252,6 +266,11 @@ export function createScoutProtocolHostServices(
         bundle.extensions.createExtensionFromTemplate(message, respond),
       openExtensionFile: (message, respond) =>
         bundle.extensions.openExtensionFile(message, respond),
+    },
+    skills: {
+      requestSkills: (respond) => bundle.skills.requestSkills(respond),
+      saveSkillsSettings: (message, respond) => bundle.skills.saveSkillsSettings(message, respond),
+      openSkillFile: (message, respond) => bundle.skills.openSkillFile(message, respond),
     },
     session: {
       userMessage: (message) => bundle.session.userMessage(message),

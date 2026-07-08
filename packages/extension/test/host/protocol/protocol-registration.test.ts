@@ -42,6 +42,7 @@ const PAYLOAD_CASES = [
     { type: 'request_extensions' },
     { service: 'extensions', method: 'request_extensions' },
   ),
+  protocolCase({ type: 'request_skills' }, { service: 'skills', method: 'request_skills' }),
   protocolCase(
     { type: 'request_context_usage' },
     { service: 'state', method: 'request_context_usage' },
@@ -136,6 +137,19 @@ const PAYLOAD_CASES = [
   protocolCase(
     { type: 'open_extension_file', path: '/workspace/.scout/extensions/permission-gate.ts' },
     { service: 'extensions', method: 'open_extension_file' },
+  ),
+  protocolCase(
+    {
+      type: 'save_skills_settings',
+      scope: 'project',
+      entries: ['./skills'],
+      toggles: [{ path: '/workspace/.scout/skills/review/SKILL.md', enabled: false }],
+    },
+    { service: 'skills', method: 'save_skills_settings' },
+  ),
+  protocolCase(
+    { type: 'open_skill_file', path: '/workspace/.scout/skills/review/SKILL.md' },
+    { service: 'skills', method: 'open_skill_file' },
   ),
   protocolCase({ type: 'open_settings_panel' }, { service: 'ui', method: 'open_settings_panel' }),
   protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),
@@ -401,6 +415,29 @@ function makeServices(): ScoutProtocolServices {
       }),
       openExtensionFile: vi.fn(async (message, respond) => {
         respond({ type: 'open_extension_file_result', success: true, path: message.path });
+      }),
+    },
+    skills: {
+      requestSkills: vi.fn(async (respond) => {
+        respond({
+          type: 'skills_result',
+          settings: {
+            projectDir: '/workspace/.scout/skills',
+            globalDir: '/home/me/.scout/agent/skills',
+            agentsDirs: ['/workspace/.agents/skills'],
+            globalEntries: [],
+            projectEntries: ['./skills'],
+            configuredPaths: ['/workspace/.scout/skills'],
+            diagnostics: [],
+            skills: [],
+          },
+        });
+      }),
+      saveSkillsSettings: vi.fn(async (_message, respond) => {
+        respond({ type: 'save_skills_settings_result', success: true });
+      }),
+      openSkillFile: vi.fn(async (message, respond) => {
+        respond({ type: 'open_skill_file_result', success: true, path: message.path });
       }),
     },
     ui: {

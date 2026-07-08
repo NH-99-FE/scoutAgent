@@ -11,6 +11,7 @@ import type {
   MentionProtocolHost,
   ProtocolPayload,
   SessionProtocolHost,
+  SkillManagementProtocolHost,
   StateProtocolHost,
   TaskProtocolHost,
   TreeProtocolHost,
@@ -31,6 +32,7 @@ export interface ScoutProtocolServices {
   tree: TreeProtocolHost;
   mention: MentionProtocolHost;
   extensions: ExtensionManagementProtocolHost;
+  skills: SkillManagementProtocolHost;
   ui: UiProtocolHost;
 }
 
@@ -199,6 +201,21 @@ export function registerScoutProtocolServices(
         payload<'open_extension_file'>(message),
         context.respond,
       );
+    },
+  });
+
+  registerProtocolServiceHandlers(server, 'skills', {
+    request_skills: async (_message, context) => {
+      await services.skills.requestSkills(context.respond);
+    },
+    save_skills_settings: async (message, context) => {
+      await services.skills.saveSkillsSettings(
+        payload<'save_skills_settings'>(message),
+        context.respond,
+      );
+    },
+    open_skill_file: async (message, context) => {
+      await services.skills.openSkillFile(payload<'open_skill_file'>(message), context.respond);
     },
   });
 
