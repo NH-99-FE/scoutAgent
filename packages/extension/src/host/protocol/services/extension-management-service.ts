@@ -2,9 +2,7 @@
 // Extension management service — Settings 扩展入口与文件管理
 // ============================================================
 
-import { existsSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
-import { homedir } from 'node:os';
 import * as path from 'node:path';
 import type {
   ScoutExtensionListItem,
@@ -24,6 +22,16 @@ import {
 import type { ExtensionSessionCoordinator } from '../../session-coordinator.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
 import { getExtensionTemplate, listExtensionTemplates } from './extension-templates.ts';
+import {
+  dedupeConfiguredResourcePathEntries,
+  dedupePaths,
+  getMissingConfiguredResourceEntries,
+  isKnownResourcePath,
+  ResourcePersistCoordinator,
+  resolveConfiguredResourcePathEntries,
+  resolveConfiguredResourcePaths,
+  type ConfiguredResourcePathEntry,
+} from './resource-management/index.ts';
 import type { ProtocolPayload, ProtocolResponder } from './types.ts';
 
 // ---------- 类型 ----------
@@ -40,11 +48,7 @@ export interface ExtensionManagementProtocolServiceOptions {
   pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
 }
 
-interface ConfiguredExtensionPathEntry {
-  path: string;
-  scope: ScoutExtensionScope;
-  sourceInfo: SourceInfo;
-}
+type ConfiguredExtensionPathEntry = ConfiguredResourcePathEntry<ScoutExtensionScope>;
 
 // ---------- Service ----------
 
@@ -52,23 +56,21 @@ export class ExtensionManagementProtocolService {
   private readonly cwd: string;
   private readonly agentDir: string;
   private readonly configManager: ConfigManager;
-  private readonly sessionManager: ExtensionSessionCoordinator;
   private readonly openTextFileCallback?: (filePath: string) => Promise<void>;
-  private readonly pushConfig: (surface?: ScoutWebviewSurface) => void;
-  private readonly requestCommandsCallback: (surface?: ScoutWebviewSurface) => void;
-  private readonly pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
-  private readonly pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
+  private readonly persistCoordinator: ResourcePersistCoordinator;
 
   constructor(options: ExtensionManagementProtocolServiceOptions) {
     this.cwd = options.cwd;
     this.agentDir = options.agentDir;
     this.configManager = options.configManager;
-    this.sessionManager = options.sessionManager;
     this.openTextFileCallback = options.openTextFile;
-    this.pushConfig = options.pushConfig;
-    this.requestCommandsCallback = options.requestCommands;
-    this.pushState = options.pushState;
-    this.pushTreeData = options.pushTreeData;
+    this.persistCoordinator = new ResourcePersistCoordinator({
+      sessionManager: options.sessionManager,
+      pushConfig: options.pushConfig,
+      requestCommands: options.requestCommands,
+      pushState: options.pushState,
+      pushTreeData: options.pushTreeData,
+    });
   }
 
   async requestExtensions(respond: ProtocolResponder): Promise<void> {
@@ -203,21 +205,30 @@ export class ExtensionManagementProtocolService {
 
   private getConfiguredExtensionPaths(resourceSettings: ScoutResourceSettingsSnapshot): string[] {
     return dedupePaths([
-      ...resolveConfiguredPaths(resourceSettings.project.extensions, path.join(this.cwd, '.scout')),
-      ...resolveConfiguredPaths(resourceSettings.global.extensions, this.agentDir),
+      ...resolveConfiguredResourcePaths(
+        resourceSettings.project.extensions,
+        path.join(this.cwd, '.scout'),
+      ),
+      ...resolveConfiguredResourcePaths(resourceSettings.global.extensions, this.agentDir),
     ]);
   }
 
   private getConfiguredExtensionPathEntries(
     resourceSettings: ScoutResourceSettingsSnapshot,
   ): ConfiguredExtensionPathEntry[] {
-    return dedupeConfiguredExtensionPathEntries([
-      ...resolveConfiguredPathEntries(
+    return dedupeConfiguredResourcePathEntries([
+      ...resolveConfiguredResourcePathEntries(
         resourceSettings.project.extensions,
         path.join(this.cwd, '.scout'),
         'project',
+        'project',
       ),
-      ...resolveConfiguredPathEntries(resourceSettings.global.extensions, this.agentDir, 'global'),
+      ...resolveConfiguredResourcePathEntries(
+        resourceSettings.global.extensions,
+        this.agentDir,
+        'global',
+        'user',
+      ),
     ]);
   }
 
@@ -225,18 +236,14 @@ export class ExtensionManagementProtocolService {
     configuredPathEntries: ConfiguredExtensionPathEntry[],
     resources: ResolvedResource[],
   ): ScoutExtensionListItem[] {
-    const resolvedPaths = new Set(resources.map((resource) => path.resolve(resource.path)));
-    return configuredPathEntries
-      .filter((entry) => !resolvedPaths.has(path.resolve(entry.path)))
-      .filter((entry) => !existsSync(entry.path))
-      .map((entry) => ({
-        name: getExtensionDisplayName(entry.path),
-        path: entry.path,
-        scope: entry.scope,
-        sourceInfo: entry.sourceInfo,
-        exists: false,
-        enabled: true,
-      }));
+    return getMissingConfiguredResourceEntries(configuredPathEntries, resources).map((entry) => ({
+      name: getExtensionDisplayName(entry.path),
+      path: entry.path,
+      scope: entry.scope,
+      sourceInfo: entry.sourceInfo,
+      exists: false,
+      enabled: true,
+    }));
   }
 
   private getTemplatePath(
@@ -259,11 +266,10 @@ export class ExtensionManagementProtocolService {
   }
 
   private canOpenExtensionPath(filePath: string): boolean {
-    const resolvedPath = path.resolve(filePath);
-    return (
-      this.resolveExtensionResources().some(
-        (resource) => path.resolve(resource.path) === resolvedPath,
-      ) || this.getKnownExtensionRoots().some((root) => isPathInside(resolvedPath, root))
+    return isKnownResourcePath(
+      filePath,
+      this.resolveExtensionResources(),
+      this.getKnownExtensionRoots(),
     );
   }
 
@@ -274,55 +280,15 @@ export class ExtensionManagementProtocolService {
   }
 
   private async reloadAfterPersist(): Promise<{ succeeded: boolean; error?: string }> {
-    try {
-      const result = await this.sessionManager.reload();
-      if (result.cancelled) {
-        return { succeeded: false, error: 'Runtime reload cancelled after creating extension' };
-      }
-      return { succeeded: true };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        succeeded: false,
-        error: `Runtime reload failed after creating extension: ${message}`,
-      };
-    }
+    return await this.persistCoordinator.reloadAfterPersist({
+      cancelled: 'Runtime reload cancelled after creating extension',
+      failedPrefix: 'Runtime reload failed after creating extension',
+    });
   }
 
   private async pushAfterPersist(reloadSucceeded: boolean): Promise<void> {
-    this.pushConfig();
-    if (reloadSucceeded) {
-      this.requestCommandsCallback();
-      await this.pushState();
-      await this.pushTreeData();
-    }
+    await this.persistCoordinator.pushAfterPersist(reloadSucceeded);
   }
-}
-
-function dedupePaths(paths: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const item of paths) {
-    const key = path.resolve(item);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(item);
-  }
-  return result;
-}
-
-function dedupeConfiguredExtensionPathEntries(
-  entries: ConfiguredExtensionPathEntry[],
-): ConfiguredExtensionPathEntry[] {
-  const seen = new Set<string>();
-  const result: ConfiguredExtensionPathEntry[] = [];
-  for (const entry of entries) {
-    const key = path.resolve(entry.path);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(entry);
-  }
-  return result;
 }
 
 function compareExtensionItems(a: ScoutExtensionListItem, b: ScoutExtensionListItem): number {
@@ -353,54 +319,6 @@ function toScoutExtensionSourceInfo(resource: ResolvedResource): SourceInfo {
   };
 }
 
-function resolveConfiguredPaths(entries: string[] | undefined, baseDir: string): string[] {
-  if (!entries) return [];
-  return entries
-    .map((entry) => entry.trim())
-    .filter((entry) => entry && !isResourceOverride(entry))
-    .map((entry) => resolveSettingsPath(entry, baseDir));
-}
-
-function resolveConfiguredPathEntries(
-  entries: string[] | undefined,
-  baseDir: string,
-  scope: ScoutExtensionScope,
-): ConfiguredExtensionPathEntry[] {
-  if (!entries) return [];
-  return entries
-    .map((entry) => entry.trim())
-    .filter((entry) => entry && !isResourceOverride(entry) && !hasGlobPattern(entry))
-    .map((entry) => {
-      const resolvedPath = resolveSettingsPath(entry, baseDir);
-      return {
-        path: resolvedPath,
-        scope,
-        sourceInfo: {
-          path: resolvedPath,
-          source: 'local',
-          scope: scope === 'project' ? 'project' : 'user',
-          origin: 'top-level',
-          baseDir,
-        },
-      };
-    });
-}
-
-function isResourceOverride(entry: string): boolean {
-  return entry.startsWith('!') || entry.startsWith('+') || entry.startsWith('-');
-}
-
-function hasGlobPattern(entry: string): boolean {
-  return entry.includes('*') || entry.includes('?');
-}
-
-function resolveSettingsPath(input: string, baseDir: string): string {
-  if (input === '~') return homedir();
-  if (input.startsWith('~/')) return path.resolve(homedir(), input.slice(2));
-  if (path.isAbsolute(input)) return path.resolve(input);
-  return path.resolve(baseDir, input);
-}
-
 async function pathExists(filePath: string): Promise<boolean> {
   return (await statOrUndefined(filePath)) !== undefined;
 }
@@ -411,11 +329,4 @@ async function statOrUndefined(filePath: string) {
   } catch {
     return undefined;
   }
-}
-
-function isPathInside(filePath: string, root: string): boolean {
-  const relative = path.relative(path.resolve(root), path.resolve(filePath));
-  return (
-    relative === '' || (!!relative && !relative.startsWith('..') && !path.isAbsolute(relative))
-  );
 }
