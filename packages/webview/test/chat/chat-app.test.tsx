@@ -5,8 +5,17 @@ import { projectTaskHistoryResult as routeTaskHistoryResponse } from '@/bridge/p
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { AppNotificationToaster } from '@/components/common/AppNotificationToaster';
 import { ChatApp } from '@/surfaces/chat/ChatApp';
+import {
+  MAX_COMPOSER_IMAGE_BYTES,
+  MAX_COMPOSER_IMAGE_COUNT,
+} from '@/features/composer/model/composer-images';
 import { useConfigStore } from '@/store/config-store';
+import {
+  getComposerImageObjectUrl,
+  registerComposerImageFile,
+} from '@/store/composer-image-registry';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
+import type { ComposerImageDescriptor } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
@@ -29,6 +38,22 @@ const TEST_IMAGE: ScoutImageContent = {
   data: 'aW1hZ2U=',
   mimeType: 'image/png',
 };
+let nextTestObjectUrlId = 0;
+const createObjectUrl = vi.fn((file: File) => {
+  nextTestObjectUrlId += 1;
+  return `blob:${file.name}:${nextTestObjectUrlId}`;
+});
+const revokeObjectUrl = vi.fn();
+
+function makeComposerImageDescriptor(
+  overrides: { file?: File; mimeType?: string; name?: string } = {},
+): ComposerImageDescriptor {
+  const mimeType = overrides.mimeType ?? 'image/png';
+  const file =
+    overrides.file ?? new File(['image'], overrides.name ?? 'image.png', { type: mimeType });
+  return registerComposerImageFile(file, file.type || mimeType);
+}
+
 const TEST_SOURCE_INFO: SourceInfo = {
   path: '<test>',
   source: 'test',
@@ -290,6 +315,85 @@ function typeComposerText(label: string, value: string): HTMLTextAreaElement {
   return textarea;
 }
 
+function makeImageClipboardData(files: File[]): DataTransfer {
+  return {
+    files,
+    getData: () => '',
+    items: files.map((file) => ({
+      getAsFile: () => file,
+      kind: 'file',
+      type: file.type,
+    })),
+  } as unknown as DataTransfer;
+}
+
+function makeAnimatedGifFile(name = 'animated.gif'): File {
+  return new File(
+    [
+      new Uint8Array([
+        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
+        0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x00, 0x3b,
+      ]),
+    ],
+    name,
+    { type: 'image/gif' },
+  );
+}
+
+function makeAnimatedWebpFile(name = 'animated.webp'): File {
+  return new File(
+    [
+      new Uint8Array([
+        0x52, 0x49, 0x46, 0x46, 0x16, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, 0x56, 0x50, 0x38,
+        0x58, 0x0a, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+      ]),
+    ],
+    name,
+    { type: 'image/webp' },
+  );
+}
+
+function installDeferredFileReader() {
+  const originalFileReader = globalThis.FileReader;
+  const readers: Array<{ complete: (dataUrl: string) => void; fail: () => void }> = [];
+
+  class DeferredFileReader {
+    error: DOMException | null = null;
+    onerror: ((event: ProgressEvent<FileReader>) => void) | null = null;
+    onload: ((event: ProgressEvent<FileReader>) => void) | null = null;
+    result: string | ArrayBuffer | null = null;
+
+    readAsDataURL = vi.fn(() => {
+      readers.push({
+        complete: (dataUrl) => {
+          this.result = dataUrl;
+          this.onload?.({} as ProgressEvent<FileReader>);
+        },
+        fail: () => {
+          this.error = new DOMException('read failed', 'NotReadableError');
+          this.onerror?.({} as ProgressEvent<FileReader>);
+        },
+      });
+    });
+  }
+
+  Object.defineProperty(globalThis, 'FileReader', {
+    configurable: true,
+    value: DeferredFileReader,
+  });
+
+  return {
+    readers,
+    restore: () => {
+      Object.defineProperty(globalThis, 'FileReader', {
+        configurable: true,
+        value: originalFileReader,
+      });
+    },
+  };
+}
+
 describe('ChatApp', () => {
   beforeAll(() => {
     Object.defineProperty(globalThis, 'acquireVsCodeApi', {
@@ -308,9 +412,20 @@ describe('ChatApp', () => {
       configurable: true,
       value: TriggerableResizeObserver,
     });
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: createObjectUrl,
+    });
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: revokeObjectUrl,
+    });
   });
 
   beforeEach(() => {
+    nextTestObjectUrlId = 0;
+    createObjectUrl.mockClear();
+    revokeObjectUrl.mockClear();
     intersectionObservers.length = 0;
     resizeObserverCallbacks.clear();
     postMessage.mockClear();
@@ -746,17 +861,220 @@ describe('ChatApp', () => {
     expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
   });
 
-  it('starts a new session with composer images', () => {
-    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
+  it('starts a new session with composer images', async () => {
+    useComposerStore
+      .getState()
+      .actions.addImages(HOME_COMPOSER_SESSION_ID, [makeComposerImageDescriptor()]);
 
     render(<ChatApp />);
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
 
-    expectPostedPayload('new_session_message', {
-      type: 'new_session_message',
-      text: '',
-      images: [TEST_IMAGE],
+    await waitFor(() => {
+      expectPostedPayload('new_session_message', {
+        type: 'new_session_message',
+        text: '',
+        images: [TEST_IMAGE],
+      });
     });
+  });
+
+  it('previews composer images in an overlay', async () => {
+    const image = makeComposerImageDescriptor({
+      name: 'preview-image.png',
+    });
+    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [image]);
+
+    render(<ChatApp />);
+
+    const previewButton = screen.getByRole('button', { name: '预览图片 1' });
+    previewButton.focus();
+    fireEvent.click(previewButton);
+
+    expect(screen.getByRole('dialog', { name: '图片预览' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '图片预览' })).toHaveAttribute(
+      'src',
+      getComposerImageObjectUrl(image),
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '关闭预览' })).toHaveFocus();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '放大图片' }));
+    expect(screen.getByText('125%')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+    expect(screen.queryByRole('dialog', { name: '图片预览' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(previewButton).toHaveFocus();
+    });
+  });
+
+  it('keeps many composer images in a hidden horizontal scroll tray', () => {
+    useComposerStore.getState().actions.addImages(
+      HOME_COMPOSER_SESSION_ID,
+      Array.from({ length: 8 }, (_, index) =>
+        makeComposerImageDescriptor({ name: `many-${index}.png` }),
+      ),
+    );
+
+    const { container } = render(<ChatApp />);
+
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
+    expect(viewport).toHaveAttribute('data-scout-nested-scroll', 'horizontal');
+    expect(viewport).toHaveClass('overflow-x-auto', 'overflow-y-hidden');
+    expect(container.querySelector('.flex-nowrap')).toBeInTheDocument();
+    expect(container.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+      '[&_[data-slot=scroll-area-scrollbar]]:hidden',
+    );
+    expect(screen.getByRole('button', { name: '预览图片 8' })).toBeInTheDocument();
+  });
+
+  it('releases composer image object URLs when removing images', () => {
+    const image = makeComposerImageDescriptor({ name: 'remove-me.png' });
+    const objectUrl = getComposerImageObjectUrl(image);
+    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [image]);
+
+    render(<ChatApp />);
+    fireEvent.click(screen.getByRole('button', { name: '移除图片 1' }));
+
+    expect(revokeObjectUrl).toHaveBeenCalledWith(objectUrl);
+    expect(screen.queryByRole('button', { name: '预览图片 1' })).not.toBeInTheDocument();
+  });
+
+  it('warns and ignores unsupported or oversized composer images', async () => {
+    render(<ChatApp />);
+    const textarea = screen.getByLabelText('随心输入');
+    const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+    const oversizedImage = new File([new Uint8Array(MAX_COMPOSER_IMAGE_BYTES + 1)], 'big.png', {
+      type: 'image/png',
+    });
+    const unsupportedFile = new File(['plain text'], 'note.txt', { type: 'text/plain' });
+
+    fireEvent.paste(textarea, {
+      clipboardData: makeImageClipboardData([pastedImage, oversizedImage, unsupportedFile]),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: '预览图片 2' })).not.toBeInTheDocument();
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'warning',
+      message: '已忽略 1 个不支持的图片文件；已忽略 1 张超过 2MB 的图片',
+    });
+  });
+
+  it('warns and only accepts images within the composer image count limit', async () => {
+    useComposerStore.getState().actions.addImages(
+      HOME_COMPOSER_SESSION_ID,
+      Array.from({ length: MAX_COMPOSER_IMAGE_COUNT - 1 }, (_, index) =>
+        makeComposerImageDescriptor({ name: `existing-${index}.png` }),
+      ),
+    );
+
+    render(<ChatApp />);
+    const textarea = screen.getByLabelText('随心输入');
+    const pastedImages = Array.from(
+      { length: 3 },
+      (_, index) => new File([`image ${index}`], `image-${index}.png`, { type: 'image/png' }),
+    );
+
+    fireEvent.paste(textarea, {
+      clipboardData: makeImageClipboardData(pastedImages),
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: `预览图片 ${MAX_COMPOSER_IMAGE_COUNT}` }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('button', { name: `预览图片 ${MAX_COMPOSER_IMAGE_COUNT + 1}` }),
+    ).not.toBeInTheDocument();
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'warning',
+      message: `最多只能添加 ${MAX_COMPOSER_IMAGE_COUNT} 张图片`,
+    });
+  });
+
+  it('does not read image bytes after composer image slots are exhausted', async () => {
+    useComposerStore.getState().actions.addImages(
+      HOME_COMPOSER_SESSION_ID,
+      Array.from({ length: MAX_COMPOSER_IMAGE_COUNT }, (_, index) =>
+        makeComposerImageDescriptor({ name: `existing-${index}.png` }),
+      ),
+    );
+
+    render(<ChatApp />);
+    const textarea = screen.getByLabelText('随心输入');
+    const overflowImage = makeAnimatedGifFile('overflow.gif');
+    const readBytes = vi.fn(() => Promise.resolve(new ArrayBuffer(0)));
+    Object.defineProperty(overflowImage, 'arrayBuffer', {
+      configurable: true,
+      value: readBytes,
+    });
+
+    fireEvent.paste(textarea, {
+      clipboardData: makeImageClipboardData([overflowImage]),
+    });
+
+    await waitFor(() => {
+      expect(useUiStore.getState().notification).toEqual({
+        type: 'notification',
+        level: 'warning',
+        message: `最多只能添加 ${MAX_COMPOSER_IMAGE_COUNT} 张图片`,
+      });
+    });
+    expect(readBytes).not.toHaveBeenCalled();
+  });
+
+  it('sends static WebP images without transcoding', async () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    const textarea = screen.getByLabelText('要求后续变更');
+    const webpImage = new File(['webp image'], 'static.webp', { type: 'image/webp' });
+
+    fireEvent.paste(textarea, {
+      clipboardData: makeImageClipboardData([webpImage]),
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(textarea, { target: { value: '看 WebP' } });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    await waitFor(() => {
+      expectPostedPayload('user_message', {
+        type: 'user_message',
+        text: '看 WebP',
+        deliverAs: undefined,
+        images: [{ type: 'image', data: 'd2VicCBpbWFnZQ==', mimeType: 'image/webp' }],
+      });
+    });
+  });
+
+  it('warns and ignores animated GIF and WebP images', async () => {
+    render(<ChatApp />);
+    const textarea = screen.getByLabelText('随心输入');
+
+    fireEvent.paste(textarea, {
+      clipboardData: makeImageClipboardData([makeAnimatedGifFile(), makeAnimatedWebpFile()]),
+    });
+
+    await waitFor(() => {
+      expect(useUiStore.getState().notification).toEqual({
+        type: 'notification',
+        level: 'warning',
+        message: '已忽略 2 张动画图片，暂不支持发送动画',
+      });
+    });
+    expect(screen.queryByRole('button', { name: '预览图片 1' })).not.toBeInTheDocument();
   });
 
   it('clears the home draft and shows the new session after creation succeeds', () => {
@@ -2326,11 +2644,11 @@ describe('ChatApp', () => {
     expect(screen.queryByText('正在压缩上下文')).not.toBeInTheDocument();
   });
 
-  it('sends current session messages with composer images', () => {
+  it('sends current session messages with composer images', async () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
     useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
-    useComposerStore.getState().actions.addImages('session-1', [TEST_IMAGE]);
+    useComposerStore.getState().actions.addImages('session-1', [makeComposerImageDescriptor()]);
 
     render(<ChatApp />);
     fireEvent.change(screen.getByLabelText('要求后续变更'), {
@@ -2338,12 +2656,349 @@ describe('ChatApp', () => {
     });
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
 
-    expectPostedPayload('user_message', {
-      type: 'user_message',
-      text: '看这张图',
-      deliverAs: undefined,
-      images: [TEST_IMAGE],
+    await waitFor(() => {
+      expectPostedPayload('user_message', {
+        type: 'user_message',
+        text: '看这张图',
+        deliverAs: undefined,
+        images: [TEST_IMAGE],
+      });
     });
+  });
+
+  it('sends pasted images with the current session message', async () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    const textarea = screen.getByLabelText('要求后续变更');
+    const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+
+    fireEvent.paste(textarea, {
+      clipboardData: makeImageClipboardData([pastedImage]),
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(textarea, { target: { value: '看粘贴的图' } });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    await waitFor(() => {
+      expectPostedPayload('user_message', {
+        type: 'user_message',
+        text: '看粘贴的图',
+        deliverAs: undefined,
+        images: [{ type: 'image', data: 'cGFzdGVkIGltYWdl', mimeType: 'image/png' }],
+      });
+    });
+  });
+
+  it('waits for pasted image encoding before sending the current session message', async () => {
+    const fileReader = installDeferredFileReader();
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    try {
+      render(<ChatApp />);
+      const textarea = screen.getByLabelText('要求后续变更');
+      const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+
+      fireEvent.change(textarea, { target: { value: '看粘贴的图' } });
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([pastedImage]),
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+      });
+      expect(fileReader.readers).toHaveLength(0);
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(fileReader.readers).toHaveLength(1);
+      expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
+      expect(screen.getByRole('button', { name: '发送中' })).toBeDisabled();
+
+      await act(async () => {
+        fileReader.readers[0]?.complete('data:image/png;base64,cGFzdGVkIGltYWdl');
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expectPostedPayload('user_message', {
+          type: 'user_message',
+          text: '看粘贴的图',
+          deliverAs: undefined,
+          images: [{ type: 'image', data: 'cGFzdGVkIGltYWdl', mimeType: 'image/png' }],
+        });
+      });
+      expect(screen.queryByRole('button', { name: '预览图片 1' })).not.toBeInTheDocument();
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('locks the current draft while submit encodes images', async () => {
+    const fileReader = installDeferredFileReader();
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    try {
+      render(<ChatApp />);
+      const textarea = screen.getByLabelText('要求后续变更') as HTMLTextAreaElement;
+      const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+      const ignoredImage = new File(['ignored image'], 'ignored.png', { type: 'image/png' });
+
+      fireEvent.change(textarea, { target: { value: '发送时的文本' } });
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([pastedImage]),
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+      });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(fileReader.readers).toHaveLength(1);
+      expect(textarea).toHaveAttribute('readonly');
+      expect(screen.getByRole('button', { name: '添加图片' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '移除图片 1' })).toBeDisabled();
+
+      fireEvent.change(textarea, { target: { value: '等待期间的新文本' } });
+      fireEvent.click(screen.getByRole('button', { name: '移除图片 1' }));
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([ignoredImage]),
+      });
+      expect(fileReader.readers).toHaveLength(1);
+
+      await act(async () => {
+        fileReader.readers[0]?.complete('data:image/png;base64,cGFzdGVkIGltYWdl');
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expectPostedPayload('user_message', {
+          type: 'user_message',
+          text: '发送时的文本',
+          deliverAs: undefined,
+          images: [{ type: 'image', data: 'cGFzdGVkIGltYWdl', mimeType: 'image/png' }],
+        });
+      });
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('shows an error notification when pasted image encoding fails', async () => {
+    const fileReader = installDeferredFileReader();
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    try {
+      render(<ChatApp />);
+      const textarea = screen.getByLabelText('要求后续变更');
+      const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([pastedImage]),
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+      });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(fileReader.readers).toHaveLength(1);
+      await act(async () => {
+        fileReader.readers[0]?.fail();
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(useUiStore.getState().notification).toEqual({
+          type: 'notification',
+          level: 'error',
+          message: '图片读取失败，请重新选择',
+        });
+      });
+      expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('keeps the draft and does not send if compaction starts while image encoding is pending', async () => {
+    const fileReader = installDeferredFileReader();
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    try {
+      render(<ChatApp />);
+      const textarea = screen.getByLabelText('要求后续变更');
+      const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+
+      fireEvent.change(textarea, { target: { value: '压缩开始前的提交' } });
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([pastedImage]),
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+      });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(fileReader.readers).toHaveLength(1);
+
+      act(() => {
+        routeExtensionMessage({
+          type: 'runtime_state_update',
+          isStreaming: true,
+          busyState: {
+            kind: 'compaction',
+            label: 'Compacting',
+            cancellable: true,
+            reason: 'manual',
+          },
+        });
+      });
+      await act(async () => {
+        fileReader.readers[0]?.complete('data:image/png;base64,cGFzdGVkIGltYWdl');
+        await Promise.resolve();
+      });
+
+      await waitFor(() => {
+        expect(useUiStore.getState().notification).toEqual({
+          type: 'notification',
+          level: 'error',
+          message: '正在压缩上下文，请等待压缩完成后再发送',
+        });
+      });
+      expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
+      expect(screen.getByLabelText('要求后续变更')).toHaveValue('压缩开始前的提交');
+      expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('does not show image encoding errors after leaving the submit context', async () => {
+    const fileReader = installDeferredFileReader();
+
+    try {
+      routeDetailState();
+      render(<ChatApp />);
+      const textarea = screen.getByLabelText('要求后续变更');
+      const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+
+      fireEvent.change(textarea, { target: { value: '切走前的失败提交' } });
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([pastedImage]),
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+      });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+      expect(fileReader.readers).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole('button', { name: '新会话' }));
+      await act(async () => {
+        fileReader.readers[0]?.fail();
+        await Promise.resolve();
+      });
+
+      expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
+      expect(useUiStore.getState().notification).toBeUndefined();
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('abandons delayed current session submits after leaving the session view', async () => {
+    const fileReader = installDeferredFileReader();
+
+    try {
+      routeDetailState();
+      render(<ChatApp />);
+      const textarea = screen.getByLabelText('要求后续变更');
+      const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+
+      fireEvent.change(textarea, { target: { value: '切走前的提交' } });
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([pastedImage]),
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+      });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(fileReader.readers).toHaveLength(1);
+      expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
+
+      fireEvent.click(screen.getByRole('button', { name: '新会话' }));
+      expect(screen.getByLabelText('随心输入')).toBeInTheDocument();
+
+      await act(async () => {
+        fileReader.readers[0]?.complete('data:image/png;base64,cGFzdGVkIGltYWdl');
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
+    } finally {
+      fileReader.restore();
+    }
+  });
+
+  it('abandons delayed new session submits after opening another task', async () => {
+    const fileReader = installDeferredFileReader();
+    useTaskStore.getState().actions.setRecentTasks([
+      {
+        id: 'task-2',
+        sessionId: 'session-2',
+        sessionPath: '/sessions/session-2.jsonl',
+        title: '会话二',
+        createdAt: '2026-06-13T00:00:00.000Z',
+      },
+    ]);
+
+    try {
+      render(<ChatApp />);
+      const textarea = screen.getByLabelText('随心输入');
+      const pastedImage = new File(['pasted image'], 'pasted.png', { type: 'image/png' });
+
+      fireEvent.change(textarea, { target: { value: '打开任务前的新会话' } });
+      fireEvent.paste(textarea, {
+        clipboardData: makeImageClipboardData([pastedImage]),
+      });
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+      });
+      fireEvent.keyDown(textarea, { key: 'Enter' });
+
+      expect(fileReader.readers).toHaveLength(1);
+      expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
+
+      fireEvent.click(screen.getByRole('button', { name: /会话二/ }));
+      expectPostedPayload('open_task', {
+        type: 'open_task',
+        taskId: 'task-2',
+        sessionPath: '/sessions/session-2.jsonl',
+        cwdOverride: undefined,
+      });
+      expect(useUiStore.getState().openingTaskSessionPath).toBe('/sessions/session-2.jsonl');
+
+      await act(async () => {
+        fileReader.readers[0]?.complete('data:image/png;base64,cGFzdGVkIGltYWdl');
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
+      expect(useUiStore.getState().openingTaskSessionPath).toBe('/sessions/session-2.jsonl');
+    } finally {
+      fileReader.restore();
+    }
   });
 
   it('keeps the reading position after sending while scrolled into history', () => {

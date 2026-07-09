@@ -3,10 +3,17 @@
 // ============================================================
 
 import { create } from 'zustand';
-import type { ScoutImageContent } from '@scout-agent/shared';
+import {
+  releaseComposerImageDescriptors,
+  resetComposerImageRegistry,
+  retainComposerImageDescriptors,
+  type ComposerImageDescriptor,
+} from './composer-image-registry';
 
-interface ComposerDraft {
-  images?: ScoutImageContent[];
+export type { ComposerImageDescriptor } from './composer-image-registry';
+
+export interface ComposerDraft {
+  images?: ComposerImageDescriptor[];
   text: string;
 }
 
@@ -20,7 +27,7 @@ export interface ComposerReplaceTextEffect {
 export type ComposerCommandEffect = ComposerReplaceTextEffect;
 
 interface ComposerActions {
-  addImages: (sessionId: string, images: ScoutImageContent[]) => void;
+  addImages: (sessionId: string, images: ComposerImageDescriptor[]) => void;
   removeImage: (sessionId: string, index: number) => void;
   setText: (sessionId: string, text: string) => void;
   stagePendingDraft: (sessionId: string, draft: ComposerDraft) => void;
@@ -34,7 +41,7 @@ interface ComposerActions {
 }
 
 interface ComposerStore {
-  imagesBySessionId: Record<string, ScoutImageContent[]>;
+  imagesBySessionId: Record<string, ComposerImageDescriptor[]>;
   pendingDraftBySessionId: Record<string, ComposerDraft>;
   textBySessionId: Record<string, string>;
   // 协议命令完成后要作用到 composer 的一次性 UI effect；由匹配的 composer 消费后清空
@@ -43,11 +50,11 @@ interface ComposerStore {
 }
 
 const EMPTY_SESSION_ID = '__empty_session__';
-const EMPTY_IMAGES: ScoutImageContent[] = [];
+const EMPTY_IMAGES: ComposerImageDescriptor[] = [];
 export const HOME_COMPOSER_SESSION_ID = '__task_home__';
 
 const initialState = {
-  imagesBySessionId: {} as Record<string, ScoutImageContent[]>,
+  imagesBySessionId: {} as Record<string, ComposerImageDescriptor[]>,
   pendingDraftBySessionId: {} as Record<string, ComposerDraft>,
   textBySessionId: {} as Record<string, string>,
   pendingCommandEffect: null as ComposerCommandEffect | null,
@@ -76,8 +83,10 @@ export const useComposerStore = create<ComposerStore>((set) => ({
       set((state) => {
         const key = getComposerSessionId(sessionId);
         const currentImages = state.imagesBySessionId[key] ?? [];
+        const removedImages = currentImages.filter((_, imageIndex) => imageIndex === index);
         const nextImages = currentImages.filter((_, imageIndex) => imageIndex !== index);
         if (nextImages.length === currentImages.length) return state;
+        releaseComposerImageDescriptors(removedImages);
         const nextImagesBySessionId = { ...state.imagesBySessionId };
         if (nextImages.length === 0) {
           delete nextImagesBySessionId[key];
@@ -100,6 +109,8 @@ export const useComposerStore = create<ComposerStore>((set) => ({
     stagePendingDraft: (sessionId, draft) =>
       set((state) => {
         const key = getComposerSessionId(sessionId);
+        releaseComposerImageDescriptors(state.pendingDraftBySessionId[key]?.images);
+        retainComposerImageDescriptors(draft.images);
         return {
           pendingDraftBySessionId: {
             ...state.pendingDraftBySessionId,
@@ -122,6 +133,7 @@ export const useComposerStore = create<ComposerStore>((set) => ({
         const currentText = state.textBySessionId[key] ?? '';
         const currentImages = state.imagesBySessionId[key] ?? [];
         if (currentText.length > 0 || currentImages.length > 0) {
+          releaseComposerImageDescriptors(pendingDraft.images);
           return { pendingDraftBySessionId: nextPendingDrafts };
         }
 
@@ -146,7 +158,9 @@ export const useComposerStore = create<ComposerStore>((set) => ({
     discardPendingDraft: (sessionId) =>
       set((state) => {
         const key = getComposerSessionId(sessionId);
-        if (state.pendingDraftBySessionId[key] === undefined) return state;
+        const pendingDraft = state.pendingDraftBySessionId[key];
+        if (pendingDraft === undefined) return state;
+        releaseComposerImageDescriptors(pendingDraft.images);
         const nextPendingDrafts = { ...state.pendingDraftBySessionId };
         delete nextPendingDrafts[key];
         return { pendingDraftBySessionId: nextPendingDrafts };
@@ -162,6 +176,7 @@ export const useComposerStore = create<ComposerStore>((set) => ({
         }
         const nextImagesBySessionId = { ...state.imagesBySessionId };
         const nextTextBySessionId = { ...state.textBySessionId };
+        releaseComposerImageDescriptors(nextImagesBySessionId[key]);
         delete nextImagesBySessionId[key];
         delete nextTextBySessionId[key];
         return {
@@ -182,7 +197,11 @@ export const useComposerStore = create<ComposerStore>((set) => ({
       set((state) =>
         state.pendingCommandEffect === null ? state : { pendingCommandEffect: null },
       ),
-    reset: () => set(initialState),
+    reset: () =>
+      set(() => {
+        resetComposerImageRegistry();
+        return initialState;
+      }),
   },
 }));
 
@@ -193,6 +212,15 @@ export const useComposerImages = (sessionId: string) =>
 
 export const useComposerText = (sessionId: string) =>
   useComposerStore((state) => state.textBySessionId[getComposerSessionId(sessionId)] ?? '');
+
+export function getComposerDraftSnapshot(sessionId: string): ComposerDraft {
+  const key = getComposerSessionId(sessionId);
+  const state = useComposerStore.getState();
+  return {
+    images: state.imagesBySessionId[key],
+    text: state.textBySessionId[key] ?? '',
+  };
+}
 
 export const useComposerActions = () => useComposerStore((state) => state.actions);
 

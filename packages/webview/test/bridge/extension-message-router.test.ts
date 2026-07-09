@@ -4,20 +4,20 @@ import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectProtocolResponsePayload } from '@/bridge/protocol-response-projector';
 import { resetProtocolTransport } from '@/bridge/transport-client';
 import { useConfigStore } from '@/store/config-store';
+import { registerComposerImageFile } from '@/store/composer-image-registry';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
+import type { ComposerImageDescriptor } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
-import type { ScoutImageContent } from '@scout-agent/shared';
 
-const TEST_IMAGE: ScoutImageContent = {
-  type: 'image',
-  data: 'aW1hZ2U=',
-  mimeType: 'image/png',
-};
+function makeComposerImageDescriptor(name = 'test-image.png'): ComposerImageDescriptor {
+  const file = new File(['image'], name, { type: 'image/png' });
+  return registerComposerImageFile(file, file.type);
+}
 
 describe('routeExtensionMessage', () => {
   afterEach(() => {
@@ -459,7 +459,9 @@ describe('routeExtensionMessage', () => {
   });
 
   it('routes new session results into chat navigation and home draft state', () => {
-    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
+    useComposerStore
+      .getState()
+      .actions.addImages(HOME_COMPOSER_SESSION_ID, [makeComposerImageDescriptor()]);
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
     useUiStore.getState().actions.beginNewSessionRequest();
 
@@ -472,7 +474,8 @@ describe('routeExtensionMessage', () => {
   });
 
   it('keeps the home draft when new session creation fails', () => {
-    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [TEST_IMAGE]);
+    const image = makeComposerImageDescriptor();
+    useComposerStore.getState().actions.addImages(HOME_COMPOSER_SESSION_ID, [image]);
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'draft');
     useUiStore.getState().actions.beginNewSessionRequest();
 
@@ -485,15 +488,16 @@ describe('routeExtensionMessage', () => {
     expect(useUiStore.getState().chatView).toBe('home');
     expect(useUiStore.getState().newSessionPending).toBe(false);
     expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toEqual([
-      TEST_IMAGE,
+      image,
     ]);
     expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('draft');
   });
 
   it('restores an optimistically cleared home draft when new session creation fails', () => {
+    const image = makeComposerImageDescriptor();
     useComposerStore.getState().actions.stagePendingDraft(HOME_COMPOSER_SESSION_ID, {
       text: 'pending draft',
-      images: [TEST_IMAGE],
+      images: [image],
     });
     useComposerStore.getState().actions.clearDraft(HOME_COMPOSER_SESSION_ID);
     useUiStore.getState().actions.beginNewSessionRequest();
@@ -504,8 +508,14 @@ describe('routeExtensionMessage', () => {
       error: 'failed',
     });
 
-    expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toEqual([
-      TEST_IMAGE,
+    expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toMatchObject([
+      {
+        id: image.id,
+        mimeType: image.mimeType,
+        name: image.name,
+        size: image.size,
+        type: 'image',
+      },
     ]);
     expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe(
       'pending draft',

@@ -2,11 +2,16 @@
 // Chat Composer — 底部输入与运行控制
 // ============================================================
 
-import type { CSSProperties, KeyboardEvent, ReactNode, RefObject } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+  RefObject,
+} from 'react';
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, X } from 'lucide-react';
-import type { ScoutImageContent } from '@scout-agent/shared';
+import { Plus } from 'lucide-react';
+import type { ScoutQueueState } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
 import { markProgrammaticFocus } from '@/components/ui/focus';
@@ -28,9 +33,13 @@ import {
   useVisualIsStreaming,
 } from '@/store/runtime-overlay-store';
 import { useSessionId } from '@/store/session-store';
-import { useUiActions } from '@/store/ui-store';
 import { ModelStatusMenu } from '@/features/model-menu';
-import { ComposerTextarea, type ComposerSubmitDelivery } from './ComposerTextarea';
+import { useComposerImageAttachments } from '../hooks/use-composer-image-attachments';
+import { useComposerSubmitFlow } from '../hooks/use-composer-submit-flow';
+import { SUPPORTED_IMAGE_INPUT_ACCEPT } from '../model/composer-images';
+import { ComposerImagePreviewDialog } from './ComposerImagePreviewDialog';
+import { ComposerImageTray } from './ComposerImageTray';
+import { ComposerTextarea } from './ComposerTextarea';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
@@ -81,29 +90,17 @@ type ChatComposerSessionProps =
   | CurrentSessionChatComposerSessionProps
   | NewSessionChatComposerSessionProps;
 
-interface PendingSubmit {
-  images?: ScoutImageContent[];
-  text: string;
-  deliverAs?: ComposerSubmitDelivery;
-}
-
-interface ComposerSubmitPayload {
-  images?: ScoutImageContent[];
-  text: string;
-}
-
 interface SlashSelectionState {
   key: string | null;
   index: number;
 }
 
 const ABORT_CONFIRM_TIMEOUT_MS = 1800;
-const COMPACTION_SEND_BLOCKED_MESSAGE = '正在压缩上下文，请等待压缩完成后再发送';
 const EMPTY_QUEUE_STATE = {
   messages: [],
   followUps: [],
   paused: false,
-} as const;
+} satisfies ScoutQueueState;
 const FLOATING_PANEL_LAYER_CLASS = 'fixed z-50 min-w-0 max-w-full';
 const FLOATING_PANEL_GAP_PX = 6;
 
@@ -173,26 +170,24 @@ export const ChatComposer = memo(ChatComposerView);
 function ChatComposerSession(props: ChatComposerSessionProps) {
   const { mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
   const [confirmAbort, setConfirmAbort] = useState(false);
-  const [pendingSubmit, setPendingSubmit] = useState<PendingSubmit | null>(null);
   const [selectionStart, setSelectionStart] = useState(0);
   const [slashSelection, setSlashSelection] = useState<SlashSelectionState>({
     key: null,
     index: 0,
   });
   const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
+  const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
   const [floatingPanelLayout, setFloatingPanelLayout] = useState<FloatingPanelLayout | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
   const floatingPanelRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
-  const submitBlockedRef = useRef(false);
   const images = useComposerImages(sessionId);
   const text = useComposerText(sessionId);
   const commands = useCommands();
   const composerActions = useComposerActions();
   const pendingCommandEffect = usePendingComposerCommandEffect();
   const runtimeOverlayActions = useRuntimeOverlayActions();
-  const uiActions = useUiActions();
   const visualBusy = useVisualBusyState();
   const currentSessionStreaming = useIsStreaming();
   const currentSessionVisualStreaming = useVisualIsStreaming();
@@ -202,15 +197,31 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const isStreaming = isCurrentSessionMode ? currentSessionStreaming : false;
   const visualIsStreaming = isCurrentSessionMode ? currentSessionVisualStreaming : false;
   const queueState = isCurrentSessionMode ? currentSessionQueueState : EMPTY_QUEUE_STATE;
-  const hasText = text.trim().length > 0;
-  const hasImages = images.length > 0;
-  const hasDraft = hasText || hasImages;
-  const isSubmitDisabled = submitDisabled;
-  const isSubmitPending = mode === 'newSession' && isSubmitDisabled;
-  const canSubmit = hasDraft && !isSubmitDisabled;
+  const imageAttachments = useComposerImageAttachments(sessionId);
+  const submitFlow = useComposerSubmitFlow({
+    images,
+    isStreaming,
+    mode,
+    onBeginNewSessionRequest:
+      props.mode === 'newSession' ? props.onBeginNewSessionRequest : undefined,
+    onMessageSent,
+    queueState,
+    sessionId,
+    submitDisabled,
+    text,
+  });
+  const {
+    canSubmit,
+    closePendingSubmitDialog,
+    hasDraft,
+    isDraftLocked,
+    isSubmitPending,
+    pendingSubmit,
+    sendPendingSubmit,
+    submit,
+  } = submitFlow;
   const canStop = isCurrentSessionMode && visualBusy.cancellable;
   const showStop = (visualIsStreaming || canStop) && !hasDraft;
-  const hasPausedFollowUps = queueState.paused && queueState.followUps.length > 0;
   const slashTrigger = useMemo(
     () => getSlashCommandTrigger(text, selectionStart),
     [selectionStart, text],
@@ -244,6 +255,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const forkMenuOpen = forkMenu.open;
   const closeForkMenu = forkMenu.close;
   const floatingPanelOpen = forkMenuOpen || slashMenuOpen;
+  const previewImage = previewImageIndex === null ? null : images[previewImageIndex];
 
   const applyFloatingPanelLayout = useCallback((layout: FloatingPanelLayout) => {
     setFloatingPanelLayout((current) =>
@@ -327,61 +339,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   }, [confirmAbort, showStop]);
 
   useEffect(() => {
-    if (submitDisabled) return;
-    submitBlockedRef.current = false;
-  }, [submitDisabled]);
-
-  const sendMessage = (
-    payload: ComposerSubmitPayload,
-    deliverAs?: ComposerSubmitDelivery,
-    options?: { clearFollowUpQueue?: boolean },
-  ) => {
-    if (isSubmitDisabled || submitBlockedRef.current) return;
-    if (isCurrentSessionMode && visualBusy.kind === 'compaction') {
-      if (payload.images && payload.images.length > 0 && images.length === 0) {
-        composerActions.addImages(sessionId, payload.images);
-      }
-      setPendingSubmit(null);
-      uiActions.setNotification({
-        type: 'notification',
-        level: 'error',
-        message: COMPACTION_SEND_BLOCKED_MESSAGE,
-      });
-      return;
-    }
-    if (props.mode === 'newSession') {
-      submitBlockedRef.current = true;
-      props.onBeginNewSessionRequest();
-      composerActions.stagePendingDraft(sessionId, payload);
-      protocolClient.newSessionMessage(payload.text, payload.images);
-      composerActions.clearDraft(sessionId);
-      setPendingSubmit(null);
-      return;
-    }
-    protocolClient.userMessage(payload.text, deliverAs, {
-      ...options,
-      images: payload.images,
-    });
-    onMessageSent?.();
-    composerActions.clearDraft(sessionId);
-    setPendingSubmit(null);
-  };
-
-  const submit = (delivery?: ComposerSubmitDelivery) => {
-    if (isSubmitDisabled || submitBlockedRef.current) return;
-    const nextText = text.trim();
-    if (!nextText && images.length === 0) return;
-    const payload = {
-      text: nextText,
-      images: images.length > 0 ? images : undefined,
-    };
-    const deliverAs = isStreaming && !hasPausedFollowUps ? (delivery ?? 'followUp') : delivery;
-    if (hasPausedFollowUps && !deliverAs) {
-      setPendingSubmit(payload);
-      return;
-    }
-    sendMessage(payload, deliverAs);
-  };
+    if (previewImageIndex === null || images[previewImageIndex]) return;
+    const timer = window.setTimeout(() => setPreviewImageIndex(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [images, previewImageIndex]);
 
   const stop = () => {
     if (!canStop) return;
@@ -410,31 +371,16 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     stop();
   };
 
-  const closePendingSubmitDialog = () => {
-    setPendingSubmit(null);
+  const openImagePreview = (index: number) => {
+    setPreviewImageIndex(index);
   };
 
-  const sendPendingSubmit = (clearFollowUpQueue: boolean) => {
-    if (!pendingSubmit) return;
-    sendMessage(pendingSubmit, pendingSubmit.deliverAs, { clearFollowUpQueue });
-  };
-
-  const addImageFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const settledImages = await Promise.allSettled(
-      Array.from(files)
-        .filter((file) => SUPPORTED_IMAGE_MIME_TYPES.has(file.type))
-        .map(readImageFile),
-    );
-    const nextImages = settledImages
-      .filter((result): result is PromiseFulfilledResult<ScoutImageContent> => {
-        return result.status === 'fulfilled';
-      })
-      .map((result) => result.value);
-    composerActions.addImages(sessionId, nextImages);
+  const closeImagePreview = () => {
+    setPreviewImageIndex(null);
   };
 
   const setComposerText = (nextText: string) => {
+    if (isDraftLocked) return;
     setDismissedSlashKey(null);
     setSlashSelection({ key: null, index: 0 });
     composerActions.setText(sessionId, nextText);
@@ -501,7 +447,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     }
   };
 
-  const handleSlashKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleSlashKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean => {
     if (forkMenu.handleKeyDown(event)) return true;
     if (!slashMenuOpen) return false;
     if (event.key === 'Escape') {
@@ -562,46 +508,38 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
           className="border-border bg-background w-full max-w-full min-w-0 overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
           onSubmit={(event) => {
             event.preventDefault();
-            submit();
+            void submit();
           }}
         >
+          {images.length > 0 ? (
+            <ComposerImageTray
+              images={images}
+              removeDisabled={isDraftLocked}
+              onPreview={openImagePreview}
+              onRemove={(index) => composerActions.removeImage(sessionId, index)}
+            />
+          ) : null}
+
           <ComposerTextarea
             placeholder={placeholder}
             textareaRef={textareaRef}
             value={text}
             onChange={setComposerText}
             onKeyDownCapture={handleSlashKeyDown}
+            onPaste={(event) => {
+              if (isDraftLocked) {
+                event.preventDefault();
+                return;
+              }
+              imageAttachments.handlePaste(event);
+            }}
             onSelectionChange={setSelectionStart}
-            onSubmit={submit}
+            onSubmit={(delivery) => void submit(delivery)}
             onCancel={requestKeyboardStop}
+            readOnly={isDraftLocked}
             isStreaming={isStreaming}
             canRequestAbort={visualIsStreaming && showStop && canStop}
           />
-
-          {images.length > 0 ? (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {images.map((image, index) => (
-                <div
-                  key={`${image.mimeType}:${image.data.length}:${index}`}
-                  className="border-border bg-muted relative size-12 overflow-hidden rounded-md border"
-                >
-                  <img
-                    alt=""
-                    className="size-full object-cover"
-                    src={`data:${image.mimeType};base64,${image.data}`}
-                  />
-                  <button
-                    aria-label="移除图片"
-                    className="bg-background/90 text-foreground hover:bg-background absolute top-0.5 right-0.5 grid size-5 place-items-center rounded-full"
-                    type="button"
-                    onClick={() => composerActions.removeImage(sessionId, index)}
-                  >
-                    <X className="size-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          ) : null}
 
           <div className="mt-2 flex min-h-8 max-w-full min-w-0 flex-nowrap items-center justify-between gap-2 overflow-hidden">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
@@ -613,11 +551,16 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
                 ref={imageInputRef}
                 type="file"
                 onChange={(event) => {
-                  void addImageFiles(event.currentTarget.files);
+                  if (isDraftLocked) {
+                    event.currentTarget.value = '';
+                    return;
+                  }
+                  void imageAttachments.addImageFiles(event.currentTarget.files);
                   event.currentTarget.value = '';
                 }}
               />
               <IconButton
+                disabled={isDraftLocked}
                 label="添加图片"
                 onClick={() => {
                   imageInputRef.current?.click();
@@ -650,6 +593,14 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
         onClearQueueAndSend={() => sendPendingSubmit(true)}
         onSend={() => sendPendingSubmit(false)}
       />
+
+      {previewImage ? (
+        <ComposerImagePreviewDialog
+          image={previewImage}
+          imageIndex={previewImageIndex ?? 0}
+          onClose={closeImagePreview}
+        />
+      ) : null}
     </>
   );
 }
@@ -681,24 +632,4 @@ function ComposerFloatingLayer({
     </div>,
     document.body,
   );
-}
-
-const SUPPORTED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-const SUPPORTED_IMAGE_INPUT_ACCEPT = Array.from(SUPPORTED_IMAGE_MIME_TYPES).join(',');
-
-function readImageFile(file: File): Promise<ScoutImageContent> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : '';
-      const [, data = ''] = result.split(',', 2);
-      resolve({
-        type: 'image',
-        data,
-        mimeType: file.type,
-      });
-    };
-    reader.readAsDataURL(file);
-  });
 }

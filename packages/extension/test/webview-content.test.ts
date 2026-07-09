@@ -72,6 +72,7 @@ describe('getScoutWebviewHtml', () => {
     expect(html).toContain('window.__vite_plugin_react_preamble_installed__ = true');
     expect(html).toContain('<script type="module" src="http://localhost:5173/@vite/client">');
     expect(html).toContain('<script type="module" src="http://localhost:5173/src/main.tsx">');
+    expect(html).toContain('img-src http://localhost:5173 data: blob:;');
     expect(html).toContain('<div id="root"></div>');
     expect(html).not.toContain('<iframe');
     expect(html).not.toContain('frame.contentWindow');

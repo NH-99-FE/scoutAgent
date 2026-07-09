@@ -68,7 +68,7 @@ function getHmrHtml(
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${devOrigin} data:; font-src ${devOrigin} data:; style-src ${devOrigin} 'unsafe-inline'; script-src ${devOrigin} 'unsafe-inline'; connect-src ${devOrigin} ws://localhost:5173;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${devOrigin} data: blob:; font-src ${devOrigin} data:; style-src ${devOrigin} 'unsafe-inline'; script-src ${devOrigin} 'unsafe-inline'; connect-src ${devOrigin} ws://localhost:5173;">
   <title>${getSurfaceTitle(surface)}</title>
   ${STARTUP_THEME_STYLE}
   <style>

@@ -236,4 +236,10 @@ export const useVisualBusyState = () => {
   return localAbortSettling ? IDLE_BUSY_STATE : busyState;
 };
 
+export function getVisualBusyStateSnapshot() {
+  const localAbortSettling = useRuntimeOverlayStore.getState().localAbortSettling;
+  const busyState = useConversationStore.getState().busyState;
+  return localAbortSettling ? IDLE_BUSY_STATE : busyState;
+}
+
 export const useRuntimeOverlayActions = () => useRuntimeOverlayStore((state) => state.actions);
