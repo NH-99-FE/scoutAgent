@@ -6,9 +6,9 @@
 
 import { Split } from 'lucide-react';
 import type { ScoutForkCandidate } from '@scout-agent/shared';
+import { FloatingPanel } from '@/components/common/FloatingPanel';
 import { cn } from '@/lib/utils';
-import { ComposerFloatingPanel, ComposerFloatingPanelHint } from './ComposerFloatingPanel';
-import { useComposerFloatingPanelOptionScroll } from './composer-floating-panel-scroll';
+import { useSuggestionOptionScroll } from '../hooks/use-suggestion-option-scroll';
 
 interface ForkCandidateMenuProps {
   activeIndex: number;
@@ -27,23 +27,37 @@ export function ForkCandidateMenu({
   onSelect,
 }: ForkCandidateMenuProps) {
   const activeKey = candidates?.[activeIndex]?.entryId ?? null;
-  const { setOptionElement } = useComposerFloatingPanelOptionScroll(activeKey);
+  const { setOptionElement } = useSuggestionOptionScroll(activeKey);
 
   if (candidates === null) {
     return (
-      <ComposerFloatingPanelHint label="Fork candidates">加载历史消息…</ComposerFloatingPanelHint>
+      <FloatingPanel
+        aria-label="Fork candidates"
+        className="text-muted-foreground text-xs"
+        contentClassName="px-3 py-2"
+        role="status"
+        scrollable={false}
+      >
+        加载历史消息…
+      </FloatingPanel>
     );
   }
   if (candidates.length === 0) {
     return (
-      <ComposerFloatingPanelHint label="Fork candidates">
+      <FloatingPanel
+        aria-label="Fork candidates"
+        className="text-muted-foreground text-xs"
+        contentClassName="px-3 py-2"
+        role="status"
+        scrollable={false}
+      >
         当前会话没有可分叉的历史消息
-      </ComposerFloatingPanelHint>
+      </FloatingPanel>
     );
   }
 
   return (
-    <ComposerFloatingPanel label="Fork candidates">
+    <FloatingPanel aria-label="Fork candidates" role="listbox">
       {candidates.map((candidate, index) => (
         <button
           key={candidate.entryId}
@@ -69,6 +83,6 @@ export function ForkCandidateMenu({
           </span>
         </button>
       ))}
-    </ComposerFloatingPanel>
+    </FloatingPanel>
   );
 }

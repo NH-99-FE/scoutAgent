@@ -1,17 +1,17 @@
 // ============================================================
-// Composer Floating Panel Scroll — Composer 浮层选中项滚动策略
+// Suggestion Option Scroll — 候选浮层选中项滚动策略
 // ============================================================
 
 import { useCallback, useLayoutEffect, useRef } from 'react';
 
-type PanelOptionKey = string | number;
+type SuggestionOptionKey = string | number;
 
 // ---------- Hook ----------
 
-export function useComposerFloatingPanelOptionScroll(activeKey: PanelOptionKey | null) {
-  const optionRefs = useRef(new Map<PanelOptionKey, HTMLElement>());
+export function useSuggestionOptionScroll(activeKey: SuggestionOptionKey | null) {
+  const optionRefs = useRef(new Map<SuggestionOptionKey, HTMLElement>());
 
-  const setOptionElement = useCallback((key: PanelOptionKey, element: HTMLElement | null) => {
+  const setOptionElement = useCallback((key: SuggestionOptionKey, element: HTMLElement | null) => {
     if (element) {
       optionRefs.current.set(key, element);
       return;
@@ -21,7 +21,7 @@ export function useComposerFloatingPanelOptionScroll(activeKey: PanelOptionKey |
 
   useLayoutEffect(() => {
     if (activeKey === null) return;
-    scrollComposerFloatingPanelOptionIntoView(optionRefs.current.get(activeKey) ?? null);
+    scrollSuggestionOptionIntoView(optionRefs.current.get(activeKey) ?? null);
   }, [activeKey]);
 
   return { setOptionElement };
@@ -29,6 +29,6 @@ export function useComposerFloatingPanelOptionScroll(activeKey: PanelOptionKey |
 
 // ---------- Scroll ----------
 
-export function scrollComposerFloatingPanelOptionIntoView(option: HTMLElement | null) {
+export function scrollSuggestionOptionIntoView(option: HTMLElement | null) {
   option?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
 }

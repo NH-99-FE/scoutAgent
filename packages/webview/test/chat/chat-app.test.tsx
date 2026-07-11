@@ -643,30 +643,34 @@ describe('ChatApp', () => {
     expect(getPostedProtocolRequests('open_tree_panel')).toHaveLength(0);
   });
 
-  it('closes slash commands when pressing outside the floating panel', () => {
+  it('closes slash commands when pressing outside the floating panel', async () => {
     routeCommands([makeCommand('tree', 'builtin', 'Open the conversation tree')]);
     render(<ChatApp />);
     typeComposerText('随心输入', '/');
 
-    expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('Slash commands')).toBeInTheDocument();
 
     fireEvent.pointerDown(document.body);
 
-    expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Slash commands')).not.toBeInTheDocument();
+    });
   });
 
-  it('closes fork candidates when pressing outside the floating panel', () => {
+  it('closes fork candidates when pressing outside the floating panel', async () => {
     routeCommands([makeCommand('fork', 'builtin', 'Create a branch')]);
     routeDetailState();
     render(<ChatApp />);
     typeComposerText('要求后续变更', '/');
 
     fireEvent.click(screen.getByRole('option', { name: /分叉/ }));
-    expect(screen.getByRole('listbox', { name: 'Fork candidates' })).toBeInTheDocument();
+    expect(await screen.findByLabelText('Fork candidates')).toBeInTheDocument();
 
     fireEvent.pointerDown(document.body);
 
-    expect(screen.queryByRole('listbox', { name: 'Fork candidates' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Fork candidates')).not.toBeInTheDocument();
+    });
   });
 
   it('ignores fork candidate responses for another session', async () => {

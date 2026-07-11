@@ -2,14 +2,8 @@
 // Chat Composer — 底部输入与运行控制
 // ============================================================
 
-import type {
-  CSSProperties,
-  KeyboardEvent as ReactKeyboardEvent,
-  ReactNode,
-  RefObject,
-} from 'react';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
 import type { ScoutQueueState } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
@@ -39,6 +33,7 @@ import { useComposerSubmitFlow } from '../hooks/use-composer-submit-flow';
 import { SUPPORTED_IMAGE_INPUT_ACCEPT } from '../model/composer-images';
 import { ComposerImagePreviewDialog } from './ComposerImagePreviewDialog';
 import { ComposerImageTray } from './ComposerImageTray';
+import { ComposerSuggestionPopover } from './ComposerSuggestionPopover';
 import { ComposerTextarea } from './ComposerTextarea';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
@@ -101,39 +96,6 @@ const EMPTY_QUEUE_STATE = {
   followUps: [],
   paused: false,
 } satisfies ScoutQueueState;
-const FLOATING_PANEL_LAYER_CLASS = 'fixed z-50 min-w-0 max-w-full';
-const FLOATING_PANEL_GAP_PX = 6;
-
-interface FloatingPanelLayout {
-  bottom: number;
-  left: number;
-  width: number;
-}
-
-function areFloatingPanelLayoutsEqual(
-  previous: FloatingPanelLayout | null,
-  next: FloatingPanelLayout,
-) {
-  return (
-    previous !== null &&
-    previous.bottom === next.bottom &&
-    previous.left === next.left &&
-    previous.width === next.width
-  );
-}
-
-function isEventFromFloatingPanel(event: Event, panel: HTMLElement | null) {
-  return event.target instanceof Node && panel !== null && panel.contains(event.target);
-}
-
-function measureFloatingPanelLayout(anchor: HTMLDivElement): FloatingPanelLayout {
-  const rect = anchor.getBoundingClientRect();
-  return {
-    bottom: Math.max(0, window.innerHeight - rect.top + FLOATING_PANEL_GAP_PX),
-    left: rect.left,
-    width: rect.width,
-  };
-}
 
 function ChatComposerView(props: ChatComposerProps) {
   const currentSessionId = useSessionId();
@@ -177,9 +139,6 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   });
   const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
   const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
-  const [floatingPanelLayout, setFloatingPanelLayout] = useState<FloatingPanelLayout | null>(null);
-  const composerAnchorRef = useRef<HTMLDivElement | null>(null);
-  const floatingPanelRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const images = useComposerImages(sessionId);
@@ -257,74 +216,13 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const floatingPanelOpen = forkMenuOpen || slashMenuOpen;
   const previewImage = previewImageIndex === null ? null : images[previewImageIndex];
 
-  const applyFloatingPanelLayout = useCallback((layout: FloatingPanelLayout) => {
-    setFloatingPanelLayout((current) =>
-      areFloatingPanelLayoutsEqual(current, layout) ? current : layout,
-    );
-  }, []);
-
-  const updateFloatingPanelLayout = useCallback(() => {
-    const anchor = composerAnchorRef.current;
-    if (!anchor) return;
-    applyFloatingPanelLayout(measureFloatingPanelLayout(anchor));
-  }, [applyFloatingPanelLayout]);
-
-  const updateFloatingPanelLayoutForExternalScroll = useCallback(
-    (event: Event) => {
-      if (isEventFromFloatingPanel(event, floatingPanelRef.current)) return;
-      updateFloatingPanelLayout();
-    },
-    [updateFloatingPanelLayout],
-  );
-
-  const setComposerAnchor = useCallback(
-    (anchor: HTMLDivElement | null) => {
-      composerAnchorRef.current = anchor;
-      if (!anchor || !floatingPanelOpen) return;
-      applyFloatingPanelLayout(measureFloatingPanelLayout(anchor));
-    },
-    [applyFloatingPanelLayout, floatingPanelOpen],
-  );
-
-  useLayoutEffect(() => {
-    if (!floatingPanelOpen) return undefined;
-
-    const anchor = composerAnchorRef.current;
-    let resizeObserver: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined' && anchor) {
-      resizeObserver = new ResizeObserver(updateFloatingPanelLayout);
-      resizeObserver.observe(anchor);
+  const dismissFloatingPanel = useCallback(() => {
+    if (forkMenuOpen) {
+      closeForkMenu();
+      return;
     }
-
-    window.addEventListener('resize', updateFloatingPanelLayout);
-    window.addEventListener('scroll', updateFloatingPanelLayoutForExternalScroll, true);
-    window.visualViewport?.addEventListener('resize', updateFloatingPanelLayout);
-    window.visualViewport?.addEventListener('scroll', updateFloatingPanelLayout);
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener('resize', updateFloatingPanelLayout);
-      window.removeEventListener('scroll', updateFloatingPanelLayoutForExternalScroll, true);
-      window.visualViewport?.removeEventListener('resize', updateFloatingPanelLayout);
-      window.visualViewport?.removeEventListener('scroll', updateFloatingPanelLayout);
-    };
-  }, [floatingPanelOpen, updateFloatingPanelLayout, updateFloatingPanelLayoutForExternalScroll]);
-
-  useEffect(() => {
-    if (!floatingPanelOpen) return undefined;
-    const closeFloatingPanelOnOutsidePointerDown = (event: PointerEvent) => {
-      const panel = floatingPanelRef.current;
-      if (event.target instanceof Node && panel?.contains(event.target)) return;
-      if (forkMenuOpen) {
-        closeForkMenu();
-        return;
-      }
-      setDismissedSlashKey(slashKey);
-    };
-    document.addEventListener('pointerdown', closeFloatingPanelOnOutsidePointerDown);
-    return () => {
-      document.removeEventListener('pointerdown', closeFloatingPanelOnOutsidePointerDown);
-    };
-  }, [closeForkMenu, floatingPanelOpen, forkMenuOpen, slashKey]);
+    setDismissedSlashKey(slashKey);
+  }, [closeForkMenu, forkMenuOpen, slashKey]);
 
   useEffect(() => {
     if (!confirmAbort) return undefined;
@@ -494,16 +392,18 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     <SlashCommandMenu
       activeIndex={boundedSlashActiveIndex}
       items={slashItems}
+      onHover={(index) => setSlashSelection({ key: slashKey, index })}
       onSelect={selectSlashItem}
     />
   ) : null;
 
   return (
     <>
-      <div ref={setComposerAnchor} className="relative w-full max-w-full min-w-0">
-        <ComposerFloatingLayer layout={floatingPanelLayout} panelRef={floatingPanelRef}>
-          {floatingPanel}
-        </ComposerFloatingLayer>
+      <ComposerSuggestionPopover
+        onDismiss={dismissFloatingPanel}
+        open={floatingPanelOpen}
+        panel={floatingPanel}
+      >
         <form
           className="border-border bg-background w-full max-w-full min-w-0 overflow-hidden rounded-2xl border px-2 py-2 shadow-sm"
           onSubmit={(event) => {
@@ -584,7 +484,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
             </div>
           </div>
         </form>
-      </div>
+      </ComposerSuggestionPopover>
 
       <PendingQueueSendDialog
         open={pendingSubmit !== null}
@@ -603,34 +503,5 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
         />
       ) : null}
     </>
-  );
-}
-
-function ComposerFloatingLayer({
-  children,
-  layout,
-  panelRef,
-}: {
-  children: ReactNode;
-  layout: FloatingPanelLayout | null;
-  panelRef: RefObject<HTMLDivElement | null>;
-}) {
-  if (!children || !layout) return null;
-
-  return createPortal(
-    <div
-      ref={panelRef}
-      className={FLOATING_PANEL_LAYER_CLASS}
-      style={
-        {
-          bottom: layout.bottom,
-          left: layout.left,
-          width: layout.width,
-        } satisfies CSSProperties
-      }
-    >
-      {children}
-    </div>,
-    document.body,
   );
 }

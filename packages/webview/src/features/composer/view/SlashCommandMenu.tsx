@@ -3,32 +3,41 @@
 // ============================================================
 
 import { Fragment } from 'react';
+import { FloatingPanel } from '@/components/common/FloatingPanel';
 import { cn } from '@/lib/utils';
-import { ComposerFloatingPanel, ComposerFloatingPanelHint } from './ComposerFloatingPanel';
-import { useComposerFloatingPanelOptionScroll } from './composer-floating-panel-scroll';
+import { useSuggestionOptionScroll } from '../hooks/use-suggestion-option-scroll';
 import type { SlashCommandMenuItem } from '../model/slash-command-options';
 
 interface SlashCommandMenuProps {
   activeIndex: number;
   items: SlashCommandMenuItem[];
+  onHover: (index: number) => void;
   onSelect: (item: SlashCommandMenuItem) => void;
 }
 
 // ---------- Component ----------
 
-export function SlashCommandMenu({ activeIndex, items, onSelect }: SlashCommandMenuProps) {
+export function SlashCommandMenu({ activeIndex, items, onHover, onSelect }: SlashCommandMenuProps) {
   const activeKey = items[activeIndex]?.key ?? null;
   const skillStartIndex = items.findIndex((item) => item.command.source === 'skill');
-  const { setOptionElement } = useComposerFloatingPanelOptionScroll(activeKey);
+  const { setOptionElement } = useSuggestionOptionScroll(activeKey);
 
   if (items.length === 0) {
     return (
-      <ComposerFloatingPanelHint label="Slash commands">没有匹配的命令</ComposerFloatingPanelHint>
+      <FloatingPanel
+        aria-label="Slash commands"
+        className="text-muted-foreground text-xs"
+        contentClassName="px-3 py-2"
+        role="status"
+        scrollable={false}
+      >
+        没有匹配的命令
+      </FloatingPanel>
     );
   }
 
   return (
-    <ComposerFloatingPanel label="Slash commands">
+    <FloatingPanel aria-label="Slash commands" role="listbox">
       {items.map((item, index) => (
         <Fragment key={item.key}>
           {index === skillStartIndex ? <SlashCommandMenuSection /> : null}
@@ -36,11 +45,12 @@ export function SlashCommandMenu({ activeIndex, items, onSelect }: SlashCommandM
             active={index === activeIndex}
             item={item}
             optionRef={(element) => setOptionElement(item.key, element)}
+            onHover={() => onHover(index)}
             onSelect={onSelect}
           />
         </Fragment>
       ))}
-    </ComposerFloatingPanel>
+    </FloatingPanel>
   );
 }
 
@@ -60,11 +70,13 @@ function SlashCommandMenuRow({
   active,
   item,
   optionRef,
+  onHover,
   onSelect,
 }: {
   active: boolean;
   item: SlashCommandMenuItem;
   optionRef: (element: HTMLButtonElement | null) => void;
+  onHover: () => void;
   onSelect: (item: SlashCommandMenuItem) => void;
 }) {
   const Icon = item.icon;
@@ -80,6 +92,7 @@ function SlashCommandMenuRow({
       role="option"
       type="button"
       onClick={() => onSelect(item)}
+      onMouseEnter={onHover}
       onMouseDown={(event) => {
         event.preventDefault();
       }}

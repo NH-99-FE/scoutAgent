@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
+import { FloatingPanel } from '@/components/common/FloatingPanel';
 import {
-  scrollComposerFloatingPanelOptionIntoView,
-  useComposerFloatingPanelOptionScroll,
-} from '@/features/composer/view/composer-floating-panel-scroll';
+  scrollSuggestionOptionIntoView,
+  useSuggestionOptionScroll,
+} from '@/features/composer/hooks/use-suggestion-option-scroll';
 
 function TestPanel({
   activeKey,
@@ -18,7 +19,7 @@ function TestPanel({
   renderTick: number;
   secondScrollIntoView: () => void;
 }) {
-  const { setOptionElement } = useComposerFloatingPanelOptionScroll(activeKey);
+  const { setOptionElement } = useSuggestionOptionScroll(activeKey);
 
   return createElement(
     'div',
@@ -48,19 +49,51 @@ function TestPanel({
   );
 }
 
-describe('ComposerFloatingPanel', () => {
+describe('FloatingPanel', () => {
+  it('renders optional title and content', () => {
+    render(
+      createElement(FloatingPanel, {
+        children: 'packages/webview',
+        title: '文件',
+      }),
+    );
+
+    expect(screen.getByText('文件')).toBeInTheDocument();
+    expect(screen.getByText('packages/webview')).toBeInTheDocument();
+  });
+
+  it('does not render an empty title container', () => {
+    const { container } = render(createElement(FloatingPanel, { children: 'content' }));
+
+    expect(container.querySelector('.border-b')).toBeNull();
+  });
+
+  it('can render non-scrollable status content', () => {
+    render(
+      createElement(FloatingPanel, {
+        children: '没有匹配的命令',
+        role: 'status',
+        scrollable: false,
+      }),
+    );
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('没有匹配的命令');
+    expect(status.querySelector('[data-slot="scroll-area"]')).toBeNull();
+  });
+
   it('uses native nearest scrolling for the active option', () => {
     const option = document.createElement('button');
     const scrollIntoView = vi.fn();
     option.scrollIntoView = scrollIntoView;
 
-    scrollComposerFloatingPanelOptionIntoView(option);
+    scrollSuggestionOptionIntoView(option);
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
   });
 
   it('ignores missing active options', () => {
-    expect(() => scrollComposerFloatingPanelOptionIntoView(null)).not.toThrow();
+    expect(() => scrollSuggestionOptionIntoView(null)).not.toThrow();
   });
 
   it('does not pull the active option back into view on unrelated renders', () => {
