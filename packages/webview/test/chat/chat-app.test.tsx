@@ -899,6 +899,16 @@ describe('ChatApp', () => {
       expect(screen.getByRole('button', { name: '关闭预览' })).toHaveFocus();
     });
 
+    fireEvent.click(screen.getByRole('button', { name: '下载图片' }));
+    await waitFor(() => {
+      expectPostedPayload('download_image', {
+        type: 'download_image',
+        data: TEST_IMAGE.data,
+        mimeType: TEST_IMAGE.mimeType,
+        fileName: 'preview-image.png',
+      });
+    });
+
     fireEvent.click(screen.getByRole('button', { name: '放大图片' }));
     expect(screen.getByText('125%')).toBeInTheDocument();
 

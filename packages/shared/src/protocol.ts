@@ -3,6 +3,7 @@
 // ============================================================
 
 export { WEBVIEW_TO_EXTENSION_MESSAGE_TYPES, SCOUT_PROTOCOL } from './protocol-requests.ts';
+export { SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE } from './protocol-state.ts';
 export type {
   ScoutControlMessage,
   ScoutProtocolCancel,

@@ -3,12 +3,14 @@
 // ============================================================
 
 import * as vscode from 'vscode';
+import { basename, join } from 'node:path';
 import type {
   ExtensionEventMessage,
   ScoutCommandInfo,
   ScoutExtensionUIRequest,
   ScoutExtensionUIRequestClosedReason,
 } from '@scout-agent/shared';
+import { SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE } from '@scout-agent/shared';
 import type { ExtensionUIContext } from '../../../core/extensions/index.ts';
 import type { FileReviewTurnSnapshot } from '../../../core/review/file-review.ts';
 import type { FileReviewArtifact } from '../../review/file-review-artifact.ts';
@@ -241,6 +243,34 @@ export class UiProtocolService implements UiProtocolHost {
     }
   }
 
+  async downloadImage(
+    message: ProtocolPayload<'download_image'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    try {
+      const fileName = normalizeImageFileName(message.fileName);
+      const cwd = this.getCurrentCwd?.();
+      const selected = await vscode.window.showSaveDialog({
+        ...(cwd ? { defaultUri: vscode.Uri.file(join(cwd, fileName)) } : {}),
+        filters: getImageDownloadFilters(message.mimeType),
+        saveLabel: 'Download Image',
+      });
+      if (!selected) {
+        respond({ type: 'download_image_result', success: false, error: 'cancelled' });
+        return;
+      }
+
+      await vscode.workspace.fs.writeFile(selected, decodeImageData(message.data));
+      respond({ type: 'download_image_result', success: true, path: selected.fsPath });
+    } catch (error) {
+      respond({
+        type: 'download_image_result',
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async openChangesReview(
     message: ProtocolPayload<'open_changes_review'>,
     respond: ProtocolResponder,
@@ -337,4 +367,24 @@ export class UiProtocolService implements UiProtocolHost {
   getCommands(): ScoutCommandInfo[] {
     return [...BUILTIN_WEBVIEW_COMMANDS, ...this.getExtensionCommands()];
   }
+}
+
+function getImageDownloadFilters(mimeType: string): Record<string, string[]> {
+  const extension = SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE[mimeType];
+  return extension ? { Image: [extension], 'All Files': ['*'] } : { 'All Files': ['*'] };
+}
+
+function normalizeImageFileName(fileName: string): string {
+  const normalized = basename(fileName.replace(/\\/g, '/'));
+  return normalized && normalized !== '.' ? normalized : 'scout-image.png';
+}
+
+function decodeImageData(data: string): Uint8Array {
+  const base64Separator = ';base64,';
+  const separatorIndex = data.toLowerCase().indexOf(base64Separator);
+  const encodedData =
+    data.startsWith('data:') && separatorIndex >= 0
+      ? data.slice(separatorIndex + base64Separator.length)
+      : data;
+  return Buffer.from(encodedData, 'base64');
 }

@@ -88,6 +88,29 @@ describe('validateWebviewMessage', () => {
     });
   });
 
+  it('validates image download payloads', () => {
+    expect(
+      validateWebviewMessage(
+        request({
+          type: 'download_image',
+          data: 'aW1hZ2U=',
+          mimeType: 'image/png',
+          fileName: 'screenshot.png',
+        }),
+      ),
+    ).toMatchObject({ ok: true });
+
+    expect(
+      validateWebviewMessage(
+        request({ type: 'download_image', data: 'aW1hZ2U=', mimeType: 'image/png' }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      requestId: 'request-1',
+      error: 'download_image.fileName must be a string',
+    });
+  });
+
   it('validates skill settings payloads', () => {
     expect(
       validateWebviewMessage(

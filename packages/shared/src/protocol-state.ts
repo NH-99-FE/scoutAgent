@@ -35,6 +35,14 @@ export interface ScoutImageContent {
   mimeType: string;
 }
 
+/** 跨 Webview 与宿主共用的图片下载扩展名映射。 */
+export const SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE: Readonly<Record<string, string>> = {
+  'image/gif': 'gif',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+
 export interface ScoutSkillInvocationContent {
   type: 'skillInvocation';
   name: string;

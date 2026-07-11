@@ -2,7 +2,7 @@
 // Conversation Transcript — 可滚动 transcript 行渲染
 // ============================================================
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import {
   Archive,
@@ -19,8 +19,10 @@ import {
   ThumbsUp,
 } from 'lucide-react';
 import type { ScoutContent, ScoutMessage } from '@scout-agent/shared';
+import { ImagePreviewDialog } from '@/components/common/ImagePreviewDialog';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { protocolClient } from '@/bridge/protocol-client';
 import { cn } from '@/lib/utils';
@@ -47,6 +49,7 @@ import {
 import { ConversationExtensionRequestsPanel } from './ConversationExtensionRequestsPanel';
 import { useRegisterConversationExpansionNode } from './conversation-expansion-node';
 import { MarkdownContent } from './MarkdownContent';
+import { adaptUserMessageImagePreviewItems } from './user-message-image-adapter';
 import { contentToText } from '../tool-display';
 
 const CHANGES_REVIEW_VISIBLE_FILE_LIMIT = 3;
@@ -160,22 +163,93 @@ const UserMessage = memo(function UserMessage({
 }: {
   message: Extract<ScoutMessage, { role: 'user' }>;
 }) {
-  const text = contentToText(message.content);
-  const hasStructuredContent =
-    Array.isArray(message.content) && message.content.some((item) => item.type !== 'text');
+  const structuredContent = Array.isArray(message.content) ? message.content : null;
+  const images = structuredContent?.filter(isImageContent) ?? [];
+  const bubbleContent = structuredContent?.filter((item) => item.type !== 'image') ?? null;
+  const text = contentToText(bubbleContent ?? message.content);
+  const hasBubbleContent = bubbleContent
+    ? bubbleContent.some(hasRenderableUserContent)
+    : typeof message.content === 'string' && message.content.trim().length > 0;
   return (
     <article className="group/message flex w-full max-w-full min-w-0 flex-col items-end">
-      <div className="scout-user-message bg-user-message max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
-        {hasStructuredContent && Array.isArray(message.content) ? (
-          <UserStructuredContent content={message.content} />
-        ) : (
-          text
-        )}
-      </div>
+      {images.length > 0 ? <UserMessageImageTray images={images} /> : null}
+      {hasBubbleContent ? (
+        <div className="scout-user-message bg-user-message max-w-[77%] min-w-0 rounded-2xl px-3 py-2 text-left text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-wrap shadow-sm">
+          {bubbleContent ? <UserStructuredContent content={bubbleContent} /> : text}
+        </div>
+      ) : null}
       <UserMessageActions text={text} timestamp={message.timestamp} />
     </article>
   );
 });
+
+function UserMessageImageTray({ images }: { images: Extract<ScoutContent, { type: 'image' }>[] }) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
+  const previewItems = adaptUserMessageImagePreviewItems(images);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollLeft = viewport.scrollWidth;
+  }, [images.length]);
+
+  return (
+    <>
+      <ScrollArea
+        className="scout-user-image-tray mb-1 w-full max-w-full min-w-0 [&_[data-slot=scroll-area-scrollbar]]:hidden"
+        scrollbars="horizontal"
+        viewportClassName="overflow-x-auto overflow-y-hidden"
+        viewportRef={viewportRef}
+      >
+        <div className="flex w-max min-w-full flex-nowrap justify-end gap-2 px-1 pt-1 pb-1">
+          {previewItems.map((item, index) => (
+            <button
+              aria-label={item.previewButtonLabel}
+              className="border-border bg-muted focus-visible:border-ring focus-visible:ring-ring/40 block size-20 shrink-0 cursor-pointer overflow-hidden rounded-xl border text-left transition-colors outline-none focus-visible:ring-2"
+              key={item.key}
+              type="button"
+              onClick={() => setPreviewImageIndex(index)}
+            >
+              <img
+                alt={item.thumbnailAlt}
+                className="size-full object-cover"
+                draggable={false}
+                src={item.source}
+              />
+            </button>
+          ))}
+        </div>
+      </ScrollArea>
+
+      {previewImageIndex !== null ? (
+        <ImagePreviewDialog
+          imageIndex={previewImageIndex}
+          images={previewItems}
+          onClose={() => setPreviewImageIndex(null)}
+          onDownload={(index) => {
+            const image = images[index];
+            const previewItem = previewItems[index];
+            if (!image || !previewItem) return;
+            protocolClient.downloadImage(image, previewItem.downloadName);
+          }}
+          onImageIndexChange={setPreviewImageIndex}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function isImageContent(
+  content: ScoutContent,
+): content is Extract<ScoutContent, { type: 'image' }> {
+  return content.type === 'image';
+}
+
+function hasRenderableUserContent(content: ScoutContent): boolean {
+  if (content.type === 'text') return content.text.trim().length > 0;
+  return content.type !== 'image' && contentToText([content]).trim().length > 0;
+}
 
 function UserStructuredContent({ content }: { content: ScoutContent[] }) {
   return (
@@ -190,9 +264,6 @@ function UserStructuredContent({ content }: { content: ScoutContent[] }) {
               {item.text}
             </div>
           );
-        }
-        if (item.type === 'image') {
-          return <ImageBlock alt="User attached image" content={item} key={`image-${index}`} />;
         }
         const fallbackText = contentToText([item]);
         if (fallbackText) {
@@ -757,7 +828,7 @@ function UserMessageActions({ text, timestamp }: { text: string; timestamp: numb
       data-message-actions="user"
     >
       <span className="mr-1">{formatTime(timestamp)}</span>
-      <CopyActionButton text={text} />
+      {text ? <CopyActionButton text={text} /> : null}
     </div>
   );
 }

@@ -19,6 +19,9 @@ export const workspace = {
     }),
   ),
   onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+  fs: {
+    writeFile: vi.fn(async () => undefined),
+  },
 };
 
 export const commands = {

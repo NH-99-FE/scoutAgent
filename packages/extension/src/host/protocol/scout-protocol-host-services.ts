@@ -310,6 +310,7 @@ export function createScoutProtocolHostServices(
       openSettingsPanel: (respond) => bundle.ui.openSettingsPanel(respond),
       openTreePanel: (respond) => bundle.ui.openTreePanel(respond),
       copyText: (message, respond) => bundle.ui.copyText(message, respond),
+      downloadImage: (message, respond) => bundle.ui.downloadImage(message, respond),
       openChangesReview: (message, respond) => bundle.ui.openChangesReview(message, respond),
       openCurrentChangesReview: (respond) => bundle.ui.openCurrentChangesReview(respond),
     },

@@ -2,7 +2,7 @@
 // Composer Images — 输入区图片策略与协议适配
 // ============================================================
 
-import type { ScoutImageContent } from '@scout-agent/shared';
+import { SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE, type ScoutImageContent } from '@scout-agent/shared';
 import {
   getComposerImageFile,
   getComposerImageObjectUrl,
@@ -28,13 +28,6 @@ interface ComposerImageSelection {
   acceptedFiles: AcceptedComposerImageFile[];
   warningMessages: string[];
 }
-
-const IMAGE_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
-  'image/gif': 'gif',
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-};
 
 export function normalizeComposerImageMimeType(mimeType: string): string {
   return mimeType === 'image/jpg' ? 'image/jpeg' : mimeType;
@@ -121,7 +114,7 @@ export function toImageSource(image: ComposerImageDescriptor): string {
 
 export function getImageDownloadName(image: ComposerImageDescriptor, index: number): string {
   if (image.name) return image.name;
-  const extension = IMAGE_EXTENSION_BY_MIME_TYPE[image.mimeType] ?? 'png';
+  const extension = SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE[image.mimeType] ?? 'png';
   return `scout-image-${index + 1}.${extension}`;
 }
 
@@ -221,7 +214,9 @@ function isAnimatedWebp(bytes: Uint8Array): boolean {
   return false;
 }
 
-function encodeComposerImageAttachment(image: ComposerImageDescriptor): Promise<ScoutImageContent> {
+export function encodeComposerImageAttachment(
+  image: ComposerImageDescriptor,
+): Promise<ScoutImageContent> {
   return new Promise((resolve, reject) => {
     const file = getComposerImageFile(image);
     if (!file) {

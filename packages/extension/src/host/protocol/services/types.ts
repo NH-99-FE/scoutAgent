@@ -186,6 +186,10 @@ export interface UiProtocolHost {
   openSettingsPanel: (respond: ProtocolResponder) => Promise<void>;
   openTreePanel: (respond: ProtocolResponder) => Promise<void>;
   copyText: (message: ProtocolPayload<'copy_text'>, respond: ProtocolResponder) => Promise<void>;
+  downloadImage: (
+    message: ProtocolPayload<'download_image'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
   openChangesReview: (
     message: ProtocolPayload<'open_changes_review'>,
     respond: ProtocolResponder,

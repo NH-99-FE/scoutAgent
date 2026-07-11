@@ -143,6 +143,15 @@ const ROUTE_CASES = [
   protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),
   protocolCase({ type: 'copy_text', text: 'hello' }, { service: 'ui', method: 'copy_text' }),
   protocolCase(
+    {
+      type: 'download_image',
+      data: 'aW1hZ2U=',
+      mimeType: 'image/png',
+      fileName: 'screenshot.png',
+    },
+    { service: 'ui', method: 'download_image' },
+  ),
+  protocolCase(
     { type: 'open_changes_review', turnId: 'turn-1' },
     { service: 'ui', method: 'open_changes_review' },
   ),

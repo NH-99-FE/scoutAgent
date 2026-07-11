@@ -124,6 +124,7 @@ export type WebviewRequestPayload =
   | { type: 'open_settings_panel' }
   | { type: 'open_tree_panel' }
   | { type: 'copy_text'; text: string }
+  | { type: 'download_image'; data: string; mimeType: string; fileName: string }
   | { type: 'open_changes_review'; turnId: string; recordId?: string }
   | { type: 'open_current_changes_review' }
   | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
@@ -405,6 +406,13 @@ export const SCOUT_PROTOCOL = {
     method: 'copy_text',
     response: 'copy_text_result',
     surfaces: ['chat', 'settings', 'tree'],
+  },
+  download_image: {
+    kind: 'command',
+    service: 'ui',
+    method: 'download_image',
+    response: 'download_image_result',
+    surfaces: ['chat'],
   },
   open_changes_review: {
     kind: 'command',

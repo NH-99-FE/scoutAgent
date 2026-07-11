@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps, ReactNode } from 'react';
 import type { ScoutExtensionUIRequest } from '@scout-agent/shared';
@@ -27,6 +27,7 @@ vi.mock('@/features/conversation/view/ConversationScroller', () => ({
 }));
 
 const protocolClientMock = vi.hoisted(() => ({
+  downloadImage: vi.fn(),
   extensionUIResponse: vi.fn(),
 }));
 
@@ -40,6 +41,7 @@ import type { ConversationTranscriptRow } from '@/features/conversation/render-m
 describe('ConversationTranscript', () => {
   beforeEach(() => {
     scrollerItemRenderCounts.clear();
+    protocolClientMock.downloadImage.mockReset();
   });
 
   it('renders typed extension request rows as transcript items', () => {
@@ -98,7 +100,7 @@ describe('ConversationTranscript', () => {
 
     expect(screen.getByText('deploy')).toBeInTheDocument();
     expect(screen.getByText('Use staging')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'User attached image' })).toHaveAttribute(
+    expect(screen.getByRole('img', { name: '已发送图片 1' })).toHaveAttribute(
       'src',
       'data:image/png;base64,aW1hZ2U=',
     );
@@ -106,7 +108,8 @@ describe('ConversationTranscript', () => {
     expect(container.textContent).not.toContain('</skill>');
   });
 
-  it('renders ordinary user image messages as images', () => {
+  it('renders user images outside the text bubble and previews the image group', async () => {
+    const scrollWidth = vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(640);
     const rows: ConversationTranscriptRow[] = [
       {
         type: 'user',
@@ -115,7 +118,9 @@ describe('ConversationTranscript', () => {
           role: 'user',
           content: [
             { type: 'text', text: 'Inspect this screenshot' },
-            { type: 'image', data: 'c2NyZWVuc2hvdA==', mimeType: 'image/png' },
+            { type: 'image', data: 'Zmlyc3Q=', mimeType: 'image/png' },
+            { type: 'image', data: 'c2Vjb25k', mimeType: 'image/jpeg' },
+            { type: 'image', data: 'dGhpcmQ=', mimeType: 'image/webp' },
           ],
           timestamp: 1,
         },
@@ -127,11 +132,67 @@ describe('ConversationTranscript', () => {
     );
 
     expect(screen.getByText('Inspect this screenshot')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'User attached image' })).toHaveAttribute(
+    expect(screen.getByRole('img', { name: '已发送图片 1' })).toHaveAttribute(
       'src',
-      'data:image/png;base64,c2NyZWVuc2hvdA==',
+      'data:image/png;base64,Zmlyc3Q=',
     );
+    const bubble = container.querySelector('.scout-user-message');
+    const tray = container.querySelector('.scout-user-image-tray');
+    const viewport = tray?.querySelector('[data-slot="scroll-area-viewport"]') as HTMLElement;
+    expect(bubble).not.toBeNull();
+    expect(tray).not.toBeNull();
+    expect(tray).toHaveClass('w-full', '[&_[data-slot=scroll-area-scrollbar]]:hidden');
+    expect(bubble?.previousElementSibling).toBe(tray);
+    expect(viewport).toHaveAttribute('data-scout-nested-scroll', 'horizontal');
+    expect(viewport).toHaveClass('overflow-x-auto', 'overflow-y-hidden');
+    expect(viewport.scrollLeft).toBe(640);
+    expect(within(bubble as HTMLElement).queryByRole('img')).not.toBeInTheDocument();
     expect(container.textContent).not.toContain('[image]');
+
+    const firstPreviewButton = screen.getByRole('button', { name: '预览已发送图片 1' });
+    firstPreviewButton.focus();
+    fireEvent.click(firstPreviewButton);
+
+    expect(screen.getByRole('dialog', { name: '图片预览' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: '图片预览' })).toHaveAttribute(
+      'src',
+      'data:image/png;base64,Zmlyc3Q=',
+    );
+    fireEvent.click(screen.getByRole('button', { name: '下载图片' }));
+    expect(protocolClientMock.downloadImage).toHaveBeenCalledWith(
+      { type: 'image', data: 'Zmlyc3Q=', mimeType: 'image/png' },
+      'scout-image-1.png',
+    );
+    expect(screen.queryByRole('button', { name: '上一张图片' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一张图片' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '放大图片' }));
+    expect(screen.getByText('125%')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '下一张图片' }));
+    expect(screen.getByRole('img', { name: '图片预览' })).toHaveAttribute(
+      'src',
+      'data:image/jpeg;base64,c2Vjb25k',
+    );
+    fireEvent.click(screen.getByRole('button', { name: '下载图片' }));
+    expect(protocolClientMock.downloadImage).toHaveBeenLastCalledWith(
+      { type: 'image', data: 'c2Vjb25k', mimeType: 'image/jpeg' },
+      'scout-image-2.jpg',
+    );
+    expect(screen.getByText('100%')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '上一张图片' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '下一张图片' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '下一张图片' }));
+    expect(screen.getByRole('img', { name: '图片预览' })).toHaveAttribute(
+      'src',
+      'data:image/webp;base64,dGhpcmQ=',
+    );
+    expect(screen.getByRole('button', { name: '上一张图片' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '下一张图片' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭预览' }));
+    await waitFor(() => expect(firstPreviewButton).toHaveFocus());
+    scrollWidth.mockRestore();
   });
 
   it('does not rerender stable history rows when a streaming row changes', () => {

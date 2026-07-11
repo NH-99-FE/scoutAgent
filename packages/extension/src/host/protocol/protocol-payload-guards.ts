@@ -104,6 +104,12 @@ const PAYLOAD_VALIDATORS = {
   open_settings_panel: fields('type'),
   open_tree_panel: fields('type'),
   copy_text: combine(fields('type', 'text'), requiredString('text')),
+  download_image: combine(
+    fields('type', 'data', 'mimeType', 'fileName'),
+    requiredString('data'),
+    requiredString('mimeType'),
+    requiredString('fileName'),
+  ),
   open_changes_review: combine(
     fields('type', 'turnId', 'recordId'),
     requiredString('turnId'),

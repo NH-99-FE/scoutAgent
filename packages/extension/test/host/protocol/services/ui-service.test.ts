@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
+import { join } from 'node:path';
 import type { FileReviewTurnSnapshot } from '../../../../src/core/review/file-review.ts';
 import type { FileReviewArtifact } from '../../../../src/host/review/file-review-artifact.ts';
 import { UiProtocolService } from '../../../../src/host/protocol/services/ui-service.ts';
@@ -72,6 +73,8 @@ function makeReviewArtifact(turnId: string, recordId: string): FileReviewArtifac
 describe('UiProtocolService', () => {
   afterEach(() => {
     vi.mocked(vscode.env.clipboard.writeText).mockClear();
+    vi.mocked(vscode.window.showSaveDialog).mockReset();
+    vi.mocked(vscode.workspace.fs.writeFile).mockReset();
   });
 
   it('responds with builtin and extension commands', () => {
@@ -186,6 +189,66 @@ describe('UiProtocolService', () => {
       type: 'copy_text_result',
       success: false,
       error: 'clipboard locked',
+    });
+  });
+
+  it('saves downloaded image bytes through the VS Code save dialog', async () => {
+    const selected = vscode.Uri.file('/workspace/downloads/screenshot.png');
+    vi.mocked(vscode.window.showSaveDialog).mockResolvedValueOnce(selected);
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      getCurrentCwd: () => '/workspace',
+      publishEvent: vi.fn(),
+    });
+    const respond = vi.fn();
+
+    await service.downloadImage(
+      {
+        type: 'download_image',
+        data: 'data:image/png;charset=utf-8;base64,AQID',
+        mimeType: 'image/png',
+        fileName: '../screenshot.png',
+      },
+      respond,
+    );
+
+    expect(vscode.window.showSaveDialog).toHaveBeenCalledWith({
+      defaultUri: vscode.Uri.file(join('/workspace', 'screenshot.png')),
+      filters: { Image: ['png'], 'All Files': ['*'] },
+      saveLabel: 'Download Image',
+    });
+    const [, bytes] = vi.mocked(vscode.workspace.fs.writeFile).mock.calls[0] ?? [];
+    expect(Array.from(bytes ?? [])).toEqual([1, 2, 3]);
+    expect(respond).toHaveBeenCalledWith({
+      type: 'download_image_result',
+      success: true,
+      path: '/workspace/downloads/screenshot.png',
+    });
+  });
+
+  it('returns a cancelled result without writing an image file', async () => {
+    vi.mocked(vscode.window.showSaveDialog).mockResolvedValueOnce(undefined);
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+    });
+    const respond = vi.fn();
+
+    await service.downloadImage(
+      {
+        type: 'download_image',
+        data: 'AQID',
+        mimeType: 'image/png',
+        fileName: 'screenshot.png',
+      },
+      respond,
+    );
+
+    expect(vscode.workspace.fs.writeFile).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      type: 'download_image_result',
+      success: false,
+      error: 'cancelled',
     });
   });
 

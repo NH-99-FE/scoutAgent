@@ -92,6 +92,10 @@ type OpenSkillFileResultPayload = Extract<
   { type: 'open_skill_file_result' }
 >;
 type CopyTextResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'copy_text_result' }>;
+type DownloadImageResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'download_image_result' }
+>;
 
 interface PromoteFollowUpOptions extends ContinueSessionOptions {
   resume?: boolean;
@@ -365,6 +369,26 @@ export const protocolClient = {
       { type: 'copy_text', text },
       (payload) => {
         if (payload.type === 'copy_text_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  downloadImage: (
+    image: ScoutImageContent,
+    fileName: string,
+    onResult?: (payload: DownloadImageResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'download_image', data: image.data, mimeType: image.mimeType, fileName },
+      (payload) => {
+        if (payload.type !== 'download_image_result') return;
+        if (!payload.success && payload.error && payload.error !== 'cancelled') {
+          reportProtocolError(payload.error);
+        }
+        onResult?.(payload);
       },
       (message) => {
         reportProtocolError(message);

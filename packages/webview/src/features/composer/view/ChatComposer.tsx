@@ -596,9 +596,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
       {previewImage ? (
         <ComposerImagePreviewDialog
-          image={previewImage}
+          images={images}
           imageIndex={previewImageIndex ?? 0}
           onClose={closeImagePreview}
+          onImageIndexChange={setPreviewImageIndex}
         />
       ) : null}
     </>

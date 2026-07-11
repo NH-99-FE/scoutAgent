@@ -235,6 +235,9 @@ export function registerScoutProtocolServices(
     copy_text: async (message, context) => {
       await services.ui.copyText(payload<'copy_text'>(message), context.respond);
     },
+    download_image: async (message, context) => {
+      await services.ui.downloadImage(payload<'download_image'>(message), context.respond);
+    },
     open_changes_review: async (message, context) => {
       await services.ui.openChangesReview(payload<'open_changes_review'>(message), context.respond);
     },
