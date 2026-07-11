@@ -28,6 +28,7 @@ const THEME_VARIABLES = [
   '--vscode-input-border',
   '--vscode-input-placeholderForeground',
   '--vscode-focusBorder',
+  '--vscode-textLink-foreground',
   '--vscode-errorForeground',
   '--vscode-charts-green',
   '--vscode-charts-yellow',

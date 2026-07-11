@@ -8,14 +8,14 @@ import { Plus } from 'lucide-react';
 import type { ScoutQueueState } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
-import { markProgrammaticFocus } from '@/components/ui/focus';
 import { useCommands } from '@/store/config-store';
 import {
   useComposerActions,
+  useComposerDocument,
   useComposerImages,
-  useComposerText,
   usePendingComposerCommandEffect,
 } from '@/store/composer-store';
+import { getComposerLinearText } from '@/store/composer-document';
 import {
   useConversationForkCandidateVersion,
   useIsStreaming,
@@ -34,7 +34,7 @@ import { SUPPORTED_IMAGE_INPUT_ACCEPT } from '../model/composer-images';
 import { ComposerImagePreviewDialog } from './ComposerImagePreviewDialog';
 import { ComposerImageTray } from './ComposerImageTray';
 import { ComposerSuggestionPopover } from './ComposerSuggestionPopover';
-import { ComposerTextarea } from './ComposerTextarea';
+import { ComposerTextarea, type ComposerEditorHandle } from './ComposerTextarea';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
@@ -139,10 +139,11 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   });
   const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
   const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const editorRef = useRef<ComposerEditorHandle | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const images = useComposerImages(sessionId);
-  const text = useComposerText(sessionId);
+  const document = useComposerDocument(sessionId);
+  const linearText = useMemo(() => getComposerLinearText(document), [document]);
   const commands = useCommands();
   const composerActions = useComposerActions();
   const pendingCommandEffect = usePendingComposerCommandEffect();
@@ -167,7 +168,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     queueState,
     sessionId,
     submitDisabled,
-    text,
+    document,
   });
   const {
     canSubmit,
@@ -182,8 +183,8 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const canStop = isCurrentSessionMode && visualBusy.cancellable;
   const showStop = (visualIsStreaming || canStop) && !hasDraft;
   const slashTrigger = useMemo(
-    () => getSlashCommandTrigger(text, selectionStart),
-    [selectionStart, text],
+    () => getSlashCommandTrigger(linearText, selectionStart),
+    [linearText, selectionStart],
   );
   const slashKey = slashTrigger
     ? `${slashTrigger.range.start}:${slashTrigger.range.end}:${slashTrigger.query}`
@@ -277,19 +278,16 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     setPreviewImageIndex(null);
   };
 
-  const setComposerText = (nextText: string) => {
+  const setComposerDocument = (nextDocument: typeof document) => {
     if (isDraftLocked) return;
     setDismissedSlashKey(null);
     setSlashSelection({ key: null, index: 0 });
-    composerActions.setText(sessionId, nextText);
+    composerActions.setDocument(sessionId, nextDocument);
   };
 
-  const focusTextareaAt = (position: number) => {
+  const focusEditorAt = (position: number) => {
     window.setTimeout(() => {
-      const textarea = textareaRef.current;
-      markProgrammaticFocus(textarea);
-      textarea?.focus();
-      textarea?.setSelectionRange(position, position);
+      editorRef.current?.focusAt(position);
       setSelectionStart(position);
     }, 0);
   };
@@ -301,28 +299,31 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     if (pendingCommandEffect.kind === 'replace_text') {
       composerActions.setText(sessionId, pendingCommandEffect.text);
       composerActions.consumeCommandEffect();
-      focusTextareaAt(pendingCommandEffect.text.length);
+      focusEditorAt(pendingCommandEffect.text.length);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCommandEffect, sessionId]);
 
   const replaceSlashToken = (replacement: string) => {
     if (!slashTrigger) return;
-    const nextText =
-      text.slice(0, slashTrigger.range.start) + replacement + text.slice(slashTrigger.range.end);
-    const nextSelectionStart = slashTrigger.range.start + replacement.length;
-    composerActions.setText(sessionId, nextText);
-    focusTextareaAt(nextSelectionStart);
+    editorRef.current?.replaceRange(slashTrigger.range, replacement);
   };
 
   const clearSlashToken = () => {
     if (!slashTrigger) return;
-    const nextText = text.slice(0, slashTrigger.range.start) + text.slice(slashTrigger.range.end);
-    composerActions.setText(sessionId, nextText);
-    focusTextareaAt(slashTrigger.range.start);
+    editorRef.current?.replaceRange(slashTrigger.range, '');
   };
 
   const selectSlashItem = (item: SlashCommandMenuItem) => {
+    if (item.command.source === 'skill') {
+      if (!slashTrigger) return;
+      editorRef.current?.replaceRange(slashTrigger.range, ' ', {
+        commandName: item.command.name,
+        id: item.command.name,
+        kind: 'skill',
+      });
+      return;
+    }
     if (item.command.source !== 'builtin') {
       replaceSlashToken(`/${item.command.name} `);
       return;
@@ -345,7 +346,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     }
   };
 
-  const handleSlashKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean => {
+  const handleSlashKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): boolean => {
     if (forkMenu.handleKeyDown(event)) return true;
     if (!slashMenuOpen) return false;
     if (event.key === 'Escape') {
@@ -421,10 +422,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
           ) : null}
 
           <ComposerTextarea
+            ref={editorRef}
+            document={document}
             placeholder={placeholder}
-            textareaRef={textareaRef}
-            value={text}
-            onChange={setComposerText}
+            onChange={setComposerDocument}
             onKeyDownCapture={handleSlashKeyDown}
             onPaste={(event) => {
               if (isDraftLocked) {

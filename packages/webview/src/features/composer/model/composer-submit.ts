@@ -2,14 +2,14 @@
 // Composer Submit — 输入区提交契约
 // ============================================================
 
-import type { ComposerImageDescriptor } from '@/store/composer-store';
+import type { ComposerDocument, ComposerImageDescriptor } from '@/store/composer-store';
 
 export type ComposerMode = 'currentSession' | 'newSession';
 export type ComposerSubmitDelivery = 'steer' | 'followUp';
 
 export interface ComposerSubmitPayload {
+  document: ComposerDocument;
   images?: ComposerImageDescriptor[];
-  text: string;
 }
 
 export interface PendingComposerSubmit extends ComposerSubmitPayload {
@@ -35,6 +35,26 @@ export const INITIAL_COMPOSER_SUBMIT_STATE: ComposerSubmitState = {
   pendingSubmit: null,
   phase: 'idle',
 };
+
+export function formatComposerSubmitText(payload: Pick<ComposerSubmitPayload, 'document'>): string {
+  return payload.document.segments
+    .map((segment) =>
+      segment.type === 'text' ? segment.text : formatComposerReference(segment.reference),
+    )
+    .join('')
+    .trim();
+}
+
+function formatComposerReference(
+  reference: Extract<ComposerDocument['segments'][number], { type: 'reference' }>['reference'],
+): string {
+  switch (reference.kind) {
+    case 'skill':
+      return `/${reference.commandName}`;
+    case 'file':
+      return `@${reference.path}`;
+  }
+}
 
 export function reduceComposerSubmitState(
   state: ComposerSubmitState,

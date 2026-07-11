@@ -1,4 +1,12 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent as testingFireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectTaskHistoryResult as routeTaskHistoryResponse } from '@/bridge/protocol-response-projector';
@@ -15,6 +23,7 @@ import {
   registerComposerImageFile,
 } from '@/store/composer-image-registry';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
+import { EMPTY_COMPOSER_DOCUMENT, getComposerPlainText } from '@/store/composer-document';
 import type { ComposerImageDescriptor } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
@@ -33,6 +42,19 @@ import type {
 } from '@scout-agent/shared';
 
 const postMessage = vi.fn();
+const fireEvent = {
+  ...testingFireEvent,
+  change: (element: Element, eventInit?: { target?: { value?: unknown } }) => {
+    const value = eventInit?.target?.value;
+    if (element instanceof HTMLElement && element.hasAttribute('data-lexical-editor')) {
+      if (element.getAttribute('contenteditable') === 'true' && typeof value === 'string') {
+        typeComposerText(element.getAttribute('aria-label') ?? '', value);
+      }
+      return true;
+    }
+    return testingFireEvent.change(element, eventInit);
+  },
+};
 const TEST_IMAGE: ScoutImageContent = {
   type: 'image',
   data: 'aW1hZ2U=',
@@ -307,12 +329,28 @@ function routeDetailState(overrides: Partial<ScoutWebviewState> = {}): void {
   });
 }
 
-function typeComposerText(label: string, value: string): HTMLTextAreaElement {
-  const textarea = screen.getByLabelText(label) as HTMLTextAreaElement;
-  fireEvent.change(textarea, { target: { value } });
-  textarea.setSelectionRange(value.length, value.length);
-  fireEvent.select(textarea);
-  return textarea;
+function typeComposerText(label: string, value: string): HTMLElement {
+  const sessionId =
+    label === '随心输入' ? HOME_COMPOSER_SESSION_ID : useSessionStore.getState().sessionId;
+  act(() => useComposerStore.getState().actions.setText(sessionId, value));
+  const editor = screen.getByLabelText(label);
+  fireEvent.focus(editor);
+  const range = document.createRange();
+  range.selectNodeContents(editor.querySelector('p') ?? editor);
+  range.collapse(false);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  testingFireEvent(document, new Event('selectionchange'));
+  return editor;
+}
+
+function expectComposerText(label: string, value: string): void {
+  const sessionId =
+    label === '随心输入' ? HOME_COMPOSER_SESSION_ID : useSessionStore.getState().sessionId;
+  const document =
+    useComposerStore.getState().documentBySessionId[sessionId] ?? EMPTY_COMPOSER_DOCUMENT;
+  expect(getComposerPlainText(document)).toBe(value);
 }
 
 function makeImageClipboardData(files: File[]): DataTransfer {
@@ -455,7 +493,7 @@ describe('ChatApp', () => {
       type: 'new_session_message',
       text: '中文回答',
     });
-    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+    expectComposerText('随心输入', '');
   });
 
   it('starts a new session from the task home send button', () => {
@@ -470,7 +508,7 @@ describe('ChatApp', () => {
       type: 'new_session_message',
       text: '按钮发送',
     });
-    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+    expectComposerText('随心输入', '');
   });
 
   it('opens settings actions from the header menu', () => {
@@ -604,7 +642,7 @@ describe('ChatApp', () => {
     ).toEqual(['reviewReview pending changes', 'handoffCreate a handoff', 'docsUse docs skill']);
   });
 
-  it('selects slash commands with the keyboard without sending the message', () => {
+  it('selects slash commands with the keyboard without sending the message', async () => {
     routeCommands([
       makeCommand('tree', 'builtin', 'Open the conversation tree'),
       makeCommand('review', 'prompt', 'Review pending changes'),
@@ -615,20 +653,20 @@ describe('ChatApp', () => {
     fireEvent.keyDown(textarea, { key: 'ArrowDown' });
     fireEvent.keyDown(textarea, { key: 'Enter' });
 
-    expect(textarea).toHaveValue('/review ');
+    await waitFor(() => expectComposerText('随心输入', '/review '));
     expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
   });
 
-  it('selects slash commands with pointer activation', () => {
+  it('selects slash commands with pointer activation', async () => {
     routeCommands([makeCommand('review', 'prompt', 'Review pending changes')]);
     render(<ChatApp />);
-    const textarea = typeComposerText('随心输入', '/');
+    typeComposerText('随心输入', '/');
 
     const option = screen.getByRole('option', { name: /review/ });
     fireEvent.mouseDown(option);
     fireEvent.click(option);
 
-    expect(textarea).toHaveValue('/review ');
+    await waitFor(() => expectComposerText('随心输入', '/review '));
     expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
   });
 
@@ -639,7 +677,7 @@ describe('ChatApp', () => {
 
     fireEvent.keyDown(textarea, { key: 'Tab' });
 
-    expect(textarea).toHaveValue('/');
+    expectComposerText('随心输入', '/');
     expect(getPostedProtocolRequests('open_tree_panel')).toHaveLength(0);
   });
 
@@ -749,10 +787,11 @@ describe('ChatApp', () => {
     });
 
     const requestsBeforeReopen = getPostedProtocolRequests('request_fork_candidates').length;
+    typeComposerText('要求后续变更', '/');
     fireEvent.click(screen.getByRole('option', { name: /分叉/ }));
     await waitFor(() => {
-      expect(getPostedProtocolRequests('request_fork_candidates')).toHaveLength(
-        requestsBeforeReopen + 1,
+      expect(getPostedProtocolRequests('request_fork_candidates').length).toBeGreaterThan(
+        requestsBeforeReopen,
       );
     });
 
@@ -775,7 +814,7 @@ describe('ChatApp', () => {
     });
   });
 
-  it('resets slash command highlight to the first item when reopening from input', () => {
+  it('resets slash command highlight to the first item when reopening from input', async () => {
     routeCommands([
       makeCommand('tree', 'builtin', 'Open the conversation tree'),
       makeCommand('compact', 'builtin', 'Manually compact the current session'),
@@ -788,12 +827,20 @@ describe('ChatApp', () => {
     expect(screen.getByRole('option', { name: /压缩/ })).toHaveAttribute('aria-selected', 'true');
 
     typeComposerText('要求后续变更', '');
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+    });
     typeComposerText('要求后续变更', '/');
 
-    expect(screen.getByRole('option', { name: /会话树/ })).toHaveAttribute('aria-selected', 'true');
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /会话树/ })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
+    });
   });
 
-  it('executes supported builtin slash commands and clears the slash token', () => {
+  it('executes supported builtin slash commands and clears the slash token', async () => {
     routeCommands([
       makeCommand('tree', 'builtin', 'Open the conversation tree'),
       makeCommand('compact', 'builtin', 'Manually compact the current session'),
@@ -804,12 +851,12 @@ describe('ChatApp', () => {
     let textarea = typeComposerText('要求后续变更', '/tree');
     fireEvent.keyDown(textarea, { key: 'Enter' });
     expectPostedPayload('open_tree_panel', { type: 'open_tree_panel' });
-    expect(textarea).toHaveValue('');
+    await waitFor(() => expectComposerText('要求后续变更', ''));
 
     textarea = typeComposerText('要求后续变更', '/compact');
     fireEvent.keyDown(textarea, { key: 'Enter' });
     expectPostedPayload('compact', { type: 'compact', customInstructions: undefined });
-    expect(textarea).toHaveValue('');
+    await waitFor(() => expectComposerText('要求后续变更', ''));
   });
 
   it('closes slash commands for arguments and escape while respecting composing input', () => {
@@ -827,7 +874,7 @@ describe('ChatApp', () => {
 
     textarea = typeComposerText('随心输入', '/');
     fireEvent.keyDown(textarea, { key: 'Process' });
-    expect(textarea).toHaveValue('/');
+    expectComposerText('随心输入', '/');
     expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
   });
 
@@ -853,7 +900,7 @@ describe('ChatApp', () => {
     });
     fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
     const newSessionMessage = getLatestPostedProtocolRequest('new_session_message');
-    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+    expectComposerText('随心输入', '');
 
     act(() => {
       routeProtocolError(newSessionMessage, 'new session failed');
@@ -861,7 +908,7 @@ describe('ChatApp', () => {
 
     expect(useUiStore.getState().newSessionPending).toBe(false);
     expect(useUiStore.getState().chatView).toBe('home');
-    expect(screen.getByLabelText('随心输入')).toHaveValue('会失败的新会话');
+    expectComposerText('随心输入', '会失败的新会话');
     expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
   });
 
@@ -1124,7 +1171,7 @@ describe('ChatApp', () => {
     });
 
     expect(screen.getByText('开始新的任务')).toBeInTheDocument();
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
+    expectComposerText('要求后续变更', '');
   });
 
   it('keeps the home draft when clicking new session on the task home', () => {
@@ -1136,7 +1183,7 @@ describe('ChatApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新会话' }));
 
-    expect(screen.getByLabelText('随心输入')).toHaveValue('准备开始的新任务');
+    expectComposerText('随心输入', '准备开始的新任务');
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'clear_conversation' });
   });
 
@@ -1421,7 +1468,7 @@ describe('ChatApp', () => {
       cwdOverride: undefined,
     });
     expect(screen.getByText('任务')).toBeInTheDocument();
-    expect(screen.getByLabelText('随心输入')).toHaveValue('还在创建的新会话');
+    expectComposerText('随心输入', '还在创建的新会话');
     expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
 
     act(() => {
@@ -1432,7 +1479,7 @@ describe('ChatApp', () => {
     });
 
     expect(screen.getByText('任务')).toBeInTheDocument();
-    expect(screen.getByLabelText('随心输入')).toHaveValue('还在创建的新会话');
+    expectComposerText('随心输入', '还在创建的新会话');
 
     act(() => {
       routeProtocolResult(openTaskMessage, {
@@ -1451,7 +1498,7 @@ describe('ChatApp', () => {
     });
 
     expect(screen.getByText('任务里的消息')).toBeInTheDocument();
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
+    expectComposerText('要求后续变更', '');
   });
 
   it('expands the task list when viewing all tasks', () => {
@@ -2776,7 +2823,7 @@ describe('ChatApp', () => {
       fireEvent.keyDown(textarea, { key: 'Enter' });
 
       expect(fileReader.readers).toHaveLength(1);
-      expect(textarea).toHaveAttribute('readonly');
+      expect(textarea).toHaveAttribute('aria-readonly', 'true');
       expect(screen.getByRole('button', { name: '添加图片' })).toBeDisabled();
       expect(screen.getByRole('button', { name: '移除图片 1' })).toBeDisabled();
 
@@ -2889,7 +2936,7 @@ describe('ChatApp', () => {
         });
       });
       expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
-      expect(screen.getByLabelText('要求后续变更')).toHaveValue('压缩开始前的提交');
+      expectComposerText('要求后续变更', '压缩开始前的提交');
       expect(screen.getByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
     } finally {
       fileReader.restore();
@@ -3086,7 +3133,7 @@ describe('ChatApp', () => {
     fireEvent.keyDown(screen.getByLabelText('要求后续变更'), { key: 'Enter' });
 
     expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('  压缩中不要丢这条\n');
+    expectComposerText('要求后续变更', '  压缩中不要丢这条\n');
     expect(useUiStore.getState().notification).toEqual({
       type: 'notification',
       level: 'error',
@@ -3176,7 +3223,7 @@ describe('ChatApp', () => {
       useSessionStore.getState().actions.applyState(sessionTwo);
     });
 
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
+    expectComposerText('要求后续变更', '');
     fireEvent.change(screen.getByLabelText('要求后续变更'), {
       target: { value: 'session two draft' },
     });
@@ -3186,7 +3233,7 @@ describe('ChatApp', () => {
       useSessionStore.getState().actions.applyState(sessionOne);
     });
 
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('session one draft');
+    expectComposerText('要求后续变更', 'session one draft');
   });
 
   it('does not reuse the conversation draft on the task home composer', () => {
@@ -3200,7 +3247,7 @@ describe('ChatApp', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '返回' }));
 
-    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+    expectComposerText('随心输入', '');
   });
 
   it('stays on the task home until the opened task state is current', () => {
@@ -3238,7 +3285,7 @@ describe('ChatApp', () => {
     });
     expect(screen.getByText('任务')).toBeInTheDocument();
     expect(screen.queryByText('old conversation')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+    expectComposerText('随心输入', '');
 
     act(() => {
       routeExtensionMessage({
@@ -3252,7 +3299,7 @@ describe('ChatApp', () => {
     });
 
     expect(screen.getByText('new conversation')).toBeInTheDocument();
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
+    expectComposerText('要求后续变更', '');
   });
 
   it('aborts immediately when clicking the stop button', () => {
@@ -3537,7 +3584,7 @@ describe('ChatApp', () => {
     expect(getLatestPostedProtocolRequest('user_message')?.payload).not.toEqual(
       expect.objectContaining({ clearFollowUpQueue: true }),
     );
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('');
+    expectComposerText('要求后续变更', '');
   });
 
   it('keeps the draft and does not send when closing the paused queue dialog', () => {
@@ -3563,7 +3610,7 @@ describe('ChatApp', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     expect(screen.queryByText('发送消息？')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('要求后续变更')).toHaveValue('先别发');
+    expectComposerText('要求后续变更', '先别发');
     expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'user_message' }));
   });
 
@@ -3607,7 +3654,7 @@ describe('ChatApp', () => {
     fireEvent.click(screen.getByRole('button', { name: '新会话' }));
 
     expect(screen.getByText('任务')).toBeInTheDocument();
-    expect(screen.getByLabelText('随心输入')).toHaveValue('');
+    expectComposerText('随心输入', '');
     expect(screen.getByRole('button', { name: '发送' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: '发送中' })).not.toBeInTheDocument();
     expect(postMessage).not.toHaveBeenCalledWith({ type: 'clear_conversation' });

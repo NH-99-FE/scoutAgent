@@ -16,7 +16,11 @@ export function markProgrammaticFocus<TElement extends HTMLElement>(element: TEl
   element?.setAttribute(SUPPRESS_FOCUS_OUTLINE_ATTRIBUTE, 'true');
 }
 
+export function clearFocusOutlineSuppression(element: HTMLElement | null) {
+  element?.removeAttribute(SUPPRESS_FOCUS_OUTLINE_ATTRIBUTE);
+}
+
 export function clearPointerFocus<TElement extends HTMLElement>(event: React.FocusEvent<TElement>) {
   if (event.relatedTarget === null) return;
-  event.currentTarget.removeAttribute(SUPPRESS_FOCUS_OUTLINE_ATTRIBUTE);
+  clearFocusOutlineSuppression(event.currentTarget);
 }

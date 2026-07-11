@@ -7,12 +7,17 @@ import type { ScoutImageContent, ScoutQueueState } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
 import { retainComposerImageLease, type ComposerImageLease } from '@/store/composer-image-registry';
 import { getComposerDraftSnapshot, useComposerActions } from '@/store/composer-store';
-import type { ComposerImageDescriptor } from '@/store/composer-store';
+import type { ComposerDocument, ComposerImageDescriptor } from '@/store/composer-store';
+import { getComposerPlainText, hasComposerReferences } from '@/store/composer-document';
 import { getVisualBusyStateSnapshot } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
 import { useUiActions, useUiStore } from '@/store/ui-store';
 import { ComposerImageEncodeError, encodeComposerImageAttachments } from '../model/composer-images';
-import { INITIAL_COMPOSER_SUBMIT_STATE, reduceComposerSubmitState } from '../model/composer-submit';
+import {
+  formatComposerSubmitText,
+  INITIAL_COMPOSER_SUBMIT_STATE,
+  reduceComposerSubmitState,
+} from '../model/composer-submit';
 import type {
   ComposerMode,
   ComposerSubmitDelivery,
@@ -34,6 +39,7 @@ interface SubmitGeneration {
 }
 
 interface UseComposerSubmitFlowOptions {
+  document: ComposerDocument;
   images: ComposerImageDescriptor[];
   isStreaming: boolean;
   mode: ComposerMode;
@@ -42,7 +48,6 @@ interface UseComposerSubmitFlowOptions {
   queueState: ScoutQueueState;
   sessionId: string;
   submitDisabled: boolean;
-  text: string;
 }
 
 interface ComposerSubmitFlow {
@@ -59,6 +64,7 @@ interface ComposerSubmitFlow {
 const COMPACTION_SEND_BLOCKED_MESSAGE = '正在压缩上下文，请等待压缩完成后再发送';
 
 export function useComposerSubmitFlow({
+  document,
   images,
   isStreaming,
   mode,
@@ -67,7 +73,6 @@ export function useComposerSubmitFlow({
   queueState,
   sessionId,
   submitDisabled,
-  text,
 }: UseComposerSubmitFlowOptions): ComposerSubmitFlow {
   const [submitState, dispatchSubmitState] = useReducer(
     reduceComposerSubmitState,
@@ -81,9 +86,9 @@ export function useComposerSubmitFlow({
     useComposerSubmitContextGuard(mode, sessionId);
 
   const isCurrentSessionMode = mode === 'currentSession';
-  const hasText = text.trim().length > 0;
+  const hasText = getComposerPlainText(document).trim().length > 0;
   const hasImages = images.length > 0;
-  const hasDraft = hasText || hasImages;
+  const hasDraft = hasText || hasImages || hasComposerReferences(document);
   const hasPausedFollowUps = queueState.paused && queueState.followUps.length > 0;
   const submitBusy = submitState.phase !== 'idle';
   const isSubmitPending = (mode === 'newSession' && submitDisabled) || submitBusy;
@@ -213,12 +218,12 @@ export function useComposerSubmitFlow({
         transitionSubmitState({ type: 'block_new_session_submit' });
         onBeginNewSessionRequest?.();
         composerActions.stagePendingDraft(sessionId, payload);
-        protocolClient.newSessionMessage(payload.text, protocolImages);
+        protocolClient.newSessionMessage(formatComposerSubmitText(payload), protocolImages);
         composerActions.clearDraft(sessionId);
         setLeasedPendingSubmit(null);
         return;
       }
-      protocolClient.userMessage(payload.text, deliverAs, {
+      protocolClient.userMessage(formatComposerSubmitText(payload), deliverAs, {
         ...options,
         images: protocolImages,
       });
@@ -250,11 +255,17 @@ export function useComposerSubmitFlow({
       const submitContext = createSubmitContext();
       if (!isSubmitContextActive(submitContext)) return;
       const draft = getComposerDraftSnapshot(sessionId);
-      const nextText = draft.text.trim();
+      const nextDocument = draft.document;
       const nextImages = draft.images ?? [];
-      if (!nextText && nextImages.length === 0) return;
+      if (
+        !getComposerPlainText(nextDocument).trim() &&
+        nextImages.length === 0 &&
+        !hasComposerReferences(nextDocument)
+      ) {
+        return;
+      }
       const payload = {
-        text: nextText,
+        document: nextDocument,
         images: nextImages.length > 0 ? nextImages : undefined,
       };
       const deliverAs = isStreaming && !hasPausedFollowUps ? (delivery ?? 'followUp') : delivery;

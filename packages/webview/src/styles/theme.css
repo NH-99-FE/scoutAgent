@@ -24,6 +24,7 @@
   --scout-fallback-border: #e5e5e5;
   --scout-fallback-input-border: #cecece;
   --scout-fallback-error: #a1260d;
+  --scout-fallback-link-foreground: #006ab1;
   --scout-action-background: var(--vscode-foreground, var(--scout-fallback-foreground));
   --scout-action-foreground: var(--vscode-editor-background, var(--scout-fallback-background));
   color: var(--foreground);
@@ -74,6 +75,10 @@
   --scout-status-warning: var(--vscode-charts-yellow, #cca700);
   --scout-status-warning-muted: color-mix(in srgb, var(--scout-status-warning) 10%, transparent);
   --scout-status-success: var(--scout-diff-added);
+  --scout-reference-foreground: var(
+    --vscode-textLink-foreground,
+    var(--scout-fallback-link-foreground)
+  );
   --scout-overlay-background: rgb(0 0 0 / 0.1);
   --scout-control-background: var(--background);
   --scout-control-border: var(--border);
@@ -122,6 +127,7 @@ html.vscode-high-contrast {
   --scout-fallback-border: #3c3c3c;
   --scout-fallback-input-border: #3c3c3c;
   --scout-fallback-error: #f14c4c;
+  --scout-fallback-link-foreground: #4daafc;
   --scout-action-background: var(--vscode-foreground, #d4d4d4);
   --scout-action-foreground: var(--vscode-editor-background, #1f1f1f);
   --scout-control-background: color-mix(in srgb, var(--input) 30%, transparent);
@@ -164,6 +170,7 @@ html.vscode-high-contrast {
   --color-status-warning: var(--scout-status-warning);
   --color-status-warning-muted: var(--scout-status-warning-muted);
   --color-status-success: var(--scout-status-success);
+  --color-reference: var(--scout-reference-foreground);
   --color-overlay-background: var(--scout-overlay-background);
   --color-control-background: var(--scout-control-background);
   --color-control-border: var(--scout-control-border);

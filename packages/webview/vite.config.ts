@@ -5,6 +5,10 @@ import path from 'path';
 
 function manualChunks(id: string): string | undefined {
   if (!id.includes('/node_modules/')) return undefined;
+  // @lexical/react 也会匹配下方的通用 React 规则，必须优先分组。
+  if (id.includes('/@lexical/') || id.includes('/node_modules/lexical/')) {
+    return 'vendor-editor';
+  }
   if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
     return 'vendor-react';
   }

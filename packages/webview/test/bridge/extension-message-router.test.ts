@@ -7,6 +7,7 @@ import { useConfigStore } from '@/store/config-store';
 import { registerComposerImageFile } from '@/store/composer-image-registry';
 import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
 import type { ComposerImageDescriptor } from '@/store/composer-store';
+import { EMPTY_COMPOSER_DOCUMENT, getComposerPlainText } from '@/store/composer-document';
 import { useConversationStore } from '@/store/conversation-store';
 import { useRuntimeOverlayStore } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
@@ -17,6 +18,13 @@ import { useUiStore } from '@/store/ui-store';
 function makeComposerImageDescriptor(name = 'test-image.png'): ComposerImageDescriptor {
   const file = new File(['image'], name, { type: 'image/png' });
   return registerComposerImageFile(file, file.type);
+}
+
+function getHomeComposerText(): string {
+  const document =
+    useComposerStore.getState().documentBySessionId[HOME_COMPOSER_SESSION_ID] ??
+    EMPTY_COMPOSER_DOCUMENT;
+  return getComposerPlainText(document);
 }
 
 describe('routeExtensionMessage', () => {
@@ -470,7 +478,9 @@ describe('routeExtensionMessage', () => {
     expect(useUiStore.getState().chatView).toBe('detail');
     expect(useUiStore.getState().newSessionPending).toBe(false);
     expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toBeUndefined();
-    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBeUndefined();
+    expect(
+      useComposerStore.getState().documentBySessionId[HOME_COMPOSER_SESSION_ID],
+    ).toBeUndefined();
   });
 
   it('keeps the home draft when new session creation fails', () => {
@@ -490,13 +500,25 @@ describe('routeExtensionMessage', () => {
     expect(useComposerStore.getState().imagesBySessionId[HOME_COMPOSER_SESSION_ID]).toEqual([
       image,
     ]);
-    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('draft');
+    expect(getHomeComposerText()).toBe('draft');
   });
 
   it('restores an optimistically cleared home draft when new session creation fails', () => {
     const image = makeComposerImageDescriptor();
     useComposerStore.getState().actions.stagePendingDraft(HOME_COMPOSER_SESSION_ID, {
-      text: 'pending draft',
+      document: {
+        segments: [
+          {
+            reference: {
+              commandName: 'skill:request-refactor-plan',
+              id: 'skill:request-refactor-plan',
+              kind: 'skill',
+            },
+            type: 'reference',
+          },
+          { text: 'pending draft', type: 'text' },
+        ],
+      },
       images: [image],
     });
     useComposerStore.getState().actions.clearDraft(HOME_COMPOSER_SESSION_ID);
@@ -517,15 +539,23 @@ describe('routeExtensionMessage', () => {
         type: 'image',
       },
     ]);
-    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe(
-      'pending draft',
-    );
+    expect(getHomeComposerText()).toBe('pending draft');
+    expect(
+      useComposerStore.getState().documentBySessionId[HOME_COMPOSER_SESSION_ID]?.segments[0],
+    ).toEqual({
+      reference: {
+        commandName: 'skill:request-refactor-plan',
+        id: 'skill:request-refactor-plan',
+        kind: 'skill',
+      },
+      type: 'reference',
+    });
   });
 
   it('does not overwrite a newer home draft when a pending new session fails', () => {
-    useComposerStore
-      .getState()
-      .actions.stagePendingDraft(HOME_COMPOSER_SESSION_ID, { text: 'old draft' });
+    useComposerStore.getState().actions.stagePendingDraft(HOME_COMPOSER_SESSION_ID, {
+      document: { segments: [{ text: 'old draft', type: 'text' }] },
+    });
     useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, 'new draft');
     useUiStore.getState().actions.beginNewSessionRequest();
 
@@ -535,7 +565,7 @@ describe('routeExtensionMessage', () => {
       error: 'failed',
     });
 
-    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('new draft');
+    expect(getHomeComposerText()).toBe('new draft');
   });
 
   it('stores fork composer command effect with the target session identity', () => {
@@ -576,7 +606,7 @@ describe('routeExtensionMessage', () => {
 
     expect(useUiStore.getState().chatView).toBe('auto');
     expect(useUiStore.getState().newSessionPending).toBe(true);
-    expect(useComposerStore.getState().textBySessionId[HOME_COMPOSER_SESSION_ID]).toBe('draft');
+    expect(getHomeComposerText()).toBe('draft');
   });
 
   it('keeps task navigation pending until the matching state update arrives', () => {

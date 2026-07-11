@@ -173,7 +173,7 @@ export function useForkCandidateMenu({
   );
 
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    (event: KeyboardEvent<HTMLElement>): boolean => {
       if (!open) return false;
       if (event.key === 'Escape') {
         event.preventDefault();

@@ -14,3 +14,11 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   configurable: true,
   value: MockResizeObserver,
 });
+
+if (!Range.prototype.getBoundingClientRect) {
+  Range.prototype.getBoundingClientRect = () => new DOMRect();
+}
+
+if (!Range.prototype.getClientRects) {
+  Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+}

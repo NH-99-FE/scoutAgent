@@ -14,10 +14,12 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",
+    "@lexical/react": "^0.47.0",
     "@scout-agent/shared": "workspace:*",
     "@shadcn/react": "^0.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "lexical": "^0.47.0",
     "lucide-react": "^1.17.0",
     "radix-ui": "^1.5.0",
     "react": "^19.2.6",

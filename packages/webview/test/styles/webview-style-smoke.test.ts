@@ -51,11 +51,16 @@ describe('webview style smoke', () => {
   it('keeps critical semantic token mappings and feature classes wired', () => {
     expectCssRule(':root', [
       '--scout-diff-added: var(--vscode-charts-green, #89d185);',
+      '--scout-fallback-link-foreground: #006ab1;',
+      '--scout-reference-foreground: var(',
+      '--vscode-textLink-foreground,',
+      'var(--scout-fallback-link-foreground)',
       '--scout-status-warning: var(--vscode-charts-yellow, #cca700);',
     ]);
     expectCssRule('@theme inline', [
       '--color-control-selected: var(--scout-control-selected);',
       '--color-field-disabled: var(--scout-field-disabled-background);',
+      '--color-reference: var(--scout-reference-foreground);',
       '--color-status-warning-muted: var(--scout-status-warning-muted);',
       '--shadow-diff-added: var(--scout-shadow-diff-added);',
     ]);

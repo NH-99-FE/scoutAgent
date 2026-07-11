@@ -11,7 +11,7 @@ import { getClipboardImageFiles, selectComposerImageFiles } from '../model/compo
 
 interface ComposerImageAttachments {
   addImageFiles: (files: Iterable<File> | FileList | null) => Promise<void>;
-  handlePaste: (event: ReactClipboardEvent<HTMLTextAreaElement>) => void;
+  handlePaste: (event: ReactClipboardEvent<HTMLElement>) => void;
 }
 
 export function useComposerImageAttachments(sessionId: string): ComposerImageAttachments {
@@ -54,7 +54,7 @@ export function useComposerImageAttachments(sessionId: string): ComposerImageAtt
   );
 
   const handlePaste = useCallback(
-    (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    (event: ReactClipboardEvent<HTMLElement>) => {
       const imageFiles = getClipboardImageFiles(event.clipboardData);
       if (imageFiles.length === 0) return;
       event.preventDefault();

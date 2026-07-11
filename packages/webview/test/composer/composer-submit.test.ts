@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatComposerSubmitText,
   INITIAL_COMPOSER_SUBMIT_STATE,
   reduceComposerSubmitState,
 } from '@/features/composer/model/composer-submit';
@@ -26,7 +27,9 @@ describe('reduceComposerSubmitState', () => {
   });
 
   it('tracks pending submit separately from the active submit phase', () => {
-    const pendingSubmit = { text: 'queued follow-up' };
+    const pendingSubmit = {
+      document: { segments: [{ text: 'queued follow-up', type: 'text' as const }] },
+    };
     const pendingState = reduceComposerSubmitState(INITIAL_COMPOSER_SUBMIT_STATE, {
       type: 'set_pending_submit',
       submit: pendingSubmit,
@@ -39,5 +42,68 @@ describe('reduceComposerSubmitState', () => {
     expect(
       reduceComposerSubmitState(pendingState, { type: 'clear_pending_submit' }).pendingSubmit,
     ).toBeNull();
+  });
+
+  it('serializes a selected skill only when sending the draft', () => {
+    expect(
+      formatComposerSubmitText({
+        document: {
+          segments: [
+            {
+              reference: {
+                commandName: 'skill:request-refactor-plan',
+                id: 'skill:request-refactor-plan',
+                kind: 'skill',
+              },
+              type: 'reference',
+            },
+            {
+              text: ' extract the notification flow',
+              type: 'text',
+            },
+          ],
+        },
+      }),
+    ).toBe('/skill:request-refactor-plan extract the notification flow');
+    expect(
+      formatComposerSubmitText({
+        document: {
+          segments: [
+            {
+              reference: {
+                commandName: 'skill:request-refactor-plan',
+                id: 'skill:request-refactor-plan',
+                kind: 'skill',
+              },
+              type: 'reference',
+            },
+            { text: ' ', type: 'text' },
+          ],
+        },
+      }),
+    ).toBe('/skill:request-refactor-plan');
+  });
+
+  it('serializes a file reference at an arbitrary document position', () => {
+    expect(
+      formatComposerSubmitText({
+        document: {
+          segments: [
+            { text: 'inspect ', type: 'text' },
+            {
+              reference: {
+                fileKind: 'file',
+                id: 'src/agent.ts',
+                kind: 'file',
+                label: 'agent.ts',
+                path: 'src/agent.ts',
+              },
+              type: 'reference',
+            },
+            { text: ' before editing', type: 'text' },
+          ],
+        },
+      }),
+    ).toBe('inspect @src/agent.ts before editing');
   });
 });
