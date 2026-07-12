@@ -146,6 +146,7 @@ export type WebviewRequestPayload =
   | { type: 'extension_ui_response'; id: string; action: 'select'; value: string }
   | { type: 'extension_ui_response'; id: string; action: 'input'; value: string }
   | { type: 'extension_ui_response'; id: string; action: 'cancel' }
+  | { type: 'pick_composer_content'; selectionKind: 'file' | 'directory' }
   | { type: 'request_file_mentions'; query: string; limit?: number }
   | {
       type: 'request_task_history';
@@ -500,6 +501,13 @@ export const SCOUT_PROTOCOL = {
     service: 'ui',
     method: 'extension_ui_response',
     surfaces: ['chat', 'settings', 'tree'],
+  },
+  pick_composer_content: {
+    kind: 'command',
+    service: 'mention',
+    method: 'pick_composer_content',
+    response: 'composer_content_pick_result',
+    surfaces: ['chat'],
   },
   request_file_mentions: {
     kind: 'query',

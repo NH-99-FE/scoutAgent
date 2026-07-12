@@ -15,7 +15,12 @@ import type {
   ScoutTaskItem,
   ScoutWebviewSurface,
 } from './protocol-core.ts';
-import type { ScoutConfig, ScoutContextUsage, ScoutWebviewState } from './protocol-state.ts';
+import type {
+  ScoutConfig,
+  ScoutContextUsage,
+  ScoutImageContent,
+  ScoutWebviewState,
+} from './protocol-state.ts';
 
 // ---------- 请求级协议结果 ----------
 
@@ -88,6 +93,18 @@ export interface ScoutFileMentionsResult {
   type: 'file_mentions_result';
   query: string;
   items: ScoutFileMentionItem[];
+  error?: string;
+}
+
+export type ScoutComposerContentPick =
+  | { type: 'reference'; item: ScoutFileMentionItem }
+  | { type: 'image'; fileName: string; image: ScoutImageContent };
+
+export interface ScoutComposerContentPickResult {
+  type: 'composer_content_pick_result';
+  selections: ScoutComposerContentPick[];
+  warnings?: string[];
+  error?: string;
 }
 
 export interface ScoutTaskHistoryResult {
@@ -191,6 +208,7 @@ export type ScoutProtocolResponsePayload =
   | ScoutTreeResult
   | ScoutSessionsResult
   | ScoutFileMentionsResult
+  | ScoutComposerContentPickResult
   | ScoutTaskHistoryResult
   | ScoutForkCandidatesResult
   | ScoutCommandResult;

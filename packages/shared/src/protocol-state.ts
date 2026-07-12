@@ -35,6 +35,11 @@ export interface ScoutImageContent {
   mimeType: string;
 }
 
+/** Composer 单张图片允许跨协议传输的最大字节数。 */
+export const SCOUT_COMPOSER_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+/** Composer 单次消息允许携带的最大图片数量。 */
+export const SCOUT_COMPOSER_IMAGE_MAX_COUNT = 6;
+
 /** 跨 Webview 与宿主共用的图片下载扩展名映射。 */
 export const SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE: Readonly<Record<string, string>> = {
   'image/gif': 'gif',

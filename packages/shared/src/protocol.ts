@@ -3,7 +3,11 @@
 // ============================================================
 
 export { WEBVIEW_TO_EXTENSION_MESSAGE_TYPES, SCOUT_PROTOCOL } from './protocol-requests.ts';
-export { SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE } from './protocol-state.ts';
+export {
+  SCOUT_COMPOSER_IMAGE_MAX_BYTES,
+  SCOUT_COMPOSER_IMAGE_MAX_COUNT,
+  SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE,
+} from './protocol-state.ts';
 export type {
   ScoutControlMessage,
   ScoutProtocolCancel,
@@ -111,6 +115,8 @@ export type {
   ScoutContextUsageResult,
   ScoutCustomModelsResult,
   ScoutExtensionsResult,
+  ScoutComposerContentPick,
+  ScoutComposerContentPickResult,
   ScoutFileMentionsResult,
   ScoutForkCandidate,
   ScoutForkCandidatesResult,

@@ -43,6 +43,8 @@ export type {
 
 export {
   EXTENSION_TO_WEBVIEW_MESSAGE_TYPES,
+  SCOUT_COMPOSER_IMAGE_MAX_BYTES,
+  SCOUT_COMPOSER_IMAGE_MAX_COUNT,
   SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE,
   SCOUT_PROTOCOL,
   WEBVIEW_TO_EXTENSION_MESSAGE_TYPES,
@@ -111,6 +113,8 @@ export type {
   ScoutFileEditPreview,
   ScoutFileMentionItem,
   ScoutFileMentionKind,
+  ScoutComposerContentPick,
+  ScoutComposerContentPickResult,
   ScoutFileMentionsResult,
   ScoutForkCandidate,
   ScoutForkCandidatesResult,
