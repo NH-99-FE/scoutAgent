@@ -14,6 +14,7 @@ function makeService(
     fdPath?: Promise<string | undefined>;
     getCurrentCwd?: () => string;
     logError?: (message: string) => void;
+    openTextFile?: (filePath: string) => Promise<void>;
   } = {},
 ) {
   return new MentionProtocolService({
@@ -21,6 +22,7 @@ function makeService(
     fdPath: options.fdPath ?? Promise.resolve('fd'),
     getCurrentCwd: options.getCurrentCwd ?? (() => '/workspace'),
     logError: options.logError ?? vi.fn(),
+    openTextFile: options.openTextFile,
   });
 }
 
@@ -118,6 +120,55 @@ describe('MentionProtocolService', () => {
 
     expect(respond).toHaveBeenCalledWith({ type: 'composer_content_pick_result', selections: [] });
     expect(vscode.workspace.fs.stat).not.toHaveBeenCalled();
+  });
+
+  it('resolves and opens a mentioned file against the current session cwd', async () => {
+    const openTextFile = vi.fn(async (_filePath: string) => undefined);
+    vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({
+      type: vscode.FileType.File,
+      ctime: 0,
+      mtime: 0,
+      size: 1,
+    });
+    const respond = vi.fn();
+    const cwd = process.cwd();
+
+    await makeService({ getCurrentCwd: () => cwd, openTextFile }).openMentionedFile(
+      { type: 'open_mentioned_file', path: 'src/agent.ts' },
+      respond,
+    );
+
+    expect(openTextFile).toHaveBeenCalledWith(expect.stringMatching(/[\\/]src[\\/]agent\.ts$/u));
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_mentioned_file_result',
+      success: true,
+      path: openTextFile.mock.calls[0]?.[0],
+    });
+  });
+
+  it('rejects a mentioned directory instead of sending it to the text editor', async () => {
+    const openTextFile = vi.fn(async (_filePath: string) => undefined);
+    vi.mocked(vscode.workspace.fs.stat).mockResolvedValue({
+      type: vscode.FileType.Directory,
+      ctime: 0,
+      mtime: 0,
+      size: 0,
+    });
+    const respond = vi.fn();
+
+    await makeService({ openTextFile }).openMentionedFile(
+      { type: 'open_mentioned_file', path: 'packages/webview' },
+      respond,
+    );
+
+    expect(openTextFile).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'open_mentioned_file_result',
+        success: false,
+        error: expect.stringContaining('Mention path is not a file'),
+      }),
+    );
   });
 
   it('returns multiple supported images as composer image content', async () => {

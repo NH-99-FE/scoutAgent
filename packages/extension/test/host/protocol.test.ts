@@ -178,6 +178,41 @@ describe('agent event mapper', () => {
     });
   });
 
+  it('uses live composer presentation instead of guessing references from text', () => {
+    const message = {
+      role: 'user' as const,
+      content: [
+        { type: 'text' as const, text: 'Review @src/a.ts。 with @alice' },
+        { type: 'image' as const, data: 'base64', mimeType: 'image/png' },
+      ],
+      timestamp: 1,
+    };
+    const document = {
+      segments: [
+        { type: 'text' as const, text: 'Review ' },
+        {
+          type: 'reference' as const,
+          reference: {
+            fileKind: 'file' as const,
+            id: 'src/a.ts',
+            kind: 'file' as const,
+            label: 'a.ts',
+            path: 'src/a.ts',
+          },
+        },
+        { type: 'text' as const, text: '。 with @alice' },
+      ],
+    };
+
+    expect(convertMessage(message, { userMessageDetails: document })).toMatchObject({
+      role: 'user',
+      content: [
+        { type: 'composerDocument', document },
+        { type: 'image', data: 'base64', mimeType: 'image/png' },
+      ],
+    });
+  });
+
   it('maps tool execution results with content blocks and details', () => {
     const event = mapAgentEventToScout({
       type: 'tool_execution_end',

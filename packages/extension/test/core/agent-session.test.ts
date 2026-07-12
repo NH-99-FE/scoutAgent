@@ -1285,6 +1285,26 @@ describe('AgentSession', () => {
     );
   });
 
+  it('keeps composer presentation attached to queued user messages', async () => {
+    const session = createSession(tempDir);
+    const steer = vi.fn();
+    attachFakeAgent(session, {
+      steer,
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    const presentation = { segments: [{ type: 'text', text: 'queued' }] };
+
+    await session.steer('queued', { userMessageDetails: presentation });
+
+    const queuedMessage = steer.mock.calls[0]?.[0] as AgentMessage;
+    expect(session.getUserMessageDetails(queuedMessage)).toBe(presentation);
+  });
+
   it('starts a user message once the prompt is accepted without waiting for the full turn', async () => {
     const session = createSession(tempDir);
     const releaseTurn = createDeferred();
@@ -1315,7 +1335,10 @@ describe('AgentSession', () => {
       },
     });
 
-    const started = await session.startUserMessage('new session prompt');
+    const presentation = { segments: [{ type: 'text', text: 'new session prompt' }] };
+    const started = await session.startUserMessage('new session prompt', {
+      details: presentation,
+    });
     void started.turn.then(() => {
       turnCompleted = true;
     });
@@ -1330,6 +1353,15 @@ describe('AgentSession', () => {
             getMessageText((entry as { message: AgentMessage }).message) === 'new session prompt',
         ),
     ).toBe(true);
+    expect(
+      session.sessionManager
+        .getEntries()
+        .find(
+          (entry) =>
+            entry.type === 'message' &&
+            getMessageText((entry as { message: AgentMessage }).message) === 'new session prompt',
+        ),
+    ).toMatchObject({ details: presentation });
     expect(
       session
         .getSessionBranch()

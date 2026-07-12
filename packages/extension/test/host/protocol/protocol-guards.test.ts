@@ -88,6 +88,57 @@ describe('validateWebviewMessage', () => {
     });
   });
 
+  it('validates composer presentation documents', () => {
+    expect(
+      validateWebviewMessage(
+        request({
+          type: 'user_message',
+          text: '@src/a.ts',
+          document: {
+            segments: [
+              {
+                type: 'reference',
+                reference: {
+                  fileKind: 'file',
+                  id: 'src/a.ts',
+                  kind: 'file',
+                  label: 'a.ts',
+                  path: 'src/a.ts',
+                },
+              },
+            ],
+          },
+        }),
+      ),
+    ).toMatchObject({ ok: true });
+
+    expect(
+      validateWebviewMessage(
+        request({
+          type: 'user_message',
+          text: '@src/a.ts',
+          document: {
+            segments: [
+              {
+                type: 'reference',
+                reference: {
+                  fileKind: 'unknown',
+                  id: 'src/a.ts',
+                  kind: 'file',
+                  label: 'a.ts',
+                  path: 'src/a.ts',
+                },
+              },
+            ],
+          },
+        }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: 'user_message.document.segments[0].reference.fileKind must be file or directory',
+    });
+  });
+
   it('validates image download payloads', () => {
     expect(
       validateWebviewMessage(

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ScoutCommandInfo } from '@scout-agent/shared';
 import { ChatComposer } from '@/features/composer';
@@ -9,6 +9,7 @@ import {
   type ComposerDocument,
 } from '@/store/composer-document';
 import { useConfigStore } from '@/store/config-store';
+import { protocolClient } from '@/bridge/protocol-client';
 
 const PROMPT_SOURCE_INFO = {
   path: '<test:prompt>',
@@ -61,6 +62,7 @@ function getText(): string {
 
 describe('ChatComposer command effects', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     useComposerStore.getState().actions.reset();
     useConfigStore.getState().actions.reset();
   });
@@ -113,6 +115,7 @@ describe('ChatComposer command effects', () => {
   });
 
   it('renders a selected skill with a separating space and removes the reference atomically', async () => {
+    const openSkillFile = vi.spyOn(protocolClient, 'openSkillFile').mockReturnValue('request-1');
     useConfigStore.getState().actions.setCommands([skillCommand('request-refactor-plan')]);
     useComposerStore.getState().actions.setText('session-1', '/skill:r');
     render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
@@ -123,7 +126,10 @@ describe('ChatComposer command effects', () => {
     fireEvent.keyDown(editor, { key: 'Enter' });
 
     const selectedSkill = await screen.findByLabelText('已选择技能：request-refactor-plan');
-    expect(selectedSkill).toHaveClass('align-bottom', 'text-reference');
+    expect(selectedSkill).toHaveClass('align-bottom', 'text-reference', 'cursor-pointer');
+    fireEvent.mouseDown(selectedSkill);
+    fireEvent.click(selectedSkill);
+    expect(openSkillFile).toHaveBeenCalledWith('<test:skill>');
     expect(screen.queryByText('要求后续变更')).not.toBeInTheDocument();
     expect(getText()).toBe(' ');
     expect(getDocument().segments).toEqual([
@@ -132,6 +138,7 @@ describe('ChatComposer command effects', () => {
           commandName: 'skill:request-refactor-plan',
           id: 'skill:request-refactor-plan',
           kind: 'skill',
+          path: '<test:skill>',
         },
         type: 'reference',
       },
@@ -157,6 +164,7 @@ describe('ChatComposer command effects', () => {
           commandName: 'skill:request-refactor-plan',
           id: 'skill:request-refactor-plan',
           kind: 'skill',
+          path: '<test:skill>',
         },
         type: 'reference',
       },
@@ -168,6 +176,33 @@ describe('ChatComposer command effects', () => {
       expect(screen.queryByLabelText('已选择技能：request-refactor-plan')).not.toBeInTheDocument();
       expect(getDocument()).toEqual(EMPTY_COMPOSER_DOCUMENT);
     });
+  });
+
+  it('opens a selected composer file reference', async () => {
+    const openMentionedFile = vi
+      .spyOn(protocolClient, 'openMentionedFile')
+      .mockReturnValue('request-1');
+    useComposerStore.getState().actions.setDocument('session-1', {
+      segments: [
+        {
+          type: 'reference',
+          reference: {
+            fileKind: 'file',
+            id: 'src/agent.ts',
+            kind: 'file',
+            label: 'agent.ts',
+            path: 'src/agent.ts',
+          },
+        },
+      ],
+    });
+
+    render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
+
+    const fileReference = await screen.findByLabelText('已选择文件：src/agent.ts');
+    expect(fileReference).toHaveClass('cursor-pointer');
+    fireEvent.click(fileReference);
+    expect(openMentionedFile).toHaveBeenCalledWith('src/agent.ts');
   });
 
   it('suppresses pointer focus outlines without suppressing the next keyboard focus', () => {

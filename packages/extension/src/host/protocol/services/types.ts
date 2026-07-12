@@ -159,6 +159,10 @@ export interface MentionProtocolHost {
     respond: ProtocolResponder,
     signal: AbortSignal,
   ) => Promise<void>;
+  openMentionedFile: (
+    message: ProtocolPayload<'open_mentioned_file'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
 }
 
 export interface ExtensionManagementProtocolHost {

@@ -195,6 +195,10 @@ const ROUTE_CASES = [
     { service: 'mention', method: 'request_file_mentions' },
   ),
   protocolCase(
+    { type: 'open_mentioned_file', path: 'src/agent.ts' },
+    { service: 'mention', method: 'open_mentioned_file' },
+  ),
+  protocolCase(
     { type: 'request_task_history', query: '', offset: 0, purpose: 'panel' },
     { service: 'task', method: 'request_task_history' },
   ),

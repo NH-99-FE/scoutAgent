@@ -6,7 +6,6 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import type { ReactElement } from 'react';
 import {
   Archive,
-  Box,
   CircleAlert,
   Check,
   ChevronDown,
@@ -18,8 +17,9 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from 'lucide-react';
-import type { ScoutContent, ScoutMessage } from '@scout-agent/shared';
+import type { ScoutComposerDocument, ScoutContent, ScoutMessage } from '@scout-agent/shared';
 import { ImagePreviewDialog } from '@/components/common/ImagePreviewDialog';
+import { InlineResourceReference } from '@/components/common/InlineResourceReference';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -255,12 +255,23 @@ function UserStructuredContent({ content }: { content: ScoutContent[] }) {
   return (
     <div className="flex max-w-full min-w-0 flex-col gap-2">
       {content.map((item, index) => {
+        if (item.type === 'composerDocument') {
+          return (
+            <div className="whitespace-pre-wrap" key={`composer-document-${index}`}>
+              <UserComposerDocument document={item.document} />
+            </div>
+          );
+        }
         if (item.type === 'skillInvocation') {
-          return <SkillInvocationBlock key={`skill-${index}-${item.name}`} skill={item} />;
+          return (
+            <div className="whitespace-pre-wrap" key={`skill-${index}-${item.name}`}>
+              <SkillInvocationReference skill={item} />
+            </div>
+          );
         }
         if (item.type === 'text' && item.text.trim()) {
           return (
-            <div key={`text-${index}`} className="whitespace-pre-wrap">
+            <div className="whitespace-pre-wrap" key={`text-${index}`}>
               {item.text}
             </div>
           );
@@ -268,7 +279,7 @@ function UserStructuredContent({ content }: { content: ScoutContent[] }) {
         const fallbackText = contentToText([item]);
         if (fallbackText) {
           return (
-            <div key={`fallback-${index}`} className="whitespace-pre-wrap">
+            <div className="whitespace-pre-wrap" key={`fallback-${index}`}>
               {fallbackText}
             </div>
           );
@@ -279,46 +290,51 @@ function UserStructuredContent({ content }: { content: ScoutContent[] }) {
   );
 }
 
-function SkillInvocationBlock({
+function UserComposerDocument({ document }: { document: ScoutComposerDocument }) {
+  return document.segments.map((segment, index) => {
+    if (segment.type === 'text') return segment.text;
+    const reference = segment.reference;
+    const isSkill = reference.kind === 'skill';
+    const label = isSkill ? reference.commandName.replace(/^skill:/, '') : reference.label;
+    const resourceKind = isSkill ? 'skill' : reference.fileKind;
+    const ariaLabel = isSkill
+      ? `打开技能：${label}`
+      : reference.fileKind === 'directory'
+        ? `已选择文件夹：${reference.path}`
+        : `打开文件：${reference.path}`;
+    return (
+      <InlineResourceReference
+        ariaLabel={ariaLabel}
+        key={`reference-${index}-${reference.id}`}
+        kind={resourceKind}
+        label={label}
+        onOpen={
+          isSkill
+            ? () => protocolClient.openSkillFile(reference.path)
+            : reference.fileKind === 'file'
+              ? () => protocolClient.openMentionedFile(reference.path)
+              : undefined
+        }
+      />
+    );
+  });
+}
+
+function SkillInvocationReference({
   skill,
 }: {
   skill: Extract<ScoutContent, { type: 'skillInvocation' }>;
 }) {
-  const [open, setOpen] = useState(false);
   return (
-    <div className="border-primary/15 bg-background/75 text-foreground max-w-full min-w-0 overflow-hidden rounded-md border shadow-sm">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger asChild>
-          <button
-            className="hover:bg-muted/70 flex w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left"
-            type="button"
-          >
-            {open ? (
-              <ChevronDown className="text-muted-foreground size-3.5 shrink-0" />
-            ) : (
-              <ChevronRight className="text-muted-foreground size-3.5 shrink-0" />
-            )}
-            <Box className="text-primary size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1 truncate text-xs font-semibold">{skill.name}</span>
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="border-border/70 border-t px-2.5 py-2">
-            <div className="text-muted-foreground mb-2 max-w-full truncate text-[11px]">
-              {skill.location}
-            </div>
-            <pre className="bg-muted/70 max-h-64 overflow-auto rounded p-2 text-[11px] leading-4 whitespace-pre-wrap">
-              {skill.content}
-            </pre>
-          </div>
-        </CollapsibleContent>
-      </Collapsible>
-      {skill.userMessage ? (
-        <div className="border-border/70 border-t px-2.5 py-2 text-sm leading-5 whitespace-pre-wrap">
-          {skill.userMessage}
-        </div>
-      ) : null}
-    </div>
+    <>
+      <InlineResourceReference
+        ariaLabel={`打开技能：${skill.name}`}
+        kind="skill"
+        label={skill.name}
+        onOpen={() => protocolClient.openSkillFile(skill.location)}
+      />
+      {skill.userMessage ? <> {skill.userMessage}</> : null}
+    </>
   );
 }
 

@@ -191,6 +191,12 @@ export function registerScoutProtocolServices(
         context.signal,
       );
     },
+    open_mentioned_file: async (message, context) => {
+      await services.mention.openMentionedFile(
+        payload<'open_mentioned_file'>(message),
+        context.respond,
+      );
+    },
   });
 
   registerProtocolServiceHandlers(server, 'extensions', {

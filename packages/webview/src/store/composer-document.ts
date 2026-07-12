@@ -2,41 +2,23 @@
 // Composer Document — 框架无关的输入文档契约与纯操作
 // ============================================================
 
-import type { ScoutFileMentionKind } from '@scout-agent/shared';
+import type {
+  ScoutComposerDocument,
+  ScoutComposerFileReference,
+  ScoutComposerReference,
+  ScoutComposerReferenceSegment,
+  ScoutComposerSegment,
+  ScoutComposerSkillReference,
+  ScoutComposerTextSegment,
+} from '@scout-agent/shared';
 
-interface ComposerReferenceBase {
-  id: string;
-}
-
-export interface ComposerSkillReference extends ComposerReferenceBase {
-  commandName: string;
-  kind: 'skill';
-}
-
-export interface ComposerFileReference extends ComposerReferenceBase {
-  fileKind: ScoutFileMentionKind;
-  kind: 'file';
-  label: string;
-  path: string;
-}
-
-export type ComposerReference = ComposerFileReference | ComposerSkillReference;
-
-export interface ComposerTextSegment {
-  text: string;
-  type: 'text';
-}
-
-export interface ComposerReferenceSegment {
-  reference: ComposerReference;
-  type: 'reference';
-}
-
-export type ComposerSegment = ComposerReferenceSegment | ComposerTextSegment;
-
-export interface ComposerDocument {
-  segments: ComposerSegment[];
-}
+export type ComposerDocument = ScoutComposerDocument;
+export type ComposerFileReference = ScoutComposerFileReference;
+export type ComposerReference = ScoutComposerReference;
+export type ComposerReferenceSegment = ScoutComposerReferenceSegment;
+export type ComposerSegment = ScoutComposerSegment;
+export type ComposerSkillReference = ScoutComposerSkillReference;
+export type ComposerTextSegment = ScoutComposerTextSegment;
 
 export interface ComposerTextRange {
   end: number;
@@ -238,7 +220,7 @@ function sliceComposerSegments(
 function areComposerReferencesEqual(left: ComposerReference, right: ComposerReference): boolean {
   if (left.kind !== right.kind || left.id !== right.id) return false;
   if (left.kind === 'skill' && right.kind === 'skill') {
-    return left.commandName === right.commandName;
+    return left.commandName === right.commandName && left.path === right.path;
   }
   if (left.kind === 'file' && right.kind === 'file') {
     return (

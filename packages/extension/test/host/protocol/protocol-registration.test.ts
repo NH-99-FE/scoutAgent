@@ -207,6 +207,10 @@ const PAYLOAD_CASES = [
     { service: 'mention', method: 'request_file_mentions' },
   ),
   protocolCase(
+    { type: 'open_mentioned_file', path: 'src/agent.ts' },
+    { service: 'mention', method: 'open_mentioned_file' },
+  ),
+  protocolCase(
     { type: 'request_task_history', query: '', offset: 0, purpose: 'panel' },
     { service: 'task', method: 'request_task_history' },
   ),
@@ -399,6 +403,9 @@ function makeServices(): ScoutProtocolServices {
     mention: {
       pickComposerContent: vi.fn(async () => undefined),
       requestFileMentions: vi.fn(async () => undefined),
+      openMentionedFile: vi.fn(async (message, respond) => {
+        respond({ type: 'open_mentioned_file_result', success: true, path: message.path });
+      }),
     },
     extensions: {
       requestExtensions: vi.fn(async (respond) => {
@@ -509,6 +516,35 @@ describe('registerScoutProtocolServices', () => {
         .find((message) => message.type === 'protocol_response' && message.error);
       expect(errorResponse).toBeUndefined();
     }
+  });
+
+  it('allows chat to open a skill file', async () => {
+    const postMessage = vi.fn();
+    const server = new ProtocolServer({ postMessage });
+    const services = makeServices();
+    registerScoutProtocolServices(server, services);
+    const payload = {
+      type: 'open_skill_file' as const,
+      path: '/workspace/.scout/skills/review/SKILL.md',
+    };
+
+    await server.handleRequest(
+      {
+        type: 'protocol_request',
+        requestId: 'open-skill-from-chat',
+        service: 'skills',
+        method: 'open_skill_file',
+        payload,
+      },
+      'chat',
+    );
+
+    expect(services.skills.openSkillFile).toHaveBeenCalledWith(payload, expect.any(Function));
+    expect(
+      postMessage.mock.calls
+        .map(([message]) => message)
+        .find((message) => message.type === 'protocol_response' && message.error),
+    ).toBeUndefined();
   });
 
   it('rejects custom model snapshot fields at the protocol boundary', () => {

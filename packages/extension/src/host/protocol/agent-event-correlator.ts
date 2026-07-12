@@ -5,6 +5,7 @@
 
 import type { ScoutAgentEvent, ToolPresentationMetadata } from '@scout-agent/shared';
 import type { AgentEvent } from '@scout-agent/agent';
+import type { UserMessage } from '@scout-agent/ai';
 import { mapAgentEventToScout } from './agent-event-mapper.ts';
 
 export interface AgentEventCorrelationContext {
@@ -12,6 +13,7 @@ export interface AgentEventCorrelationContext {
   formatDisplayPath?: (path: string) => string;
   getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
   enrichToolResultDetails?: (details: unknown) => unknown;
+  getUserMessageDetails?: (message: UserMessage) => unknown;
 }
 
 // ---------- AgentEventCorrelator ----------
@@ -30,6 +32,7 @@ export class AgentEventCorrelator {
       formatDisplayPath: context.formatDisplayPath,
       getToolPresentation: context.getToolPresentation,
       enrichToolResultDetails: context.enrichToolResultDetails,
+      getUserMessageDetails: context.getUserMessageDetails,
     });
   }
 

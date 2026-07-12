@@ -7,7 +7,11 @@ import type { ScoutRuntimeSettingsPatch, ScoutSettingsScope } from './settings.t
 import type { ScoutDomainEventType } from './protocol-events.ts';
 import type { ScoutProtocolResponsePayloadType } from './protocol-results.ts';
 import type { ScoutImageContent } from './protocol-state.ts';
-import type { ScoutTaskHistoryPurpose, ScoutWebviewSurface } from './protocol-core.ts';
+import type {
+  ScoutComposerDocument,
+  ScoutTaskHistoryPurpose,
+  ScoutWebviewSurface,
+} from './protocol-core.ts';
 import type { ScoutExtensionScope, ScoutExtensionTemplateId } from './protocol-extensions.ts';
 import type { ScoutSkillScope, ScoutSkillToggleIntent } from './protocol-skills.ts';
 
@@ -78,6 +82,7 @@ export type WebviewRequestPayload =
   | {
       type: 'user_message';
       text: string;
+      document?: ScoutComposerDocument;
       images?: ScoutImageContent[];
       deliverAs?: 'steer' | 'followUp';
       clearFollowUpQueue?: boolean;
@@ -85,6 +90,7 @@ export type WebviewRequestPayload =
   | {
       type: 'new_session_message';
       text: string;
+      document?: ScoutComposerDocument;
       images?: ScoutImageContent[];
     }
   | { type: 'cancel_follow_up'; id: string }
@@ -148,6 +154,7 @@ export type WebviewRequestPayload =
   | { type: 'extension_ui_response'; id: string; action: 'cancel' }
   | { type: 'pick_composer_content'; selectionKind: 'file' | 'directory' }
   | { type: 'request_file_mentions'; query: string; limit?: number }
+  | { type: 'open_mentioned_file'; path: string }
   | {
       type: 'request_task_history';
       query: string;
@@ -385,7 +392,7 @@ export const SCOUT_PROTOCOL = {
     service: 'skills',
     method: 'open_skill_file',
     response: 'open_skill_file_result',
-    surfaces: ['settings'],
+    surfaces: ['chat', 'settings'],
   },
   open_settings_panel: {
     kind: 'command',
@@ -514,6 +521,13 @@ export const SCOUT_PROTOCOL = {
     service: 'mention',
     method: 'request_file_mentions',
     response: 'file_mentions_result',
+    surfaces: ['chat'],
+  },
+  open_mentioned_file: {
+    kind: 'command',
+    service: 'mention',
+    method: 'open_mentioned_file',
+    response: 'open_mentioned_file_result',
     surfaces: ['chat'],
   },
   request_task_history: {

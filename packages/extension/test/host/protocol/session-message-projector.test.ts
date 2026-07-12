@@ -173,6 +173,38 @@ describe('session message projector', () => {
     });
   });
 
+  it('restores persisted composer presentation without parsing plain user text', () => {
+    const session = SessionManager.inMemory();
+    const document = {
+      segments: [
+        { type: 'text' as const, text: 'Ask @alice to review ' },
+        {
+          type: 'reference' as const,
+          reference: {
+            fileKind: 'directory' as const,
+            id: 'packages/webview',
+            kind: 'file' as const,
+            label: 'webview',
+            path: 'packages/webview',
+          },
+        },
+      ],
+    };
+    const entryId = session.appendMessage(
+      userMessage('Ask @alice to review @packages/webview'),
+      document,
+    );
+
+    const [message] = projectSessionBranchToScoutMessages(session.getBranch());
+
+    expect(message).toEqual({
+      role: 'user',
+      timestamp: 1,
+      entryId,
+      content: [{ type: 'composerDocument', document }],
+    });
+  });
+
   it('projects expanded skill text blocks as structured skill invocations', () => {
     const session = SessionManager.inMemory();
     const skillText =

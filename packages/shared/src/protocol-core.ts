@@ -128,6 +128,41 @@ export interface ScoutFileMentionItem {
   description?: string;
 }
 
+// ---------- Composer 文档 ----------
+
+export interface ScoutComposerTextSegment {
+  text: string;
+  type: 'text';
+}
+
+export interface ScoutComposerSkillReference {
+  commandName: string;
+  id: string;
+  kind: 'skill';
+  path: string;
+}
+
+export interface ScoutComposerFileReference {
+  fileKind: ScoutFileMentionKind;
+  id: string;
+  kind: 'file';
+  label: string;
+  path: string;
+}
+
+export type ScoutComposerReference = ScoutComposerFileReference | ScoutComposerSkillReference;
+
+export interface ScoutComposerReferenceSegment {
+  reference: ScoutComposerReference;
+  type: 'reference';
+}
+
+export type ScoutComposerSegment = ScoutComposerReferenceSegment | ScoutComposerTextSegment;
+
+export interface ScoutComposerDocument {
+  segments: ScoutComposerSegment[];
+}
+
 export interface ScoutTaskItem {
   id: string;
   sessionId: string;

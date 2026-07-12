@@ -3,7 +3,7 @@
 // ============================================================
 
 import * as vscode from 'vscode';
-import { extname, relative } from 'node:path';
+import { extname, isAbsolute, relative, resolve } from 'node:path';
 import {
   SCOUT_COMPOSER_IMAGE_MAX_BYTES,
   SCOUT_COMPOSER_IMAGE_MAX_COUNT,
@@ -27,6 +27,7 @@ export interface MentionProtocolServiceOptions {
   fdPath: Promise<string | undefined>;
   getCurrentCwd: () => string;
   logError: (message: string) => void;
+  openTextFile?: (filePath: string) => Promise<void>;
 }
 
 interface ComposerContentClassification {
@@ -41,12 +42,14 @@ export class MentionProtocolService implements MentionProtocolHost {
   private readonly fdPath: Promise<string | undefined>;
   private readonly getCurrentCwd: () => string;
   private readonly logError: (message: string) => void;
+  private readonly openTextFile?: (filePath: string) => Promise<void>;
 
   constructor(options: MentionProtocolServiceOptions) {
     this.discoverFileMentions = options.discoverFileMentions ?? discoverFileMentions;
     this.fdPath = options.fdPath;
     this.getCurrentCwd = options.getCurrentCwd;
     this.logError = options.logError;
+    this.openTextFile = options.openTextFile;
   }
 
   async pickComposerContent(
@@ -163,6 +166,36 @@ export class MentionProtocolService implements MentionProtocolHost {
       this.logError(
         `[scout] File mentions failed: ${error instanceof Error ? error.message : String(error)}`,
       );
+    }
+  }
+
+  async openMentionedFile(
+    message: ProtocolPayload<'open_mentioned_file'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    const cwd = this.getCurrentCwd();
+    const filePath = isAbsolute(message.path) ? resolve(message.path) : resolve(cwd, message.path);
+
+    try {
+      const stat = await vscode.workspace.fs.stat(vscode.Uri.file(filePath));
+      if ((stat.type & vscode.FileType.File) === 0) {
+        respond({
+          type: 'open_mentioned_file_result',
+          success: false,
+          error: `Mention path is not a file: ${filePath}`,
+          path: filePath,
+        });
+        return;
+      }
+      await this.openTextFile?.(filePath);
+      respond({ type: 'open_mentioned_file_result', success: true, path: filePath });
+    } catch (error) {
+      respond({
+        type: 'open_mentioned_file_result',
+        success: false,
+        error: `Failed to open mentioned file ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+        path: filePath,
+      });
     }
   }
 }

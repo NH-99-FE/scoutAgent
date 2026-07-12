@@ -128,7 +128,10 @@ function appendProjectedMessage(
 ): void {
   const agentMessage = createAgentMessageFromEntry(entry);
   if (!agentMessage) return;
-  const scoutMessage = convertMessage(agentMessage, options);
+  const scoutMessage = convertMessage(agentMessage, {
+    ...options,
+    userMessageDetails: entry.type === 'message' ? entry.details : undefined,
+  });
   if (!scoutMessage) return;
   scoutMessage.entryId = entry.id;
   messages.push(scoutMessage);

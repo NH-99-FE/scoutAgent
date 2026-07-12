@@ -287,6 +287,12 @@ interface PromptOptions {
   images?: ImageContent[];
   streamingBehavior?: QueuedAgentMessageDelivery;
   clearFollowUpQueue?: boolean;
+  userMessageDetails?: unknown;
+}
+
+interface QueuedUserMessageOptions {
+  images?: ImageContent[];
+  userMessageDetails?: unknown;
 }
 
 // ---------- AgentSession ----------
@@ -296,6 +302,7 @@ export class AgentSession implements CoreDisposable {
   private readonly configManager: ScoutCoreConfig;
   private readonly cwd: string;
   private readonly logger: CoreLogger;
+  private readonly userMessageDetails = new WeakMap<object, unknown>();
   private skills: ScoutSkill[];
   private promptTemplates: PromptTemplate[];
   private contextFiles: ScoutContextFile[];
@@ -504,6 +511,7 @@ export class AgentSession implements CoreDisposable {
     await this.runPrompt(text, options?.images, 'interactive', {
       streamingBehavior: options?.streamingBehavior,
       clearFollowUpQueue: options?.clearFollowUpQueue,
+      userMessageDetails: options?.userMessageDetails,
     });
   }
 
@@ -511,7 +519,11 @@ export class AgentSession implements CoreDisposable {
     text: string,
     images: ImageContent[] | undefined,
     source: 'interactive' | 'rpc' | 'extension',
-    options?: { streamingBehavior?: QueuedAgentMessageDelivery; clearFollowUpQueue?: boolean },
+    options?: {
+      streamingBehavior?: QueuedAgentMessageDelivery;
+      clearFollowUpQueue?: boolean;
+      userMessageDetails?: unknown;
+    },
   ): Promise<void> {
     try {
       const started = await this.startPromptRun(text, images, source, options);
@@ -527,7 +539,11 @@ export class AgentSession implements CoreDisposable {
     text: string,
     images: ImageContent[] | undefined,
     source: 'interactive' | 'rpc' | 'extension',
-    options?: { streamingBehavior?: QueuedAgentMessageDelivery; clearFollowUpQueue?: boolean },
+    options?: {
+      streamingBehavior?: QueuedAgentMessageDelivery;
+      clearFollowUpQueue?: boolean;
+      userMessageDetails?: unknown;
+    },
   ): Promise<StartedPromptRun | undefined> {
     if (!this.agent) return undefined;
 
@@ -549,7 +565,11 @@ export class AgentSession implements CoreDisposable {
         );
       }
       this.queueAgentMessage(
-        this.createUserMessage(preparedInput.text, preparedInput.images),
+        this.createUserMessage(
+          preparedInput.text,
+          preparedInput.images,
+          options.userMessageDetails,
+        ),
         options.streamingBehavior,
       );
       return {
@@ -571,7 +591,11 @@ export class AgentSession implements CoreDisposable {
     this._isStreaming = true;
     this.emit({ type: 'state_change' });
     try {
-      const userMessage = this.createUserMessage(preparedInput.text, preparedInput.images);
+      const userMessage = this.createUserMessage(
+        preparedInput.text,
+        preparedInput.images,
+        options?.userMessageDetails,
+      );
       const messages = await this.prepareAgentStartMessages(
         userMessage,
         preparedInput.images,
@@ -677,13 +701,17 @@ export class AgentSession implements CoreDisposable {
    * Queue a steering message while the agent is running.
    * Delivered after the current assistant turn finishes executing tool calls.
    */
-  async steer(text: string, images?: ImageContent[]): Promise<void> {
+  async steer(text: string, options: QueuedUserMessageOptions = {}): Promise<void> {
     if (!this.agent) return;
     if (text.startsWith('/')) {
       this.throwIfExtensionCommand(text);
     }
     this.queueAgentMessage(
-      this.createUserMessage(this.expandPromptCommands(text), images),
+      this.createUserMessage(
+        this.expandPromptCommands(text),
+        options.images,
+        options.userMessageDetails,
+      ),
       'steer',
     );
   }
@@ -691,13 +719,17 @@ export class AgentSession implements CoreDisposable {
   /**
    * Queue a follow-up message to run after the agent has no tool calls or steering messages.
    */
-  async followUp(text: string, images?: ImageContent[]): Promise<void> {
+  async followUp(text: string, options: QueuedUserMessageOptions = {}): Promise<void> {
     if (!this.agent) return;
     if (text.startsWith('/')) {
       this.throwIfExtensionCommand(text);
     }
     this.queueAgentMessage(
-      this.createUserMessage(this.expandPromptCommands(text), images),
+      this.createUserMessage(
+        this.expandPromptCommands(text),
+        options.images,
+        options.userMessageDetails,
+      ),
       'followUp',
     );
   }
@@ -1113,6 +1145,7 @@ export class AgentSession implements CoreDisposable {
 
   async startUserMessage(
     content: string | (TextContent | ImageContent)[],
+    options?: { details?: unknown },
   ): Promise<StartedUserMessage> {
     if (!this.agent) return { turn: Promise.resolve() };
 
@@ -1121,7 +1154,9 @@ export class AgentSession implements CoreDisposable {
       throw new Error('startUserMessage requires an idle replacement session');
     }
 
-    const started = await this.startPromptRun(text, images, 'extension');
+    const started = await this.startPromptRun(text, images, 'extension', {
+      userMessageDetails: options?.details,
+    });
     if (!started) return { turn: Promise.resolve() };
     await started.accepted;
     return { turn: started.turn };
@@ -1617,7 +1652,7 @@ export class AgentSession implements CoreDisposable {
     ) as ReplacedSessionContext;
     context.sendMessage = (message, options) => this.sendMessage(message, options);
     context.sendUserMessage = (content, options) => this.sendUserMessage(content, options);
-    context.startUserMessage = (content) => this.startUserMessage(content);
+    context.startUserMessage = (content, options) => this.startUserMessage(content, options);
     return context;
   }
 
@@ -2071,10 +2106,20 @@ export class AgentSession implements CoreDisposable {
     await this.runPostAgentLoop(policy);
   }
 
-  private createUserMessage(text: string, images?: ImageContent[]): AgentMessage {
+  private createUserMessage(
+    text: string,
+    images?: ImageContent[],
+    details?: unknown,
+  ): AgentMessage {
     const content: Array<TextContent | ImageContent> = [{ type: 'text', text }];
     if (images) content.push(...images);
-    return { role: 'user', content, timestamp: Date.now() };
+    const message: AgentMessage = { role: 'user', content, timestamp: Date.now() };
+    if (details !== undefined) this.userMessageDetails.set(message, details);
+    return message;
+  }
+
+  getUserMessageDetails(message: AgentMessage): unknown {
+    return this.userMessageDetails.get(message);
   }
 
   private createCustomMessageFromInput<TDetails = unknown>(
@@ -2501,7 +2546,7 @@ export class AgentSession implements CoreDisposable {
       );
       return;
     }
-    await this.session.appendMessage(message);
+    await this.session.appendMessage(message, this.userMessageDetails.get(message));
   }
 
   private enrichAgentEndEvent(event: AgentEvent): AgentEvent & { willRetry?: boolean } {

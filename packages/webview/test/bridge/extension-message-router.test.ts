@@ -513,6 +513,7 @@ describe('routeExtensionMessage', () => {
               commandName: 'skill:request-refactor-plan',
               id: 'skill:request-refactor-plan',
               kind: 'skill',
+              path: '/skills/request-refactor-plan/SKILL.md',
             },
             type: 'reference',
           },
@@ -547,6 +548,7 @@ describe('routeExtensionMessage', () => {
         commandName: 'skill:request-refactor-plan',
         id: 'skill:request-refactor-plan',
         kind: 'skill',
+        path: '/skills/request-refactor-plan/SKILL.md',
       },
       type: 'reference',
     });

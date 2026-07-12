@@ -3,7 +3,12 @@
 // ============================================================
 
 import type { ScoutModelInfo, ThinkingLevel } from './models.ts';
-import type { ScoutCommandInfo, ScoutDiagnostic, ToolInfo } from './protocol-core.ts';
+import type {
+  ScoutCommandInfo,
+  ScoutComposerDocument,
+  ScoutDiagnostic,
+  ToolInfo,
+} from './protocol-core.ts';
 import type { ScoutExtensionUIRequest } from './protocol-extension-ui.ts';
 import type { ScoutChangesReviewRow, ScoutChangesReviewSummary } from './protocol-review.ts';
 
@@ -56,12 +61,18 @@ export interface ScoutSkillInvocationContent {
   userMessage?: string;
 }
 
+export interface ScoutComposerDocumentContent {
+  type: 'composerDocument';
+  document: ScoutComposerDocument;
+}
+
 export type ScoutContent =
   | ScoutTextContent
   | ScoutThinkingContent
   | ScoutToolCallContent
   | ScoutImageContent
-  | ScoutSkillInvocationContent;
+  | ScoutSkillInvocationContent
+  | ScoutComposerDocumentContent;
 
 // ---------- 可序列化消息 ----------
 

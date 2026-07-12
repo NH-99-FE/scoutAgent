@@ -67,6 +67,7 @@ export class SessionProtocolService implements SessionProtocolHost {
   async userMessage(message: ProtocolPayload<'user_message'>): Promise<void> {
     await this.sessionManager.prompt(message.text, {
       deliverAs: message.deliverAs,
+      document: message.document,
       images: message.images,
       clearFollowUpQueue: message.clearFollowUpQueue,
     });
@@ -88,7 +89,7 @@ export class SessionProtocolService implements SessionProtocolHost {
             message.images && message.images.length > 0
               ? [{ type: 'text' as const, text: message.text }, ...message.images]
               : message.text;
-          const started = await ctx.startUserMessage(content);
+          const started = await ctx.startUserMessage(content, { details: message.document });
           turnPromise = started.turn;
         },
       });

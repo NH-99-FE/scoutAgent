@@ -3,6 +3,7 @@
 // ============================================================
 
 import type {
+  ScoutComposerDocument,
   ScoutCustomModelsSaveSettings,
   ScoutExtensionScope,
   ScoutExtensionTemplateId,
@@ -35,6 +36,7 @@ import {
 
 interface UserMessageOptions {
   clearFollowUpQueue?: boolean;
+  document?: ScoutComposerDocument;
   images?: ScoutImageContent[];
 }
 
@@ -101,6 +103,10 @@ type OpenExtensionFileResultPayload = Extract<
 type OpenSkillFileResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'open_skill_file_result' }
+>;
+type OpenMentionedFileResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'open_mentioned_file_result' }
 >;
 type CopyTextResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'copy_text_result' }>;
 type DownloadImageResultPayload = Extract<
@@ -437,18 +443,24 @@ export const protocolClient = {
     if (options?.images && options.images.length > 0) {
       payload.images = options.images;
     }
+    if (options?.document) payload.document = options.document;
     if (options?.clearFollowUpQueue) {
       payload.clearFollowUpQueue = true;
     }
     send(payload);
   },
-  newSessionMessage: (text: string, images?: ScoutImageContent[]) => {
+  newSessionMessage: (
+    text: string,
+    images?: ScoutImageContent[],
+    document?: ScoutComposerDocument,
+  ) => {
     discardProtocolRequest(pendingOpenTaskRequestId);
     pendingOpenTaskRequestId = undefined;
     const payload: WebviewRequestPayload = { type: 'new_session_message', text };
     if (images && images.length > 0) {
       payload.images = images;
     }
+    if (document) payload.document = document;
     pendingNewSessionRequestId = sendRouted(payload, projectProtocolResponsePayload, (message) => {
       projectProtocolResponsePayload({
         type: 'new_session_result',
@@ -585,6 +597,22 @@ export const protocolClient = {
       (payload) => {
         projectProtocolResponsePayload(payload);
         if (payload.type === 'open_skill_file_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  openMentionedFile: (
+    path: string,
+    onResult?: (payload: OpenMentionedFileResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'open_mentioned_file', path },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'open_mentioned_file_result') onResult?.(payload);
       },
       (message) => {
         reportProtocolError(message);

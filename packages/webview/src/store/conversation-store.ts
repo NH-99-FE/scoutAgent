@@ -15,6 +15,7 @@ import type {
   ScoutToolExecutionResult,
   ScoutWebviewState,
 } from '@scout-agent/shared';
+import { formatComposerDocumentText } from '@/lib/composer-document-text';
 
 export interface ConversationItem {
   key: string;
@@ -227,6 +228,7 @@ function getUserMessageTitle(message: ScoutUserMessage): string {
           .map((item) => {
             if (item.type === 'text') return item.text;
             if (item.type === 'skillInvocation') return item.userMessage || `/skill:${item.name}`;
+            if (item.type === 'composerDocument') return formatComposerDocumentText(item.document);
             return '';
           })
           .join(' ');

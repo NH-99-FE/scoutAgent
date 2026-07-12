@@ -57,6 +57,11 @@ export interface SessionEntryBase {
 export interface SessionMessageEntry extends SessionEntryBase {
   type: 'message';
   message: AgentMessage;
+  /**
+   * Host 展示元数据：不进入 provider/runtime context，不参与 compaction/branch summary；
+   * 由 host 协议投影消费。元数据附着于原 message entry，因此不改变 raw/visible leaf。
+   */
+  details?: unknown;
 }
 
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {
@@ -981,13 +986,14 @@ export class SessionManager {
    * so it is easier to find them.
    * These need to be appended via appendCompaction() and appendBranchSummary() methods.
    */
-  appendMessage(message: AgentMessage): string {
+  appendMessage(message: AgentMessage, details?: unknown): string {
     const entry: SessionMessageEntry = {
       type: 'message',
       id: generateId(this.byId),
       parentId: this.leafId,
       timestamp: new Date().toISOString(),
       message,
+      ...(details === undefined ? {} : { details }),
     };
     this._appendEntry(entry);
     return entry.id;

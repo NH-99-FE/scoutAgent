@@ -9,6 +9,7 @@ import type {
   ScoutAgentEvent,
   ScoutChangesReviewSummary,
   ScoutCommandInfo,
+  ScoutComposerDocument,
   ScoutForkCandidate,
   ScoutImageContent,
   ScoutMessage,
@@ -565,6 +566,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     options?: {
       deliverAs?: 'steer' | 'followUp';
       images?: ScoutImageContent[];
+      document?: ScoutComposerDocument;
       clearFollowUpQueue?: boolean;
     },
   ): Promise<void> {
@@ -573,23 +575,20 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     }
     if (!this.agentSession) return;
     if (this.agentSession.isStreaming) {
+      const queuedMessageOptions = {
+        images: options?.images,
+        userMessageDetails: options?.document,
+      };
       if (options?.deliverAs === 'followUp') {
-        if (options.images) {
-          await this.agentSession.followUp(text, options.images);
-        } else {
-          await this.agentSession.followUp(text);
-        }
+        await this.agentSession.followUp(text, queuedMessageOptions);
       } else {
-        if (options?.images) {
-          await this.agentSession.steer(text, options.images);
-        } else {
-          await this.agentSession.steer(text);
-        }
+        await this.agentSession.steer(text, queuedMessageOptions);
       }
       return;
     }
     await this.agentSession.prompt(text, {
       images: options?.images,
+      userMessageDetails: options?.document,
       clearFollowUpQueue: options?.clearFollowUpQueue,
     });
   }
@@ -834,6 +833,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       formatDisplayPath: (path) => this.formatDisplayPath(path),
       getToolPresentation: (toolName) => this.getToolPresentation(toolName),
       enrichToolResultDetails: this.createFileChangeDetailsEnricher(),
+      getUserMessageDetails: (message) => this.agentSession?.getUserMessageDetails(message),
     });
     if (scoutEvent) {
       if (scoutEvent.type === 'agent_start') {

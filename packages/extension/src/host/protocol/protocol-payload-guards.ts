@@ -47,15 +47,17 @@ const PAYLOAD_VALIDATORS = {
   request_skills: fields('type'),
   request_context_usage: fields('type'),
   user_message: combine(
-    fields('type', 'text', 'images', 'deliverAs', 'clearFollowUpQueue'),
+    fields('type', 'text', 'document', 'images', 'deliverAs', 'clearFollowUpQueue'),
     requiredString('text'),
+    optionalComposerDocument('document'),
     optionalImages('images'),
     optionalEnum('deliverAs', ['steer', 'followUp']),
     optionalBoolean('clearFollowUpQueue'),
   ),
   new_session_message: combine(
-    fields('type', 'text', 'images'),
+    fields('type', 'text', 'document', 'images'),
     requiredString('text'),
+    optionalComposerDocument('document'),
     optionalImages('images'),
   ),
   cancel_follow_up: combine(fields('type', 'id'), requiredString('id')),
@@ -157,6 +159,7 @@ const PAYLOAD_VALIDATORS = {
     requiredString('query'),
     optionalInteger('limit'),
   ),
+  open_mentioned_file: combine(fields('type', 'path'), requiredString('path')),
   request_task_history: combine(
     fields('type', 'query', 'limit', 'offset', 'scope', 'purpose'),
     requiredString('query'),
@@ -375,6 +378,65 @@ function optionalImages(key: string): PayloadValidator {
       if (typeof item.data !== 'string') return `${key}[${index}].data must be a string`;
       if (typeof item.mimeType !== 'string') {
         return `${key}[${index}].mimeType must be a string`;
+      }
+    }
+    return undefined;
+  };
+}
+
+function optionalComposerDocument(key: string): PayloadValidator {
+  return (payload) => {
+    const value = payload[key];
+    if (value === undefined) return undefined;
+    if (!isRecord(value)) return `${key} must be an object when provided`;
+    const documentFieldError = fields('segments')(value);
+    if (documentFieldError) return `${key}.${documentFieldError}`;
+    if (!Array.isArray(value.segments)) return `${key}.segments must be an array`;
+
+    for (const [index, segmentValue] of value.segments.entries()) {
+      if (!isRecord(segmentValue)) return `${key}.segments[${index}] must be an object`;
+      if (segmentValue.type === 'text') {
+        const fieldError = fields('type', 'text')(segmentValue);
+        if (fieldError) return `${key}.segments[${index}].${fieldError}`;
+        if (typeof segmentValue.text !== 'string') {
+          return `${key}.segments[${index}].text must be a string`;
+        }
+        continue;
+      }
+      if (segmentValue.type !== 'reference') {
+        return `${key}.segments[${index}].type must be text or reference`;
+      }
+      const segmentFieldError = fields('type', 'reference')(segmentValue);
+      if (segmentFieldError) return `${key}.segments[${index}].${segmentFieldError}`;
+      if (!isRecord(segmentValue.reference)) {
+        return `${key}.segments[${index}].reference must be an object`;
+      }
+      const reference = segmentValue.reference;
+      const allowedReferenceFields =
+        reference.kind === 'skill'
+          ? ['id', 'kind', 'commandName', 'path']
+          : ['id', 'kind', 'fileKind', 'label', 'path'];
+      const referenceFieldError = fields(...allowedReferenceFields)(reference);
+      if (referenceFieldError) {
+        return `${key}.segments[${index}].reference.${referenceFieldError}`;
+      }
+      if (typeof reference.id !== 'string' || typeof reference.path !== 'string') {
+        return `${key}.segments[${index}].reference id and path must be strings`;
+      }
+      if (reference.kind === 'skill') {
+        if (typeof reference.commandName !== 'string') {
+          return `${key}.segments[${index}].reference.commandName must be a string`;
+        }
+        continue;
+      }
+      if (reference.kind !== 'file') {
+        return `${key}.segments[${index}].reference.kind must be file or skill`;
+      }
+      if (reference.fileKind !== 'file' && reference.fileKind !== 'directory') {
+        return `${key}.segments[${index}].reference.fileKind must be file or directory`;
+      }
+      if (typeof reference.label !== 'string') {
+        return `${key}.segments[${index}].reference.label must be a string`;
       }
     }
     return undefined;

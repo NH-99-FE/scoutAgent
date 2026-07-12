@@ -162,6 +162,7 @@ describe('composer document', () => {
               commandName: 'skill:old',
               id: 'skill:old',
               kind: 'skill',
+              path: '/skills/old/SKILL.md',
             },
             type: 'reference',
           },
@@ -174,6 +175,7 @@ describe('composer document', () => {
         commandName: 'skill:new',
         id: 'skill:new',
         kind: 'skill',
+        path: '/skills/new/SKILL.md',
       },
     );
 

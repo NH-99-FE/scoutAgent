@@ -161,18 +161,34 @@ describe('SessionProtocolService', () => {
     });
   });
 
+  it('passes composer presentation through current-session prompts', async () => {
+    const sessionManager = makeSessionManager();
+    const { service } = makeService({ sessionManager });
+    const document = { segments: [{ type: 'text' as const, text: 'hello' }] };
+
+    await service.userMessage({ type: 'user_message', text: 'hello', document });
+
+    expect(sessionManager.prompt).toHaveBeenCalledWith('hello', {
+      clearFollowUpQueue: undefined,
+      deliverAs: undefined,
+      document,
+      images: undefined,
+    });
+  });
+
   it('refreshes recent tasks after a new session initial turn finishes', async () => {
     let resolveTurn: (() => void) | undefined;
     const turn = new Promise<void>((resolve) => {
       resolveTurn = resolve;
     });
     const operation = makeOperation('new_session_message');
+    const startUserMessage = vi.fn(async () => ({ turn }));
     const sessionManager = makeSessionManager({
       beginUserSessionOperation: vi.fn(() => operation),
       newUserSession: vi.fn(
         async (_operation, options: { withSession: (ctx: unknown) => void }) => {
           await options.withSession({
-            startUserMessage: vi.fn(async () => ({ turn })),
+            startUserMessage,
           });
           return { status: 'completed', value: { cancelled: false } };
         },
@@ -187,7 +203,11 @@ describe('SessionProtocolService', () => {
       requestRecentTasks,
     });
 
-    await service.newSessionMessage({ type: 'new_session_message', text: 'hello' }, respond);
+    const document = { segments: [{ type: 'text' as const, text: 'hello' }] };
+    await service.newSessionMessage(
+      { type: 'new_session_message', text: 'hello', document },
+      respond,
+    );
     resolveTurn?.();
     await turn;
     await Promise.resolve();
@@ -195,6 +215,7 @@ describe('SessionProtocolService', () => {
     expect(respond).toHaveBeenCalledWith({ type: 'new_session_result', success: true });
     expect(pushState).toHaveBeenCalledTimes(2);
     expect(requestRecentTasks).toHaveBeenCalledTimes(1);
+    expect(startUserMessage).toHaveBeenCalledWith('hello', { details: document });
   });
 
   it('refreshes recent tasks after renaming the active session', async () => {

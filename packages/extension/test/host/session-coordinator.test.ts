@@ -260,9 +260,21 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
 
     await coordinator.prompt('turn now');
     await coordinator.prompt('after turn', { deliverAs: 'followUp' });
+    const document = { segments: [{ type: 'text' as const, text: 'with presentation' }] };
+    await coordinator.prompt('with presentation', { deliverAs: 'followUp', document });
 
-    expect(steer).toHaveBeenCalledWith('turn now');
-    expect(followUp).toHaveBeenCalledWith('after turn');
+    expect(steer).toHaveBeenCalledWith('turn now', {
+      images: undefined,
+      userMessageDetails: undefined,
+    });
+    expect(followUp).toHaveBeenCalledWith('after turn', {
+      images: undefined,
+      userMessageDetails: undefined,
+    });
+    expect(followUp).toHaveBeenLastCalledWith('with presentation', {
+      images: undefined,
+      userMessageDetails: document,
+    });
     expect(prompt).not.toHaveBeenCalled();
   });
 

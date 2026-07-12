@@ -97,6 +97,7 @@ export function createScoutProtocolHostServices(
     fdPath,
     getCurrentCwd: () => options.sessionManager.currentCwd,
     logError: options.log,
+    openTextFile: options.openTextFile,
   });
 
   bundle.ui = new UiProtocolService({
@@ -318,6 +319,7 @@ export function createScoutProtocolHostServices(
         bundle.mention.pickComposerContent(message, respond),
       requestFileMentions: (message, respond, signal) =>
         bundle.mention.requestFileMentions(message, respond, signal),
+      openMentionedFile: (message, respond) => bundle.mention.openMentionedFile(message, respond),
     },
     ui: {
       requestCommands: (respond) => bundle.ui.requestCommands(respond),

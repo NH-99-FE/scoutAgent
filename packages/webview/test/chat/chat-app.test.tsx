@@ -709,6 +709,40 @@ describe('ChatApp', () => {
       },
       { text: ' ', type: 'text' },
     ]);
+
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('new_session_message')?.payload).toEqual({
+        type: 'new_session_message',
+        text: '@packages/webview/src/App.tsx @packages/webview/src/main.tsx',
+        document: {
+          segments: [
+            {
+              reference: {
+                fileKind: 'file',
+                id: 'packages/webview/src/App.tsx',
+                kind: 'file',
+                label: 'App.tsx',
+                path: 'packages/webview/src/App.tsx',
+              },
+              type: 'reference',
+            },
+            { text: ' ', type: 'text' },
+            {
+              reference: {
+                fileKind: 'file',
+                id: 'packages/webview/src/main.tsx',
+                kind: 'file',
+                label: 'main.tsx',
+                path: 'packages/webview/src/main.tsx',
+              },
+              type: 'reference',
+            },
+            { text: ' ', type: 'text' },
+          ],
+        },
+      });
+    });
   });
 
   it('opens the at mention add menu from the composer add button', async () => {
@@ -946,6 +980,29 @@ describe('ChatApp', () => {
       },
       { text: ' ', type: 'text' },
     ]);
+
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('new_session_message')?.payload).toEqual({
+        type: 'new_session_message',
+        text: '@packages/agent',
+        document: {
+          segments: [
+            {
+              reference: {
+                fileKind: 'directory',
+                id: 'packages/agent',
+                kind: 'file',
+                label: 'agent',
+                path: 'packages/agent',
+              },
+              type: 'reference',
+            },
+            { text: ' ', type: 'text' },
+          ],
+        },
+      });
+    });
   });
 
   it('searches project files after pasting an at mention', async () => {

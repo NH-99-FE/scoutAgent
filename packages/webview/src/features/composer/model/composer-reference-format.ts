@@ -3,16 +3,8 @@
 // ============================================================
 
 import type { ComposerReference } from '@/store/composer-document';
+import { formatComposerReferenceText } from '@/lib/composer-document-text';
 
 export function formatComposerReference(reference: ComposerReference): string {
-  switch (reference.kind) {
-    case 'skill':
-      return `/${reference.commandName}`;
-    case 'file':
-      return formatFileMention(reference.path);
-  }
-}
-
-export function formatFileMention(path: string): string {
-  return path.includes(' ') ? `@"${path}"` : `@${path}`;
+  return formatComposerReferenceText(reference);
 }

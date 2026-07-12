@@ -2,8 +2,9 @@
 // Composer Inline Reference — 编辑器内原子引用展示
 // ============================================================
 
-import { Box, File, Folder } from 'lucide-react';
 import type { ComposerReference } from '@/store/composer-document';
+import { protocolClient } from '@/bridge/protocol-client';
+import { InlineResourceReference } from '@/components/common/InlineResourceReference';
 
 interface ComposerInlineReferenceProps {
   reference: ComposerReference;
@@ -12,8 +13,6 @@ interface ComposerInlineReferenceProps {
 export function ComposerInlineReference({ reference }: ComposerInlineReferenceProps) {
   const label =
     reference.kind === 'skill' ? reference.commandName.replace(/^skill:/, '') : reference.label;
-  const Icon =
-    reference.kind === 'skill' ? Box : reference.fileKind === 'directory' ? Folder : File;
   const ariaLabel =
     reference.kind === 'skill'
       ? `已选择技能：${label}`
@@ -22,13 +21,20 @@ export function ComposerInlineReference({ reference }: ComposerInlineReferencePr
         : `已选择文件：${reference.path}`;
 
   return (
-    <span
-      aria-label={ariaLabel}
-      className="text-reference inline-flex items-center gap-1 align-bottom text-sm leading-[inherit] font-medium"
-      data-composer-reference-id={reference.id}
-    >
-      <Icon aria-hidden="true" className="size-4 shrink-0" />
-      <span className="max-w-48 truncate">{label}</span>
+    <span data-composer-reference-id={reference.id}>
+      <InlineResourceReference
+        ariaLabel={ariaLabel}
+        kind={reference.kind === 'skill' ? 'skill' : reference.fileKind}
+        label={label}
+        preserveEditorSelection
+        onOpen={
+          reference.kind === 'skill'
+            ? () => protocolClient.openSkillFile(reference.path)
+            : reference.fileKind === 'file'
+              ? () => protocolClient.openMentionedFile(reference.path)
+              : undefined
+        }
+      />
     </span>
   );
 }

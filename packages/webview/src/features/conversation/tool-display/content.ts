@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { ScoutContent, ScoutToolExecutionResult } from '@scout-agent/shared';
+import { formatComposerDocumentText } from '@/lib/composer-document-text';
 
 export function contentToText(content: string | ScoutContent[]): string {
   if (typeof content === 'string') return content;
@@ -12,6 +13,7 @@ export function contentToText(content: string | ScoutContent[]): string {
       if (item.type === 'thinking') return item.redacted ? '思考内容已隐藏' : item.thinking;
       if (item.type === 'toolCall') return item.name;
       if (item.type === 'skillInvocation') return item.userMessage || `/skill:${item.name}`;
+      if (item.type === 'composerDocument') return formatComposerDocumentText(item.document);
       return '[image]';
     })
     .filter(Boolean)

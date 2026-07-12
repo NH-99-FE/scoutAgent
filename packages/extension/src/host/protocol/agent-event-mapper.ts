@@ -32,12 +32,15 @@ import type {
   CustomMessage,
 } from '@scout-agent/agent';
 import { createDisplayArguments } from './display-arguments.ts';
+import { readScoutComposerDocument } from './composer-document.ts';
 
 export interface AgentEventMappingOptions {
   messageId?: string;
   formatDisplayPath?: (path: string) => string;
   getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
   enrichToolResultDetails?: (details: unknown) => unknown;
+  getUserMessageDetails?: (message: UserMessage) => unknown;
+  userMessageDetails?: unknown;
 }
 
 // ---------- 内容块转换 ----------
@@ -105,7 +108,22 @@ function convertAssistantContent(
   });
 }
 
-function convertUserContent(content: UserMessage['content']): string | ScoutContent[] {
+function convertUserContent(
+  content: UserMessage['content'],
+  details?: unknown,
+): string | ScoutContent[] {
+  const composerDocument = readScoutComposerDocument(details);
+  if (composerDocument) {
+    const images =
+      typeof content === 'string'
+        ? []
+        : content.flatMap((block): ScoutContent[] =>
+            block.type === 'image'
+              ? [{ type: 'image', data: block.data, mimeType: block.mimeType }]
+              : [],
+          );
+    return [{ type: 'composerDocument', document: composerDocument }, ...images];
+  }
   if (typeof content === 'string') {
     return convertSkillTextBlock(content) ?? content;
   }
@@ -151,7 +169,10 @@ export function convertMessage(
     const msg = message as UserMessage;
     const scoutMsg: ScoutUserMessage = {
       role: 'user',
-      content: convertUserContent(msg.content),
+      content: convertUserContent(
+        msg.content,
+        options.userMessageDetails ?? options.getUserMessageDetails?.(msg),
+      ),
       timestamp: msg.timestamp,
     };
     return scoutMsg;

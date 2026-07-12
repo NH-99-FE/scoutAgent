@@ -218,13 +218,18 @@ export function useComposerSubmitFlow({
         transitionSubmitState({ type: 'block_new_session_submit' });
         onBeginNewSessionRequest?.();
         composerActions.stagePendingDraft(sessionId, payload);
-        protocolClient.newSessionMessage(formatComposerSubmitText(payload), protocolImages);
+        protocolClient.newSessionMessage(
+          formatComposerSubmitText(payload),
+          protocolImages,
+          hasComposerReferences(payload.document) ? payload.document : undefined,
+        );
         composerActions.clearDraft(sessionId);
         setLeasedPendingSubmit(null);
         return;
       }
       protocolClient.userMessage(formatComposerSubmitText(payload), deliverAs, {
         ...options,
+        document: hasComposerReferences(payload.document) ? payload.document : undefined,
         images: protocolImages,
       });
       onMessageSent?.();

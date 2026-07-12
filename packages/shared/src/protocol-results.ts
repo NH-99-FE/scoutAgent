@@ -136,6 +136,7 @@ export type ScoutGenericCommandResultType =
   | 'create_extension_from_template_result'
   | 'open_extension_file_result'
   | 'open_skill_file_result'
+  | 'open_mentioned_file_result'
   | 'reload_result'
   | 'delete_session_result';
 

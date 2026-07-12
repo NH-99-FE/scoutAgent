@@ -29,6 +29,8 @@ vi.mock('@/features/conversation/view/ConversationScroller', () => ({
 const protocolClientMock = vi.hoisted(() => ({
   downloadImage: vi.fn(),
   extensionUIResponse: vi.fn(),
+  openMentionedFile: vi.fn(),
+  openSkillFile: vi.fn(),
 }));
 
 vi.mock('@/bridge/protocol-client', () => ({
@@ -42,6 +44,8 @@ describe('ConversationTranscript', () => {
   beforeEach(() => {
     scrollerItemRenderCounts.clear();
     protocolClientMock.downloadImage.mockReset();
+    protocolClientMock.openMentionedFile.mockReset();
+    protocolClientMock.openSkillFile.mockReset();
   });
 
   it('renders typed extension request rows as transcript items', () => {
@@ -98,7 +102,9 @@ describe('ConversationTranscript', () => {
       <ConversationTranscript expansionScope="test" isStreaming={false} rows={rows} />,
     );
 
-    expect(screen.getByText('deploy')).toBeInTheDocument();
+    const skillReference = screen.getByRole('button', { name: '打开技能：deploy' });
+    expect(skillReference).toHaveTextContent('deploy');
+    expect(skillReference).toHaveClass('cursor-pointer');
     expect(screen.getByText('Use staging')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: '已发送图片 1' })).toHaveAttribute(
       'src',
@@ -106,6 +112,111 @@ describe('ConversationTranscript', () => {
     );
     expect(container.textContent).not.toContain('<skill');
     expect(container.textContent).not.toContain('</skill>');
+    expect(container.textContent).not.toContain('Deploy carefully.');
+
+    fireEvent.click(skillReference);
+    expect(protocolClientMock.openSkillFile).toHaveBeenCalledWith(
+      '/workspace/.scout/skills/deploy/SKILL.md',
+    );
+  });
+
+  it('renders sent file mentions as clickable composer-style references', () => {
+    const rows: ConversationTranscriptRow[] = [
+      {
+        type: 'user',
+        key: 'user-files',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'composerDocument',
+              document: {
+                segments: [
+                  { type: 'text', text: 'Review ' },
+                  {
+                    type: 'reference',
+                    reference: {
+                      fileKind: 'file',
+                      id: 'packages/webview/src/App.tsx',
+                      kind: 'file',
+                      label: 'App.tsx',
+                      path: 'packages/webview/src/App.tsx',
+                    },
+                  },
+                  { type: 'text', text: '。 Compare ' },
+                  {
+                    type: 'reference',
+                    reference: {
+                      fileKind: 'file',
+                      id: 'docs/design notes.md',
+                      kind: 'file',
+                      label: 'design notes.md',
+                      path: 'docs/design notes.md',
+                    },
+                  },
+                  { type: 'text', text: ' with @alice in ' },
+                  {
+                    type: 'reference',
+                    reference: {
+                      fileKind: 'directory',
+                      id: 'packages/webview',
+                      kind: 'file',
+                      label: 'webview',
+                      path: 'packages/webview',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+          timestamp: 1,
+        },
+      },
+    ];
+
+    render(<ConversationTranscript expansionScope="test" isStreaming={false} rows={rows} />);
+
+    const sourceReference = screen.getByRole('button', {
+      name: '打开文件：packages/webview/src/App.tsx',
+    });
+    const notesReference = screen.getByRole('button', {
+      name: '打开文件：docs/design notes.md',
+    });
+    expect(sourceReference).toHaveTextContent('App.tsx');
+    expect(sourceReference).toHaveClass('text-reference', 'cursor-pointer');
+    expect(notesReference).toHaveTextContent('design notes.md');
+    expect(screen.getByText(/@alice/u)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /@alice/u })).not.toBeInTheDocument();
+    const directoryReference = screen.getByLabelText('已选择文件夹：packages/webview');
+    expect(directoryReference).toHaveTextContent('webview');
+    expect(directoryReference).not.toHaveClass('cursor-pointer');
+    expect(directoryReference.tagName).toBe('SPAN');
+
+    fireEvent.click(sourceReference);
+    fireEvent.click(notesReference);
+    expect(protocolClientMock.openMentionedFile.mock.calls).toEqual([
+      ['packages/webview/src/App.tsx'],
+      ['docs/design notes.md'],
+    ]);
+  });
+
+  it('keeps unstructured at tokens and sentence punctuation as plain text', () => {
+    const rows: ConversationTranscriptRow[] = [
+      {
+        type: 'user',
+        key: 'user-plain-at',
+        message: {
+          role: 'user',
+          content: 'Ask @alice about @src/a.ts。',
+          timestamp: 1,
+        },
+      },
+    ];
+
+    render(<ConversationTranscript expansionScope="test" isStreaming={false} rows={rows} />);
+
+    expect(screen.getByText('Ask @alice about @src/a.ts。')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /打开文件/u })).not.toBeInTheDocument();
   });
 
   it('renders user images outside the text bubble and previews the image group', async () => {
@@ -117,10 +228,11 @@ describe('ConversationTranscript', () => {
         message: {
           role: 'user',
           content: [
-            { type: 'text', text: 'Inspect this screenshot' },
+            { type: 'text', text: 'Before screenshot' },
             { type: 'image', data: 'Zmlyc3Q=', mimeType: 'image/png' },
             { type: 'image', data: 'c2Vjb25k', mimeType: 'image/jpeg' },
             { type: 'image', data: 'dGhpcmQ=', mimeType: 'image/webp' },
+            { type: 'text', text: 'After screenshot' },
           ],
           timestamp: 1,
         },
@@ -131,7 +243,12 @@ describe('ConversationTranscript', () => {
       <ConversationTranscript expansionScope="test" isStreaming={false} rows={rows} />,
     );
 
-    expect(screen.getByText('Inspect this screenshot')).toBeInTheDocument();
+    const beforeText = screen.getByText('Before screenshot');
+    const afterText = screen.getByText('After screenshot');
+    expect(beforeText).not.toBe(afterText);
+    expect(beforeText.parentElement).toBe(afterText.parentElement);
+    expect(beforeText.tagName).toBe('DIV');
+    expect(afterText.tagName).toBe('DIV');
     expect(screen.getByRole('img', { name: '已发送图片 1' })).toHaveAttribute(
       'src',
       'data:image/png;base64,Zmlyc3Q=',

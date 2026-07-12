@@ -359,6 +359,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
         commandName: item.command.name,
         id: item.command.name,
         kind: 'skill',
+        path: item.command.sourceInfo.path,
       });
       return;
     }
