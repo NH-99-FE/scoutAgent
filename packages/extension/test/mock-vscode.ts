@@ -11,6 +11,9 @@ export function __setMockConfiguration(nextSettings: Record<string, unknown>): v
 }
 
 export const workspace = {
+  workspaceFolders: undefined as
+    | Array<{ uri: { fsPath: string; path: string; scheme: string } }>
+    | undefined,
   getConfiguration: vi.fn(
     (_section?: string): MockWorkspaceConfiguration => ({
       get<T>(key: string): T | undefined {
@@ -20,8 +23,17 @@ export const workspace = {
   ),
   onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
   fs: {
+    readFile: vi.fn(async () => new Uint8Array()),
+    stat: vi.fn(async () => ({ type: 1 })),
     writeFile: vi.fn(async () => undefined),
   },
+};
+
+export const FileType = {
+  Unknown: 0,
+  File: 1,
+  Directory: 2,
+  SymbolicLink: 64,
 };
 
 export const commands = {

@@ -199,6 +199,10 @@ const PAYLOAD_CASES = [
     { service: 'ui', method: 'extension_ui_response' },
   ),
   protocolCase(
+    { type: 'pick_composer_content', selectionKind: 'file' },
+    { service: 'mention', method: 'pick_composer_content' },
+  ),
+  protocolCase(
     { type: 'request_file_mentions', query: 'src', limit: 10 },
     { service: 'mention', method: 'request_file_mentions' },
   ),
@@ -393,6 +397,7 @@ function makeServices(): ScoutProtocolServices {
       }),
     },
     mention: {
+      pickComposerContent: vi.fn(async () => undefined),
       requestFileMentions: vi.fn(async () => undefined),
     },
     extensions: {

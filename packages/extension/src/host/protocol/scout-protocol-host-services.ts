@@ -7,6 +7,7 @@ import type { ExtensionMessage, ToolInfo } from '@scout-agent/shared';
 import type { ConfigManager } from '../../config-manager.ts';
 import type { FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
 import type { ToolPreviewContext, ToolPreviewToolIdentity } from '../../core/tool-preview/index.ts';
+import { ensureTool } from '../../core/tools/shared/tools-manager.ts';
 import type { FileReviewArtifact } from '../review/file-review-artifact.ts';
 import type { ExtensionSessionCoordinator } from '../session-coordinator.ts';
 import type { SessionIndex } from '../session-index.ts';
@@ -30,6 +31,7 @@ import { UiProtocolService } from './services/ui-service.ts';
 export interface ScoutProtocolHostServicesOptions {
   cwd: string;
   agentDir: string;
+  fdPath?: Promise<string | undefined>;
   sessionManager: ExtensionSessionCoordinator;
   configManager: ConfigManager;
   sessionIndex: SessionIndex;
@@ -71,6 +73,16 @@ export function createScoutProtocolHostServices(
   options: ScoutProtocolHostServicesOptions,
 ): ScoutProtocolHostServices {
   const bundle = {} as ScoutProtocolHostServices;
+  const fdPath =
+    options.fdPath ??
+    ensureTool('fd').then((path) => {
+      options.log(
+        path
+          ? `[scout] File mention search ready: ${path}`
+          : '[scout] File mention search unavailable: fd could not be installed',
+      );
+      return path;
+    });
   bundle.eventPublisher = new DomainEventPublisher({
     postMessage: (message, surface) => options.postMessage(message, surface),
   });
@@ -82,7 +94,8 @@ export function createScoutProtocolHostServices(
   });
 
   bundle.mention = new MentionProtocolService({
-    cwd: options.cwd,
+    fdPath,
+    getCurrentCwd: () => options.sessionManager.currentCwd,
     logError: options.log,
   });
 
@@ -301,8 +314,10 @@ export function createScoutProtocolHostServices(
       setLabel: (message, respond) => bundle.tree.setLabel(message, respond),
     },
     mention: {
-      requestFileMentions: (message, respond) =>
-        bundle.mention.requestFileMentions(message, respond),
+      pickComposerContent: (message, respond) =>
+        bundle.mention.pickComposerContent(message, respond),
+      requestFileMentions: (message, respond, signal) =>
+        bundle.mention.requestFileMentions(message, respond, signal),
     },
     ui: {
       requestCommands: (respond) => bundle.ui.requestCommands(respond),

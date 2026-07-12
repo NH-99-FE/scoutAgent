@@ -31,6 +31,7 @@ function makeBundle(): ScoutProtocolHostServices {
   return createScoutProtocolHostServices({
     cwd: '/workspace',
     agentDir: '/home/me/.scout/agent',
+    fdPath: Promise.resolve('fd'),
     sessionManager: makeSessionManager(),
     configManager: makeConfigManager(),
     sessionIndex: new SessionIndex({
@@ -101,6 +102,7 @@ describe('createScoutProtocolHostServices', () => {
     const bundle = createScoutProtocolHostServices({
       cwd: '/workspace',
       agentDir: '/home/me/.scout/agent',
+      fdPath: Promise.resolve('fd'),
       sessionManager: {
         ...makeSessionManager(),
         isStreaming: true,
@@ -147,6 +149,7 @@ describe('createScoutProtocolHostServices', () => {
     const bundle = createScoutProtocolHostServices({
       cwd: '/workspace',
       agentDir: '/home/me/.scout/agent',
+      fdPath: Promise.resolve('fd'),
       sessionManager: {
         ...makeSessionManager(),
         initialize: vi.fn(async () => {

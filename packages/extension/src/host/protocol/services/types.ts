@@ -150,9 +150,14 @@ export interface TreeProtocolHost {
 }
 
 export interface MentionProtocolHost {
+  pickComposerContent: (
+    message: ProtocolPayload<'pick_composer_content'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
   requestFileMentions: (
     message: ProtocolPayload<'request_file_mentions'>,
     respond: ProtocolResponder,
+    signal: AbortSignal,
   ) => Promise<void>;
 }
 

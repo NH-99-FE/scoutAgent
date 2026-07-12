@@ -178,10 +178,17 @@ export function registerScoutProtocolServices(
   });
 
   registerProtocolServiceHandlers(server, 'mention', {
+    pick_composer_content: async (message, context) => {
+      await services.mention.pickComposerContent(
+        payload<'pick_composer_content'>(message),
+        context.respond,
+      );
+    },
     request_file_mentions: async (message, context) => {
       await services.mention.requestFileMentions(
         payload<'request_file_mentions'>(message),
         context.respond,
+        context.signal,
       );
     },
   });

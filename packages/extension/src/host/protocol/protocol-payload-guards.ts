@@ -148,6 +148,10 @@ const PAYLOAD_VALIDATORS = {
     requiredEnum('action', ['confirm', 'select', 'input', 'cancel']),
     extensionUIResponseValue(),
   ),
+  pick_composer_content: combine(
+    fields('type', 'selectionKind'),
+    requiredEnum('selectionKind', ['file', 'directory']),
+  ),
   request_file_mentions: combine(
     fields('type', 'query', 'limit'),
     requiredString('query'),
