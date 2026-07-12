@@ -63,6 +63,7 @@ export function projectProtocolResponsePayload(
       projectTaskHistoryResult(payload, queryToken);
       break;
     case 'file_mentions_result':
+    case 'composer_content_pick_result':
       break;
     case 'fork_candidates_result':
       // fork 候选由发起方在 onResponse 回调中直接消费，无需投影到 store

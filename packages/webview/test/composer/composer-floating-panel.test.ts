@@ -50,35 +50,74 @@ function TestPanel({
 }
 
 describe('FloatingPanel', () => {
-  it('renders optional title and content', () => {
+  it('renders content inside one shared scroll area', () => {
     render(
       createElement(FloatingPanel, {
         children: 'packages/webview',
-        title: '文件',
       }),
     );
 
-    expect(screen.getByText('文件')).toBeInTheDocument();
-    expect(screen.getByText('packages/webview')).toBeInTheDocument();
+    expect(
+      screen.getByText('packages/webview').closest('[data-slot="scroll-area"]'),
+    ).not.toBeNull();
   });
 
-  it('does not render an empty title container', () => {
-    const { container } = render(createElement(FloatingPanel, { children: 'content' }));
+  it('renders accessible groups inside the shared scroll area', () => {
+    render(
+      createElement(FloatingPanel, {
+        'aria-label': '添加内容',
+        children: [
+          createElement(FloatingPanel.Group, { children: '文件和文件夹', label: '添加' }),
+          createElement(FloatingPanel.Group, {
+            children: 'Default templates',
+            label: '插件',
+          }),
+          createElement(FloatingPanel.Group, { children: 'Sites', label: '应用' }),
+        ],
+        role: 'listbox',
+      }),
+    );
 
-    expect(container.querySelector('.border-b')).toBeNull();
+    const addGroup = screen.getByRole('group', { name: '添加' });
+    expect(addGroup).toHaveTextContent('文件和文件夹');
+    expect(screen.getByRole('group', { name: '插件' })).toHaveTextContent('Default templates');
+    expect(screen.getByRole('group', { name: '应用' })).toHaveTextContent('Sites');
+    expect(addGroup.closest('[data-slot="scroll-area"]')).not.toBeNull();
   });
 
-  it('can render non-scrollable status content', () => {
+  it('uses one canonical option layout for panel options', () => {
+    render(
+      createElement(FloatingPanel, {
+        'aria-label': '候选项',
+        children: createElement(FloatingPanel.Option, {
+          active: true,
+          description: '查看会话树',
+          icon: createElement('svg'),
+          label: '会话树',
+        }),
+        role: 'listbox',
+      }),
+    );
+
+    const option = screen.getByRole('option', { name: '会话树 查看会话树' });
+    expect(option).toHaveAttribute('aria-selected', 'true');
+    expect(option).toHaveClass('h-7', 'gap-1.5', 'rounded-lg', 'px-2', 'text-xs');
+    expect(screen.getByText('会话树')).toHaveClass('max-w-[58%]', 'font-medium');
+    expect(screen.getByText('查看会话树')).toHaveClass('w-0', 'flex-1');
+  });
+
+  it('renders status content without scrolling or a clipping height cap', () => {
     render(
       createElement(FloatingPanel, {
         children: '没有匹配的命令',
         role: 'status',
-        scrollable: false,
+        variant: 'status',
       }),
     );
 
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent('没有匹配的命令');
+    expect(status).not.toHaveClass('max-h-[min(280px,42vh)]');
     expect(status.querySelector('[data-slot="scroll-area"]')).toBeNull();
   });
 

@@ -30,11 +30,13 @@ import { useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu';
 import { useComposerImageAttachments } from '../hooks/use-composer-image-attachments';
 import { useComposerSubmitFlow } from '../hooks/use-composer-submit-flow';
-import { SUPPORTED_IMAGE_INPUT_ACCEPT } from '../model/composer-images';
+import { useFileMentionMenu } from '../hooks/use-file-mention-menu';
+import { AddMentionMenu } from './AddMentionMenu';
 import { ComposerImagePreviewDialog } from './ComposerImagePreviewDialog';
 import { ComposerImageTray } from './ComposerImageTray';
 import { ComposerSuggestionPopover } from './ComposerSuggestionPopover';
 import { ComposerTextarea, type ComposerEditorHandle } from './ComposerTextarea';
+import { FileMentionSearchMenu } from './FileMentionSearchMenu';
 import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
@@ -85,7 +87,7 @@ type ChatComposerSessionProps =
   | CurrentSessionChatComposerSessionProps
   | NewSessionChatComposerSessionProps;
 
-interface SlashSelectionState {
+interface SuggestionSelectionState {
   key: string | null;
   index: number;
 }
@@ -132,15 +134,14 @@ export const ChatComposer = memo(ChatComposerView);
 function ChatComposerSession(props: ChatComposerSessionProps) {
   const { mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
   const [confirmAbort, setConfirmAbort] = useState(false);
-  const [selectionStart, setSelectionStart] = useState(0);
-  const [slashSelection, setSlashSelection] = useState<SlashSelectionState>({
+  const [selectionStart, setSelectionStart] = useState<number | null>(0);
+  const [slashSelection, setSlashSelection] = useState<SuggestionSelectionState>({
     key: null,
     index: 0,
   });
   const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
   const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const images = useComposerImages(sessionId);
   const document = useComposerDocument(sessionId);
   const linearText = useMemo(() => getComposerLinearText(document), [document]);
@@ -182,6 +183,32 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   } = submitFlow;
   const canStop = isCurrentSessionMode && visualBusy.cancellable;
   const showStop = (visualIsStreaming || canStop) && !hasDraft;
+  const replaceComposerRange = useCallback(
+    (...args: Parameters<ComposerEditorHandle['replaceRange']>) => {
+      editorRef.current?.replaceRange(...args);
+    },
+    [],
+  );
+  const insertComposerReferencesAt = useCallback(
+    (...args: Parameters<ComposerEditorHandle['insertReferencesAt']>) => {
+      editorRef.current?.insertReferencesAt(...args);
+    },
+    [],
+  );
+  const replaceComposerRangeWithReferences = useCallback(
+    (...args: Parameters<ComposerEditorHandle['replaceRangeWithReferences']>) => {
+      editorRef.current?.replaceRangeWithReferences(...args);
+    },
+    [],
+  );
+  const fileMentionMenu = useFileMentionMenu({
+    addImageFiles: imageAttachments.addImageFiles,
+    insertReferencesAt: insertComposerReferencesAt,
+    linearText,
+    replaceRange: replaceComposerRange,
+    replaceRangeWithReferences: replaceComposerRangeWithReferences,
+    selectionStart,
+  });
   const slashTrigger = useMemo(
     () => getSlashCommandTrigger(linearText, selectionStart),
     [linearText, selectionStart],
@@ -214,16 +241,26 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   });
   const forkMenuOpen = forkMenu.open;
   const closeForkMenu = forkMenu.close;
-  const floatingPanelOpen = forkMenuOpen || slashMenuOpen;
+  const floatingPanelOpen = forkMenuOpen || fileMentionMenu.open || slashMenuOpen;
   const previewImage = previewImageIndex === null ? null : images[previewImageIndex];
+
+  const openComposerAddMenu = useCallback(() => {
+    closeForkMenu();
+    setDismissedSlashKey(slashKey);
+    fileMentionMenu.openAddMenu();
+  }, [closeForkMenu, fileMentionMenu, slashKey]);
 
   const dismissFloatingPanel = useCallback(() => {
     if (forkMenuOpen) {
       closeForkMenu();
       return;
     }
+    if (fileMentionMenu.open) {
+      fileMentionMenu.dismiss();
+      return;
+    }
     setDismissedSlashKey(slashKey);
-  }, [closeForkMenu, forkMenuOpen, slashKey]);
+  }, [closeForkMenu, fileMentionMenu, forkMenuOpen, slashKey]);
 
   useEffect(() => {
     if (!confirmAbort) return undefined;
@@ -280,6 +317,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
   const setComposerDocument = (nextDocument: typeof document) => {
     if (isDraftLocked) return;
+    fileMentionMenu.handleDocumentChange();
     setDismissedSlashKey(null);
     setSlashSelection({ key: null, index: 0 });
     composerActions.setDocument(sessionId, nextDocument);
@@ -346,14 +384,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     }
   };
 
-  const handleSlashKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): boolean => {
+  const handleSuggestionKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): boolean => {
     if (forkMenu.handleKeyDown(event)) return true;
+    if (fileMentionMenu.handleKeyDown(event)) return true;
     if (!slashMenuOpen) return false;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      setDismissedSlashKey(slashKey);
-      return true;
-    }
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setSlashSelection({
@@ -388,6 +422,21 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
       candidates={forkMenu.candidates}
       onHover={forkMenu.onHover}
       onSelect={forkMenu.confirm}
+    />
+  ) : fileMentionMenu.kind === 'add' ? (
+    <AddMentionMenu
+      activeIndex={fileMentionMenu.activeIndex}
+      onHover={fileMentionMenu.onHover}
+      onSelect={fileMentionMenu.selectComposerContent}
+    />
+  ) : fileMentionMenu.kind === 'search' ? (
+    <FileMentionSearchMenu
+      activeIndex={fileMentionMenu.activeIndex}
+      error={fileMentionMenu.error}
+      items={fileMentionMenu.items}
+      loading={fileMentionMenu.loading}
+      onHover={fileMentionMenu.onHover}
+      onSelect={fileMentionMenu.selectFile}
     />
   ) : slashMenuOpen ? (
     <SlashCommandMenu
@@ -426,7 +475,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
             document={document}
             placeholder={placeholder}
             onChange={setComposerDocument}
-            onKeyDownCapture={handleSlashKeyDown}
+            onKeyDownCapture={handleSuggestionKeyDown}
             onPaste={(event) => {
               if (isDraftLocked) {
                 event.preventDefault();
@@ -444,28 +493,10 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
           <div className="mt-2 flex min-h-8 max-w-full min-w-0 flex-nowrap items-center justify-between gap-2 overflow-hidden">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
-              <input
-                accept={SUPPORTED_IMAGE_INPUT_ACCEPT}
-                aria-label="选择图片"
-                className="hidden"
-                multiple
-                ref={imageInputRef}
-                type="file"
-                onChange={(event) => {
-                  if (isDraftLocked) {
-                    event.currentTarget.value = '';
-                    return;
-                  }
-                  void imageAttachments.addImageFiles(event.currentTarget.files);
-                  event.currentTarget.value = '';
-                }}
-              />
               <IconButton
                 disabled={isDraftLocked}
-                label="添加图片"
-                onClick={() => {
-                  imageInputRef.current?.click();
-                }}
+                label="添加文件、文件夹或图片"
+                onClick={openComposerAddMenu}
               >
                 <Plus />
               </IconButton>

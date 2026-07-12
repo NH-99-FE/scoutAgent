@@ -10,7 +10,7 @@ import { useUiActions } from '@/store/ui-store';
 import { getClipboardImageFiles, selectComposerImageFiles } from '../model/composer-images';
 
 interface ComposerImageAttachments {
-  addImageFiles: (files: Iterable<File> | FileList | null) => Promise<void>;
+  addImageFiles: (files: Iterable<File> | FileList | null) => Promise<number>;
   handlePaste: (event: ReactClipboardEvent<HTMLElement>) => void;
 }
 
@@ -20,7 +20,7 @@ export function useComposerImageAttachments(sessionId: string): ComposerImageAtt
 
   const addImageFiles = useCallback(
     async (files: Iterable<File> | FileList | null) => {
-      if (!files) return;
+      if (!files) return 0;
       let selection;
       try {
         selection = await selectComposerImageFiles(
@@ -33,7 +33,7 @@ export function useComposerImageAttachments(sessionId: string): ComposerImageAtt
           level: 'error',
           message: '图片读取失败，请重新选择',
         });
-        return;
+        return 0;
       }
       if (selection.warningMessages.length > 0) {
         uiActions.setNotification({
@@ -42,13 +42,14 @@ export function useComposerImageAttachments(sessionId: string): ComposerImageAtt
           message: selection.warningMessages.join('；'),
         });
       }
-      if (selection.acceptedFiles.length === 0) return;
+      if (selection.acceptedFiles.length === 0) return 0;
       composerActions.addImages(
         sessionId,
         selection.acceptedFiles.map(({ file, mimeType }) =>
           registerComposerImageFile(file, mimeType),
         ),
       );
+      return selection.acceptedFiles.length;
     },
     [composerActions, sessionId, uiActions],
   );

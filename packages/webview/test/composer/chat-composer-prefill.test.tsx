@@ -206,6 +206,28 @@ describe('ChatComposer command effects', () => {
     expect(getText()).toBe('/re');
   });
 
+  it('dismisses suggestions when focus moves outside the composer', async () => {
+    useConfigStore.getState().actions.setCommands([promptCommand('review')]);
+    useComposerStore.getState().actions.setText('session-1', '/re');
+    render(
+      <>
+        <button type="button">外部操作</button>
+        <ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />
+      </>,
+    );
+
+    const editor = screen.getByRole('textbox', { name: '要求后续变更' });
+    focusEditorAtEnd(editor);
+    expect(await screen.findByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+
+    screen.getByRole('button', { name: '外部操作' }).focus();
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();
+    });
+    expect(getText()).toBe('/re');
+  });
+
   it('dismisses suggestions with Escape after focus leaves the textarea', async () => {
     useConfigStore.getState().actions.setCommands([promptCommand('review')]);
     useComposerStore.getState().actions.setText('session-1', '/re');
@@ -216,12 +238,12 @@ describe('ChatComposer command effects', () => {
 
     expect(await screen.findByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
 
-    const addImageButton = screen.getByRole('button', { name: '添加图片' });
-    addImageButton.focus();
-    expect(addImageButton).toHaveFocus();
+    const addContentButton = screen.getByRole('button', { name: '添加文件、文件夹或图片' });
+    addContentButton.focus();
+    expect(addContentButton).toHaveFocus();
     expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
 
-    fireEvent.keyDown(addImageButton, { key: 'Escape' });
+    fireEvent.keyDown(addContentButton, { key: 'Escape' });
 
     await waitFor(() => {
       expect(screen.queryByRole('listbox', { name: 'Slash commands' })).not.toBeInTheDocument();

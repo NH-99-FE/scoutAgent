@@ -42,6 +42,17 @@ interface ContinueSessionOptions {
   preserveFollowUpQueue?: boolean;
 }
 
+interface RequestFileMentionsOptions {
+  limit: number;
+  onError?: (message: string) => void;
+  onResult: (result: FileMentionsResultPayload) => void;
+  query: string;
+}
+
+interface CancellableProtocolRequest {
+  cancel: () => void;
+}
+
 interface NavigateTreeOptions {
   targetId: string;
   summarize: boolean;
@@ -95,6 +106,14 @@ type CopyTextResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'copy
 type DownloadImageResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'download_image_result' }
+>;
+type ComposerContentPickResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'composer_content_pick_result' }
+>;
+type FileMentionsResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'file_mentions_result' }
 >;
 
 interface PromoteFollowUpOptions extends ContinueSessionOptions {
@@ -576,8 +595,25 @@ export const protocolClient = {
   requestCommands: () => sendRouted({ type: 'request_commands' }, projectProtocolResponsePayload),
   extensionUIResponse: (payload: ExtensionUIResponsePayload) =>
     send({ type: 'extension_ui_response', ...payload }),
-  requestFileMentions: (query: string, limit?: number) =>
-    sendRouted({ type: 'request_file_mentions', query, limit }, projectProtocolResponsePayload),
+  pickComposerContent: (
+    selectionKind: 'file' | 'directory',
+    onResult: (result: ComposerContentPickResultPayload) => void,
+  ) =>
+    sendRouted({ type: 'pick_composer_content', selectionKind }, (payload) => {
+      if (payload.type === 'composer_content_pick_result') onResult(payload);
+    }),
+  requestFileMentions: ({ limit, onError, onResult, query }: RequestFileMentionsOptions) => {
+    const requestId = sendRouted(
+      { type: 'request_file_mentions', query, limit },
+      (payload) => {
+        if (payload.type === 'file_mentions_result') onResult(payload);
+      },
+      (message) => onError?.(message),
+    );
+    return {
+      cancel: () => cancelProtocolRequest(requestId),
+    } satisfies CancellableProtocolRequest;
+  },
 };
 
 function createTaskHistoryQueryToken(): string {

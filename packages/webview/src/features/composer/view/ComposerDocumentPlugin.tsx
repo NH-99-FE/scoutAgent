@@ -10,7 +10,9 @@ import type { EditorState } from 'lexical';
 import { markProgrammaticFocus } from '@/components/ui/focus';
 import {
   areComposerDocumentsEqual,
+  insertComposerReferencesAt,
   replaceComposerRange,
+  replaceComposerRangeWithReferences,
   type ComposerDocument,
   type ComposerReference,
   type ComposerTextRange,
@@ -24,18 +26,20 @@ import {
 
 export interface ComposerEditorHandle {
   focusAt: (offset: number) => void;
+  insertReferencesAt: (offset: number, references: ComposerReference[]) => void;
   replaceRange: (
     range: ComposerTextRange,
     replacementText: string,
     reference?: ComposerReference,
   ) => void;
+  replaceRangeWithReferences: (range: ComposerTextRange, references: ComposerReference[]) => void;
 }
 
 interface ComposerDocumentPluginProps {
   document: ComposerDocument;
   editorRef: ForwardedRef<ComposerEditorHandle>;
   onChange: (document: ComposerDocument) => void;
-  onSelectionChange?: (selectionStart: number) => void;
+  onSelectionChange?: (selectionStart: number | null) => void;
   readOnly: boolean;
 }
 
@@ -66,7 +70,21 @@ export function ComposerDocumentPlugin({
         rootElement?.focus();
         editor.focus();
       },
+      insertReferencesAt: (offset, references) => {
+        const rootElement = editor.getRootElement();
+        markProgrammaticFocus(rootElement);
+        editor.update(() => {
+          const insertion = insertComposerReferencesAt($readComposerDocument(), offset, references);
+          $writeComposerDocument(insertion.document);
+          $selectComposerOffset(insertion.selectionOffset);
+        });
+        editor.focus();
+      },
       replaceRange: (range, replacementText, reference) => {
+        const rootElement = editor.getRootElement();
+        // 菜单/宿主选择器驱动的替换仍要回到 composer，但不应显示键盘 focus ring。
+        markProgrammaticFocus(rootElement);
+        const nextOffset = range.start + replacementText.length + (reference === undefined ? 0 : 1);
         editor.update(() => {
           const nextDocument = replaceComposerRange(
             $readComposerDocument(),
@@ -75,9 +93,21 @@ export function ComposerDocumentPlugin({
             reference,
           );
           $writeComposerDocument(nextDocument);
-          $selectComposerOffset(
-            range.start + replacementText.length + (reference === undefined ? 0 : 1),
+          $selectComposerOffset(nextOffset);
+        });
+        editor.focus();
+      },
+      replaceRangeWithReferences: (range, references) => {
+        const rootElement = editor.getRootElement();
+        markProgrammaticFocus(rootElement);
+        editor.update(() => {
+          const insertion = replaceComposerRangeWithReferences(
+            $readComposerDocument(),
+            range,
+            references,
           );
+          $writeComposerDocument(insertion.document);
+          $selectComposerOffset(insertion.selectionOffset);
         });
         editor.focus();
       },
@@ -97,5 +127,11 @@ export function ComposerDocumentPlugin({
     [document, onChange, onSelectionChange],
   );
 
-  return <OnChangePlugin ignoreHistoryMergeTagChange={false} onChange={handleChange} />;
+  return (
+    <OnChangePlugin
+      ignoreHistoryMergeTagChange={false}
+      ignoreSelectionChange={false}
+      onChange={handleChange}
+    />
+  );
 }

@@ -27,7 +27,7 @@ interface ComposerTextareaProps {
   onChange: (document: ComposerDocument) => void;
   onKeyDownCapture?: (event: ReactKeyboardEvent<HTMLDivElement>) => boolean;
   onPaste?: (event: ClipboardEvent<HTMLDivElement>) => void;
-  onSelectionChange?: (selectionStart: number) => void;
+  onSelectionChange?: (selectionStart: number | null) => void;
   onSubmit: (delivery?: ComposerSubmitDelivery) => void;
   placeholder: string;
   readOnly?: boolean;

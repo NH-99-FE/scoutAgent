@@ -2,7 +2,12 @@
 // Composer Images — 输入区图片策略与协议适配
 // ============================================================
 
-import { SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE, type ScoutImageContent } from '@scout-agent/shared';
+import {
+  SCOUT_COMPOSER_IMAGE_MAX_BYTES,
+  SCOUT_COMPOSER_IMAGE_MAX_COUNT,
+  SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE,
+  type ScoutImageContent,
+} from '@scout-agent/shared';
 import {
   getComposerImageFile,
   getComposerImageObjectUrl,
@@ -15,9 +20,8 @@ export const SUPPORTED_IMAGE_MIME_TYPES = new Set([
   'image/gif',
   'image/webp',
 ]);
-export const SUPPORTED_IMAGE_INPUT_ACCEPT = Array.from(SUPPORTED_IMAGE_MIME_TYPES).join(',');
-export const MAX_COMPOSER_IMAGE_COUNT = 6;
-export const MAX_COMPOSER_IMAGE_BYTES = 2 * 1024 * 1024;
+export const MAX_COMPOSER_IMAGE_COUNT = SCOUT_COMPOSER_IMAGE_MAX_COUNT;
+export const MAX_COMPOSER_IMAGE_BYTES = SCOUT_COMPOSER_IMAGE_MAX_BYTES;
 
 export interface AcceptedComposerImageFile {
   file: File;
@@ -44,6 +48,12 @@ export function getClipboardImageFiles(clipboardData: DataTransfer): File[] {
     .filter((file): file is File => file !== null);
   if (itemFiles.length > 0) return itemFiles;
   return Array.from(clipboardData.files);
+}
+
+export function createComposerImageFile(image: ScoutImageContent, fileName: string): File {
+  const binary = atob(image.data);
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new File([bytes], fileName, { type: image.mimeType });
 }
 
 export async function selectComposerImageFiles(

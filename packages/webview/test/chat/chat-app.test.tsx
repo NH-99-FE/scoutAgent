@@ -334,15 +334,26 @@ function typeComposerText(label: string, value: string): HTMLElement {
     label === '随心输入' ? HOME_COMPOSER_SESSION_ID : useSessionStore.getState().sessionId;
   act(() => useComposerStore.getState().actions.setText(sessionId, value));
   const editor = screen.getByLabelText(label);
-  fireEvent.focus(editor);
   const range = document.createRange();
   range.selectNodeContents(editor.querySelector('p') ?? editor);
   range.collapse(false);
   const selection = window.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
+  fireEvent.focus(editor);
   testingFireEvent(document, new Event('selectionchange'));
   return editor;
+}
+
+function moveComposerCaretToStart(editor: HTMLElement): void {
+  const range = document.createRange();
+  range.selectNodeContents(editor.querySelector('p') ?? editor);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  testingFireEvent(document, new Event('selectionchange'));
+  testingFireEvent.pointerUp(editor);
 }
 
 function expectComposerText(label: string, value: string): void {
@@ -365,18 +376,54 @@ function makeImageClipboardData(files: File[]): DataTransfer {
   } as unknown as DataTransfer;
 }
 
+function makeTextClipboardData(text: string): DataTransfer {
+  return {
+    files: [],
+    getData: (type: string) => (type === 'text/plain' ? text : ''),
+    items: [],
+    types: ['text/plain'],
+  } as unknown as DataTransfer;
+}
+
+function pasteComposerText(editor: HTMLElement, text: string): void {
+  const originalClipboardEvent = globalThis.ClipboardEvent;
+  class TestClipboardEvent extends Event {
+    readonly clipboardData: DataTransfer;
+
+    constructor(type: string, clipboardData: DataTransfer) {
+      super(type, { bubbles: true, cancelable: true });
+      this.clipboardData = clipboardData;
+    }
+  }
+  Object.defineProperty(globalThis, 'ClipboardEvent', {
+    configurable: true,
+    value: TestClipboardEvent,
+  });
+
+  try {
+    act(() => {
+      testingFireEvent(editor, new TestClipboardEvent('paste', makeTextClipboardData(text)));
+    });
+  } finally {
+    if (originalClipboardEvent) {
+      Object.defineProperty(globalThis, 'ClipboardEvent', {
+        configurable: true,
+        value: originalClipboardEvent,
+      });
+    } else {
+      Reflect.deleteProperty(globalThis, 'ClipboardEvent');
+    }
+  }
+}
+
+const ANIMATED_GIF_BYTES = new Uint8Array([
+  0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00,
+  0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+  0x01, 0x00, 0x00, 0x02, 0x00, 0x3b,
+]);
+
 function makeAnimatedGifFile(name = 'animated.gif'): File {
-  return new File(
-    [
-      new Uint8Array([
-        0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x2c, 0x00,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x00, 0x2c, 0x00, 0x00, 0x00, 0x00,
-        0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x00, 0x3b,
-      ]),
-    ],
-    name,
-    { type: 'image/gif' },
-  );
+  return new File([ANIMATED_GIF_BYTES], name, { type: 'image/gif' });
 }
 
 function makeAnimatedWebpFile(name = 'animated.webp'): File {
@@ -585,6 +632,463 @@ describe('ChatApp', () => {
     expect(screen.getByRole('option', { name: /压缩/ })).toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /settings/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('option', { name: /review/ })).not.toBeInTheDocument();
+  });
+
+  it('opens the add menu for at mention and inserts selected file references', async () => {
+    render(<ChatApp />);
+    const editor = typeComposerText('随心输入', '@');
+
+    const menu = screen.getByRole('listbox', { name: '添加内容' });
+    expect(within(menu).getByText('添加')).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole('option', { name: '文件 / 图片' }));
+
+    const request = getLatestPostedProtocolRequest('pick_composer_content');
+    expect(request?.payload).toEqual({
+      type: 'pick_composer_content',
+      selectionKind: 'file',
+    });
+    expectComposerText('随心输入', '@');
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'composer_content_pick_result',
+        selections: [
+          {
+            type: 'reference',
+            item: {
+              id: 'packages/webview/src/App.tsx',
+              kind: 'file',
+              path: 'packages/webview/src/App.tsx',
+              label: 'App.tsx',
+              description: 'packages/webview/src',
+            },
+          },
+          {
+            type: 'reference',
+            item: {
+              id: 'packages/webview/src/main.tsx',
+              kind: 'file',
+              path: 'packages/webview/src/main.tsx',
+              label: 'main.tsx',
+              description: 'packages/webview/src',
+            },
+          },
+        ],
+      });
+    });
+
+    expect(
+      await screen.findByLabelText('已选择文件：packages/webview/src/App.tsx'),
+    ).toBeInTheDocument();
+    expect(editor).toHaveAttribute('data-scout-suppress-focus-outline', 'true');
+    expect(
+      await screen.findByLabelText('已选择文件：packages/webview/src/main.tsx'),
+    ).toBeInTheDocument();
+    expect(
+      useComposerStore.getState().documentBySessionId[HOME_COMPOSER_SESSION_ID]?.segments,
+    ).toEqual([
+      {
+        reference: {
+          fileKind: 'file',
+          id: 'packages/webview/src/App.tsx',
+          kind: 'file',
+          label: 'App.tsx',
+          path: 'packages/webview/src/App.tsx',
+        },
+        type: 'reference',
+      },
+      { text: ' ', type: 'text' },
+      {
+        reference: {
+          fileKind: 'file',
+          id: 'packages/webview/src/main.tsx',
+          kind: 'file',
+          label: 'main.tsx',
+          path: 'packages/webview/src/main.tsx',
+        },
+        type: 'reference',
+      },
+      { text: ' ', type: 'text' },
+    ]);
+  });
+
+  it('opens the at mention add menu from the composer add button', async () => {
+    render(<ChatApp />);
+    typeComposerText('随心输入', '查看这些内容');
+
+    fireEvent.click(screen.getByRole('button', { name: '添加文件、文件夹或图片' }));
+
+    const menu = await screen.findByRole('listbox', { name: '添加内容' });
+    expect(within(menu).getByRole('option', { name: '文件 / 图片' })).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole('option', { name: '文件夹' }));
+    expect(getLatestPostedProtocolRequest('pick_composer_content')?.payload).toEqual({
+      type: 'pick_composer_content',
+      selectionKind: 'directory',
+    });
+    expectComposerText('随心输入', '查看这些内容');
+  });
+
+  it('adds an image selected from the composer add menu as an attachment', async () => {
+    render(<ChatApp />);
+    typeComposerText('随心输入', '查看截图');
+
+    fireEvent.click(screen.getByRole('button', { name: '添加文件、文件夹或图片' }));
+    fireEvent.click(
+      within(await screen.findByRole('listbox', { name: '添加内容' })).getByRole('option', {
+        name: '文件 / 图片',
+      }),
+    );
+    const request = getLatestPostedProtocolRequest('pick_composer_content');
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'composer_content_pick_result',
+        selections: [
+          {
+            type: 'image',
+            fileName: 'first.png',
+            image: TEST_IMAGE,
+          },
+          {
+            type: 'image',
+            fileName: 'second.png',
+            image: TEST_IMAGE,
+          },
+        ],
+      });
+    });
+
+    expect(await screen.findByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '预览图片 2' })).toBeInTheDocument();
+    expectComposerText('随心输入', '查看截图');
+  });
+
+  it('does not remove a stale at range when the document changes during image validation', async () => {
+    render(<ChatApp />);
+    typeComposerText('随心输入', '@');
+
+    fireEvent.click(
+      within(screen.getByRole('listbox', { name: '添加内容' })).getByRole('option', {
+        name: '文件 / 图片',
+      }),
+    );
+    const request = getLatestPostedProtocolRequest('pick_composer_content');
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'composer_content_pick_result',
+        selections: [{ type: 'image', fileName: 'image.png', image: TEST_IMAGE }],
+      });
+      useComposerStore.getState().actions.setText(HOME_COMPOSER_SESSION_ID, '继续编辑后的内容');
+    });
+
+    expect(await screen.findByRole('button', { name: '预览图片 1' })).toBeInTheDocument();
+    expectComposerText('随心输入', '继续编辑后的内容');
+  });
+
+  it('applies mixed file references before asynchronous image validation finishes', async () => {
+    let resolveImageBytes!: (value: ArrayBuffer) => void;
+    const arrayBufferSpy = vi.spyOn(File.prototype, 'arrayBuffer').mockImplementation(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          resolveImageBytes = resolve;
+        }),
+    );
+
+    try {
+      render(<ChatApp />);
+      typeComposerText('随心输入', '@');
+      fireEvent.click(
+        within(screen.getByRole('listbox', { name: '添加内容' })).getByRole('option', {
+          name: '文件 / 图片',
+        }),
+      );
+      const request = getLatestPostedProtocolRequest('pick_composer_content');
+      act(() => {
+        routeProtocolResult(request, {
+          type: 'composer_content_pick_result',
+          selections: [
+            {
+              type: 'reference',
+              item: {
+                id: 'src/agent.ts',
+                kind: 'file',
+                path: 'src/agent.ts',
+                label: 'agent.ts',
+                description: 'src',
+              },
+            },
+            {
+              type: 'image',
+              fileName: 'animated.gif',
+              image: {
+                type: 'image',
+                data: btoa(String.fromCharCode(...ANIMATED_GIF_BYTES)),
+                mimeType: 'image/gif',
+              },
+            },
+          ],
+        });
+      });
+
+      expect(await screen.findByLabelText('已选择文件：src/agent.ts')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: '预览图片 1' })).not.toBeInTheDocument();
+
+      act(() => {
+        resolveImageBytes(new Uint8Array(ANIMATED_GIF_BYTES).buffer);
+      });
+      await waitFor(() => {
+        expect(useUiStore.getState().notification?.message).toBe(
+          '已忽略 1 张动画图片，暂不支持发送动画',
+        );
+      });
+      expect(await screen.findByLabelText('已选择文件：src/agent.ts')).toBeInTheDocument();
+    } finally {
+      arrayBufferSpy.mockRestore();
+    }
+  });
+
+  it('keeps the at trigger when a selected animated image is rejected', async () => {
+    render(<ChatApp />);
+    typeComposerText('随心输入', '@');
+
+    fireEvent.click(
+      within(screen.getByRole('listbox', { name: '添加内容' })).getByRole('option', {
+        name: '文件 / 图片',
+      }),
+    );
+    const request = getLatestPostedProtocolRequest('pick_composer_content');
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'composer_content_pick_result',
+        selections: [
+          {
+            type: 'image',
+            fileName: 'animated.gif',
+            image: {
+              type: 'image',
+              data: btoa(String.fromCharCode(...ANIMATED_GIF_BYTES)),
+              mimeType: 'image/gif',
+            },
+          },
+        ],
+      });
+    });
+
+    await waitFor(() => {
+      expect(useUiStore.getState().notification).toEqual({
+        type: 'notification',
+        level: 'warning',
+        message: '已忽略 1 张动画图片，暂不支持发送动画',
+      });
+    });
+    expectComposerText('随心输入', '@');
+    expect(screen.queryByRole('button', { name: '预览图片 1' })).not.toBeInTheDocument();
+  });
+
+  it('searches project paths after at mention content and selects a directory result', async () => {
+    render(<ChatApp />);
+    const editor = typeComposerText('随心输入', '');
+    pasteComposerText(editor, '@agent');
+
+    expect(await screen.findByRole('status', { name: '文件搜索' })).toHaveTextContent('搜索中');
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('request_file_mentions')).toBeDefined();
+    });
+    const request = getLatestPostedProtocolRequest('request_file_mentions');
+    expect(request?.payload).toEqual({
+      type: 'request_file_mentions',
+      query: 'agent',
+      limit: 50,
+    });
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'file_mentions_result',
+        query: 'agent',
+        items: [
+          {
+            id: 'packages/agent',
+            kind: 'directory',
+            path: 'packages/agent',
+            label: 'agent',
+            description: 'packages',
+          },
+          {
+            id: 'packages/agent/src/agent.ts',
+            kind: 'file',
+            path: 'packages/agent/src/agent.ts',
+            label: 'agent.ts',
+            description: 'packages/agent/src',
+          },
+        ],
+      });
+    });
+
+    expectComposerText('随心输入', '@agent');
+    expect(editor).toHaveTextContent('@agent');
+    const menu = await screen.findByRole('listbox', { name: '文件搜索' });
+    const directoryOption = within(menu).getAllByRole('option')[0];
+    expect(directoryOption).toHaveTextContent('agent');
+    expect(directoryOption).toHaveAttribute('aria-selected', 'true');
+    expect(directoryOption.querySelector('.lucide-folder')).toBeInTheDocument();
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(await screen.findByLabelText('已选择文件夹：packages/agent')).toBeInTheDocument();
+    expect(
+      useComposerStore.getState().documentBySessionId[HOME_COMPOSER_SESSION_ID]?.segments,
+    ).toEqual([
+      {
+        reference: {
+          fileKind: 'directory',
+          id: 'packages/agent',
+          kind: 'file',
+          label: 'agent',
+          path: 'packages/agent',
+        },
+        type: 'reference',
+      },
+      { text: ' ', type: 'text' },
+    ]);
+  });
+
+  it('searches project files after pasting an at mention', async () => {
+    render(<ChatApp />);
+    const editor = typeComposerText('随心输入', '');
+    pasteComposerText(editor, '@agent');
+
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('request_file_mentions')?.payload).toEqual({
+        type: 'request_file_mentions',
+        query: 'agent',
+        limit: 50,
+      });
+    });
+    expectComposerText('随心输入', '@agent');
+  });
+
+  it('shows an empty state when project file search has no matches', async () => {
+    render(<ChatApp />);
+    const editor = typeComposerText('随心输入', '');
+    pasteComposerText(editor, '@missing-file');
+
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('request_file_mentions')).toBeDefined();
+    });
+    const request = getLatestPostedProtocolRequest('request_file_mentions');
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'file_mentions_result',
+        query: 'missing-file',
+        items: [],
+      });
+    });
+
+    expectComposerText('随心输入', '@missing-file');
+    expect(editor).toHaveTextContent('@missing-file');
+    expect(await screen.findByRole('status', { name: '文件搜索' })).toHaveTextContent('无结果');
+
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('new_session_message')?.payload).toEqual({
+        type: 'new_session_message',
+        text: '@missing-file',
+      });
+    });
+  });
+
+  it('distinguishes unavailable file search from an empty result', async () => {
+    render(<ChatApp />);
+    pasteComposerText(typeComposerText('随心输入', ''), '@agent');
+
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('request_file_mentions')).toBeDefined();
+    });
+    const request = getLatestPostedProtocolRequest('request_file_mentions');
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'file_mentions_result',
+        query: 'agent',
+        items: [],
+        error: '文件搜索不可用：fd 未安装且自动下载失败',
+      });
+    });
+
+    expect(await screen.findByRole('status', { name: '文件搜索' })).toHaveTextContent(
+      '文件搜索不可用：fd 未安装且自动下载失败',
+    );
+  });
+
+  it('submits an unmatched mention when Enter is pressed while search is loading', async () => {
+    render(<ChatApp />);
+    const editor = typeComposerText('随心输入', '');
+    pasteComposerText(editor, '@pending-file');
+
+    expect(await screen.findByRole('status', { name: '文件搜索' })).toHaveTextContent('搜索中');
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('new_session_message')?.payload).toEqual({
+        type: 'new_session_message',
+        text: '@pending-file',
+      });
+    });
+  });
+
+  it('closes file search when the caret leaves the mention token', async () => {
+    render(<ChatApp />);
+    const editor = typeComposerText('随心输入', '');
+    pasteComposerText(editor, 'prefix @agent');
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('request_file_mentions')).toBeDefined();
+    });
+    const request = getLatestPostedProtocolRequest('request_file_mentions');
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'file_mentions_result',
+        query: 'agent',
+        items: [
+          {
+            id: 'src/agent.ts',
+            kind: 'file',
+            path: 'src/agent.ts',
+            label: 'agent.ts',
+            description: 'src',
+          },
+        ],
+      });
+    });
+    expect(await screen.findByRole('option', { name: /agent\.ts/ })).toBeInTheDocument();
+
+    moveComposerCaretToStart(editor);
+
+    await waitFor(() => {
+      expect(screen.queryByRole('listbox', { name: '文件搜索' })).not.toBeInTheDocument();
+    });
+    expectComposerText('随心输入', 'prefix @agent');
+  });
+
+  it('cancels the previous project file search when the mention query changes', async () => {
+    render(<ChatApp />);
+    const editor = typeComposerText('随心输入', '');
+    pasteComposerText(editor, '@agent');
+    await waitFor(() => {
+      expect(getLatestPostedProtocolRequest('request_file_mentions')).toBeDefined();
+    });
+    const firstRequest = getLatestPostedProtocolRequest('request_file_mentions');
+
+    pasteComposerText(editor, '-runtime');
+
+    await waitFor(() => {
+      expect(
+        postMessage.mock.calls.some(
+          ([message]) =>
+            message.type === 'protocol_cancel' && message.requestId === firstRequest?.requestId,
+        ),
+      ).toBe(true);
+      expect(getLatestPostedProtocolRequest('request_file_mentions')?.payload).toEqual({
+        type: 'request_file_mentions',
+        query: 'agent-runtime',
+        limit: 50,
+      });
+    });
   });
 
   it('hides session-bound builtin slash commands on the task home', () => {
@@ -876,6 +1380,17 @@ describe('ChatApp', () => {
     fireEvent.keyDown(textarea, { key: 'Process' });
     expectComposerText('随心输入', '/');
     expect(getPostedProtocolRequests('new_session_message')).toHaveLength(0);
+  });
+
+  it('keeps suggestions open when Escape belongs to an IME composition', () => {
+    routeCommands([makeCommand('review', 'prompt', 'Review pending changes')]);
+    render(<ChatApp />);
+    const textarea = typeComposerText('随心输入', '/');
+
+    expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+    fireEvent.keyDown(textarea, { isComposing: true, key: 'Escape' });
+
+    expect(screen.getByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
   });
 
   it('prevents duplicate new session submits while creation is pending', () => {
@@ -2824,7 +3339,7 @@ describe('ChatApp', () => {
 
       expect(fileReader.readers).toHaveLength(1);
       expect(textarea).toHaveAttribute('aria-readonly', 'true');
-      expect(screen.getByRole('button', { name: '添加图片' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '添加文件、文件夹或图片' })).toBeDisabled();
       expect(screen.getByRole('button', { name: '移除图片 1' })).toBeDisabled();
 
       fireEvent.change(textarea, { target: { value: '等待期间的新文本' } });

@@ -14,6 +14,7 @@ import {
 } from 'lexical';
 import type { ComposerReference } from '@/store/composer-document';
 import { ComposerInlineReference } from '../view/ComposerInlineReference';
+import { formatComposerReference } from './composer-reference-format';
 
 export type SerializedComposerReferenceNode = Spread<
   {
@@ -69,9 +70,7 @@ export class ComposerReferenceNode extends DecoratorNode<JSX.Element> {
   }
 
   getTextContent(): string {
-    return this.__reference.kind === 'skill'
-      ? `/${this.__reference.commandName}`
-      : `@${this.__reference.path}`;
+    return formatComposerReference(this.__reference);
   }
 
   isInline(): true {

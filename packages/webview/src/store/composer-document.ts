@@ -43,6 +43,11 @@ export interface ComposerTextRange {
   start: number;
 }
 
+export interface ComposerReferenceInsertion {
+  document: ComposerDocument;
+  selectionOffset: number;
+}
+
 export const COMPOSER_REFERENCE_CHARACTER = '\uFFFC';
 export const EMPTY_COMPOSER_DOCUMENT: ComposerDocument = { segments: [] };
 
@@ -128,6 +133,60 @@ export function replaceComposerRange(
     ...nextSuffix,
   ];
   return normalizeComposerDocument({ segments });
+}
+
+export function insertComposerReferenceAt(
+  document: ComposerDocument,
+  offset: number,
+  reference: ComposerReference,
+): ComposerReferenceInsertion {
+  const linearText = getComposerLinearText(document);
+  const anchor = Math.max(0, Math.min(offset, linearText.length));
+  const previousCharacter = linearText[anchor - 1];
+  const nextCharacter = linearText[anchor];
+  const leadingSpace = previousCharacter !== undefined && !/\s/u.test(previousCharacter) ? ' ' : '';
+  const trailingSpace = nextCharacter === undefined || !/\s/u.test(nextCharacter) ? ' ' : '';
+  const documentWithLeadingSpace = replaceComposerRange(
+    document,
+    { start: anchor, end: anchor },
+    leadingSpace,
+  );
+  const referenceOffset = anchor + leadingSpace.length;
+  return {
+    document: replaceComposerRange(
+      documentWithLeadingSpace,
+      { start: referenceOffset, end: referenceOffset },
+      trailingSpace,
+      reference,
+    ),
+    selectionOffset: referenceOffset + 1 + trailingSpace.length,
+  };
+}
+
+export function insertComposerReferencesAt(
+  document: ComposerDocument,
+  offset: number,
+  references: ComposerReference[],
+): ComposerReferenceInsertion {
+  let nextDocument = document;
+  let selectionOffset = Math.max(0, Math.min(offset, getComposerDocumentLength(document)));
+  for (const reference of references) {
+    const insertion = insertComposerReferenceAt(nextDocument, selectionOffset, reference);
+    nextDocument = insertion.document;
+    selectionOffset = insertion.selectionOffset;
+  }
+  return { document: nextDocument, selectionOffset };
+}
+
+export function replaceComposerRangeWithReferences(
+  document: ComposerDocument,
+  range: ComposerTextRange,
+  references: ComposerReference[],
+): ComposerReferenceInsertion {
+  const documentLength = getComposerDocumentLength(document);
+  const start = Math.max(0, Math.min(range.start, documentLength));
+  const withoutRange = replaceComposerRange(document, range, '');
+  return insertComposerReferencesAt(withoutRange, start, references);
 }
 
 function removeSkillReferences(segments: ComposerSegment[]): ComposerSegment[] {

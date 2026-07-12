@@ -106,4 +106,26 @@ describe('reduceComposerSubmitState', () => {
       }),
     ).toBe('inspect @src/agent.ts before editing');
   });
+
+  it('quotes a file reference whose path contains spaces', () => {
+    expect(
+      formatComposerSubmitText({
+        document: {
+          segments: [
+            { text: 'inspect ', type: 'text' },
+            {
+              reference: {
+                fileKind: 'file',
+                id: 'My Folder/file.ts',
+                kind: 'file',
+                label: 'file.ts',
+                path: 'My Folder/file.ts',
+              },
+              type: 'reference',
+            },
+          ],
+        },
+      }),
+    ).toBe('inspect @"My Folder/file.ts"');
+  });
 });

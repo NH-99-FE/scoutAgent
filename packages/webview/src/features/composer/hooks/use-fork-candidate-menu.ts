@@ -175,11 +175,6 @@ export function useForkCandidateMenu({
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>): boolean => {
       if (!open) return false;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        close();
-        return true;
-      }
       if (list.length === 0) return false;
       if (event.key === 'ArrowDown') {
         event.preventDefault();
@@ -198,7 +193,7 @@ export function useForkCandidateMenu({
       }
       return false;
     },
-    [boundedActiveIndex, close, confirm, list.length, open],
+    [boundedActiveIndex, confirm, list.length, open],
   );
 
   return useMemo(

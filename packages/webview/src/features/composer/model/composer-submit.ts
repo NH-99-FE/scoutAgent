@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { ComposerDocument, ComposerImageDescriptor } from '@/store/composer-store';
+import { formatComposerReference } from './composer-reference-format';
 
 export type ComposerMode = 'currentSession' | 'newSession';
 export type ComposerSubmitDelivery = 'steer' | 'followUp';
@@ -43,17 +44,6 @@ export function formatComposerSubmitText(payload: Pick<ComposerSubmitPayload, 'd
     )
     .join('')
     .trim();
-}
-
-function formatComposerReference(
-  reference: Extract<ComposerDocument['segments'][number], { type: 'reference' }>['reference'],
-): string {
-  switch (reference.kind) {
-    case 'skill':
-      return `/${reference.commandName}`;
-    case 'file':
-      return `@${reference.path}`;
-  }
 }
 
 export function reduceComposerSubmitState(

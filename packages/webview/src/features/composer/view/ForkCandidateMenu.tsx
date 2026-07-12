@@ -36,7 +36,7 @@ export function ForkCandidateMenu({
         className="text-muted-foreground text-xs"
         contentClassName="px-3 py-2"
         role="status"
-        scrollable={false}
+        variant="status"
       >
         加载历史消息…
       </FloatingPanel>
@@ -49,7 +49,7 @@ export function ForkCandidateMenu({
         className="text-muted-foreground text-xs"
         contentClassName="px-3 py-2"
         role="status"
-        scrollable={false}
+        variant="status"
       >
         当前会话没有可分叉的历史消息
       </FloatingPanel>

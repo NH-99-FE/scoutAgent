@@ -15,7 +15,11 @@ export function ComposerInlineReference({ reference }: ComposerInlineReferencePr
   const Icon =
     reference.kind === 'skill' ? Box : reference.fileKind === 'directory' ? Folder : File;
   const ariaLabel =
-    reference.kind === 'skill' ? `已选择技能：${label}` : `已选择文件：${reference.path}`;
+    reference.kind === 'skill'
+      ? `已选择技能：${label}`
+      : reference.fileKind === 'directory'
+        ? `已选择文件夹：${reference.path}`
+        : `已选择文件：${reference.path}`;
 
   return (
     <span
