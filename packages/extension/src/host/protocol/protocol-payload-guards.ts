@@ -55,10 +55,11 @@ const PAYLOAD_VALIDATORS = {
     optionalBoolean('clearFollowUpQueue'),
   ),
   new_session_message: combine(
-    fields('type', 'text', 'document', 'images'),
+    fields('type', 'text', 'document', 'images', 'toolProfileId'),
     requiredString('text'),
     optionalComposerDocument('document'),
     optionalImages('images'),
+    optionalString('toolProfileId'),
   ),
   cancel_follow_up: combine(fields('type', 'id'), requiredString('id')),
   promote_follow_up: combine(
@@ -86,7 +87,7 @@ const PAYLOAD_VALIDATORS = {
     requiredRuntimeSettingsPatch('patch'),
   ),
   select_thinking: combine(fields('type', 'level'), requiredEnum('level', THINKING_LEVELS)),
-  set_active_tools: combine(fields('type', 'toolNames'), requiredStringArray('toolNames')),
+  set_tool_profile: combine(fields('type', 'profileId'), requiredString('profileId')),
   clear_conversation: fields('type'),
   reload_resources: fields('type'),
   create_extension_from_template: combine(

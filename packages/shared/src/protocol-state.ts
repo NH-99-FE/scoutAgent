@@ -11,6 +11,7 @@ import type {
 } from './protocol-core.ts';
 import type { ScoutExtensionUIRequest } from './protocol-extension-ui.ts';
 import type { ScoutChangesReviewRow, ScoutChangesReviewSummary } from './protocol-review.ts';
+import type { ScoutActiveToolSelection, ScoutToolProfileInfo } from './settings.ts';
 
 // ---------- 消息内容块 ----------
 
@@ -188,6 +189,7 @@ export interface ScoutWebviewState {
   thinkingLevel: ThinkingLevel;
   tools: ToolInfo[];
   activeToolNames: string[];
+  activeToolSelection?: ScoutActiveToolSelection;
   commands: ScoutCommandInfo[];
   cwd?: string;
   errorMessage?: string;
@@ -209,6 +211,8 @@ export interface ScoutConfig {
   models: ScoutModelInfo[];
   defaultModelProvider: string;
   defaultModelId: string;
+  defaultToolProfileId: string;
+  toolProfiles: ScoutToolProfileInfo[];
   branchSummary: {
     reserveTokens: number;
     skipPrompt: boolean;

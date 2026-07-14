@@ -92,6 +92,7 @@ export type WebviewRequestPayload =
       text: string;
       document?: ScoutComposerDocument;
       images?: ScoutImageContent[];
+      toolProfileId?: string;
     }
   | { type: 'cancel_follow_up'; id: string }
   | {
@@ -110,7 +111,7 @@ export type WebviewRequestPayload =
       patch: ScoutRuntimeSettingsPatch;
     }
   | { type: 'select_thinking'; level: ThinkingLevel }
-  | { type: 'set_active_tools'; toolNames: string[] }
+  | { type: 'set_tool_profile'; profileId: string }
   | { type: 'clear_conversation' }
   | { type: 'reload_resources' }
   | {
@@ -342,11 +343,11 @@ export const SCOUT_PROTOCOL = {
     emits: ['state_update'],
     surfaces: ['chat', 'settings'],
   },
-  set_active_tools: {
+  set_tool_profile: {
     kind: 'command',
     service: 'config',
-    method: 'set_active_tools',
-    emits: ['state_update', 'config_update'],
+    method: 'set_tool_profile',
+    emits: ['state_update'],
     surfaces: ['chat', 'settings'],
   },
   clear_conversation: {

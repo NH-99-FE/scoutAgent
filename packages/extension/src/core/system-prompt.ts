@@ -79,7 +79,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 
   // ---------- 默认提示 ----------
 
-  const tools = selectedTools.length > 0 ? selectedTools : ['read', 'bash', 'edit', 'write'];
+  const tools = selectedTools;
   const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
   const toolsList =
     visibleTools.length > 0

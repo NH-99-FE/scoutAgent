@@ -23,6 +23,7 @@ function makeSessionManager(
     thinkingLevel: 'low',
     getAllToolInfos: vi.fn(() => []),
     getActiveToolNames: vi.fn(() => ['read_file']),
+    getActiveToolSelection: vi.fn(() => ({ kind: 'profile', profileId: 'develop' })),
     currentCwd: '/workspace',
     sessionId: 'session-1',
     sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
@@ -41,6 +42,23 @@ function makeConfigManager(config = { provider: 'openai' }): ConfigManager {
 }
 
 describe('StateProtocolService', () => {
+  it('projects only the active tool selection in session state', async () => {
+    const service = new StateProtocolService({
+      sessionManager: makeSessionManager(),
+      configManager: makeConfigManager(),
+      getCommands: () => [],
+      getBusyState: () => ({ kind: 'idle', cancellable: false }),
+      getExtensionUIRequests: () => [],
+      publishEvent: vi.fn(),
+    });
+
+    const state = await service.getState();
+
+    expect(state.activeToolSelection).toEqual({ kind: 'profile', profileId: 'develop' });
+    expect(state).not.toHaveProperty('toolProfiles');
+    expect(state).not.toHaveProperty('toolProfileId');
+  });
+
   it('posts a complete webview state snapshot to the requested surface', async () => {
     const publishEvent = vi.fn();
     const service = new StateProtocolService({

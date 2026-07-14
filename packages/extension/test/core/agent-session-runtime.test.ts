@@ -14,6 +14,7 @@ import type { Session } from '../../src/core/session/index.ts';
 import { mockModel, userMessage } from './test-utils.ts';
 import type { Api, Model } from '@scout-agent/ai';
 import type { ThinkingLevel } from '@scout-agent/agent';
+import type { ActiveToolSelection } from '../../src/core/tools/index.ts';
 
 interface FakeAgentSessionOptions {
   beforeSwitchCancelled?: boolean;
@@ -26,19 +27,25 @@ interface FakeAgentSessionOptions {
   onDispose?: () => void;
   model?: Model<Api>;
   thinkingLevel?: ThinkingLevel;
-  activeToolNames?: string[];
+  activeToolSelection?: ActiveToolSelection;
 }
 
 function createFakeAgentSession(session: Session, options: FakeAgentSessionOptions = {}) {
   const model = options.model ?? mockModel();
   const thinkingLevel = options.thinkingLevel ?? 'off';
-  const activeToolNames = options.activeToolNames ?? ['read'];
+  const activeToolSelection = options.activeToolSelection ?? {
+    kind: 'custom' as const,
+    toolNames: ['read'],
+  };
   const fake = {
     sessionManager: session,
     sessionFile: session.getSessionFile(),
     model,
     thinkingLevel,
-    getActiveToolNames: vi.fn(() => [...activeToolNames]),
+    getActiveToolNames: vi.fn(() =>
+      activeToolSelection.kind === 'custom' ? [...activeToolSelection.toolNames] : [],
+    ),
+    getActiveToolSelection: vi.fn(() => activeToolSelection),
     emitSessionBeforeSwitch: vi.fn(async () => options.beforeSwitchCancelled ?? false),
     emitSessionBeforeFork: vi.fn(async () => options.beforeForkCancelled ?? false),
     emitSessionShutdown: vi.fn(async () => {
@@ -208,14 +215,14 @@ describe('AgentSessionRuntime', () => {
     ]);
   });
 
-  it('carries current runtime model, thinking level, and tools into new sessions', async () => {
+  it('carries model and thinking level but not runtime tools into new sessions', async () => {
     const sessionDir = path.join(tempDir, 'sessions');
     const currentSession = SessionManager.create(tempDir, sessionDir);
     const inheritedModel = mockModel({ id: 'third-party-gpt', provider: 'openai' });
     const currentAgentSession = createFakeAgentSession(currentSession, {
       model: inheritedModel,
       thinkingLevel: 'off',
-      activeToolNames: ['read', 'grep'],
+      activeToolSelection: { kind: 'profile', profileId: 'review' },
     });
     let replacementOptions: CreateAgentSessionRuntimeOptions | undefined;
     const createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
@@ -231,17 +238,40 @@ describe('AgentSessionRuntime', () => {
 
     expect(replacementOptions?.initialModel).toBe(inheritedModel);
     expect(replacementOptions?.initialThinkingLevel).toBe('off');
-    expect(replacementOptions?.activeToolNames).toEqual(['read', 'grep']);
+    expect(replacementOptions?.activeToolSelection).toBeUndefined();
   });
 
-  it('carries current runtime model, thinking level, and tools into forked sessions', async () => {
+  it('applies an explicitly requested tool profile to a new session', async () => {
+    const currentSession = SessionManager.inMemory(tempDir);
+    const currentAgentSession = createFakeAgentSession(currentSession, {
+      activeToolSelection: { kind: 'profile', profileId: 'develop' },
+    });
+    let replacementOptions: CreateAgentSessionRuntimeOptions | undefined;
+    const createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
+      replacementOptions = options;
+      return { session: createFakeAgentSession(options.session), diagnostics: [] };
+    };
+    const runtime = new AgentSessionRuntime(currentAgentSession, {
+      cwd: tempDir,
+      createRuntime,
+    });
+
+    await runtime.newSession({ toolProfileId: 'review' });
+
+    expect(replacementOptions?.activeToolSelection).toEqual({
+      kind: 'profile',
+      profileId: 'review',
+    });
+  });
+
+  it('carries model and thinking level but not runtime tools into forked sessions', async () => {
     const currentSession = SessionManager.inMemory(tempDir);
     const forkPoint = currentSession.appendMessage(userMessage('fork point'));
     const inheritedModel = mockModel({ id: 'third-party-gpt', provider: 'openai' });
     const currentAgentSession = createFakeAgentSession(currentSession, {
       model: inheritedModel,
       thinkingLevel: 'off',
-      activeToolNames: ['read', 'grep'],
+      activeToolSelection: { kind: 'custom', toolNames: ['read', 'grep'] },
     });
     let replacementOptions: CreateAgentSessionRuntimeOptions | undefined;
     const createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
@@ -257,7 +287,30 @@ describe('AgentSessionRuntime', () => {
 
     expect(replacementOptions?.initialModel).toBe(inheritedModel);
     expect(replacementOptions?.initialThinkingLevel).toBe('off');
-    expect(replacementOptions?.activeToolNames).toEqual(['read', 'grep']);
+    expect(replacementOptions?.activeToolSelection).toBeUndefined();
+  });
+
+  it('carries the current active tool selection across reload', async () => {
+    const currentSession = SessionManager.inMemory(tempDir);
+    const currentAgentSession = createFakeAgentSession(currentSession, {
+      activeToolSelection: { kind: 'profile', profileId: 'review' },
+    });
+    let replacementOptions: CreateAgentSessionRuntimeOptions | undefined;
+    const createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
+      replacementOptions = options;
+      return { session: createFakeAgentSession(options.session), diagnostics: [] };
+    };
+    const runtime = new AgentSessionRuntime(currentAgentSession, {
+      cwd: tempDir,
+      createRuntime,
+    });
+
+    await runtime.reload();
+
+    expect(replacementOptions?.activeToolSelection).toEqual({
+      kind: 'profile',
+      profileId: 'review',
+    });
   });
 
   it('invalidates the previous session after shutdown and before replacement rebind', async () => {

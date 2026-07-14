@@ -16,6 +16,7 @@ import type { CoreLogger } from './logger.ts';
 import type { Api, Model } from '@scout-agent/ai';
 import type { ThinkingLevel } from '@scout-agent/agent';
 import type { FileReviewTurnSnapshot } from './review/file-review.ts';
+import type { ActiveToolSelection } from './tools/index.ts';
 
 // ---------- 类型 ----------
 
@@ -40,8 +41,7 @@ export interface CreateAgentSessionFromServicesOptions {
   services: AgentSessionServices;
   session: Session;
   logger: CoreLogger;
-  activeToolNames?: string[];
-  includeAllExtensionTools?: boolean;
+  activeToolSelection?: ActiveToolSelection;
   initialModel?: Model<Api>;
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
@@ -127,8 +127,7 @@ export async function createAgentSessionFromServices(
     extensionRunner: options.services.extensionRunner,
     loadExtensionResources: (resources) =>
       options.services.resourceLoader.replaceExtensionResources(resources),
-    activeToolNames: options.activeToolNames,
-    includeAllExtensionTools: options.includeAllExtensionTools,
+    activeToolSelection: options.activeToolSelection,
     initialModel: options.initialModel,
     initialThinkingLevel: options.initialThinkingLevel,
     sessionStartEvent: options.sessionStartEvent,

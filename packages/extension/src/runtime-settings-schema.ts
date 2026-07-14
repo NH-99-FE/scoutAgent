@@ -3,6 +3,8 @@
 // ============================================================
 
 import {
+  SCOUT_BUILTIN_TOOL_PROFILE_IDS,
+  SCOUT_CUSTOM_TOOL_PROFILE_ID,
   SCOUT_MODEL_PROVIDERS,
   SCOUT_QUEUE_MODES,
   SCOUT_RUNTIME_SETTINGS_PATHS,
@@ -10,6 +12,7 @@ import {
   THINKING_LEVELS,
 } from '@scout-agent/shared';
 import type {
+  ScoutCustomToolProfile,
   ScoutPackageSource,
   ScoutQueueMode,
   ScoutRuntimeSettings,
@@ -26,11 +29,18 @@ const VALID_QUEUE_MODES = new Set<ScoutQueueMode>(SCOUT_QUEUE_MODES);
 const VALID_THINKING_LEVELS = new Set<string>(THINKING_LEVELS);
 const VALID_MODEL_PROVIDER_PREFIXES = new Set<string>(SCOUT_MODEL_PROVIDERS);
 const VALID_RUNTIME_SETTINGS_PATHS = new Set<string>(SCOUT_RUNTIME_SETTINGS_PATHS);
+const RESERVED_TOOL_PROFILE_IDS = new Set<string>([
+  ...SCOUT_BUILTIN_TOOL_PROFILE_IDS,
+  SCOUT_CUSTOM_TOOL_PROFILE_ID,
+]);
+const BUILTIN_TOOL_PROFILE_IDS = new Set<string>(SCOUT_BUILTIN_TOOL_PROFILE_IDS);
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export const RUNTIME_SETTINGS_KEYS = new Set<keyof ScoutRuntimeSettings>([
   'defaultProvider',
   'defaultModel',
+  'defaultToolProfile',
+  'toolProfiles',
   'defaultThinkingLevel',
   'transport',
   'thinkingBudgets',
@@ -58,6 +68,15 @@ export function normalizeRuntimeSettings(value: unknown): ScoutRuntimeSettings {
 
 export function validateRuntimeSettingsForSave(settings: ScoutRuntimeSettings): string | undefined {
   return readRuntimeSettings(settings).errors[0];
+}
+
+export function validateDefaultToolProfileReference(
+  settings: ScoutRuntimeSettings,
+): string | undefined {
+  const profileId = settings.defaultToolProfile;
+  if (!profileId || BUILTIN_TOOL_PROFILE_IDS.has(profileId)) return undefined;
+  if (settings.toolProfiles?.some((profile) => profile.id === profileId)) return undefined;
+  return `defaultToolProfile references unknown tool profile: ${profileId}`;
 }
 
 export function validateRuntimeSettingsPatch(value: unknown): string | undefined {
@@ -106,6 +125,16 @@ export function readRuntimeSettings(value: unknown): RuntimeSettingsReadResult {
       settings.defaultModel = defaultModel;
     }
   }
+
+  const defaultToolProfile = readNonEmptyString(
+    record.defaultToolProfile,
+    'defaultToolProfile',
+    errors,
+  );
+  if (defaultToolProfile) settings.defaultToolProfile = defaultToolProfile;
+
+  const toolProfiles = readToolProfiles(record.toolProfiles, 'toolProfiles', errors);
+  if (toolProfiles) settings.toolProfiles = toolProfiles;
 
   const defaultThinkingLevel = readThinkingLevel(
     record.defaultThinkingLevel,
@@ -222,7 +251,10 @@ function validateRuntimeSettingsPatchValue(
   path: ScoutRuntimeSettingsPath,
   value: unknown,
 ): string | undefined {
-  if ((path === 'defaultModel' || path === 'shellPath') && !readNonEmptyStringValue(value)) {
+  if (
+    (path === 'defaultModel' || path === 'defaultToolProfile' || path === 'shellPath') &&
+    !readNonEmptyStringValue(value)
+  ) {
     return `value for ${path} must be a non-empty string`;
   }
 
@@ -470,6 +502,19 @@ function readNonEmptyString(value: unknown, label: string, errors: string[]): st
   return trimmed ? trimmed : undefined;
 }
 
+function readRequiredString(value: unknown, label: string, errors: string[]): string | undefined {
+  if (typeof value !== 'string') {
+    errors.push(`${label} must be a string`);
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    errors.push(`${label} must be a non-empty string`);
+    return undefined;
+  }
+  return trimmed;
+}
+
 function readNonEmptyStringValue(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
@@ -483,6 +528,49 @@ function readStringArray(value: unknown, label: string, errors: string[]): strin
     return undefined;
   }
   return value;
+}
+
+function readToolProfiles(
+  value: unknown,
+  label: string,
+  errors: string[],
+): ScoutCustomToolProfile[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    errors.push(`${label} must be an array`);
+    return undefined;
+  }
+
+  const profiles: ScoutCustomToolProfile[] = [];
+  const ids = new Set<string>();
+  value.forEach((item, index) => {
+    const itemLabel = `${label}[${index}]`;
+    if (!isRecord(item)) {
+      errors.push(`${itemLabel} must be an object`);
+      return;
+    }
+
+    const id = readRequiredString(item.id, `${itemLabel}.id`, errors);
+    const name = readRequiredString(item.name, `${itemLabel}.name`, errors);
+    const tools = readStringArray(item.tools, `${itemLabel}.tools`, errors);
+    if (!id || !name || !tools) return;
+
+    if (RESERVED_TOOL_PROFILE_IDS.has(id)) {
+      errors.push(
+        `${itemLabel}.id must not be one of ${Array.from(RESERVED_TOOL_PROFILE_IDS).join(', ')}`,
+      );
+      return;
+    }
+    if (ids.has(id)) {
+      errors.push(`${itemLabel}.id must be unique`);
+      return;
+    }
+
+    ids.add(id);
+    profiles.push({ id, name, tools: [...new Set(tools)] });
+  });
+
+  return profiles;
 }
 
 function readPackageSources(

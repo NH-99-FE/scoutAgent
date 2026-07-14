@@ -88,6 +88,22 @@ describe('validateWebviewMessage', () => {
     });
   });
 
+  it('validates the optional new session tool profile', () => {
+    expect(
+      validateWebviewMessage(
+        request({ type: 'new_session_message', text: 'hello', toolProfileId: 'review' }),
+      ).ok,
+    ).toBe(true);
+    expect(
+      validateWebviewMessage(
+        request({ type: 'new_session_message', text: 'hello', toolProfileId: 1 }),
+      ),
+    ).toMatchObject({
+      ok: false,
+      error: 'new_session_message.toolProfileId must be a string when provided',
+    });
+  });
+
   it('validates composer presentation documents', () => {
     expect(
       validateWebviewMessage(

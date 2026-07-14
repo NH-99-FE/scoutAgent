@@ -21,6 +21,7 @@ import { readSessionFileInfo } from './session-file.ts';
 import { assertSessionCwdExists } from './session-cwd.ts';
 import type { Api, Model } from '@scout-agent/ai';
 import type { ThinkingLevel } from '@scout-agent/agent';
+import type { ActiveToolSelection } from './tools/index.ts';
 
 // ---------- 类型 ----------
 
@@ -34,8 +35,7 @@ export interface AgentSessionRuntimeDiagnostic {
 export interface CreateAgentSessionRuntimeOptions {
   session: Session;
   cwd?: string;
-  activeToolNames?: string[];
-  includeAllExtensionTools?: boolean;
+  activeToolSelection?: ActiveToolSelection;
   initialModel?: Model<Api>;
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
@@ -56,6 +56,10 @@ export interface AgentSessionReplacementResult {
   selectedText?: string;
 }
 
+export interface AgentSessionRuntimeNewSessionOptions extends NewSessionReplacementOptions {
+  toolProfileId?: string;
+}
+
 interface AgentSessionRuntimeOptions {
   cwd: string;
   createRuntime: CreateAgentSessionRuntimeFactory;
@@ -65,8 +69,11 @@ interface AgentSessionRuntimeOptions {
 
 type ReplacementRuntimeState = Pick<
   CreateAgentSessionRuntimeOptions,
-  'activeToolNames' | 'initialModel' | 'initialThinkingLevel'
+  'initialModel' | 'initialThinkingLevel'
 >;
+
+type ReloadRuntimeState = ReplacementRuntimeState &
+  Pick<CreateAgentSessionRuntimeOptions, 'activeToolSelection'>;
 
 // ---------- 辅助 ----------
 
@@ -86,9 +93,15 @@ function getSessionOpenCwdOverride(
 
 function getReplacementRuntimeState(session: AgentSession): ReplacementRuntimeState {
   return {
-    activeToolNames: session.getActiveToolNames(),
     initialModel: session.model,
     initialThinkingLevel: session.thinkingLevel,
+  };
+}
+
+function getReloadRuntimeState(session: AgentSession): ReloadRuntimeState {
+  return {
+    ...getReplacementRuntimeState(session),
+    activeToolSelection: session.getActiveToolSelection(),
   };
 }
 
@@ -244,13 +257,15 @@ export class AgentSessionRuntime {
     return this.replaceWith(session, session.getCwd(), 'resume', previousSessionFile, options);
   }
 
-  async newSession(options?: NewSessionReplacementOptions): Promise<AgentSessionReplacementResult> {
+  async newSession(
+    options?: AgentSessionRuntimeNewSessionOptions,
+  ): Promise<AgentSessionReplacementResult> {
     const cancelled = await this.session.emitSessionBeforeSwitch('new');
     if (cancelled) return { cancelled: true };
 
+    const replacementRuntimeState = getReplacementRuntimeState(this.session);
     const previousSessionFile = this.session.sessionFile;
     const currentSession = this.session.sessionManager;
-    const replacementRuntimeState = getReplacementRuntimeState(this.session);
     const session = currentSession.isPersisted()
       ? CoreSessionManager.create(this.cwd, currentSession.getSessionDir(), {
           parentSession: options?.parentSession,
@@ -269,6 +284,9 @@ export class AgentSessionRuntime {
       session,
       cwd: this.cwd,
       ...replacementRuntimeState,
+      activeToolSelection: options?.toolProfileId
+        ? { kind: 'profile', profileId: options.toolProfileId }
+        : undefined,
       sessionStartEvent,
     });
     this.apply(result, this.cwd);
@@ -281,6 +299,7 @@ export class AgentSessionRuntime {
   }
 
   async reload(): Promise<AgentSessionReplacementResult> {
+    const replacementRuntimeState = getReloadRuntimeState(this.session);
     const previousSessionFile = this.session.sessionFile;
     const currentSession = this.session.sessionManager;
     const sessionFile = currentSession.getSessionFile();
@@ -293,7 +312,14 @@ export class AgentSessionRuntime {
           )
         : currentSession;
 
-    return this.replaceWith(session, currentSession.getCwd(), 'reload', previousSessionFile);
+    return this.replaceWith(
+      session,
+      currentSession.getCwd(),
+      'reload',
+      previousSessionFile,
+      undefined,
+      replacementRuntimeState,
+    );
   }
 
   async fork(
@@ -303,6 +329,8 @@ export class AgentSessionRuntime {
   ): Promise<AgentSessionReplacementResult> {
     const cancelled = await this.session.emitSessionBeforeFork(entryId, position);
     if (cancelled) return { cancelled: true };
+
+    const replacementRuntimeState = getReplacementRuntimeState(this.session);
 
     const selectedEntry = await this.session.sessionManager.getEntry(entryId);
     if (!selectedEntry) throw new Error(`Invalid entry ID for forking: ${entryId}`);
@@ -351,7 +379,7 @@ export class AgentSessionRuntime {
       'fork',
       previousSessionFile,
       options,
-      getReplacementRuntimeState(this.session),
+      replacementRuntimeState,
     );
     return { ...result, selectedText };
   }

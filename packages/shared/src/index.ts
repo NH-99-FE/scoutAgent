@@ -20,14 +20,19 @@ export type {
 } from './models.ts';
 
 export {
+  SCOUT_BUILTIN_TOOL_PROFILE_IDS,
+  SCOUT_CUSTOM_TOOL_PROFILE_ID,
   SCOUT_QUEUE_MODES,
   SCOUT_RUNTIME_SETTINGS_PATHS,
   SCOUT_SETTINGS_SCOPES,
   SCOUT_TRANSPORTS,
 } from './settings.ts';
 export type {
+  ScoutActiveToolSelection,
+  ScoutBuiltinToolProfileId,
   ScoutBranchSummarySettings,
   ScoutCompactionSettings,
+  ScoutCustomToolProfile,
   ScoutPackageSource,
   ScoutQueueMode,
   ScoutRetryProviderSettings,
@@ -38,6 +43,8 @@ export type {
   ScoutRuntimeSettingsPath,
   ScoutRuntimeSettingsState,
   ScoutSettingsScope,
+  ScoutToolProfileDefinition,
+  ScoutToolProfileInfo,
   ScoutTransport,
 } from './settings.ts';
 

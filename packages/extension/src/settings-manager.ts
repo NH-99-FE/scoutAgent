@@ -21,6 +21,7 @@ import {
   applyRuntimeSettingsPatch,
   normalizeRuntimeSettings,
   readRuntimeSettings,
+  validateDefaultToolProfileReference,
 } from './runtime-settings-schema.ts';
 
 export interface SettingsManagerOptions {
@@ -70,12 +71,20 @@ export class SettingsManager {
     this.globalSettings = globalSettings.settings;
     this.projectSettings = projectSettings.settings;
     this.effectiveSettings = deepMergeSettings(this.globalSettings, this.projectSettings);
+    const globalToolProfileError = validateDefaultToolProfileReference(this.globalSettings);
+    const effectiveToolProfileError = validateDefaultToolProfileReference(this.effectiveSettings);
     this.error =
       [
         global.ok ? undefined : global.error,
         ...formatSettingsErrors(this.globalSettingsPath, globalSettings.errors),
+        globalToolProfileError
+          ? `Settings config is invalid: ${this.globalSettingsPath}: ${globalToolProfileError}`
+          : undefined,
         project.ok ? undefined : project.error,
         ...formatSettingsErrors(this.projectSettingsPath, projectSettings.errors),
+        effectiveToolProfileError
+          ? `Effective settings are invalid: ${effectiveToolProfileError}`
+          : undefined,
       ]
         .filter(Boolean)
         .join('\n') || undefined;
@@ -120,6 +129,22 @@ export class SettingsManager {
 
       if (patch.operations.length > 0) {
         const next = applyRuntimeSettingsPatch(existing.value, patch);
+        const scopedRead = readRuntimeSettings(next);
+        if (scopedRead.errors[0]) {
+          throw new Error(`Cannot save ${scope} settings: ${scopedRead.errors[0]}`);
+        }
+        const proposedGlobal = scope === 'global' ? scopedRead.settings : this.globalSettings;
+        const proposedProject = scope === 'project' ? scopedRead.settings : this.projectSettings;
+        const globalToolProfileError = validateDefaultToolProfileReference(proposedGlobal);
+        if (globalToolProfileError) {
+          throw new Error(`Cannot save global settings: ${globalToolProfileError}`);
+        }
+        const effectiveToolProfileError = validateDefaultToolProfileReference(
+          deepMergeSettings(proposedGlobal, proposedProject),
+        );
+        if (effectiveToolProfileError) {
+          throw new Error(`Cannot save effective settings: ${effectiveToolProfileError}`);
+        }
         writeJsonFile(path, next);
       }
     });
@@ -143,6 +168,7 @@ function deepMergeSettings(
     ) {
       result[key] = deepMergeRecord(baseValue, overrideValue);
     } else if (overrideValue !== undefined) {
+      // toolProfiles 等数组采用 scope 整体覆盖语义；项目数组不得与全局数组隐式拼接。
       result[key] = overrideValue;
     }
   }

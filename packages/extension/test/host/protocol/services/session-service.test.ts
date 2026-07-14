@@ -186,7 +186,10 @@ describe('SessionProtocolService', () => {
     const sessionManager = makeSessionManager({
       beginUserSessionOperation: vi.fn(() => operation),
       newUserSession: vi.fn(
-        async (_operation, options: { withSession: (ctx: unknown) => void }) => {
+        async (
+          _operation,
+          options: { toolProfileId?: string; withSession: (ctx: unknown) => void },
+        ) => {
           await options.withSession({
             startUserMessage,
           });
@@ -205,7 +208,7 @@ describe('SessionProtocolService', () => {
 
     const document = { segments: [{ type: 'text' as const, text: 'hello' }] };
     await service.newSessionMessage(
-      { type: 'new_session_message', text: 'hello', document },
+      { type: 'new_session_message', text: 'hello', document, toolProfileId: 'review' },
       respond,
     );
     resolveTurn?.();
@@ -215,6 +218,10 @@ describe('SessionProtocolService', () => {
     expect(respond).toHaveBeenCalledWith({ type: 'new_session_result', success: true });
     expect(pushState).toHaveBeenCalledTimes(2);
     expect(requestRecentTasks).toHaveBeenCalledTimes(1);
+    expect(sessionManager.newUserSession).toHaveBeenCalledWith(
+      operation,
+      expect.objectContaining({ toolProfileId: 'review' }),
+    );
     expect(startUserMessage).toHaveBeenCalledWith('hello', { details: document });
   });
 

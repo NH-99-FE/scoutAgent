@@ -83,6 +83,7 @@ export class SessionProtocolService implements SessionProtocolHost {
 
     try {
       const operationResult = await this.sessionManager.newUserSession(operation, {
+        toolProfileId: message.toolProfileId,
         withSession: async (ctx) => {
           if (!operation.isLatest()) return;
           const content =

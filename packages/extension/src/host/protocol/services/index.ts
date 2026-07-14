@@ -88,8 +88,8 @@ export function registerScoutProtocolServices(
     select_thinking: async (message) => {
       await services.config.setThinkingLevel(payload<'select_thinking'>(message));
     },
-    set_active_tools: (message) => {
-      services.config.setActiveTools(payload<'set_active_tools'>(message));
+    set_tool_profile: (message) => {
+      services.config.setToolProfile(payload<'set_tool_profile'>(message));
     },
     reload_resources: async (_message, context) => {
       await services.config.reloadResources(context.respond);

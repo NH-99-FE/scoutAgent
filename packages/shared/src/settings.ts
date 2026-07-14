@@ -11,6 +11,31 @@ export const SCOUT_TRANSPORTS = ['sse', 'websocket', 'websocket-cached', 'auto']
 export type ScoutTransport = (typeof SCOUT_TRANSPORTS)[number];
 export const SCOUT_QUEUE_MODES = ['one-at-a-time', 'all'] as const;
 export type ScoutQueueMode = (typeof SCOUT_QUEUE_MODES)[number];
+export const SCOUT_BUILTIN_TOOL_PROFILE_IDS = ['develop', 'review'] as const;
+export type ScoutBuiltinToolProfileId = (typeof SCOUT_BUILTIN_TOOL_PROFILE_IDS)[number];
+export const SCOUT_CUSTOM_TOOL_PROFILE_ID = 'custom';
+
+// ---------- 工具模式 ----------
+
+export interface ScoutCustomToolProfile {
+  id: string;
+  name: string;
+  tools: string[];
+}
+
+export interface ScoutToolProfileDefinition {
+  readonly id: string;
+  readonly name: string;
+  readonly tools: readonly string[];
+}
+
+export interface ScoutToolProfileInfo extends ScoutToolProfileDefinition {
+  readonly builtin: boolean;
+}
+
+export type ScoutActiveToolSelection =
+  | { readonly kind: 'profile'; readonly profileId: string }
+  | { readonly kind: 'custom'; readonly toolNames: readonly string[] };
 
 // ---------- 运行时设置 ----------
 export interface ScoutRetryProviderSettings {
@@ -53,6 +78,8 @@ export interface ScoutRuntimeSettings {
    * not settings.json.
    */
   defaultModel?: string;
+  defaultToolProfile?: string;
+  toolProfiles?: ScoutCustomToolProfile[];
   defaultThinkingLevel?: ThinkingLevel;
   transport?: ScoutTransport;
   thinkingBudgets?: Record<string, unknown>;
@@ -72,6 +99,8 @@ export interface ScoutRuntimeSettings {
 export const SCOUT_RUNTIME_SETTINGS_PATHS = [
   'defaultProvider',
   'defaultModel',
+  'defaultToolProfile',
+  'toolProfiles',
   'defaultThinkingLevel',
   'transport',
   'thinkingBudgets',

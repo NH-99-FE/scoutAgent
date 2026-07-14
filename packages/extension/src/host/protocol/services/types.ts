@@ -85,7 +85,7 @@ export interface ConfigProtocolHost {
     respond: ProtocolResponder,
   ) => Promise<void>;
   setThinkingLevel: (message: ProtocolPayload<'select_thinking'>) => Promise<void>;
-  setActiveTools: (message: ProtocolPayload<'set_active_tools'>) => void;
+  setToolProfile: (message: ProtocolPayload<'set_tool_profile'>) => void;
   reloadResources: (respond: ProtocolResponder) => Promise<void>;
 }
 

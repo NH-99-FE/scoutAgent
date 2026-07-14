@@ -25,8 +25,14 @@ import type {
   RetrySettings,
   ScoutCoreConfig,
   ScoutStreamOptions,
+  ToolProfileSettings,
 } from './core/config.ts';
 import type { ScoutResourceSettingsSnapshot } from './core/package-manager.ts';
+import {
+  getConfiguredToolProfiles,
+  getToolProfileInfos,
+  resolveDefaultToolProfileId,
+} from './core/tools/index.ts';
 import type { QueueMode } from '@scout-agent/agent';
 
 const THINKING_LEVEL_SET = new Set<string>(THINKING_LEVELS);
@@ -133,6 +139,14 @@ export class ConfigManager implements ScoutCoreConfig {
 
   getDefaultThinkingLevel(): ThinkingLevel | undefined {
     return this.settingsManager.getEffectiveSettings().defaultThinkingLevel;
+  }
+
+  getToolProfileSettings(): ToolProfileSettings {
+    const settings = this.settingsManager.getEffectiveSettings();
+    return {
+      defaultToolProfile: settings.defaultToolProfile,
+      toolProfiles: settings.toolProfiles ?? [],
+    };
   }
 
   getCompactionSettings(): CompactionSettings {
@@ -251,6 +265,8 @@ export class ConfigManager implements ScoutCoreConfig {
   getScoutConfig(): ScoutConfig {
     const available = this.getAvailableModels();
     const defaultModel = this.findDefaultModel();
+    const toolProfileSettings = this.getToolProfileSettings();
+    const toolProfiles = getConfiguredToolProfiles(toolProfileSettings.toolProfiles);
     return {
       models: available.map((m) => ({
         provider: m.provider,
@@ -262,6 +278,11 @@ export class ConfigManager implements ScoutCoreConfig {
       })),
       defaultModelProvider: defaultModel?.provider ?? '',
       defaultModelId: defaultModel?.id ?? '',
+      defaultToolProfileId: resolveDefaultToolProfileId(
+        toolProfiles,
+        toolProfileSettings.defaultToolProfile,
+      ),
+      toolProfiles: getToolProfileInfos(toolProfiles),
       branchSummary: this.getBranchSummarySettings(),
     };
   }

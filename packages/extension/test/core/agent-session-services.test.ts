@@ -312,6 +312,12 @@ describe('createAgentSessionServices', () => {
     expect(result.session.getActiveToolNames()).toContain('hidden_tool');
     expect(prompt).not.toContain('hidden_tool');
     expect(prompt).not.toContain('Description should not appear in available tools');
+
+    await result.session.setToolProfile('review');
+    expect(result.session.getActiveToolNames()).not.toContain('hidden_tool');
+
+    await result.session.setToolProfile('develop');
+    expect(result.session.getActiveToolNames()).toContain('hidden_tool');
     result.session.dispose();
   });
 

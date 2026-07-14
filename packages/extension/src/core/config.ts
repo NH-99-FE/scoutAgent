@@ -7,6 +7,7 @@ import type { Model, Api, SimpleStreamOptions, ThinkingBudgets, Transport } from
 import type { QueueMode, ThinkingLevel } from '@scout-agent/agent';
 import type { CompactionSettings } from './compaction/index.ts';
 import type { ScoutResourceSettingsSnapshot } from './package-manager.ts';
+import type { ScoutCustomToolProfile } from '@scout-agent/shared';
 
 export interface RetrySettings {
   enabled: boolean;
@@ -25,6 +26,11 @@ export interface BranchSummarySettings {
   skipPrompt: boolean;
 }
 
+export interface ToolProfileSettings {
+  defaultToolProfile?: string;
+  toolProfiles: ScoutCustomToolProfile[];
+}
+
 export interface ScoutStreamOptions {
   transport?: Transport;
   timeoutMs?: number;
@@ -40,6 +46,7 @@ export interface ScoutStreamOptions {
 export interface ScoutCoreConfig {
   getApiKey(provider: string): string | undefined;
   getDefaultThinkingLevel(): ThinkingLevel | undefined;
+  getToolProfileSettings(): ToolProfileSettings;
   getCompactionSettings(): CompactionSettings;
   getBranchSummarySettings(): BranchSummarySettings;
   getSteeringMode(): QueueMode;

@@ -44,9 +44,14 @@ import {
 import type { ScoutCoreConfig, ScoutStreamOptions } from './config.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import {
-  DEFAULT_ACTIVE_TOOL_NAMES,
   ALL_TOOL_NAMES,
   createBuiltinToolDefinitionEntries,
+  findToolProfile,
+  getConfiguredToolProfiles,
+  resolveDefaultToolProfileId,
+  resolveToolProfileNames,
+  type ActiveToolSelection,
+  type ToolProfileDefinition,
   wrapToolDefinition,
   createLocalBashOperations,
   OutputAccumulator,
@@ -219,8 +224,7 @@ export interface AgentSessionOptions {
   loadExtensionResources?: (
     resources: DiscoveredExtensionResources,
   ) => Promise<LoadedScoutResources>;
-  activeToolNames?: string[];
-  includeAllExtensionTools?: boolean;
+  activeToolSelection?: ActiveToolSelection;
   initialModel?: Model<Api>;
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
@@ -277,10 +281,9 @@ type ToolRegistryEntry = {
   sourceType: 'builtin' | 'extension';
 };
 
-const ACTIVE_TOOLS_CUSTOM_TYPE = 'tools-config';
-
-interface ActiveToolsState {
-  enabledTools: string[];
+interface ActiveToolRuntimeState {
+  selection: ActiveToolSelection;
+  activeToolNames: string[];
 }
 
 interface PromptOptions {
@@ -314,9 +317,7 @@ export class AgentSession implements CoreDisposable {
   ) => Promise<LoadedScoutResources>;
   private hasExtensionDiscoveredResources = false;
   private sessionStartEvent: SessionStartEvent;
-  private activeToolNames: string[];
-  private activeToolsCustomized: boolean;
-  private includeAllExtensionToolsOnInitialize: boolean;
+  private activeToolState: ActiveToolRuntimeState;
   private readonly initialModel?: Model<Api>;
   private readonly initialThinkingLevel?: ThinkingLevel;
   private readonly onFileReviewUpdated?: (
@@ -368,7 +369,6 @@ export class AgentSession implements CoreDisposable {
   private readonly queuedMessages = new QueuedMessagePolicy();
   /** 等待 prompt 初始消息完成持久化的启动请求。 */
   private readonly promptAcceptances: PromptAcceptance[] = [];
-
   /** 扩展通过 sendMessage({ deliverAs: 'nextTurn' }) 排入下一次 prompt 的 custom 消息。 */
   private pendingNextTurnMessages: AgentMessage[] = [];
   /** Agent 运行时产生的宿主 bash 消息延后写入，避免破坏 tool_use/tool_result 顺序。 */
@@ -399,9 +399,24 @@ export class AgentSession implements CoreDisposable {
       type: 'session_start',
       reason: 'startup',
     };
-    this.activeToolNames = options.activeToolNames ?? [...DEFAULT_ACTIVE_TOOL_NAMES];
-    this.activeToolsCustomized = options.activeToolNames !== undefined;
-    this.includeAllExtensionToolsOnInitialize = options.includeAllExtensionTools ?? false;
+    const profiles = this.getToolProfiles();
+    const configuredDefault = this.configManager.getToolProfileSettings().defaultToolProfile;
+    const selection = options.activeToolSelection;
+    const activeToolSelection: ActiveToolSelection =
+      selection?.kind === 'custom'
+        ? { kind: 'custom', toolNames: [...selection.toolNames] }
+        : {
+            kind: 'profile',
+            profileId: resolveDefaultToolProfileId(
+              profiles,
+              selection?.profileId ?? configuredDefault,
+            ),
+          };
+    this.activeToolState = {
+      selection: activeToolSelection,
+      activeToolNames:
+        activeToolSelection.kind === 'custom' ? [...activeToolSelection.toolNames] : [],
+    };
     this.initialModel = options.initialModel;
     this.initialThinkingLevel = options.initialThinkingLevel;
     this.onFileReviewUpdated = options.onFileReviewUpdated;
@@ -415,8 +430,6 @@ export class AgentSession implements CoreDisposable {
     this.cachedSessionId = metadata.id;
     this.cachedParentSessionPath = metadata.parentSessionPath;
     this.cachedForkPointEntryId = metadata.forkPointEntryId;
-    await this.restoreActiveToolsFromBranch();
-
     await this.rebuildRuntime();
     await this.rebuildCachedSessionBranch();
   }
@@ -1188,11 +1201,18 @@ export class AgentSession implements CoreDisposable {
   }
 
   getActiveToolNames(): string[] {
-    return [...this.activeToolNames];
+    return [...this.activeToolState.activeToolNames];
+  }
+
+  getActiveToolSelection(): ActiveToolSelection {
+    const selection = this.activeToolState.selection;
+    return selection.kind === 'profile'
+      ? { kind: 'profile', profileId: selection.profileId }
+      : { kind: 'custom', toolNames: [...selection.toolNames] };
   }
 
   isActiveToolsCustomized(): boolean {
-    return this.activeToolsCustomized;
+    return this.activeToolState.selection.kind === 'custom';
   }
 
   async getSessionMetadata(): Promise<JsonlSessionMetadata> {
@@ -1300,51 +1320,34 @@ export class AgentSession implements CoreDisposable {
       throw new Error(`Unknown tool(s): ${missing.join(', ')}`);
     }
 
-    this.activeToolsCustomized = true;
-    this.activeToolNames = [...toolNames];
-    await this.persistActiveTools();
-    this.applyToolsToAgent();
-    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
-    if (this.agent) this.agent.state.systemPrompt = this.lastSystemPrompt;
+    this.applyActiveToolState({
+      selection: { kind: 'custom', toolNames: [...new Set(toolNames)] },
+      activeToolNames: [...new Set(toolNames)],
+    });
     this.emit({ type: 'state_change' });
-    this.emit({ type: 'tree_change' });
+  }
+
+  async setToolProfile(profileId: string): Promise<void> {
+    const profile = findToolProfile(this.getToolProfiles(), profileId);
+    if (!profile) {
+      throw new Error(`Unknown tool profile: ${profileId}`);
+    }
+
+    this.applyActiveToolState({
+      selection: { kind: 'profile', profileId: profile.id },
+      activeToolNames: this.resolveProfileToolNames(profile),
+    });
+    this.emit({ type: 'state_change' });
   }
 
   async refreshTools(): Promise<void> {
     const previousRegistryNames = new Set(this.toolRegistry.keys());
     this.rebuildToolRegistry();
-    this.normalizeActiveToolNames({ previousRegistryNames });
+    this.normalizeActiveToolState(previousRegistryNames);
     this.applyToolsToAgent();
     this.lastSystemPrompt = this.buildCurrentSystemPrompt();
     if (this.agent) this.agent.state.systemPrompt = this.lastSystemPrompt;
     this.emit({ type: 'state_change' });
-  }
-
-  private async restoreActiveToolsFromBranch(): Promise<void> {
-    if (this.activeToolsCustomized) return;
-
-    const branch = await this.session.getBranch();
-    let savedTools: string[] | undefined;
-    for (const entry of branch) {
-      if (entry.type !== 'custom' || entry.customType !== ACTIVE_TOOLS_CUSTOM_TYPE) {
-        continue;
-      }
-      const data = entry.data as ActiveToolsState | undefined;
-      if (Array.isArray(data?.enabledTools)) {
-        savedTools = data.enabledTools.filter((name): name is string => typeof name === 'string');
-      }
-    }
-
-    if (!savedTools) return;
-    this.activeToolsCustomized = true;
-    this.activeToolNames = savedTools;
-  }
-
-  private async persistActiveTools(): Promise<void> {
-    await this.session.appendCustomEntry(ACTIVE_TOOLS_CUSTOM_TYPE, {
-      enabledTools: [...this.activeToolNames],
-    } satisfies ActiveToolsState);
-    this.cachedLeafId = await this.session.getLeafId();
   }
 
   getSystemPrompt(): string {
@@ -1846,33 +1849,69 @@ export class AgentSession implements CoreDisposable {
     this.toolRegistryVersion += 1;
   }
 
-  private normalizeActiveToolNames(options?: {
-    previousRegistryNames?: Set<string>;
-    includeAllExtensionTools?: boolean;
-  }): void {
-    const extensionTools = [...this.toolRegistry.values()]
-      .filter((entry) => entry.sourceType === 'extension')
-      .map((entry) => entry.tool.name);
-
-    if (!this.activeToolsCustomized) {
-      const defaults = DEFAULT_ACTIVE_TOOL_NAMES.filter((name) => this.toolRegistry.has(name));
-      this.activeToolNames = [...new Set([...defaults, ...extensionTools])];
+  private normalizeActiveToolState(previousRegistryNames?: ReadonlySet<string>): void {
+    const selection = this.activeToolState.selection;
+    if (selection.kind === 'profile') {
+      const profiles = this.getToolProfiles();
+      const profile =
+        findToolProfile(profiles, selection.profileId) ??
+        findToolProfile(profiles, resolveDefaultToolProfileId(profiles));
+      if (!profile) throw new Error(`Unknown default tool profile: ${selection.profileId}`);
+      this.activeToolState = {
+        selection: { kind: 'profile', profileId: profile.id },
+        activeToolNames: this.resolveProfileToolNames(profile),
+      };
       return;
     }
 
-    const nextActiveToolNames = this.activeToolNames.filter((name) => this.toolRegistry.has(name));
-    if (options?.includeAllExtensionTools) {
-      nextActiveToolNames.push(...extensionTools);
-    } else if (options?.previousRegistryNames) {
-      nextActiveToolNames.push(
-        ...extensionTools.filter((name) => !options.previousRegistryNames?.has(name)),
-      );
-    }
-    this.activeToolNames = [...new Set(nextActiveToolNames)];
+    const availableToolNames = new Set(this.toolRegistry.keys());
+    const extensionTools = [...this.toolRegistry.values()]
+      .filter((entry) => entry.sourceType === 'extension')
+      .map((entry) => entry.tool.name);
+    const newlyRegisteredExtensionTools = previousRegistryNames
+      ? extensionTools.filter((name) => !previousRegistryNames.has(name))
+      : [];
+    const activeToolNames = [
+      ...new Set([
+        ...this.activeToolState.activeToolNames.filter((name) => availableToolNames.has(name)),
+        ...newlyRegisteredExtensionTools,
+      ]),
+    ];
+    this.activeToolState = {
+      selection: {
+        kind: 'custom',
+        toolNames: [...activeToolNames],
+      },
+      activeToolNames,
+    };
+  }
+
+  private resolveProfileToolNames(profile: ToolProfileDefinition): string[] {
+    const extensionToolNames = [...this.toolRegistry.values()]
+      .filter((entry) => entry.sourceType === 'extension')
+      .map((entry) => entry.tool.name);
+    return resolveToolProfileNames(profile, new Set(this.toolRegistry.keys()), extensionToolNames);
+  }
+
+  private applyActiveToolState(state: ActiveToolRuntimeState): void {
+    this.activeToolState = {
+      selection:
+        state.selection.kind === 'profile'
+          ? { kind: 'profile', profileId: state.selection.profileId }
+          : { kind: 'custom', toolNames: [...state.selection.toolNames] },
+      activeToolNames: [...state.activeToolNames],
+    };
+    this.applyToolsToAgent();
+    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
+    if (this.agent) this.agent.state.systemPrompt = this.lastSystemPrompt;
+  }
+
+  private getToolProfiles(): readonly ToolProfileDefinition[] {
+    return getConfiguredToolProfiles(this.configManager.getToolProfileSettings().toolProfiles);
   }
 
   private getActiveTools(): AgentTool[] {
-    return this.activeToolNames
+    return this.activeToolState.activeToolNames
       .map((name) => this.toolRegistry.get(name)?.tool)
       .filter((tool): tool is AgentTool => tool !== undefined);
   }
@@ -2225,10 +2264,7 @@ export class AgentSession implements CoreDisposable {
       thinkingLevel,
     });
     this.rebuildToolRegistry(model);
-    this.normalizeActiveToolNames({
-      includeAllExtensionTools: this.includeAllExtensionToolsOnInitialize,
-    });
-    this.includeAllExtensionToolsOnInitialize = false;
+    this.normalizeActiveToolState();
     this.lastSystemPrompt = this.buildCurrentSystemPrompt();
 
     this.unsubscribeAgent?.();

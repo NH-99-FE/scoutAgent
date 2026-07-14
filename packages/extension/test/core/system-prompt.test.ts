@@ -31,4 +31,21 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('- read: Read file contents');
     expect(prompt).not.toContain('- dynamic_tool:');
   });
+
+  it('does not fall back to default tools when selected tools is empty', () => {
+    const prompt = buildSystemPrompt({
+      selectedTools: [],
+      toolSnippets: {
+        read: 'Read file contents',
+        bash: 'Run shell commands',
+      },
+      contextFiles: [],
+      skills: [],
+      cwd: process.cwd(),
+    });
+
+    expect(prompt).toContain('Available tools:\n(none)');
+    expect(prompt).not.toContain('- read: Read file contents');
+    expect(prompt).not.toContain('- bash: Run shell commands');
+  });
 });

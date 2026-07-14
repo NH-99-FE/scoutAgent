@@ -271,7 +271,7 @@ export function createScoutProtocolHostServices(
       saveRuntimeSettings: (message, respond) =>
         bundle.config.saveRuntimeSettings(message, respond),
       setThinkingLevel: (message) => bundle.config.setThinkingLevel(message),
-      setActiveTools: (message) => bundle.config.setActiveTools(message),
+      setToolProfile: (message) => bundle.config.setToolProfile(message),
       reloadResources: (respond) => bundle.config.reloadResources(respond),
     },
     extensions: {

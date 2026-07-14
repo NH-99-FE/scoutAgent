@@ -36,7 +36,6 @@ import {
   ScoutExtensionRunner,
   type ExtensionUIContext,
   type SendMessageInput,
-  type NewSessionReplacementOptions,
   type ScoutExtensionActions,
   type ScoutExtensionContextActions,
   type SessionReplacementOptions,
@@ -56,6 +55,7 @@ import {
   type AgentSessionReplacementResult,
   type AgentSessionRuntime,
   type AgentSessionRuntimeDiagnostic,
+  type AgentSessionRuntimeNewSessionOptions,
   type CreateAgentSessionRuntimeFactory,
 } from '../core/agent-session-runtime.ts';
 import { formatPathRelativeToCwd, resolveToCwd } from '../core/tools/shared/path-utils.ts';
@@ -117,6 +117,8 @@ type ExtensionSessionCoordinatorReplacementResult = AgentSessionReplacementResul
 type ExtensionSessionCoordinatorSessionReplacementOptions = SessionReplacementOptions & {
   cwdOverride?: string;
 };
+
+type ExtensionSessionCoordinatorNewSessionOptions = AgentSessionRuntimeNewSessionOptions;
 
 export type UserSessionOperationToken = SessionOperationToken;
 export type UserSessionOperationResult<T> = SessionOperationResult<T>;
@@ -229,6 +231,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return this.agentSession?.getActiveToolNames() ?? [];
   }
 
+  getActiveToolSelection() {
+    return this.agentSession?.getActiveToolSelection();
+  }
+
   getAllToolInfos(): ToolInfo[] {
     const active = new Set(this.getActiveToolNames());
     return (this.agentSession?.getAllToolInfos() ?? []).map((tool) => ({
@@ -249,13 +255,13 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return this.agentSession?.getSessionStats();
   }
 
-  async setActiveTools(toolNames: string[]): Promise<void> {
+  async setToolProfile(profileId: string): Promise<void> {
     if (!this.agentSession) {
       this.emit({ type: 'error', message: 'No active session' });
       return;
     }
     try {
-      await this.agentSession.setActiveTools(toolNames);
+      await this.agentSession.setToolProfile(profileId);
     } catch (error) {
       this.emit({
         type: 'error',
@@ -284,7 +290,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   private async createInitialRuntime(
     reason: InitialRuntimeReason,
-    options?: NewSessionReplacementOptions,
+    options?: ExtensionSessionCoordinatorNewSessionOptions,
     operationToken?: UserSessionOperationToken,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     if (this.sessionRuntime) return { cancelled: false };
@@ -316,6 +322,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       const runtime = await createAgentSessionRuntime(this.createRuntime, {
         session,
         cwd: this.cwd,
+        activeToolSelection: options?.toolProfileId
+          ? { kind: 'profile', profileId: options.toolProfileId }
+          : undefined,
         sessionStartEvent: { type: 'session_start', reason },
       });
       runtime.setRebindSession((nextSession) => this.rebindAgentSession(nextSession));
@@ -380,7 +389,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   async newUserSession(
     token: UserSessionOperationToken,
-    options?: NewSessionReplacementOptions,
+    options?: ExtensionSessionCoordinatorNewSessionOptions,
   ): Promise<UserSessionOperationResult<ExtensionSessionCoordinatorReplacementResult>> {
     return await this.sessionOperationBroker.runUserOperation(token, async (currentToken) => {
       return await this.newSessionUnlocked(
@@ -406,9 +415,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   }
 
   private guardNewSessionOptions(
-    options: NewSessionReplacementOptions | undefined,
+    options: ExtensionSessionCoordinatorNewSessionOptions | undefined,
     token: UserSessionOperationToken,
-  ): NewSessionReplacementOptions | undefined {
+  ): ExtensionSessionCoordinatorNewSessionOptions | undefined {
     if (!options?.withSession) return options;
     const { withSession } = options;
     return {
@@ -514,13 +523,13 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   }
 
   async newSession(
-    options?: NewSessionReplacementOptions,
+    options?: ExtensionSessionCoordinatorNewSessionOptions,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     return await this.runSessionReplacement(async () => this.newSessionUnlocked(options));
   }
 
   private async newSessionUnlocked(
-    options?: NewSessionReplacementOptions,
+    options?: ExtensionSessionCoordinatorNewSessionOptions,
     operationToken?: UserSessionOperationToken,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     if (!this.sessionRuntime) {
@@ -999,8 +1008,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private readonly createRuntime: CreateAgentSessionRuntimeFactory = async ({
     session,
     cwd,
-    activeToolNames,
-    includeAllExtensionTools,
+    activeToolSelection,
     initialModel,
     initialThinkingLevel,
     sessionStartEvent,
@@ -1017,8 +1025,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       services,
       session,
       logger: this.outputChannel,
-      activeToolNames,
-      includeAllExtensionTools,
+      activeToolSelection,
       initialModel,
       initialThinkingLevel,
       sessionStartEvent,

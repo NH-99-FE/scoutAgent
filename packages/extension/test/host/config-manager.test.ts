@@ -242,6 +242,98 @@ describe('SettingsManager', () => {
     ).toThrow('defaultThinkingLevel must be one of off, minimal, low, medium, high, xhigh');
   });
 
+  it('rejects blank custom tool profile names instead of silently dropping them', () => {
+    const manager = new SettingsManager({ cwd, userConfigDir });
+
+    expect(() =>
+      manager.save('global', {
+        operations: [
+          {
+            op: 'set',
+            path: 'toolProfiles',
+            value: [{ id: 'search-only', name: '   ', tools: ['read', 'grep'] }],
+          },
+        ],
+      }),
+    ).toThrow('toolProfiles[0].name must be a non-empty string');
+  });
+
+  it('validates default tool profile references after applying the complete patch', () => {
+    const globalSettingsPath = path.join(userConfigDir, 'settings.json');
+    const manager = new SettingsManager({ cwd, userConfigDir });
+
+    manager.save('global', {
+      operations: [
+        {
+          op: 'set',
+          path: 'toolProfiles',
+          value: [{ id: 'search-only', name: '只搜索', tools: ['read', 'grep'] }],
+        },
+        { op: 'set', path: 'defaultToolProfile', value: 'search-only' },
+      ],
+    });
+
+    expect(() =>
+      manager.save('global', {
+        operations: [
+          {
+            op: 'set',
+            path: 'toolProfiles',
+            value: [{ id: 'renamed', name: '只搜索', tools: ['read', 'grep'] }],
+          },
+        ],
+      }),
+    ).toThrow('defaultToolProfile references unknown tool profile: search-only');
+    expect(readJson(globalSettingsPath)).toMatchObject({
+      defaultToolProfile: 'search-only',
+      toolProfiles: [{ id: 'search-only' }],
+    });
+  });
+
+  it('allows a project default to reference an inherited global tool profile', () => {
+    writeJson(path.join(userConfigDir, 'settings.json'), {
+      toolProfiles: [{ id: 'search-only', name: '只搜索', tools: ['read', 'grep'] }],
+    });
+    const manager = new SettingsManager({ cwd, userConfigDir });
+
+    manager.save('project', {
+      operations: [{ op: 'set', path: 'defaultToolProfile', value: 'search-only' }],
+    });
+
+    expect(manager.getEffectiveSettings()).toMatchObject({
+      defaultToolProfile: 'search-only',
+      toolProfiles: [{ id: 'search-only' }],
+    });
+  });
+
+  it('saves a project profile override with an explicit builtin default', () => {
+    writeJson(path.join(userConfigDir, 'settings.json'), {
+      defaultToolProfile: 'global-search',
+      toolProfiles: [{ id: 'global-search', name: '全局搜索', tools: ['read', 'grep'] }],
+    });
+    const manager = new SettingsManager({ cwd, userConfigDir });
+
+    const snapshot = manager.save('project', {
+      operations: [
+        { op: 'set', path: 'defaultToolProfile', value: 'develop' },
+        {
+          op: 'set',
+          path: 'toolProfiles',
+          value: [{ id: 'project-search', name: '项目搜索', tools: ['read'] }],
+        },
+      ],
+    });
+
+    expect(snapshot.project).toMatchObject({
+      defaultToolProfile: 'develop',
+      toolProfiles: [{ id: 'project-search' }],
+    });
+    expect(snapshot.effective).toMatchObject({
+      defaultToolProfile: 'develop',
+      toolProfiles: [{ id: 'project-search' }],
+    });
+  });
+
   it('rejects invalid runtime numeric settings on save', () => {
     const manager = new SettingsManager({ cwd, userConfigDir });
     const invalidCases: Array<{ path: ScoutRuntimeSettingsPath; value: unknown; error: string }> = [
@@ -552,6 +644,24 @@ describe('ConfigManager', () => {
     expect(manager.getDefaultThinkingLevel()).toBe('off');
     expect(manager.getSteeringMode()).toBe('all');
     expect(manager.findModelByProvider('openai', 'project-gpt')?.name).toBe('Project GPT');
+  });
+
+  it('projects the resolved default tool profile for new session composers', () => {
+    writeJson(path.join(userConfigDir, 'settings.json'), {
+      defaultToolProfile: 'review',
+      toolProfiles: [{ id: 'search-only', name: '只搜索', tools: ['read', 'grep'] }],
+    });
+
+    const manager = new ConfigManager({ cwd, userConfigDir });
+
+    expect(manager.getScoutConfig()).toMatchObject({
+      defaultToolProfileId: 'review',
+      toolProfiles: [
+        { id: 'develop', name: '开发模式', builtin: true },
+        { id: 'review', name: '审查模式', builtin: true },
+        { id: 'search-only', name: '只搜索', tools: ['read', 'grep'], builtin: false },
+      ],
+    });
   });
 
   it('normalizes provider-scoped default model settings', () => {

@@ -28,7 +28,7 @@ function makeSessionManager(overrides: Record<string, unknown> = {}): ExtensionS
   return {
     setModel: vi.fn(async () => undefined),
     setThinkingLevel: vi.fn(async () => undefined),
-    setActiveTools: vi.fn(async () => undefined),
+    setToolProfile: vi.fn(async () => undefined),
     reload: vi.fn(async () => ({ cancelled: false })),
     ...overrides,
   } as unknown as ExtensionSessionCoordinator;
@@ -142,17 +142,17 @@ function makeService(
 }
 
 describe('ConfigProtocolService', () => {
-  it('delegates model, thinking, and active tool changes to the session coordinator', async () => {
+  it('delegates model, thinking, and tool profile changes to the session coordinator', async () => {
     const sessionManager = makeSessionManager();
     const { service } = makeService({ sessionManager });
 
     await service.setModel({ type: 'select_model', provider: 'openai', modelId: 'gpt-test' });
     await service.setThinkingLevel({ type: 'select_thinking', level: 'high' });
-    service.setActiveTools({ type: 'set_active_tools', toolNames: ['read_file', 'shell'] });
+    service.setToolProfile({ type: 'set_tool_profile', profileId: 'review' });
 
     expect(sessionManager.setModel).toHaveBeenCalledWith('gpt-test', 'openai');
     expect(sessionManager.setThinkingLevel).toHaveBeenCalledWith('high');
-    expect(sessionManager.setActiveTools).toHaveBeenCalledWith(['read_file', 'shell']);
+    expect(sessionManager.setToolProfile).toHaveBeenCalledWith('review');
   });
 
   it('returns editable custom models and runtime settings from the config manager', () => {

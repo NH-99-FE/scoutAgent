@@ -13,21 +13,20 @@ import { type FindToolOptions, createFindToolDefinition } from './find.ts';
 import { type LsToolOptions, createLsToolDefinition } from './ls.ts';
 import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import { createSyntheticSourceInfo, type SourceInfo } from '../source-info.ts';
+import {
+  BUILTIN_TOOL_NAMES,
+  BUILTIN_TOOL_PROFILES,
+  type BuiltinToolName,
+} from './tool-profiles.ts';
 
-export type ToolName = 'read' | 'bash' | 'edit' | 'write' | 'grep' | 'find' | 'ls';
+export type ToolName = BuiltinToolName;
 
-export const ALL_TOOL_NAMES: Set<ToolName> = new Set([
-  'read',
-  'bash',
-  'edit',
-  'write',
-  'grep',
-  'find',
-  'ls',
-]);
+export const ALL_TOOL_NAMES: Set<ToolName> = new Set(BUILTIN_TOOL_NAMES);
 
 /** 默认活跃工具集 */
-export const DEFAULT_ACTIVE_TOOL_NAMES: ToolName[] = ['read', 'bash', 'edit', 'write'];
+export const DEFAULT_ACTIVE_TOOL_NAMES: ToolName[] = [
+  ...(BUILTIN_TOOL_PROFILES[0].tools as readonly ToolName[]),
+];
 
 export interface ToolsOptions {
   read?: ReadToolOptions;

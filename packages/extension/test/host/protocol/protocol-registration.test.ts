@@ -122,8 +122,8 @@ const PAYLOAD_CASES = [
     { service: 'config', method: 'select_thinking' },
   ),
   protocolCase(
-    { type: 'set_active_tools', toolNames: [] },
-    { service: 'config', method: 'set_active_tools' },
+    { type: 'set_tool_profile', profileId: 'review' },
+    { service: 'config', method: 'set_tool_profile' },
   ),
   protocolCase(
     { type: 'clear_conversation' },
@@ -332,7 +332,7 @@ function makeServices(): ScoutProtocolServices {
         respond({ type: 'save_runtime_settings_result', success: true });
       }),
       setThinkingLevel: vi.fn(async () => undefined),
-      setActiveTools: vi.fn(),
+      setToolProfile: vi.fn(),
       reloadResources: vi.fn(async (respond) => {
         respond({ type: 'reload_result', success: true });
       }),
@@ -491,6 +491,10 @@ function makeServices(): ScoutProtocolServices {
 }
 
 describe('registerScoutProtocolServices', () => {
+  it('declares the actual events emitted by tool profile selection', () => {
+    expect(SCOUT_PROTOCOL.set_tool_profile.emits).toEqual(['state_update']);
+  });
+
   it('registers a handler for every routed webview payload', async () => {
     expect(exhaustivePayloadCoverage).toEqual({});
 

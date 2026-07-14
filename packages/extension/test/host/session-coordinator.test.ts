@@ -84,6 +84,7 @@ function createFakeAgentSession(session: Session, calls: string[] = []): AgentSe
     model: undefined,
     thinkingLevel: 'off',
     getActiveToolNames: vi.fn(() => ['read']),
+    getActiveToolSelection: vi.fn(() => ({ kind: 'custom', toolNames: ['read'] })),
     isStreaming: false,
     emitSessionBeforeSwitch: vi.fn(async () => false),
     emitSessionShutdown: vi.fn(async () => undefined),

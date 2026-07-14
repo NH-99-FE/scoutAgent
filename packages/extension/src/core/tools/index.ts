@@ -132,3 +132,19 @@ export {
   detectSupportedImageMimeTypeFromFile,
 } from './shared/mime.ts';
 export { ensureTool, getToolPath } from './shared/tools-manager.ts';
+export {
+  BUILTIN_TOOL_PROFILES,
+  BUILTIN_TOOL_NAMES,
+  DEFAULT_TOOL_PROFILE_ID,
+  DEVELOP_TOOL_PROFILE_ID,
+  REVIEW_TOOL_PROFILE_ID,
+  findBuiltinToolProfile,
+  findToolProfile,
+  getConfiguredToolProfiles,
+  getToolProfileInfos,
+  resolveDefaultToolProfileId,
+  resolveToolProfileNames,
+  type ToolProfileDefinition,
+  type ActiveToolSelection,
+  type BuiltinToolName,
+} from './tool-profiles.ts';

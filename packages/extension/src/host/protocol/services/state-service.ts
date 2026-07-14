@@ -96,6 +96,7 @@ export class StateProtocolService implements StateProtocolHost {
       thinkingLevel: this.sessionManager.thinkingLevel,
       tools: this.sessionManager.getAllToolInfos(),
       activeToolNames: this.sessionManager.getActiveToolNames(),
+      activeToolSelection: this.sessionManager.getActiveToolSelection(),
       commands: this.getCommands(),
       cwd: this.sessionManager.currentCwd,
       sessionId: this.sessionManager.sessionId,

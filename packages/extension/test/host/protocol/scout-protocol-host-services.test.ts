@@ -113,6 +113,7 @@ describe('createScoutProtocolHostServices', () => {
         getQueueState: vi.fn(() => ({ messages: [], followUps: [], paused: false })),
         getAllToolInfos: vi.fn(() => []),
         getActiveToolNames: vi.fn(() => []),
+        getActiveToolSelection: vi.fn(() => ({ kind: 'profile', profileId: 'develop' })),
         model: undefined,
         thinkingLevel: 'off',
         currentCwd: '/workspace',

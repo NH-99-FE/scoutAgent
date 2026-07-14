@@ -144,8 +144,8 @@ export class ConfigProtocolService implements ConfigProtocolHost {
     await this.sessionManager.setThinkingLevel(message.level);
   }
 
-  setActiveTools(message: ProtocolPayload<'set_active_tools'>): void {
-    void this.sessionManager.setActiveTools(message.toolNames);
+  setToolProfile(message: ProtocolPayload<'set_tool_profile'>): void {
+    void this.sessionManager.setToolProfile(message.profileId);
   }
 
   async reloadResources(respond: ProtocolResponder): Promise<void> {

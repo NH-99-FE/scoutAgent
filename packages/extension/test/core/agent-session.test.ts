@@ -186,6 +186,117 @@ describe('AgentSession', () => {
     }
   });
 
+  it('uses the configured review tool profile for new sessions', async () => {
+    const session = createSession(tempDir, {
+      anthropicProviderApiKey: 'test-key',
+      defaultToolProfile: 'review',
+    });
+
+    await session.initialize();
+    try {
+      expect(session.getActiveToolSelection()).toEqual({ kind: 'profile', profileId: 'review' });
+      expect(session.getActiveToolNames()).toEqual(['read', 'grep', 'find', 'ls']);
+      expect(session.getSystemPrompt()).toContain('- grep:');
+      expect(session.getSystemPrompt()).not.toContain('- bash:');
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('uses an explicitly requested tool profile for a new session', async () => {
+    const session = new AgentSession({
+      session: SessionManager.inMemory(tempDir),
+      configManager: createConfigManager(tempDir),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+      activeToolSelection: { kind: 'profile', profileId: 'review' },
+    });
+
+    await session.initialize();
+    try {
+      expect(session.getActiveToolSelection()).toEqual({ kind: 'profile', profileId: 'review' });
+      expect(session.getActiveToolNames()).toEqual(['read', 'grep', 'find', 'ls']);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('switches tool profiles without mutating session history', async () => {
+    const backingSession = SessionManager.inMemory(tempDir);
+    const session = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManager(tempDir),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+    await session.initialize();
+    const entriesBeforeSwitch = backingSession.getEntries();
+
+    try {
+      await session.setToolProfile('review');
+
+      expect(session.getActiveToolSelection()).toEqual({ kind: 'profile', profileId: 'review' });
+      expect(session.getActiveToolNames()).toEqual(['read', 'grep', 'find', 'ls']);
+      expect(session.getSystemPrompt()).toContain('- grep:');
+      expect(session.getSystemPrompt()).not.toContain('- bash:');
+      expect(backingSession.getEntries()).toEqual(entriesBeforeSwitch);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('treats extension tool selection as runtime-only custom state', async () => {
+    const session = createSession(tempDir);
+    await session.initialize();
+
+    try {
+      await session.setActiveTools(['read', 'grep']);
+
+      expect(session.getActiveToolSelection()).toEqual({
+        kind: 'custom',
+        toolNames: ['read', 'grep'],
+      });
+      expect(session.getActiveToolNames()).toEqual(['read', 'grep']);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('uses the current default profile when reopening session history', async () => {
+    const backingSession = SessionManager.inMemory(tempDir);
+    const first = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManager(tempDir),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+    await first.initialize();
+    await first.setToolProfile('review');
+    first.dispose();
+
+    const reopened = new AgentSession({
+      session: backingSession,
+      configManager: createConfigManager(tempDir),
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+    });
+    await reopened.initialize();
+
+    try {
+      expect(reopened.getActiveToolSelection()).toEqual({
+        kind: 'profile',
+        profileId: 'develop',
+      });
+      expect(reopened.getActiveToolNames()).toEqual(['read', 'bash', 'edit', 'write']);
+    } finally {
+      reopened.dispose();
+    }
+  });
+
   it('uses inherited runtime model and thinking level when initializing an empty replacement session', async () => {
     const inheritedModel = mockModel({
       provider: 'openai',
@@ -206,7 +317,7 @@ describe('AgentSession', () => {
       skills: [],
       initialModel: inheritedModel,
       initialThinkingLevel: 'off',
-      activeToolNames: ['read'],
+      activeToolSelection: { kind: 'custom', toolNames: ['read'] },
     });
 
     await session.initialize();
@@ -1156,6 +1267,25 @@ describe('AgentSession', () => {
     expect(backingSession.getLeafId()).toBeNull();
     expect(runtimeMessages).toEqual([]);
     expect(session.getSessionBranch()).toEqual([]);
+  });
+
+  it('keeps runtime tool profile unchanged during tree navigation', async () => {
+    const session = createSession(tempDir);
+    const backingSession = session.sessionManager;
+
+    await session.initialize();
+    try {
+      backingSession.appendMessage(userMessage('review branch'));
+      const targetId = backingSession.appendMessage(assistantMessage('review response'));
+      await session.setToolProfile('review');
+
+      await session.navigateTree(targetId, { summarize: false });
+
+      expect(session.getActiveToolSelection()).toEqual({ kind: 'profile', profileId: 'review' });
+      expect(session.getActiveToolNames()).toEqual(['read', 'grep', 'find', 'ls']);
+    } finally {
+      session.dispose();
+    }
   });
 
   it('propagates label write failures without emitting duplicate user-visible errors', async () => {
