@@ -17,6 +17,12 @@ const profiles: ScoutToolProfileInfo[] = [
     tools: ['read', 'grep', 'find', 'ls'],
     builtin: true,
   },
+  {
+    id: 'custom',
+    name: '自定义模式',
+    tools: ['read'],
+    builtin: false,
+  },
 ];
 
 describe('ToolProfileSelect', () => {
@@ -52,5 +58,13 @@ describe('ToolProfileSelect', () => {
     await waitFor(() => {
       expect(trigger).toHaveFocus();
     });
+  });
+
+  it('uses the pickaxe icon for a custom profile', () => {
+    render(<ToolProfileSelect profileId="custom" profiles={profiles} onValueChange={vi.fn()} />);
+
+    expect(
+      screen.getByRole('button', { name: '工具模式' }).querySelector('.lucide-pickaxe'),
+    ).not.toBeNull();
   });
 });

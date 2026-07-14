@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Flame, ShieldCheck, Wrench } from 'lucide-react';
+import { ChevronDown, Flame, Pickaxe, ShieldCheck } from 'lucide-react';
 import { SCOUT_BUILTIN_TOOL_PROFILE_IDS } from '@scout-agent/shared';
 import type { ScoutToolProfileDefinition } from '@scout-agent/shared';
 import {
@@ -118,5 +118,5 @@ function ToolProfileIcon({
   if (profileId === SCOUT_BUILTIN_TOOL_PROFILE_IDS[1]) {
     return <ShieldCheck className={className} {...props} />;
   }
-  return <Wrench className={className} {...props} />;
+  return <Pickaxe className={className} {...props} />;
 }
