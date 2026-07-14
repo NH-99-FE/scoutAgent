@@ -30,6 +30,7 @@ import { useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu';
 import { useComposerImageAttachments } from '../hooks/use-composer-image-attachments';
 import { useComposerSubmitFlow } from '../hooks/use-composer-submit-flow';
+import { useComposerToolProfile } from '../hooks/use-composer-tool-profile';
 import { useFileMentionMenu } from '../hooks/use-file-mention-menu';
 import { AddMentionMenu } from './AddMentionMenu';
 import { ComposerImagePreviewDialog } from './ComposerImagePreviewDialog';
@@ -41,6 +42,7 @@ import { ForkCandidateMenu } from './ForkCandidateMenu';
 import { PendingQueueSendDialog } from './PendingQueueSendDialog';
 import { SendButton } from './SendButton';
 import { SlashCommandMenu } from './SlashCommandMenu';
+import { ToolProfileSelect } from './ToolProfileSelect';
 import { useForkCandidateMenu } from '../hooks/use-fork-candidate-menu';
 import { buildSlashCommandItems, type SlashCommandMenuItem } from '../model/slash-command-options';
 import { getSlashCommandTrigger } from '../model/slash-command-trigger';
@@ -153,6 +155,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const currentSessionStreaming = useIsStreaming();
   const currentSessionVisualStreaming = useVisualIsStreaming();
   const currentSessionQueueState = useQueueState();
+  const toolProfile = useComposerToolProfile(mode);
   const currentSessionForkCandidateVersion = useConversationForkCandidateVersion();
   const isCurrentSessionMode = mode === 'currentSession';
   const isStreaming = isCurrentSessionMode ? currentSessionStreaming : false;
@@ -163,6 +166,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     images,
     isStreaming,
     mode,
+    newSessionToolProfileId: toolProfile.submitProfileId,
     onBeginNewSessionRequest:
       props.mode === 'newSession' ? props.onBeginNewSessionRequest : undefined,
     onMessageSent,
@@ -501,6 +505,11 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
               >
                 <Plus />
               </IconButton>
+              <ToolProfileSelect
+                profileId={toolProfile.profileId}
+                profiles={toolProfile.profiles}
+                onValueChange={toolProfile.selectProfile}
+              />
             </div>
 
             <div className="flex min-w-0 flex-1 items-center justify-end gap-1 overflow-hidden">

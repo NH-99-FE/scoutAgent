@@ -52,6 +52,8 @@ function configureModels(): void {
     ],
     defaultModelProvider: 'openai',
     defaultModelId: 'gpt-5.5',
+    defaultToolProfileId: 'develop',
+    toolProfiles: [],
     branchSummary: { reserveTokens: 100, skipPrompt: false },
   });
   useSessionStore.getState().actions.applyState(makeState());
@@ -139,6 +141,8 @@ describe('ModelStatusMenu', () => {
       ],
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-limited',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore
@@ -170,6 +174,8 @@ describe('ModelStatusMenu', () => {
       models: [makeModel('gpt-reasoning', 'GPT Reasoning')],
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-reasoning',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore
@@ -188,6 +194,8 @@ describe('ModelStatusMenu', () => {
       models: [makeModel('gpt-reasoning', 'GPT Reasoning')],
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-reasoning',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore
@@ -214,6 +222,8 @@ describe('ModelStatusMenu', () => {
       models: [makeModel('gpt-reasoning', 'GPT Reasoning')],
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-reasoning',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore
@@ -258,6 +268,8 @@ describe('ModelStatusMenu', () => {
       ],
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-fast',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore
@@ -276,6 +288,8 @@ describe('ModelStatusMenu', () => {
       models: [makeModel('gpt-default', 'GPT Default')],
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-default',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore.getState().actions.applyState(
@@ -299,6 +313,8 @@ describe('ModelStatusMenu', () => {
       models: [],
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-default',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore.getState().actions.applyState(
@@ -319,6 +335,8 @@ describe('ModelStatusMenu', () => {
       models: Array.from({ length: 12 }, (_, index) => makeModel(`gpt-option-${index + 1}`)),
       defaultModelProvider: 'openai',
       defaultModelId: 'gpt-option-1',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [],
       branchSummary: { reserveTokens: 100, skipPrompt: false },
     });
     useSessionStore.getState().actions.applyState(

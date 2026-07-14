@@ -56,6 +56,8 @@ describe('routeExtensionMessage', () => {
         ],
         defaultModelProvider: 'openai',
         defaultModelId: 'gpt-test',
+        defaultToolProfileId: 'develop',
+        toolProfiles: [],
         branchSummary: { reserveTokens: 100, skipPrompt: false },
       },
     });

@@ -453,6 +453,7 @@ export const protocolClient = {
     text: string,
     images?: ScoutImageContent[],
     document?: ScoutComposerDocument,
+    toolProfileId?: string,
   ) => {
     discardProtocolRequest(pendingOpenTaskRequestId);
     pendingOpenTaskRequestId = undefined;
@@ -461,6 +462,7 @@ export const protocolClient = {
       payload.images = images;
     }
     if (document) payload.document = document;
+    if (toolProfileId) payload.toolProfileId = toolProfileId;
     pendingNewSessionRequestId = sendRouted(payload, projectProtocolResponsePayload, (message) => {
       projectProtocolResponsePayload({
         type: 'new_session_result',
@@ -620,6 +622,7 @@ export const protocolClient = {
       },
     ),
   selectThinking: (level: ThinkingLevel) => send({ type: 'select_thinking', level }),
+  setToolProfile: (profileId: string) => send({ type: 'set_tool_profile', profileId }),
   requestCommands: () => sendRouted({ type: 'request_commands' }, projectProtocolResponsePayload),
   extensionUIResponse: (payload: ExtensionUIResponsePayload) =>
     send({ type: 'extension_ui_response', ...payload }),

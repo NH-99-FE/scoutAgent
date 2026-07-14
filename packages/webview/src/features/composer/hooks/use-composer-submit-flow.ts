@@ -43,6 +43,7 @@ interface UseComposerSubmitFlowOptions {
   images: ComposerImageDescriptor[];
   isStreaming: boolean;
   mode: ComposerMode;
+  newSessionToolProfileId?: string;
   onBeginNewSessionRequest?: () => void;
   onMessageSent?: () => void;
   queueState: ScoutQueueState;
@@ -68,6 +69,7 @@ export function useComposerSubmitFlow({
   images,
   isStreaming,
   mode,
+  newSessionToolProfileId,
   onBeginNewSessionRequest,
   onMessageSent,
   queueState,
@@ -222,6 +224,7 @@ export function useComposerSubmitFlow({
           formatComposerSubmitText(payload),
           protocolImages,
           hasComposerReferences(payload.document) ? payload.document : undefined,
+          newSessionToolProfileId,
         );
         composerActions.clearDraft(sessionId);
         setLeasedPendingSubmit(null);
@@ -244,6 +247,7 @@ export function useComposerSubmitFlow({
       isCurrentSessionMode,
       isSubmitContextActive,
       mode,
+      newSessionToolProfileId,
       onBeginNewSessionRequest,
       onMessageSent,
       sessionId,

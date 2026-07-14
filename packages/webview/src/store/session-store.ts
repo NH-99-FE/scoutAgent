@@ -3,7 +3,13 @@
 // ============================================================
 
 import { create } from 'zustand';
-import type { ScoutSessionListItem, ScoutWebviewState, ThinkingLevel } from '@scout-agent/shared';
+import type {
+  ScoutSessionListItem,
+  ScoutActiveToolSelection,
+  ScoutWebviewState,
+  ThinkingLevel,
+  ToolInfo,
+} from '@scout-agent/shared';
 
 interface SessionActions {
   applyState: (state: ScoutWebviewState) => void;
@@ -22,6 +28,8 @@ interface SessionStore {
   modelProvider: string;
   modelId: string;
   thinkingLevel: ThinkingLevel;
+  tools: ToolInfo[];
+  activeToolSelection?: ScoutActiveToolSelection;
   actions: SessionActions;
 }
 
@@ -36,6 +44,8 @@ const initialState = {
   modelProvider: '',
   modelId: '',
   thinkingLevel: 'off' as ThinkingLevel,
+  tools: [] as ToolInfo[],
+  activeToolSelection: undefined as ScoutActiveToolSelection | undefined,
 };
 
 export const useSessionStore = create<SessionStore>((set) => ({
@@ -52,6 +62,8 @@ export const useSessionStore = create<SessionStore>((set) => ({
         modelProvider: state.modelProvider,
         modelId: state.modelId,
         thinkingLevel: state.thinkingLevel,
+        tools: state.tools,
+        activeToolSelection: state.activeToolSelection,
       }),
     setSessions: (sessions) => set({ sessions }),
     reset: () => set(initialState),
@@ -71,4 +83,6 @@ export const useCurrentModelId = () => useSessionStore((state) => state.modelId)
 export const useCurrentModelLabel = () =>
   useSessionStore((state) => [state.modelProvider, state.modelId].filter(Boolean).join(' / '));
 export const useThinkingLevel = () => useSessionStore((state) => state.thinkingLevel);
+export const useTools = () => useSessionStore((state) => state.tools);
+export const useActiveToolSelection = () => useSessionStore((state) => state.activeToolSelection);
 export const useSessionActions = () => useSessionStore((state) => state.actions);

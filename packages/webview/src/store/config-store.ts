@@ -3,7 +3,12 @@
 // ============================================================
 
 import { create } from 'zustand';
-import type { ScoutCommandInfo, ScoutConfig, ScoutModelInfo } from '@scout-agent/shared';
+import type {
+  ScoutCommandInfo,
+  ScoutConfig,
+  ScoutModelInfo,
+  ScoutToolProfileInfo,
+} from '@scout-agent/shared';
 
 interface ConfigActions {
   setConfig: (config: ScoutConfig) => void;
@@ -23,6 +28,7 @@ const initialState = {
 };
 
 const EMPTY_MODELS: ScoutModelInfo[] = [];
+const EMPTY_TOOL_PROFILES: ScoutToolProfileInfo[] = [];
 
 export const useConfigStore = create<ConfigStore>((set) => ({
   ...initialState,
@@ -41,6 +47,10 @@ export const useDefaultModelProvider = () =>
   useConfigStore((state) => state.config?.defaultModelProvider ?? '');
 export const useDefaultModelId = () =>
   useConfigStore((state) => state.config?.defaultModelId ?? '');
+export const useDefaultToolProfileId = () =>
+  useConfigStore((state) => state.config?.defaultToolProfileId ?? '');
+export const useToolProfiles = () =>
+  useConfigStore((state) => state.config?.toolProfiles ?? EMPTY_TOOL_PROFILES);
 export const useDefaultModelLabel = () =>
   useConfigStore((state) => {
     const config = state.config;

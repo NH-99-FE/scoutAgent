@@ -110,8 +110,8 @@ const ROUTE_CASES = [
     { service: 'config', method: 'select_thinking' },
   ),
   protocolCase(
-    { type: 'set_active_tools', toolNames: [] },
-    { service: 'config', method: 'set_active_tools' },
+    { type: 'set_tool_profile', profileId: 'review' },
+    { service: 'config', method: 'set_tool_profile' },
   ),
   protocolCase(
     { type: 'clear_conversation' },

@@ -543,6 +543,97 @@ describe('ChatApp', () => {
     expectComposerText('随心输入', '');
   });
 
+  it('applies the task home tool profile to the new session without changing the hidden session', () => {
+    useConfigStore.getState().actions.setConfig({
+      models: [],
+      defaultModelProvider: 'openai',
+      defaultModelId: 'gpt-test',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [
+        {
+          id: 'develop',
+          name: '开发模式',
+          tools: ['read', 'bash', 'edit', 'write'],
+          builtin: true,
+        },
+        {
+          id: 'review',
+          name: '审查模式',
+          tools: ['read', 'grep', 'find', 'ls'],
+          builtin: true,
+        },
+      ],
+      branchSummary: { reserveTokens: 100, skipPrompt: false },
+    });
+    useSessionStore.setState({
+      activeToolSelection: { kind: 'profile', profileId: 'review' },
+    });
+    render(<ChatApp />);
+
+    expect(screen.getByRole('button', { name: '工具模式' })).toHaveAttribute('title', '开发模式');
+    fireEvent.pointerDown(screen.getByRole('button', { name: '工具模式' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '审查模式' }));
+    fireEvent.change(screen.getByLabelText('随心输入'), {
+      target: { value: '检查未提交更改' },
+    });
+    fireEvent.keyDown(screen.getByLabelText('随心输入'), { key: 'Enter' });
+
+    expect(getPostedProtocolRequests('set_tool_profile')).toHaveLength(0);
+    expectPostedPayload('new_session_message', {
+      type: 'new_session_message',
+      text: '检查未提交更改',
+      toolProfileId: 'review',
+    });
+  });
+
+  it('excludes the current session runtime-only custom profile from the task home menu', () => {
+    useConfigStore.getState().actions.setConfig({
+      models: [],
+      defaultModelProvider: 'openai',
+      defaultModelId: 'gpt-test',
+      defaultToolProfileId: 'develop',
+      toolProfiles: [
+        {
+          id: 'develop',
+          name: '开发模式',
+          tools: ['read', 'bash', 'edit', 'write'],
+          builtin: true,
+        },
+        {
+          id: 'search-only',
+          name: '只搜索',
+          tools: ['read', 'grep'],
+          builtin: false,
+        },
+        {
+          id: 'review',
+          name: '审查模式',
+          tools: ['read', 'grep', 'find', 'ls'],
+          builtin: true,
+        },
+      ],
+      branchSummary: { reserveTokens: 100, skipPrompt: false },
+    });
+    useSessionStore.setState({
+      activeToolSelection: { kind: 'custom', toolNames: ['read'] },
+    });
+    render(<ChatApp />);
+
+    expect(screen.getByRole('button', { name: '工具模式' })).toHaveAttribute('title', '开发模式');
+    fireEvent.pointerDown(screen.getByRole('button', { name: '工具模式' }), {
+      button: 0,
+      ctrlKey: false,
+    });
+
+    expect(screen.queryByRole('menuitemradio', { name: '自定义' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: '开发模式' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: '审查模式' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitemradio', { name: '只搜索' })).toBeInTheDocument();
+  });
+
   it('starts a new session from the task home send button', () => {
     render(<ChatApp />);
 
