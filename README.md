@@ -2,7 +2,7 @@
 
 Scout Agent 是一个运行在 VS Code 中的轻量 AI Coding Agent。它以对话为入口，能够读取和检索项目、执行命令、修改文件，并用可恢复的会话树保存完整工作过程。
 
-项目以 Pi Agent（本地对照仓库为 `../pi`）为行为参照，但刻意收窄了模型接入范围：目前只支持 **OpenAI** 和 **Anthropic**，且只支持 **API Key** 鉴权。
+目前只支持 **OpenAI** 和 **Anthropic**，且只支持 **API Key** 鉴权。
 
 > 项目仍处于开发阶段，当前推荐从源码启动并通过 VS Code Extension Host 使用。
 

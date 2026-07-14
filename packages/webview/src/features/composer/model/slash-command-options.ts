@@ -75,7 +75,7 @@ function toSlashCommandItem(
     key: `${command.source}:${command.name}`,
     command,
     icon: iconBySource[command.source],
-    label: command.name,
+    label: command.source === 'skill' ? command.name.replace(/^skill:/, '') : command.name,
     description: command.description ?? getSourceDescription(command.source),
   };
 }

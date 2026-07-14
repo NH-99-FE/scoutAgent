@@ -122,7 +122,10 @@ describe('ChatComposer command effects', () => {
 
     const editor = screen.getByRole('textbox', { name: '要求后续变更' });
     focusEditorAtEnd(editor);
-    expect(await screen.findByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
+    const menu = await screen.findByRole('listbox', { name: 'Slash commands' });
+    const skillOption = within(menu).getByRole('option');
+    expect(skillOption).toHaveTextContent('request-refactor-plan');
+    expect(skillOption).not.toHaveTextContent('skill:request-refactor-plan');
     fireEvent.keyDown(editor, { key: 'Enter' });
 
     const selectedSkill = await screen.findByLabelText('已选择技能：request-refactor-plan');
