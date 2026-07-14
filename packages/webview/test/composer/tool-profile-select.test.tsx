@@ -39,34 +39,18 @@ describe('ToolProfileSelect', () => {
     cleanup();
   });
 
-  it('suppresses the pointer-restored focus outline after selecting a profile', async () => {
+  it('restores trigger focus after selecting a profile', async () => {
     render(<ToolProfileSelect profileId="review" profiles={profiles} onValueChange={vi.fn()} />);
     const trigger = screen.getByRole('button', { name: '工具模式' });
 
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     const option = screen.getByRole('menuitemradio', { name: '开发模式' });
     fireEvent.blur(trigger, { relatedTarget: option });
-    expect(trigger).not.toHaveAttribute('data-scout-suppress-focus-outline');
 
     fireEvent.click(option);
 
     await waitFor(() => {
-      expect(trigger).toHaveAttribute('data-scout-suppress-focus-outline', 'true');
+      expect(trigger).toHaveFocus();
     });
-  });
-
-  it('keeps keyboard-restored focus visible after selecting a profile', async () => {
-    render(<ToolProfileSelect profileId="review" profiles={profiles} onValueChange={vi.fn()} />);
-    const trigger = screen.getByRole('button', { name: '工具模式' });
-
-    fireEvent.keyDown(trigger, { key: 'Enter' });
-    const option = screen.getByRole('menuitemradio', { name: '开发模式' });
-    fireEvent.blur(trigger, { relatedTarget: option });
-    fireEvent.click(option);
-
-    await waitFor(() => {
-      expect(option).not.toBeInTheDocument();
-    });
-    expect(trigger).not.toHaveAttribute('data-scout-suppress-focus-outline');
   });
 });

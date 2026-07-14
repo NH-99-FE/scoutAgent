@@ -1,4 +1,5 @@
 @custom-variant dark (&:is(.dark *, .vscode-dark *, .vscode-high-contrast *));
+@custom-variant focus-visible (&:where([data-scout-tab-focus='true'] *):focus-visible);
 
 /* VS Code workbench 语义色。主按钮使用前景/背景反色，保持中性且不使用 VS Code 蓝色按钮。 */
 :root {

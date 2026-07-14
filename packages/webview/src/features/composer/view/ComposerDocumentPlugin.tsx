@@ -7,7 +7,6 @@ import { useCallback, useEffect, useImperativeHandle } from 'react';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
 import type { EditorState } from 'lexical';
-import { markProgrammaticFocus } from '@/components/ui/focus';
 import {
   areComposerDocumentsEqual,
   insertComposerReferencesAt,
@@ -65,14 +64,11 @@ export function ComposerDocumentPlugin({
     () => ({
       focusAt: (offset) => {
         const rootElement = editor.getRootElement();
-        markProgrammaticFocus(rootElement);
         editor.update(() => $selectComposerOffset(offset));
         rootElement?.focus();
         editor.focus();
       },
       insertReferencesAt: (offset, references) => {
-        const rootElement = editor.getRootElement();
-        markProgrammaticFocus(rootElement);
         editor.update(() => {
           const insertion = insertComposerReferencesAt($readComposerDocument(), offset, references);
           $writeComposerDocument(insertion.document);
@@ -81,9 +77,6 @@ export function ComposerDocumentPlugin({
         editor.focus();
       },
       replaceRange: (range, replacementText, reference) => {
-        const rootElement = editor.getRootElement();
-        // 菜单/宿主选择器驱动的替换仍要回到 composer，但不应显示键盘 focus ring。
-        markProgrammaticFocus(rootElement);
         const nextOffset = range.start + replacementText.length + (reference === undefined ? 0 : 1);
         editor.update(() => {
           const nextDocument = replaceComposerRange(
@@ -98,8 +91,6 @@ export function ComposerDocumentPlugin({
         editor.focus();
       },
       replaceRangeWithReferences: (range, references) => {
-        const rootElement = editor.getRootElement();
-        markProgrammaticFocus(rootElement);
         editor.update(() => {
           const insertion = replaceComposerRangeWithReferences(
             $readComposerDocument(),

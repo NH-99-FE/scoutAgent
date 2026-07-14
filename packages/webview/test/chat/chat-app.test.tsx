@@ -770,7 +770,6 @@ describe('ChatApp', () => {
     expect(
       await screen.findByLabelText('已选择文件：packages/webview/src/App.tsx'),
     ).toBeInTheDocument();
-    expect(editor).toHaveAttribute('data-scout-suppress-focus-outline', 'true');
     expect(
       await screen.findByLabelText('已选择文件：packages/webview/src/main.tsx'),
     ).toBeInTheDocument();

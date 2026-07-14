@@ -14,7 +14,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { markProgrammaticFocus } from '@/components/ui/focus';
 import { cn } from '@/lib/utils';
 
 const COMPACT_GROUP_WIDTH_PX = 112;
@@ -29,7 +28,6 @@ interface ToolProfileSelectProps {
 
 export function ToolProfileSelect({ profileId, profiles, onValueChange }: ToolProfileSelectProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const openedWithPointerRef = useRef(false);
   const [compact, setCompact] = useState(false);
   const selectedProfile = profiles.find((profile) => profile.id === profileId) ?? profiles[0];
 
@@ -62,12 +60,6 @@ export function ToolProfileSelect({ profileId, profiles, onValueChange }: ToolPr
           size="sm"
           type="button"
           variant="ghost"
-          onKeyDown={() => {
-            openedWithPointerRef.current = false;
-          }}
-          onPointerDown={() => {
-            openedWithPointerRef.current = true;
-          }}
         >
           <ToolProfileIcon
             profileId={selectedProfile.id}
@@ -81,12 +73,6 @@ export function ToolProfileSelect({ profileId, profiles, onValueChange }: ToolPr
       <DropdownMenuContent
         align="start"
         className="bg-background text-foreground w-42 rounded-lg p-1 shadow-sm"
-        onCloseAutoFocus={() => {
-          if (openedWithPointerRef.current) {
-            markProgrammaticFocus(triggerRef.current);
-          }
-          openedWithPointerRef.current = false;
-        }}
       >
         <DropdownMenuRadioGroup value={selectedProfile.id} onValueChange={onValueChange}>
           {profiles.map((profile) => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import THEME_CSS from '../../src/styles/theme.css?raw';
-import { expectCssRule, WEBVIEW_CSS, WEBVIEW_CSS_PATHS } from '../webview-css';
+import { expectCssRule, expectNoCssRule, WEBVIEW_CSS, WEBVIEW_CSS_PATHS } from '../webview-css';
 
 describe('webview style smoke', () => {
   afterEach(() => {
@@ -49,6 +49,9 @@ describe('webview style smoke', () => {
   });
 
   it('keeps critical semantic token mappings and feature classes wired', () => {
+    expect(THEME_CSS).toContain(
+      "@custom-variant focus-visible (&:where([data-scout-tab-focus='true'] *):focus-visible);",
+    );
     expectCssRule(':root', [
       '--scout-diff-added: var(--vscode-charts-green, #89d185);',
       '--scout-fallback-link-foreground: #006ab1;',
@@ -64,7 +67,10 @@ describe('webview style smoke', () => {
       '--color-status-warning-muted: var(--scout-status-warning-muted);',
       '--shadow-diff-added: var(--scout-shadow-diff-added);',
     ]);
-    expectCssRule('*:focus-visible', [
+    expectNoCssRule('*:focus-visible', [
+      'outline: 1px solid var(--vscode-focusBorder, var(--border)) !important;',
+    ]);
+    expectCssRule("[data-scout-tab-focus='true'] *:focus-visible", [
       'outline: 1px solid var(--vscode-focusBorder, var(--border)) !important;',
       'outline-offset: 2px;',
     ]);

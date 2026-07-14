@@ -5,7 +5,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Download, Minus, Plus, X } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog';
-import { markProgrammaticFocus } from '@/components/ui/focus';
 
 const IMAGE_PREVIEW_MIN_ZOOM = 0.5;
 const IMAGE_PREVIEW_MAX_ZOOM = 3;
@@ -45,7 +44,6 @@ export function ImagePreviewDialog({
     const returnFocusTarget = returnFocusRef.current;
     return () => {
       if (!returnFocusTarget?.isConnected) return;
-      markProgrammaticFocus(returnFocusTarget);
       returnFocusTarget.focus();
     };
   }, []);

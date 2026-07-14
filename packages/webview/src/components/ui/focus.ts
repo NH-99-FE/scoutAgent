@@ -1,26 +1,34 @@
 // ============================================================
-// UI Focus Helpers — 统一焦点轮廓抑制样式
+// UI Focus Visibility — 仅在 Tab 键盘导航时展示焦点轮廓
 // ============================================================
 
-import type * as React from 'react';
+const TAB_FOCUS_ATTRIBUTE = 'data-scout-tab-focus';
 
-const SUPPRESS_FOCUS_OUTLINE_ATTRIBUTE = 'data-scout-suppress-focus-outline';
+export function installTabFocusVisibility(targetDocument: Document): () => void {
+  const root = targetDocument.documentElement;
+  const targetWindow = targetDocument.defaultView;
 
-export function markPointerFocus<TElement extends HTMLElement>(
-  event: React.PointerEvent<TElement>,
-) {
-  event.currentTarget.setAttribute(SUPPRESS_FOCUS_OUTLINE_ATTRIBUTE, 'true');
-}
+  const disableTabFocus = () => {
+    root.removeAttribute(TAB_FOCUS_ATTRIBUTE);
+  };
 
-export function markProgrammaticFocus<TElement extends HTMLElement>(element: TElement | null) {
-  element?.setAttribute(SUPPRESS_FOCUS_OUTLINE_ATTRIBUTE, 'true');
-}
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Tab') return;
+    if (event.altKey || event.ctrlKey || event.metaKey) {
+      disableTabFocus();
+      return;
+    }
+    root.setAttribute(TAB_FOCUS_ATTRIBUTE, 'true');
+  };
 
-export function clearFocusOutlineSuppression(element: HTMLElement | null) {
-  element?.removeAttribute(SUPPRESS_FOCUS_OUTLINE_ATTRIBUTE);
-}
+  targetDocument.addEventListener('keydown', handleKeyDown, true);
+  targetDocument.addEventListener('pointerdown', disableTabFocus, true);
+  targetWindow?.addEventListener('blur', disableTabFocus);
 
-export function clearPointerFocus<TElement extends HTMLElement>(event: React.FocusEvent<TElement>) {
-  if (event.relatedTarget === null) return;
-  clearFocusOutlineSuppression(event.currentTarget);
+  return () => {
+    targetDocument.removeEventListener('keydown', handleKeyDown, true);
+    targetDocument.removeEventListener('pointerdown', disableTabFocus, true);
+    targetWindow?.removeEventListener('blur', disableTabFocus);
+    disableTabFocus();
+  };
 }

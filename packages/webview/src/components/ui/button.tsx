@@ -3,7 +3,6 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { Slot } from 'radix-ui';
 
 import { cn } from '@/lib/utils';
-import { clearPointerFocus, markPointerFocus } from './focus';
 
 const buttonVariants = cva(
   "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-colors outline-none select-none disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-invalid-border aria-invalid:ring-3 aria-invalid:ring-invalid-ring [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
@@ -42,8 +41,6 @@ const buttonVariants = cva(
 
 function Button({
   className,
-  onBlur,
-  onPointerDown,
   variant = 'default',
   size = 'default',
   asChild = false,
@@ -60,14 +57,6 @@ function Button({
       data-variant={variant}
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }))}
-      onBlur={(event) => {
-        clearPointerFocus(event);
-        onBlur?.(event);
-      }}
-      onPointerDown={(event) => {
-        markPointerFocus(event);
-        onPointerDown?.(event);
-      }}
       {...props}
     />
   );

@@ -22,7 +22,7 @@ body,
   *:focus:not(:focus-visible) {
     box-shadow: none !important;
   }
-  *:focus-visible {
+  [data-scout-tab-focus='true'] *:focus-visible {
     outline: 1px solid var(--vscode-focusBorder, var(--border)) !important;
     outline-offset: 2px;
   }
@@ -32,18 +32,15 @@ body,
     outline-offset: 0 !important;
     box-shadow: none !important;
   }
-  .scout-subtle-input-focus:focus,
-  .scout-subtle-input-focus:focus-visible {
+  [data-scout-tab-focus='true'] .scout-subtle-input-focus:focus-visible {
     outline: none !important;
     outline-offset: 0 !important;
     border-color: color-mix(in srgb, var(--foreground) 28%, transparent) !important;
     box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 18%, transparent) !important;
   }
-  .task-search-field:focus-within + div [data-slot='separator'] {
+  [data-scout-tab-focus='true'] .task-search-field:focus-within + div [data-slot='separator'] {
     background: var(--vscode-focusBorder, var(--border));
   }
-  [data-scout-suppress-focus-outline='true']:focus,
-  [data-scout-suppress-focus-outline='true']:focus-visible,
   :where(
     [data-slot='dropdown-menu-content'],
     [data-slot='dropdown-menu-sub-content'],

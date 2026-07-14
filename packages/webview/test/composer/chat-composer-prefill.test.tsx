@@ -208,22 +208,6 @@ describe('ChatComposer command effects', () => {
     expect(openMentionedFile).toHaveBeenCalledWith('src/agent.ts');
   });
 
-  it('suppresses pointer focus outlines without suppressing the next keyboard focus', () => {
-    render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
-
-    const editor = screen.getByRole('textbox', { name: '要求后续变更' });
-
-    fireEvent.pointerDown(editor);
-    editor.focus();
-    expect(editor).toHaveAttribute('data-scout-suppress-focus-outline', 'true');
-
-    fireEvent.blur(editor, { relatedTarget: null });
-    expect(editor).not.toHaveAttribute('data-scout-suppress-focus-outline');
-
-    editor.focus();
-    expect(editor).not.toHaveAttribute('data-scout-suppress-focus-outline');
-  });
-
   it('keeps suggestions open on composer interaction and dismisses them on outside pointer down', async () => {
     useConfigStore.getState().actions.setCommands([promptCommand('review')]);
     useComposerStore.getState().actions.setText('session-1', '/re');
@@ -307,7 +291,6 @@ describe('ChatComposer command effects', () => {
     const editor = screen.getByRole('textbox', { name: '要求后续变更' });
     await waitFor(() => {
       expect(editor).toHaveFocus();
-      expect(editor).toHaveAttribute('data-scout-suppress-focus-outline', 'true');
     });
     expect(useComposerStore.getState().pendingCommandEffect).toBeNull();
   });

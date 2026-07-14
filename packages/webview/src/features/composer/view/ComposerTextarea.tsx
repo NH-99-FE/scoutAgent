@@ -9,7 +9,6 @@ import { ContentEditable } from '@lexical/react/LexicalContentEditable';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
 import { PlainTextPlugin } from '@lexical/react/LexicalPlainTextPlugin';
-import { clearFocusOutlineSuppression, markPointerFocus } from '@/components/ui/focus';
 import { getComposerLinearText, type ComposerDocument } from '@/store/composer-document';
 import { $writeComposerDocument } from '../model/composer-lexical-adapter';
 import { ComposerReferenceNode } from '../model/composer-reference-node';
@@ -94,11 +93,9 @@ export const ComposerTextarea = forwardRef<ComposerEditorHandle, ComposerTextare
                 aria-readonly={readOnly}
                 className="scout-native-scrollbar max-h-40 min-h-12 w-full overflow-y-auto bg-transparent px-1 py-1 text-sm break-words whitespace-pre-wrap outline-none"
                 role="textbox"
-                onBlur={(event) => clearFocusOutlineSuppression(event.currentTarget)}
                 onFocus={() => onSelectionChange?.(getComposerLinearText(document).length)}
                 onKeyDownCapture={handleKeyDown}
                 onPaste={onPaste}
-                onPointerDown={markPointerFocus}
               />
             }
             placeholder={

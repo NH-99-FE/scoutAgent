@@ -2,12 +2,9 @@ import * as React from 'react';
 import { Switch as SwitchPrimitive } from 'radix-ui';
 
 import { cn } from '@/lib/utils';
-import { clearPointerFocus, markPointerFocus } from './focus';
 
 function Switch({
   className,
-  onBlur,
-  onPointerDown,
   size = 'default',
   ...props
 }: React.ComponentProps<typeof SwitchPrimitive.Root> & {
@@ -21,14 +18,6 @@ function Switch({
         'peer group/switch focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:border-invalid-border aria-invalid:ring-invalid-ring data-checked:bg-primary data-unchecked:bg-switch-unchecked relative inline-flex shrink-0 items-center rounded-full border border-transparent transition-all outline-none after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:ring-3 aria-invalid:ring-3 data-disabled:cursor-not-allowed data-disabled:opacity-50 data-[size=default]:h-[18.4px] data-[size=default]:w-[32px] data-[size=sm]:h-[14px] data-[size=sm]:w-[24px]',
         className,
       )}
-      onBlur={(event) => {
-        clearPointerFocus(event);
-        onBlur?.(event);
-      }}
-      onPointerDown={(event) => {
-        markPointerFocus(event);
-        onPointerDown?.(event);
-      }}
       {...props}
     >
       <SwitchPrimitive.Thumb
