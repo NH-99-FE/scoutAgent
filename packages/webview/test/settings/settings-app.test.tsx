@@ -126,6 +126,21 @@ function makeBootstrapConfig(): ScoutConfig {
     models: [],
     defaultModelProvider: 'openai',
     defaultModelId: 'qwen3.7-max',
+    defaultToolProfileId: 'develop',
+    toolProfiles: [
+      {
+        id: 'develop',
+        name: '开发模式',
+        tools: ['read', 'bash', 'edit', 'write'],
+        builtin: true,
+      },
+      {
+        id: 'review',
+        name: '审查模式',
+        tools: ['read', 'grep', 'find', 'ls'],
+        builtin: true,
+      },
+    ],
     branchSummary: {
       reserveTokens: 0,
       skipPrompt: false,
@@ -366,6 +381,7 @@ describe('SettingsApp', () => {
     postMessage.mockClear();
     postMessage.mockImplementation(() => undefined);
     window.__SCOUT_WEBVIEW_SURFACE__ = 'settings';
+    useConfigStore.getState().actions.setConfig(makeBootstrapConfig());
   });
 
   afterEach(() => {
@@ -518,6 +534,9 @@ describe('SettingsApp', () => {
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    expect(screen.getAllByText('开发模式').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('审查模式').length).toBeGreaterThan(0);
+    expect(screen.getByText('未设置（开发模式）')).toBeInTheDocument();
     expect(
       screen.queryByText('C:\\Users\\me\\.scout\\agent\\settings.json'),
     ).not.toBeInTheDocument();
@@ -536,6 +555,67 @@ describe('SettingsApp', () => {
       },
     });
     expect(getPostedRequests('save_custom_models')).toHaveLength(0);
+  });
+
+  it('pins the project default when project profiles hide the inherited default', async () => {
+    render(<SettingsApp />);
+    await resolveCustomModels();
+    const settings = makeRuntimeSettings();
+    settings.global = {
+      ...settings.global,
+      defaultToolProfile: 'custom-1',
+      toolProfiles: [{ id: 'custom-1', name: '全局搜索', tools: ['read', 'grep'] }],
+    };
+    settings.effective = {
+      ...settings.effective,
+      defaultToolProfile: 'custom-1',
+      toolProfiles: [{ id: 'custom-1', name: '全局搜索', tools: ['read', 'grep'] }],
+    };
+    await resolveRuntimeSettings(settings);
+    await resolveSkills();
+
+    fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前项目' }));
+    expect(screen.getByText('未设置（继承：全局搜索）')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '新增' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(getLatestPostedPayload('save_runtime_settings')).toEqual({
+      type: 'save_runtime_settings',
+      scope: 'project',
+      patch: {
+        operations: [
+          { op: 'set', path: 'defaultToolProfile', value: 'develop' },
+          {
+            op: 'set',
+            path: 'toolProfiles',
+            value: [{ id: 'custom-2', name: '自定义模式', tools: ['read'] }],
+          },
+        ],
+      },
+    });
+  });
+
+  it('shows the inherited builtin tool profile for an unset project override', async () => {
+    render(<SettingsApp />);
+    await resolveCustomModels();
+    const settings = makeRuntimeSettings();
+    settings.global = {
+      ...settings.global,
+      defaultToolProfile: 'review',
+    };
+    settings.effective = {
+      ...settings.effective,
+      defaultToolProfile: 'review',
+    };
+    await resolveRuntimeSettings(settings);
+    await resolveSkills();
+
+    fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    fireEvent.click(screen.getByRole('button', { name: '当前项目' }));
+
+    expect(screen.getByText('未设置（继承：审查模式）')).toBeInTheDocument();
+    expect(screen.queryByText('未设置（开发模式）')).not.toBeInTheDocument();
   });
 
   it('saves only skills settings from the Skills tab', async () => {

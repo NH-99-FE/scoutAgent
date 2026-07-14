@@ -36,4 +36,57 @@ describe('runtime settings draft', () => {
       ],
     });
   });
+
+  it('preserves tool profile settings in patch operations', () => {
+    const state: ScoutRuntimeSettingsState = {
+      globalSettingsPath: '/home/me/.scout/agent/settings.json',
+      projectSettingsPath: '/workspace/.scout/settings.json',
+      global: {
+        defaultToolProfile: 'review',
+        toolProfiles: [{ id: 'search-only', name: '只搜索', tools: ['read', 'grep'] }],
+      },
+      project: {},
+      effective: {},
+    };
+    const editable = toEditableRuntimeSettingsState(state);
+    const nextProfiles = [
+      ...(editable.global.toolProfiles ?? []),
+      { id: 'safe-edit', name: '安全编辑', tools: ['read', 'edit'] },
+    ];
+
+    const patch = toRuntimeSettingsPatch(
+      {
+        ...editable.global,
+        defaultToolProfile: 'safe-edit',
+        toolProfiles: nextProfiles,
+      },
+      new Set(['defaultToolProfile', 'toolProfiles']),
+    );
+
+    expect(patch).toEqual({
+      operations: [
+        { op: 'set', path: 'defaultToolProfile', value: 'safe-edit' },
+        { op: 'set', path: 'toolProfiles', value: nextProfiles },
+      ],
+    });
+  });
+
+  it('preserves an unset project tool profile list for global inheritance', () => {
+    const editable = toEditableRuntimeSettingsState({
+      globalSettingsPath: '/home/me/.scout/agent/settings.json',
+      projectSettingsPath: '/workspace/.scout/settings.json',
+      global: {
+        toolProfiles: [{ id: 'search-only', name: '只搜索', tools: ['read', 'grep'] }],
+      },
+      project: {},
+      effective: {
+        toolProfiles: [{ id: 'search-only', name: '只搜索', tools: ['read', 'grep'] }],
+      },
+    });
+
+    expect(editable.project.toolProfiles).toBeUndefined();
+    expect(editable.effective.toolProfiles).toEqual([
+      { id: 'search-only', name: '只搜索', tools: ['read', 'grep'] },
+    ]);
+  });
 });

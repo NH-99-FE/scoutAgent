@@ -13,9 +13,12 @@ import {
 import type {
   ScoutModelProvider,
   ScoutQueueMode,
+  ScoutCustomToolProfile,
   ScoutRuntimeSettingsPath,
   ScoutSettingsScope,
+  ScoutToolProfileInfo,
   ScoutTransport,
+  ToolInfo,
   ThinkingLevel,
 } from '@scout-agent/shared';
 import { Button } from '@/components/ui/button';
@@ -30,7 +33,15 @@ import {
   type EditableRuntimeSettings,
 } from '../model/runtime-settings-draft';
 import type { RuntimeSettingsController } from '../hooks/runtime-settings-state';
-import { SettingsField, SettingsSelectField, type SettingsSelectOption } from './settings-fields';
+import {
+  SettingsAdvancedOptions,
+  SettingsField,
+  SettingsSelectField,
+  type SettingsSelectOption,
+} from './settings-fields';
+import { ToolProfileSettings } from './ToolProfileSettings';
+import { useTools } from '@/store/session-store';
+import { useToolProfiles } from '@/store/config-store';
 
 const SCOPE_LABELS: Record<ScoutSettingsScope, string> = {
   global: '全局',
@@ -72,6 +83,8 @@ const OPTIONAL_BOOLEAN_FALSE_DEFAULT: Array<SettingsSelectOption<OptionalBoolean
 export function RuntimeSettingsTab({ controller }: { controller: RuntimeSettingsController }) {
   const { draft, currentSettings, isLoading, isSaving, setScope, updateCurrentSettings } =
     controller;
+  const tools = useTools();
+  const toolProfiles = useToolProfiles();
   const disabled = isLoading || isSaving;
 
   return (
@@ -106,7 +119,14 @@ export function RuntimeSettingsTab({ controller }: { controller: RuntimeSettings
           </h2>
         </div>
         <RuntimeSettingsForm
+          scope={draft.scope}
           settings={currentSettings}
+          inheritedDefaultToolProfile={
+            draft.scope === 'project' ? draft.global.defaultToolProfile : undefined
+          }
+          inheritedToolProfiles={draft.scope === 'project' ? (draft.global.toolProfiles ?? []) : []}
+          availableTools={tools}
+          configuredProfiles={toolProfiles}
           disabled={disabled}
           onChange={updateCurrentSettings}
         />
@@ -117,6 +137,7 @@ export function RuntimeSettingsTab({ controller }: { controller: RuntimeSettings
         <dl className="mt-3 grid grid-cols-3 gap-3 text-sm max-[840px]:grid-cols-1">
           <EffectiveValue label="Default Provider" value={draft.effective.defaultProvider} />
           <EffectiveValue label="Default Model" value={draft.effective.defaultModel} />
+          <EffectiveValue label="Tool Profile" value={draft.effective.defaultToolProfile} />
           <EffectiveValue label="Thinking" value={draft.effective.defaultThinkingLevel} />
           <EffectiveValue label="Transport" value={draft.effective.transport} />
           <EffectiveValue label="Steering Mode" value={draft.effective.steeringMode} />
@@ -128,11 +149,21 @@ export function RuntimeSettingsTab({ controller }: { controller: RuntimeSettings
 }
 
 function RuntimeSettingsForm({
+  scope,
   settings,
+  inheritedDefaultToolProfile,
+  inheritedToolProfiles,
+  availableTools,
+  configuredProfiles,
   disabled,
   onChange,
 }: {
+  scope: ScoutSettingsScope;
   settings: EditableRuntimeSettings;
+  inheritedDefaultToolProfile?: string;
+  inheritedToolProfiles: ScoutCustomToolProfile[];
+  availableTools: ToolInfo[];
+  configuredProfiles: ScoutToolProfileInfo[];
   disabled: boolean;
   onChange: (
     patch: Partial<EditableRuntimeSettings>,
@@ -141,90 +172,73 @@ function RuntimeSettingsForm({
 }) {
   return (
     <div className="grid gap-6 p-4">
-      <div className="grid grid-cols-3 gap-4 max-[980px]:grid-cols-1">
-        <SettingsField label="Default Provider">
-          <SettingsSelectField
-            value={settings.defaultProvider ?? ''}
-            disabled={disabled}
-            onChange={(value) =>
-              onChange({ defaultProvider: value ? (value as ScoutModelProvider) : undefined }, [
-                'defaultProvider',
-              ])
-            }
-            options={PROVIDERS}
-          />
-        </SettingsField>
-        <SettingsField label="Default Model">
-          <Input
-            value={settings.defaultModel ?? ''}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange({ defaultModel: optionalString(event.target.value) }, ['defaultModel'])
-            }
-          />
-        </SettingsField>
-        <SettingsField label="Default Thinking">
-          <SettingsSelectField
-            value={settings.defaultThinkingLevel ?? ''}
-            disabled={disabled}
-            onChange={(value) =>
-              onChange({ defaultThinkingLevel: toThinkingLevel(value) }, ['defaultThinkingLevel'])
-            }
-            options={THINKING_LEVEL_OPTIONS}
-          />
-        </SettingsField>
-        <SettingsField label="Transport">
-          <SettingsSelectField
-            value={settings.transport ?? ''}
-            disabled={disabled}
-            onChange={(value) => onChange({ transport: toTransport(value) }, ['transport'])}
-            options={TRANSPORTS}
-          />
-        </SettingsField>
-        <SettingsField label="Steering Mode">
-          <SettingsSelectField
-            value={settings.steeringMode ?? ''}
-            disabled={disabled}
-            onChange={(value) => onChange({ steeringMode: toQueueMode(value) }, ['steeringMode'])}
-            options={QUEUE_MODES}
-          />
-        </SettingsField>
-        <SettingsField label="Follow-up Mode">
-          <SettingsSelectField
-            value={settings.followUpMode ?? ''}
-            disabled={disabled}
-            onChange={(value) => onChange({ followUpMode: toQueueMode(value) }, ['followUpMode'])}
-            options={QUEUE_MODES}
-          />
-        </SettingsField>
-        <SettingsField label="WebSocket Timeout">
-          <Input
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={settings.websocketConnectTimeoutMs?.toString() ?? ''}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange({ websocketConnectTimeoutMs: readOptionalNumber(event.target.value) }, [
-                'websocketConnectTimeoutMs',
-              ])
-            }
-          />
-        </SettingsField>
-        <SettingsField label="Shell Path">
-          <Input
-            value={settings.shellPath ?? ''}
-            disabled={disabled}
-            onChange={(event) =>
-              onChange({ shellPath: optionalString(event.target.value) }, ['shellPath'])
-            }
-          />
-        </SettingsField>
-      </div>
+      <SettingGroup title="常用配置">
+        <div className="grid grid-cols-3 gap-4 max-[980px]:grid-cols-1">
+          <SettingsField label="Default Provider">
+            <SettingsSelectField
+              value={settings.defaultProvider ?? ''}
+              disabled={disabled}
+              onChange={(value) =>
+                onChange({ defaultProvider: value ? (value as ScoutModelProvider) : undefined }, [
+                  'defaultProvider',
+                ])
+              }
+              options={PROVIDERS}
+            />
+          </SettingsField>
+          <SettingsField label="Default Model">
+            <Input
+              value={settings.defaultModel ?? ''}
+              disabled={disabled}
+              onChange={(event) =>
+                onChange({ defaultModel: optionalString(event.target.value) }, ['defaultModel'])
+              }
+            />
+          </SettingsField>
+          <SettingsField label="Default Thinking">
+            <SettingsSelectField
+              value={settings.defaultThinkingLevel ?? ''}
+              disabled={disabled}
+              onChange={(value) =>
+                onChange({ defaultThinkingLevel: toThinkingLevel(value) }, ['defaultThinkingLevel'])
+              }
+              options={THINKING_LEVEL_OPTIONS}
+            />
+          </SettingsField>
+          <SettingsField label="Steering Mode">
+            <SettingsSelectField
+              value={settings.steeringMode ?? ''}
+              disabled={disabled}
+              onChange={(value) => onChange({ steeringMode: toQueueMode(value) }, ['steeringMode'])}
+              options={QUEUE_MODES}
+            />
+          </SettingsField>
+          <SettingsField label="Follow-up Mode">
+            <SettingsSelectField
+              value={settings.followUpMode ?? ''}
+              disabled={disabled}
+              onChange={(value) => onChange({ followUpMode: toQueueMode(value) }, ['followUpMode'])}
+              options={QUEUE_MODES}
+            />
+          </SettingsField>
+        </div>
+      </SettingGroup>
 
-      <div className="grid grid-cols-3 gap-4 max-[980px]:grid-cols-1">
-        <SettingGroup title="Compaction">
+      <ToolProfileSettings
+        scope={scope}
+        settings={settings}
+        inheritedDefaultToolProfile={inheritedDefaultToolProfile}
+        inheritedToolProfiles={inheritedToolProfiles}
+        availableTools={availableTools}
+        configuredProfiles={configuredProfiles}
+        disabled={disabled}
+        onChange={onChange}
+      />
+
+      <div className="grid grid-cols-2 gap-4 max-[980px]:grid-cols-1">
+        <SettingGroup title="上下文与历史">
           <OptionalBooleanField
-            label="Enabled"
+            label="Compaction Enabled"
             value={settings.compaction?.enabled}
             disabled={disabled}
             onChange={(enabled) =>
@@ -238,7 +252,7 @@ function RuntimeSettingsForm({
             options={OPTIONAL_BOOLEAN_TRUE_DEFAULT}
           />
           <OptionalNumberField
-            label="Reserve Tokens"
+            label="Compaction Reserve Tokens"
             value={settings.compaction?.reserveTokens}
             disabled={disabled}
             onChange={(value) =>
@@ -263,11 +277,8 @@ function RuntimeSettingsForm({
               )
             }
           />
-        </SettingGroup>
-
-        <SettingGroup title="Branch Summary">
           <OptionalNumberField
-            label="Reserve Tokens"
+            label="Branch Summary Reserve Tokens"
             value={settings.branchSummary?.reserveTokens}
             disabled={disabled}
             onChange={(value) =>
@@ -280,7 +291,7 @@ function RuntimeSettingsForm({
             }
           />
           <OptionalBooleanField
-            label="Skip Prompt"
+            label="Branch Summary Skip Prompt"
             value={settings.branchSummary?.skipPrompt}
             disabled={disabled}
             onChange={(skipPrompt) =>
@@ -295,9 +306,39 @@ function RuntimeSettingsForm({
           />
         </SettingGroup>
 
-        <SettingGroup title="Retry">
+        <SettingGroup title="稳定性与执行">
+          <SettingsField label="Transport">
+            <SettingsSelectField
+              value={settings.transport ?? ''}
+              disabled={disabled}
+              onChange={(value) => onChange({ transport: toTransport(value) }, ['transport'])}
+              options={TRANSPORTS}
+            />
+          </SettingsField>
+          <SettingsField label="WebSocket Timeout">
+            <Input
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={settings.websocketConnectTimeoutMs?.toString() ?? ''}
+              disabled={disabled}
+              onChange={(event) =>
+                onChange({ websocketConnectTimeoutMs: readOptionalNumber(event.target.value) }, [
+                  'websocketConnectTimeoutMs',
+                ])
+              }
+            />
+          </SettingsField>
+          <SettingsField label="Shell Path">
+            <Input
+              value={settings.shellPath ?? ''}
+              disabled={disabled}
+              onChange={(event) =>
+                onChange({ shellPath: optionalString(event.target.value) }, ['shellPath'])
+              }
+            />
+          </SettingsField>
           <OptionalBooleanField
-            label="Enabled"
+            label="Retry Enabled"
             value={settings.retry?.enabled}
             disabled={disabled}
             onChange={(enabled) =>
@@ -311,7 +352,7 @@ function RuntimeSettingsForm({
             options={OPTIONAL_BOOLEAN_TRUE_DEFAULT}
           />
           <OptionalNumberField
-            label="Max Retries"
+            label="Retry Max Retries"
             value={settings.retry?.maxRetries}
             disabled={disabled}
             onChange={(value) =>
@@ -324,7 +365,7 @@ function RuntimeSettingsForm({
             }
           />
           <OptionalNumberField
-            label="Base Delay Ms"
+            label="Retry Base Delay Ms"
             value={settings.retry?.baseDelayMs}
             disabled={disabled}
             onChange={(value) =>
@@ -390,28 +431,30 @@ function RuntimeSettingsForm({
         </SettingGroup>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 max-[980px]:grid-cols-1">
-        <SettingsField label="Thinking Budgets">
-          <Textarea
-            value={settings.thinkingBudgetsJson}
-            disabled={disabled}
-            placeholder={'{\n  "medium": 4096\n}'}
-            className="min-h-28 resize-y font-mono text-xs"
-            onChange={(event) =>
-              onChange({ thinkingBudgetsJson: event.target.value }, ['thinkingBudgets'])
-            }
-          />
-        </SettingsField>
-        <SettingsField label="Extensions">
-          <Textarea
-            value={settings.extensionsText}
-            disabled={disabled}
-            placeholder={'C:\\path\\to\\extension\n./relative-extension'}
-            className="min-h-28 resize-y font-mono text-xs"
-            onChange={(event) => onChange({ extensionsText: event.target.value }, ['extensions'])}
-          />
-        </SettingsField>
-      </div>
+      <SettingsAdvancedOptions description="这些设置通常只在调试模型预算、资源加载路径或扩展入口时需要调整。">
+        <div className="grid grid-cols-2 gap-4 max-[980px]:grid-cols-1">
+          <SettingsField label="Thinking Budgets">
+            <Textarea
+              value={settings.thinkingBudgetsJson}
+              disabled={disabled}
+              placeholder={'{\n  "medium": 4096\n}'}
+              className="min-h-28 resize-y font-mono text-xs"
+              onChange={(event) =>
+                onChange({ thinkingBudgetsJson: event.target.value }, ['thinkingBudgets'])
+              }
+            />
+          </SettingsField>
+          <SettingsField label="Extensions">
+            <Textarea
+              value={settings.extensionsText}
+              disabled={disabled}
+              placeholder={'C:\\path\\to\\extension\n./relative-extension'}
+              className="min-h-28 resize-y font-mono text-xs"
+              onChange={(event) => onChange({ extensionsText: event.target.value }, ['extensions'])}
+            />
+          </SettingsField>
+        </div>
+      </SettingsAdvancedOptions>
     </div>
   );
 }
