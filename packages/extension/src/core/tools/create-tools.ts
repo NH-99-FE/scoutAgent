@@ -1,5 +1,5 @@
 // ============================================================
-// 工具工厂 — Pi-style ToolDefinition-first registry
+// 工具工厂
 // ============================================================
 
 import type { AgentTool } from '@scout-agent/agent';

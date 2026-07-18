@@ -1,5 +1,5 @@
 // ============================================================
-// AgentSessionServices — Pi-style cwd-bound service assembly
+// AgentSessionServices
 // 负责：构造 cwd 绑定的资源加载器、扩展 runner，并从 services 创建 AgentSession。
 // ============================================================
 

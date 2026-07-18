@@ -1,6 +1,5 @@
 // ============================================================
 // 扩展系统类型定义
-// Lifecycle 语义以 Pi extension API 为唯一来源。
 // ============================================================
 
 import type {
@@ -50,7 +49,7 @@ export interface ToolRenderResultOptions {
 }
 
 /**
- * Pi-style 工具定义。
+ * 工具定义。
  * Agent runtime 只消费包装后的 AgentTool；metadata/render 字段保留在 definition registry。
  */
 export interface ToolDefinition<

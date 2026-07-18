@@ -352,10 +352,9 @@ export class AgentSession implements CoreDisposable {
 
   /**
    * message_end 时记录最后一条 assistant message，供 agent_end 后决策 retry/compaction。
-   * 对齐 Pi 的 _lastAssistantMessage 模式，避免在 message_end 事件回调中重入 Agent。
    */
   private lastAssistantMessage: AssistantMessage | undefined;
-  /** Pi extension lifecycle turn index；agent_start 时重置，turn_end 后递增。 */
+  /** agent_start 时重置，turn_end 后递增。 */
   private turnIndex = 0;
   /** 当前 agent_start 运行 id，用于生成一次 assistant 回复范围内的 review turnId。 */
   private currentReviewRunId = createReviewRunId();
@@ -363,7 +362,7 @@ export class AgentSession implements CoreDisposable {
 
   /** 从当前 session branch 缓存原始路径；provider runtime context 由 agent.state.messages 持有。 */
   private cachedBranch: SessionTreeEntry[] = [];
-  /** Pi 式运行态上下文由 agent.state.messages 持有。 */
+  /** 运行态上下文由 agent.state.messages 持有。 */
 
   /** Agent 运行队列的宿主态策略：暂停、恢复和可见快照。 */
   private readonly queuedMessages = new QueuedMessagePolicy();
@@ -1790,7 +1789,7 @@ export class AgentSession implements CoreDisposable {
   }
 
   /**
-   * Pi 语义：assistant error message 保留在 session history 中用于展示和树历史；
+   * assistant error message 保留在 session history 中用于展示和树历史；
    * retry/overflow recovery 只从 agent.state.messages 运行态移除，避免带入本次自动恢复的 runtime context。
    */
   private async removeLastRuntimeAssistantMessage(): Promise<boolean> {
@@ -2806,7 +2805,6 @@ export class AgentSession implements CoreDisposable {
 
   /**
    * agent_end 后统一处理 retry / compaction 决策。
-   * 对齐 Pi 的 _handlePostAgentRun() 模式：
    *   1. 若 retry 触发 → 直接 return（跳过 compaction，retry 成功后再判断）
    *   2. 若 retry 超限 → 发出 auto_retry_end(success=false)，再做 compaction 检查
    *   3. 若 retry 成功 → 发出 auto_retry_end(success=true)，再做 compaction 检查
@@ -2916,7 +2914,7 @@ export class AgentSession implements CoreDisposable {
       });
       await this.syncRuntimeMessagesFromSession();
       if (willRetry) {
-        // compact 会从 session 重建运行态；本次 retry 前再次清理尾部 error，保持 Pi runtime 语义。
+        // compact 会从 session 重建运行态；本次 retry 前再次清理尾部 error。
         await this.removeLastRuntimeAssistantError();
       }
       await this.rebuildCachedSessionBranch();

@@ -151,7 +151,7 @@ function isStaleLock(lockPath: string): boolean {
 function waitSynchronously(delayMs: number): void {
   const start = Date.now();
   while (Date.now() - start < delayMs) {
-    // 保持 SettingsManager 同步 API，同时沿用 Pi 的 scoped lock 形态。
+    // 保持 SettingsManager 同步 API。
   }
 }
 

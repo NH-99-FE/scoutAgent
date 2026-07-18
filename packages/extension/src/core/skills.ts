@@ -1,5 +1,5 @@
 // ============================================================
-// Skills 加载器 — Pi coding-agent core 对齐的文件系统技能发现
+// Skills 加载器
 // 负责：扫描 SKILL.md / 根级 markdown，解析 frontmatter，生成资源诊断。
 // ============================================================
 
@@ -259,7 +259,7 @@ function loadSkillsFromDirInternal(
       diagnostics.push(...result.diagnostics);
     }
   } catch {
-    // Pi 行为：无法读取目录时跳过，让其它资源继续加载。
+    // 无法读取目录时跳过，让其它资源继续加载。
   }
 
   return { skills, diagnostics };

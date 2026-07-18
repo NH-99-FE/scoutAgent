@@ -939,7 +939,7 @@ export class SessionManager {
   }
 
   dispose(): void {
-    // Pi-style SessionManager has no external handles beyond synchronous file I/O.
+    // SessionManager has no external handles beyond synchronous file I/O.
   }
 
   _persist(entry: SessionEntry): void {

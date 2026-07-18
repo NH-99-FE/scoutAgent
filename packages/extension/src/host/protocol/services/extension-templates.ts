@@ -18,7 +18,7 @@ export interface ExtensionTemplate {
 export const PERMISSION_GATE_TEMPLATE_ID = 'permission-gate';
 
 const PERMISSION_GATE_TEMPLATE_SOURCE = `// ============================================================
-// Permission Gate — Pi 风格危险 bash 命令确认扩展
+// Permission Gate — 危险 bash 命令确认扩展
 // ============================================================
 
 interface PermissionGateToolCallEvent {

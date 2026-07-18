@@ -1,5 +1,5 @@
 // ============================================================
-// AgentSessionRuntime — Pi-style session replacement owner
+// AgentSessionRuntime
 // 负责：持有当前 AgentSession，并统一处理 new/resume/fork/reload 替换语义。
 // ============================================================
 
