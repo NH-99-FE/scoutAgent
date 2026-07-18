@@ -3,7 +3,7 @@
   "displayName": "Scout Coding Agent",
   "description": "AI Coding Agent — Chat-driven dev, code gen & edit, context-aware suggest, diagnose & fix",
   "icon": "resources/icon.png",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "publisher": "lianglh",
   "repository": {
