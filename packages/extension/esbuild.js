@@ -65,7 +65,7 @@ async function main() {
       js: "import { createRequire as __scoutCreateRequire } from 'node:module';\nconst require = __scoutCreateRequire(import.meta.url);",
     },
     outfile: 'dist/extension.js',
-    external: ['vscode', 'jiti'],
+    external: ['vscode'],
     logLevel: 'silent',
     plugins: [esbuildProblemMatcherPlugin, copyWebviewPlugin],
   });

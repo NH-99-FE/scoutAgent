@@ -1,17 +1,26 @@
 {
-  "name": "@scout-agent/extension",
-  "displayName": "Scout Agent",
+  "name": "scout-coding-agent",
+  "displayName": "Scout Coding Agent",
   "description": "AI Coding Agent — Chat-driven dev, code gen & edit, context-aware suggest, diagnose & fix",
+  "icon": "resources/icon.png",
   "version": "0.0.1",
   "type": "module",
-  "publisher": "",
+  "publisher": "lianglh",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NH-99-FE/scoutAgent.git",
+    "directory": "packages/extension"
+  },
+  "homepage": "https://github.com/NH-99-FE/scoutAgent#readme",
+  "bugs": {
+    "url": "https://github.com/NH-99-FE/scoutAgent/issues"
+  },
   "engines": {
     "vscode": "^1.120.0"
   },
   "categories": [
     "Programming Languages",
-    "Machine Learning",
-    "Chat"
+    "Other"
   ],
   "main": "./dist/extension.js",
   "contributes": {

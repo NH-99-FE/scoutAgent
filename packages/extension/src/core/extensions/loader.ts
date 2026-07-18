@@ -6,7 +6,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { createJiti } from 'jiti';
+import { createJiti } from 'jiti/static';
 import { createEventBus, type EventBus } from './event-bus.ts';
 import { createSyntheticSourceInfo, type SourceInfo, type SourceOrigin } from '../source-info.ts';
 import { STALE_EXTENSION_CONTEXT_MESSAGE } from './types.ts';
