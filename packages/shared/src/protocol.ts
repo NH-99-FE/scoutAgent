@@ -36,6 +36,7 @@ export type {
   ScoutFileMentionItem,
   ScoutFileMentionKind,
   ScoutSessionListItem,
+  ScoutSessionIdentity,
   ScoutSessionTreeNode,
   ScoutSessionTreeNodeKind,
   ScoutSessionTreeToolArgument,
@@ -103,6 +104,8 @@ export type {
   ScoutQueuedMessage,
   ScoutQueuedMessageDelivery,
   ScoutQueueState,
+  ScoutTreeNavigationAdmission,
+  ScoutTreeNavigationBlockReason,
   ScoutSessionStats,
   ScoutTextContent,
   ScoutThinkingContent,
@@ -113,6 +116,7 @@ export type {
   ScoutToolResultMessage,
   ScoutUserMessage,
   ScoutWebviewState,
+  ScoutPendingComposerIntent,
 } from './protocol-state.ts';
 
 export type {
@@ -129,6 +133,7 @@ export type {
   ScoutForkCandidate,
   ScoutForkCandidatesResult,
   ScoutForkResult,
+  ScoutNavigateTreeResult,
   ScoutGenericCommandResult,
   ScoutGenericCommandResultType,
   ScoutProtocolResponsePayload,
@@ -137,6 +142,9 @@ export type {
   ScoutSaveCustomModelsResult,
   ScoutSaveRuntimeSettingsResult,
   ScoutSaveSkillsSettingsResult,
+  ScoutAbortTreeNavigationResult,
+  ScoutAckComposerIntentResult,
+  ScoutUserMessageResult,
   ScoutSessionsResult,
   ScoutSkillsResult,
   ScoutStateResult,

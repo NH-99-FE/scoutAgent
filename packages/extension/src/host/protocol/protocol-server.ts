@@ -83,8 +83,8 @@ export class ProtocolServer {
     }
   }
 
-  cancel(requestId: string): boolean {
-    return this.registry.cancel(requestId);
+  cancel(requestId: string, surface?: ScoutWebviewSurface): boolean {
+    return this.registry.cancel(requestId, surface);
   }
 
   dispose(): void {

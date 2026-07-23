@@ -4,29 +4,34 @@
 
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { CircleAlert, Plus, Trash2 } from 'lucide-react';
 import type { ScoutQueueState } from '@scout-agent/shared';
+import { acknowledgeComposerIntentUntilSettled } from '@/bridge/composer-intent-ack';
 import { protocolClient } from '@/bridge/protocol-client';
 import { IconButton } from '@/components/common/IconButton';
+import { Button } from '@/components/ui/button';
 import { useCommands } from '@/store/config-store';
 import {
+  createComposerDraftKey,
   useComposerActions,
   useComposerDocument,
   useComposerImages,
   usePendingComposerCommandEffect,
+  useRecoverableComposerDrafts,
 } from '@/store/composer-store';
 import { getComposerLinearText } from '@/store/composer-document';
 import {
   useConversationForkCandidateVersion,
   useIsStreaming,
   useQueueState,
+  useTreeNavigationAdmission,
 } from '@/store/conversation-store';
 import {
   useRuntimeOverlayActions,
   useVisualBusyState,
   useVisualIsStreaming,
 } from '@/store/runtime-overlay-store';
-import { useSessionId } from '@/store/session-store';
+import { usePendingComposerIntent, useSessionFile, useSessionId } from '@/store/session-store';
 import { ModelStatusMenu } from '@/features/model-menu';
 import { useComposerImageAttachments } from '../hooks/use-composer-image-attachments';
 import { useComposerSubmitFlow } from '../hooks/use-composer-submit-flow';
@@ -45,6 +50,7 @@ import { SlashCommandMenu } from './SlashCommandMenu';
 import { ToolProfileSelect } from './ToolProfileSelect';
 import { useForkCandidateMenu } from '../hooks/use-fork-candidate-menu';
 import { buildSlashCommandItems, type SlashCommandMenuItem } from '../model/slash-command-options';
+import { isComposerSubmissionBlocked } from '../model/composer-submit';
 import { getSlashCommandTrigger } from '../model/slash-command-trigger';
 
 interface BaseChatComposerProps {
@@ -72,6 +78,8 @@ interface BaseChatComposerSessionProps {
   onMessageSent?: () => void;
   placeholder: string;
   sessionId: string;
+  draftKey: string;
+  sessionPath: string;
   submitDisabled: boolean;
 }
 
@@ -103,7 +111,11 @@ const EMPTY_QUEUE_STATE = {
 
 function ChatComposerView(props: ChatComposerProps) {
   const currentSessionId = useSessionId();
+  const currentSessionPath = useSessionFile();
   const composerSessionId = props.draftSessionId ?? currentSessionId;
+  const currentSessionDraftKey = createComposerDraftKey(currentSessionId, currentSessionPath);
+  const componentKey =
+    props.mode === 'newSession' ? composerSessionId : `${composerSessionId}:${currentSessionPath}`;
 
   if (props.mode === 'newSession') {
     return (
@@ -112,6 +124,8 @@ function ChatComposerView(props: ChatComposerProps) {
         mode="newSession"
         placeholder={props.placeholder}
         sessionId={composerSessionId}
+        draftKey={composerSessionId}
+        sessionPath=""
         submitDisabled={props.submitDisabled}
         onMessageSent={props.onMessageSent}
         onBeginNewSessionRequest={props.onBeginNewSessionRequest}
@@ -121,10 +135,12 @@ function ChatComposerView(props: ChatComposerProps) {
 
   return (
     <ChatComposerSession
-      key={composerSessionId}
+      key={componentKey}
       mode="currentSession"
       placeholder={props.placeholder}
-      sessionId={composerSessionId}
+      sessionId={currentSessionId}
+      draftKey={currentSessionDraftKey}
+      sessionPath={currentSessionPath}
       submitDisabled={props.submitDisabled ?? false}
       onMessageSent={props.onMessageSent}
     />
@@ -134,7 +150,8 @@ function ChatComposerView(props: ChatComposerProps) {
 export const ChatComposer = memo(ChatComposerView);
 
 function ChatComposerSession(props: ChatComposerSessionProps) {
-  const { mode, onMessageSent, placeholder, sessionId, submitDisabled } = props;
+  const { mode, onMessageSent, placeholder, sessionId, draftKey, sessionPath, submitDisabled } =
+    props;
   const [confirmAbort, setConfirmAbort] = useState(false);
   const [selectionStart, setSelectionStart] = useState<number | null>(0);
   const [slashSelection, setSlashSelection] = useState<SuggestionSelectionState>({
@@ -144,25 +161,32 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
   const [dismissedSlashKey, setDismissedSlashKey] = useState<string | null>(null);
   const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
-  const images = useComposerImages(sessionId);
-  const document = useComposerDocument(sessionId);
+  const images = useComposerImages(draftKey);
+  const document = useComposerDocument(draftKey);
+  const recoverableDrafts = useRecoverableComposerDrafts(draftKey);
   const linearText = useMemo(() => getComposerLinearText(document), [document]);
   const commands = useCommands();
   const composerActions = useComposerActions();
   const pendingCommandEffect = usePendingComposerCommandEffect();
+  const pendingComposerIntent = usePendingComposerIntent();
   const runtimeOverlayActions = useRuntimeOverlayActions();
   const visualBusy = useVisualBusyState();
   const currentSessionStreaming = useIsStreaming();
   const currentSessionVisualStreaming = useVisualIsStreaming();
   const currentSessionQueueState = useQueueState();
+  const treeNavigationAdmission = useTreeNavigationAdmission();
   const toolProfile = useComposerToolProfile(mode);
   const currentSessionForkCandidateVersion = useConversationForkCandidateVersion();
   const isCurrentSessionMode = mode === 'currentSession';
   const isStreaming = isCurrentSessionMode ? currentSessionStreaming : false;
   const visualIsStreaming = isCurrentSessionMode ? currentSessionVisualStreaming : false;
   const queueState = isCurrentSessionMode ? currentSessionQueueState : EMPTY_QUEUE_STATE;
-  const imageAttachments = useComposerImageAttachments(sessionId);
+  const sendBlocked =
+    isCurrentSessionMode &&
+    isComposerSubmissionBlocked(visualBusy, isStreaming, treeNavigationAdmission);
+  const imageAttachments = useComposerImageAttachments(draftKey);
   const submitFlow = useComposerSubmitFlow({
+    draftKey,
     images,
     isStreaming,
     mode,
@@ -171,7 +195,9 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
       props.mode === 'newSession' ? props.onBeginNewSessionRequest : undefined,
     onMessageSent,
     queueState,
+    sendBlocked,
     sessionId,
+    sessionPath,
     submitDisabled,
     document,
   });
@@ -324,7 +350,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     fileMentionMenu.handleDocumentChange();
     setDismissedSlashKey(null);
     setSlashSelection({ key: null, index: 0 });
-    composerActions.setDocument(sessionId, nextDocument);
+    composerActions.setDocument(draftKey, nextDocument);
   };
 
   const focusEditorAt = (position: number) => {
@@ -334,17 +360,43 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
     }, 0);
   };
 
-  // fork 完成后回填被选用户消息文本到当前激活会话的 composer
   useEffect(() => {
     if (pendingCommandEffect == null) return;
-    if (pendingCommandEffect.targetSessionId !== sessionId) return;
+    if (
+      pendingCommandEffect.targetSession.sessionId !== sessionId ||
+      pendingCommandEffect.targetSession.sessionPath !== sessionPath
+    ) {
+      return;
+    }
     if (pendingCommandEffect.kind === 'replace_text') {
-      composerActions.setText(sessionId, pendingCommandEffect.text);
+      composerActions.setText(draftKey, pendingCommandEffect.text);
       composerActions.consumeCommandEffect();
       focusEditorAt(pendingCommandEffect.text.length);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingCommandEffect, sessionId]);
+  }, [draftKey, pendingCommandEffect, sessionId]);
+
+  useEffect(() => {
+    if (mode !== 'currentSession' || !pendingComposerIntent) return;
+    if (
+      pendingComposerIntent.session.sessionId !== sessionId ||
+      pendingComposerIntent.session.sessionPath !== sessionPath
+    ) {
+      return;
+    }
+    const text =
+      pendingComposerIntent.kind === 'replace_text' ? (pendingComposerIntent.text ?? '') : '';
+    const applied = composerActions.applyComposerIntent(
+      draftKey,
+      pendingComposerIntent.version,
+      text,
+    );
+    acknowledgeComposerIntentUntilSettled(pendingComposerIntent);
+    if (applied && pendingComposerIntent.kind === 'replace_text') {
+      focusEditorAt(text.length);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, mode, pendingComposerIntent, sessionId, sessionPath]);
 
   const replaceSlashToken = (replacement: string) => {
     if (!slashTrigger) return;
@@ -454,6 +506,38 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
 
   return (
     <>
+      {recoverableDrafts.length > 0 ? (
+        <div
+          className="border-border bg-background mb-1 flex min-h-8 items-center gap-2 rounded-xl border px-2 py-1 text-sm"
+          data-recoverable-composer-draft="true"
+        >
+          <CircleAlert className="text-status-warning size-3.5 shrink-0" />
+          <span className="text-muted-foreground min-w-0 flex-1 truncate">
+            {recoverableDrafts.length === 1
+              ? '上一条消息发送失败'
+              : `${recoverableDrafts.length} 条消息发送失败`}
+          </span>
+          <Button
+            aria-label="恢复未发送消息"
+            className="h-6 shrink-0 px-1.5"
+            disabled={hasDraft || isDraftLocked}
+            size="xs"
+            type="button"
+            variant="ghost"
+            onClick={() => composerActions.recoverFailedDraft(draftKey, recoverableDrafts[0]!.id)}
+          >
+            恢复
+          </Button>
+          <IconButton
+            label="丢弃未发送消息"
+            size="icon-xs"
+            onClick={() => composerActions.discardFailedDraft(draftKey, recoverableDrafts[0]!.id)}
+          >
+            <Trash2 />
+          </IconButton>
+        </div>
+      ) : null}
+
       <ComposerSuggestionPopover
         onDismiss={dismissFloatingPanel}
         open={floatingPanelOpen}
@@ -471,7 +555,7 @@ function ChatComposerSession(props: ChatComposerSessionProps) {
               images={images}
               removeDisabled={isDraftLocked}
               onPreview={openImagePreview}
-              onRemove={(index) => composerActions.removeImage(sessionId, index)}
+              onRemove={(index) => composerActions.removeImage(draftKey, index)}
             />
           ) : null}
 

@@ -7,6 +7,7 @@ import type {
   ScoutCommandInfo,
   ScoutComposerDocument,
   ScoutDiagnostic,
+  ScoutSessionIdentity,
   ToolInfo,
 } from './protocol-core.ts';
 import type { ScoutExtensionUIRequest } from './protocol-extension-ui.ts';
@@ -152,7 +153,15 @@ export type ScoutBusyState =
       maxAttempts?: number;
       reason?: string;
     }
-  | { kind: 'compaction'; label?: string; cancellable: boolean; reason?: string };
+  | { kind: 'compaction'; label?: string; cancellable: boolean; reason?: string }
+  | {
+      kind: 'tree_navigation';
+      operationId: string;
+      phase: 'preflight' | 'reconciling';
+      label?: string;
+      cancellable: boolean;
+    }
+  | { kind: 'session_mutation'; label?: string; cancellable: false };
 
 export type ScoutBusyKind = ScoutBusyState['kind'];
 
@@ -178,12 +187,30 @@ export interface ScoutQueueState {
   pauseReason?: 'aborted';
 }
 
+export type ScoutTreeNavigationBlockReason =
+  | 'session_unavailable'
+  | 'session_blocked'
+  | 'session_busy'
+  | 'steering_pending'
+  | 'follow_up_pending'
+  | 'follow_up_paused';
+
+export type ScoutTreeNavigationAdmission =
+  | { allowed: true }
+  | {
+      allowed: false;
+      reason: ScoutTreeNavigationBlockReason;
+      message: string;
+    };
+
 export interface ScoutWebviewState {
   messages: ScoutMessage[];
   /** bootstrap/state_result/state_update 使用的运行态快照；流式增量以事件为准。 */
   isStreaming: boolean;
   busyState: ScoutBusyState;
   queueState?: ScoutQueueState;
+  /** Host 计算的权威分支导航准入状态；Webview 仅负责提前提示。 */
+  treeNavigationAdmission?: ScoutTreeNavigationAdmission;
   modelProvider: string;
   modelId: string;
   thinkingLevel: ThinkingLevel;
@@ -205,7 +232,17 @@ export interface ScoutWebviewState {
   extensionUIRequests?: ScoutExtensionUIRequest[];
   modelFallbackMessage?: string;
   activeChangesReview?: ScoutChangesReviewSummary;
+  pendingComposerIntent?: ScoutPendingComposerIntent;
 }
+
+interface ScoutPendingComposerIntentBase {
+  version: string;
+  commandId: string;
+  session: ScoutSessionIdentity;
+}
+
+export type ScoutPendingComposerIntent = ScoutPendingComposerIntentBase &
+  ({ kind: 'replace_text'; text: string } | { kind: 'clear' });
 
 export interface ScoutConfig {
   models: ScoutModelInfo[];

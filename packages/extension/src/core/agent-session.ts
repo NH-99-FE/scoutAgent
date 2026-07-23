@@ -32,7 +32,7 @@ import type {
   StreamFn,
   ThinkingLevel,
 } from '@scout-agent/agent';
-import type { ToolPresentationMetadata } from '@scout-agent/shared';
+import type { ScoutTreeNavigationAdmission, ToolPresentationMetadata } from '@scout-agent/shared';
 import {
   Agent,
   type BashExecutionMessage,
@@ -78,6 +78,8 @@ import type {
 import { stripFrontmatter, type Skill as ScoutSkill } from './skills.ts';
 import { createSyntheticSourceInfo } from './source-info.ts';
 import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
+import { SessionOperationScope } from './session-operation-scope.ts';
+import type { SessionExecutionKind, SessionExecutionPort } from './session-execution.ts';
 import {
   QueuedMessagePolicy,
   type QueueContinuationPolicy,
@@ -134,8 +136,19 @@ const NON_RETRYABLE_LIMIT_PATTERN =
 
 const EXTENSION_MESSAGE_CUSTOM_TYPE = 'extension_message';
 
+type AgentSessionOperation =
+  | 'retry'
+  | 'bash'
+  | 'manualCompaction'
+  | 'autoCompaction'
+  | 'treeNavigation';
+
 function createReviewRunId(): string {
   return `run-${randomUUID()}`;
+}
+
+function isSessionMutationRejection(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith('Session mutation rejected:');
 }
 
 function cloneStreamOptions(streamOptions?: ScoutStreamOptions): ScoutStreamOptions {
@@ -229,6 +242,7 @@ export interface AgentSessionOptions {
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
   onFileReviewUpdated?: (session: AgentSession, review: FileReviewTurnSnapshot) => void;
+  sessionExecution?: SessionExecutionPort;
 }
 
 export interface ExtensionBindings {
@@ -236,9 +250,23 @@ export interface ExtensionBindings {
 }
 
 export interface NavigateTreeResult {
-  cancelled: boolean;
+  navigationId: string;
+  status:
+    | 'busy'
+    | 'blocked'
+    | 'stale'
+    | 'cancelled'
+    | 'failed_before_commit'
+    | 'committed'
+    | 'blocked_after_commit';
+  error?: string;
   editorText?: string;
-  summaryEntry?: BranchSummaryEntry;
+}
+
+interface ResolvedExtensionCommand {
+  args: string;
+  command: RegisteredCommand;
+  name: string;
 }
 
 export interface SessionStats {
@@ -293,6 +321,24 @@ interface PromptOptions {
   userMessageDetails?: unknown;
 }
 
+export type PromptResultStatus = 'accepted' | 'busy' | 'stale' | 'blocked';
+
+export interface PromptResult {
+  status: PromptResultStatus;
+  error?: string;
+}
+
+export interface PromptSubmissionResult extends PromptResult {
+  turn?: Promise<void>;
+}
+
+interface PromptExecutionResult {
+  accepted: boolean;
+  error?: string;
+}
+
+type ExtensionCommandResult = { success: true } | { success: false; error: string };
+
 interface QueuedUserMessageOptions {
   images?: ImageContent[];
   userMessageDetails?: unknown;
@@ -337,11 +383,8 @@ export class AgentSession implements CoreDisposable {
 
   /** Retry 状态 */
   private retryAttempt = 0;
-  private retryAbortController: AbortController | undefined;
-  private bashAbortController: AbortController | undefined;
-  private manualCompactionAbortController: AbortController | undefined;
-  private autoCompactionAbortController: AbortController | undefined;
-  private branchSummaryAbortController: AbortController | undefined;
+  private readonly operations = new SessionOperationScope<AgentSessionOperation>();
+  private readonly sessionExecution?: SessionExecutionPort;
 
   /**
    * Overflow compaction 防重入标志。
@@ -419,6 +462,7 @@ export class AgentSession implements CoreDisposable {
     this.initialModel = options.initialModel;
     this.initialThinkingLevel = options.initialThinkingLevel;
     this.onFileReviewUpdated = options.onFileReviewUpdated;
+    this.sessionExecution = options.sessionExecution;
   }
 
   // ---------- 初始化 ----------
@@ -476,6 +520,7 @@ export class AgentSession implements CoreDisposable {
     return this.session.getSessionFile();
   }
 
+  /** @internal 仅供 AgentSessionRuntime 在 session_replacement owner 内执行生命周期操作。 */
   get sessionManager(): Session {
     return this.session;
   }
@@ -494,6 +539,67 @@ export class AgentSession implements CoreDisposable {
     return this.queuedMessages.snapshot(this.agent);
   }
 
+  getTreeNavigationAdmission(): ScoutTreeNavigationAdmission {
+    if (!this.agent) {
+      return {
+        allowed: false,
+        reason: 'session_unavailable',
+        message: '当前没有可导航的会话。',
+      };
+    }
+
+    const execution = this.sessionExecution?.snapshot();
+    if (execution?.health.kind === 'blocked') {
+      return {
+        allowed: false,
+        reason: 'session_blocked',
+        message: '会话当前不可修改，请重新加载后再切换分支。',
+      };
+    }
+    if (execution?.activity.kind !== undefined && execution.activity.kind !== 'idle') {
+      return {
+        allowed: false,
+        reason: 'session_busy',
+        message: '会话正在运行，请等待当前操作完成后再切换分支。',
+      };
+    }
+    if (this._isStreaming) {
+      return {
+        allowed: false,
+        reason: 'session_busy',
+        message: '会话正在运行，请等待当前操作完成后再切换分支。',
+      };
+    }
+
+    const queue = this.getQueueSnapshot();
+    if (queue.messages.some((message) => message.delivery === 'steer')) {
+      return {
+        allowed: false,
+        reason: 'steering_pending',
+        message: '仍有 steering 消息待处理，请等待消息队列清空后再切换分支。',
+      };
+    }
+    if (queue.followUpPaused) {
+      return {
+        allowed: false,
+        reason: 'follow_up_paused',
+        message: '存在已暂停的 follow-up，请先继续、取消或清空这些消息后再切换分支。',
+      };
+    }
+    if (
+      this.pendingNextTurnMessages.length > 0 ||
+      queue.followUps.length > 0 ||
+      queue.messages.some((message) => message.delivery === 'followUp')
+    ) {
+      return {
+        allowed: false,
+        reason: 'follow_up_pending',
+        message: '仍有 follow-up 待处理，请等待或清空队列后再切换分支。',
+      };
+    }
+    return { allowed: true };
+  }
+
   getQueuedFollowUps(): QueuedFollowUpMessage[] {
     return this.queuedMessages.getFollowUps(this.agent);
   }
@@ -507,6 +613,7 @@ export class AgentSession implements CoreDisposable {
   }
 
   promoteFollowUp(id: string): boolean {
+    this.assertQueueAdmission();
     const promoted = this.queuedMessages.promoteFollowUp(this.agent, id);
     if (promoted) {
       this.emit({ type: 'queue_change' });
@@ -519,12 +626,154 @@ export class AgentSession implements CoreDisposable {
     this.emit({ type: 'queue_change' });
   }
 
-  async prompt(text: string, options?: PromptOptions): Promise<void> {
-    await this.runPrompt(text, options?.images, 'interactive', {
-      streamingBehavior: options?.streamingBehavior,
-      clearFollowUpQueue: options?.clearFollowUpQueue,
-      userMessageDetails: options?.userMessageDetails,
+  private async runSessionMutation<T>(
+    kind: SessionExecutionKind,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const execution = this.sessionExecution;
+    const sessionPath = this.sessionFile;
+    if (!execution || !sessionPath || !execution.snapshot().session) {
+      return await operation();
+    }
+    const result = await execution.run(
+      {
+        kind,
+        operationId: randomUUID(),
+        session: { sessionId: this.sessionId, sessionPath },
+      },
+      operation,
+    );
+    if (!result.ok) {
+      throw new Error(`Session mutation rejected: ${result.reason}`);
+    }
+    return result.value;
+  }
+
+  private assertQueueAdmission(): void {
+    const snapshot = this.sessionExecution?.snapshot();
+    if (!snapshot) return;
+    if (snapshot.health.kind === 'blocked') {
+      throw new Error('Session mutation rejected: blocked');
+    }
+    if (snapshot.activity.kind !== 'idle' && snapshot.activity.kind !== 'agent_turn') {
+      throw new Error('Session mutation rejected: busy');
+    }
+  }
+
+  private async submitOwnedAgentTurn(
+    operation: () => Promise<PromptSubmissionResult>,
+  ): Promise<PromptSubmissionResult> {
+    const execution = this.sessionExecution;
+    const sessionPath = this.sessionFile;
+    if (!execution || !sessionPath || !execution.snapshot().session) {
+      return await operation();
+    }
+
+    let resolveSubmission!: (submission: PromptSubmissionResult) => void;
+    let rejectSubmission!: (error: unknown) => void;
+    const submissionReady = new Promise<PromptSubmissionResult>((resolve, reject) => {
+      resolveSubmission = resolve;
+      rejectSubmission = reject;
     });
+    const ownedTurn = execution.run(
+      {
+        kind: 'agent_turn',
+        operationId: randomUUID(),
+        session: { sessionId: this.sessionId, sessionPath },
+      },
+      async () => {
+        try {
+          const submission = await operation();
+          resolveSubmission(submission);
+          await submission.turn;
+        } catch (error) {
+          rejectSubmission(error);
+          throw error;
+        }
+      },
+    );
+    void ownedTurn.then((result) => {
+      if (!result.ok) resolveSubmission({ status: result.reason });
+    }, rejectSubmission);
+
+    const submission = await submissionReady;
+    if (submission.status !== 'accepted') return submission;
+    const turn = ownedTurn.then((result) => {
+      if (!result.ok) throw new Error(`Session mutation rejected: ${result.reason}`);
+    });
+    void turn.catch(() => undefined);
+    return { ...submission, turn };
+  }
+
+  async prompt(text: string, options?: PromptOptions): Promise<PromptResult> {
+    const { turn, ...result } = await this.submitPrompt(text, options);
+    await turn;
+    return result;
+  }
+
+  async submitPrompt(text: string, options?: PromptOptions): Promise<PromptSubmissionResult> {
+    const execution = this.sessionExecution;
+    const sessionPath = this.sessionFile;
+    const snapshot = execution?.snapshot();
+    const extensionCommand = this.resolveExtensionCommand(text);
+    if (extensionCommand) {
+      const executionResult =
+        execution && sessionPath
+          ? await execution.run(
+              {
+                kind: 'extension_command',
+                operationId: randomUUID(),
+                session: { sessionId: this.sessionId, sessionPath },
+              },
+              async () => await this.executeExtensionCommand(extensionCommand),
+            )
+          : { ok: true as const, value: await this.executeExtensionCommand(extensionCommand) };
+      if (!executionResult.ok) return { status: executionResult.reason };
+      const commandResult = executionResult.value;
+      return commandResult.success
+        ? { status: 'accepted' }
+        : { status: 'blocked', error: commandResult.error };
+    }
+
+    const activity = snapshot?.activity;
+    if (activity?.kind === 'agent_turn') {
+      if (!options?.streamingBehavior) return { status: 'busy' };
+      return await this.submitInteractivePrompt(text, options.images, {
+        streamingBehavior: options.streamingBehavior,
+        clearFollowUpQueue: options.clearFollowUpQueue,
+        userMessageDetails: options.userMessageDetails,
+      });
+    }
+    return await this.submitOwnedAgentTurn(async () => {
+      return await this.submitInteractivePrompt(text, options?.images, {
+        streamingBehavior: options?.streamingBehavior,
+        clearFollowUpQueue: options?.clearFollowUpQueue,
+        userMessageDetails: options?.userMessageDetails,
+      });
+    });
+  }
+
+  private async submitInteractivePrompt(
+    text: string,
+    images: ImageContent[] | undefined,
+    options?: {
+      streamingBehavior?: QueuedAgentMessageDelivery;
+      clearFollowUpQueue?: boolean;
+      userMessageDetails?: unknown;
+    },
+  ): Promise<PromptSubmissionResult> {
+    if (!this.agent) return { status: 'blocked', error: 'No active agent' };
+    try {
+      const started = await this.startPromptRun(text, images, 'interactive', options);
+      if (!started) return { status: 'accepted' };
+      await started.accepted;
+      return { status: 'accepted', turn: started.turn };
+    } catch (error) {
+      return {
+        status: 'blocked',
+        error: this.logPromptError('Prompt', error),
+      };
+    }
   }
 
   private async runPrompt(
@@ -536,15 +785,23 @@ export class AgentSession implements CoreDisposable {
       clearFollowUpQueue?: boolean;
       userMessageDetails?: unknown;
     },
-  ): Promise<void> {
-    try {
-      const started = await this.startPromptRun(text, images, source, options);
-      if (!started) return;
-      await started.accepted;
-      await started.turn;
-    } catch (error) {
-      this.handlePromptError('Prompt', error);
-    }
+  ): Promise<PromptExecutionResult> {
+    return await this.runSessionMutation('agent_turn', async () => {
+      if (!this.agent) return { accepted: false, error: 'No active agent' };
+      try {
+        const started = await this.startPromptRun(text, images, source, options);
+        if (!started) return { accepted: true };
+        await started.accepted;
+        await started.turn;
+        return { accepted: true };
+      } catch (error) {
+        const errorMessage =
+          source === 'interactive'
+            ? this.logPromptError('Prompt', error)
+            : this.handlePromptError('Prompt', error);
+        return { accepted: false, error: errorMessage };
+      }
+    });
   }
 
   private async startPromptRun(
@@ -561,11 +818,16 @@ export class AgentSession implements CoreDisposable {
 
     this.retryAttempt = 0;
 
-    if (await this.tryExecuteExtensionCommand(text)) {
-      return {
-        accepted: Promise.resolve(),
-        turn: Promise.resolve(),
-      };
+    const extensionCommand = this.resolveExtensionCommand(text);
+    if (extensionCommand) {
+      const commandResult = await this.executeExtensionCommand(extensionCommand);
+      if (commandResult.success) {
+        return {
+          accepted: Promise.resolve(),
+          turn: Promise.resolve(),
+        };
+      }
+      throw new Error(commandResult.error);
     }
     const preparedInput = await this.preparePromptInput(text, images, source);
     if (!preparedInput) return undefined;
@@ -626,7 +888,7 @@ export class AgentSession implements CoreDisposable {
     acceptedMessages: AgentMessage[],
   ): StartedPromptRun {
     const acceptance = this.registerPromptAcceptance(acceptedMessages);
-    const turn = this.runStartedPrompt(messages).finally(() => {
+    const turn = this.runStartedPrompt(messages, acceptance.record).finally(() => {
       this.rejectPromptAcceptance(
         acceptance.record,
         new Error('Prompt ended before the initial user message was accepted'),
@@ -638,36 +900,52 @@ export class AgentSession implements CoreDisposable {
     };
   }
 
-  private async runStartedPrompt(messages: AgentMessage[]): Promise<void> {
+  private async runStartedPrompt(
+    messages: AgentMessage[],
+    acceptance: PromptAcceptance,
+  ): Promise<void> {
     if (!this.agent) {
       this._isStreaming = false;
       this.emit({ type: 'state_change' });
+      this.rejectPromptAcceptance(acceptance, new Error('No active agent'));
       return;
     }
     try {
       await this.agent.prompt(messages);
       await this.runPostAgentLoop();
     } catch (error) {
+      if (!acceptance.settled) {
+        this._isStreaming = false;
+        this.emit({ type: 'state_change' });
+        this.rejectPromptAcceptance(
+          acceptance,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        return;
+      }
       this.handlePromptError('Prompt', error);
     }
   }
 
-  private handlePromptError(context: string, error: unknown): void {
+  private logPromptError(context: string, error: unknown): string {
     const errorMessage = error instanceof Error ? error.message : String(error);
     this.logger.appendLine(`[scout] ${context} error: ${errorMessage}`);
+    return errorMessage;
+  }
+
+  private handlePromptError(context: string, error: unknown): string {
+    const errorMessage = this.logPromptError(context, error);
     this._isStreaming = false;
     this.emit({ type: 'error', message: errorMessage });
+    return errorMessage;
   }
 
   async abort(): Promise<void> {
+    const hasActiveRun =
+      this._isStreaming || this.isPostAgentProcessing || this.operations.has('treeNavigation');
+    this.operations.cancelAll();
     if (!this.agent) return;
     try {
-      const hasActiveRun = this._isStreaming || this.isPostAgentProcessing;
-      this.retryAbortController?.abort();
-      this.bashAbortController?.abort();
-      this.manualCompactionAbortController?.abort();
-      this.autoCompactionAbortController?.abort();
-      this.branchSummaryAbortController?.abort();
       this.queuedMessages.pauseFollowUpsAfterAbort(this.agent);
       this.emit({ type: 'queue_change' });
       this.agent?.abort();
@@ -685,28 +963,30 @@ export class AgentSession implements CoreDisposable {
   async continue(options?: { preserveFollowUps?: boolean }): Promise<void> {
     if (!this.agent) return;
 
-    this.retryAttempt = 0;
+    await this.runSessionMutation('agent_turn', async () => {
+      this.retryAttempt = 0;
 
-    try {
-      if (options?.preserveFollowUps) {
-        if (!this.queuedMessages.isFollowUpPaused(this.agent)) {
-          this.queuedMessages.reset();
+      try {
+        if (options?.preserveFollowUps) {
+          if (!this.queuedMessages.isFollowUpPaused(this.agent)) {
+            this.queuedMessages.reset();
+          }
+        } else {
+          this.queuedMessages.resumeFollowUps();
         }
-      } else {
-        this.queuedMessages.resumeFollowUps();
+        this._isStreaming = true;
+        this.emit({ type: 'state_change' });
+        await this.agent!.continue({
+          preserveFollowUps: options?.preserveFollowUps,
+        });
+        await this.runPostAgentLoop({ preserveFollowUps: options?.preserveFollowUps });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.appendLine(`[scout] Continue error: ${errorMessage}`);
+        this._isStreaming = false;
+        this.emit({ type: 'error', message: errorMessage });
       }
-      this._isStreaming = true;
-      this.emit({ type: 'state_change' });
-      await this.agent.continue({
-        preserveFollowUps: options?.preserveFollowUps,
-      });
-      await this.runPostAgentLoop({ preserveFollowUps: options?.preserveFollowUps });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.appendLine(`[scout] Continue error: ${errorMessage}`);
-      this._isStreaming = false;
-      this.emit({ type: 'error', message: errorMessage });
-    }
+    });
   }
 
   /**
@@ -715,6 +995,7 @@ export class AgentSession implements CoreDisposable {
    */
   async steer(text: string, options: QueuedUserMessageOptions = {}): Promise<void> {
     if (!this.agent) return;
+    this.assertQueueAdmission();
     if (text.startsWith('/')) {
       this.throwIfExtensionCommand(text);
     }
@@ -733,6 +1014,7 @@ export class AgentSession implements CoreDisposable {
    */
   async followUp(text: string, options: QueuedUserMessageOptions = {}): Promise<void> {
     if (!this.agent) return;
+    this.assertQueueAdmission();
     if (text.startsWith('/')) {
       this.throwIfExtensionCommand(text);
     }
@@ -838,15 +1120,17 @@ export class AgentSession implements CoreDisposable {
   }
 
   async setModel(modelId: string, provider?: string): Promise<void> {
-    if (!this.agent) return;
-    const model = provider
-      ? this.configManager.findModelByProvider(provider, modelId)
-      : this.configManager.findModel(modelId);
-    if (!model) return;
-
     try {
-      await this.applyModelSelection(model, 'set');
+      await this.runSessionMutation('session_mutation', async () => {
+        if (!this.agent) return;
+        const model = provider
+          ? this.configManager.findModelByProvider(provider, modelId)
+          : this.configManager.findModel(modelId);
+        if (!model) return;
+        await this.applyModelSelection(model, 'set');
+      });
     } catch (error) {
+      if (isSessionMutationRejection(error)) throw error;
       this.logger.appendLine(
         `[scout] Model select error: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -856,23 +1140,25 @@ export class AgentSession implements CoreDisposable {
   async cycleModel(
     direction: 'forward' | 'backward' = 'forward',
   ): Promise<ModelCycleResult | undefined> {
-    if (!this.agent) return undefined;
-    const availableModels = this.configManager.getAvailableModels().map((entry) => entry.model);
-    if (availableModels.length === 0) return undefined;
+    return await this.runSessionMutation('session_mutation', async () => {
+      if (!this.agent) return undefined;
+      const availableModels = this.configManager.getAvailableModels().map((entry) => entry.model);
+      if (availableModels.length === 0) return undefined;
 
-    const current = this.agent.state.model;
-    const currentIndex = availableModels.findIndex(
-      (model) => model.provider === current.provider && model.id === current.id,
-    );
-    const step = direction === 'forward' ? 1 : -1;
-    const baseIndex = currentIndex >= 0 ? currentIndex : 0;
-    const nextIndex = (baseIndex + step + availableModels.length) % availableModels.length;
-    const nextModel = availableModels[nextIndex];
-    if (!nextModel) return undefined;
+      const current = this.agent.state.model;
+      const currentIndex = availableModels.findIndex(
+        (model) => model.provider === current.provider && model.id === current.id,
+      );
+      const step = direction === 'forward' ? 1 : -1;
+      const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+      const nextIndex = (baseIndex + step + availableModels.length) % availableModels.length;
+      const nextModel = availableModels[nextIndex];
+      if (!nextModel) return undefined;
 
-    const thinkingLevel = await this.applyModelSelection(nextModel, 'cycle');
-    if (!thinkingLevel) return undefined;
-    return { model: nextModel, thinkingLevel, isScoped: false };
+      const thinkingLevel = await this.applyModelSelection(nextModel, 'cycle');
+      if (!thinkingLevel) return undefined;
+      return { model: nextModel, thinkingLevel, isScoped: false };
+    });
   }
 
   private async applyModelSelection(
@@ -912,22 +1198,25 @@ export class AgentSession implements CoreDisposable {
   }
 
   async setThinkingLevel(level: ThinkingLevel): Promise<void> {
-    if (!this.agent) return;
     try {
-      const previousLevel = this.agent.state.thinkingLevel as ThinkingLevel;
-      const thinkingLevel = normalizeThinkingLevelForModel(this.agent.state.model, level);
-      if (thinkingLevel === previousLevel) return;
+      await this.runSessionMutation('session_mutation', async () => {
+        if (!this.agent) return;
+        const previousLevel = this.agent.state.thinkingLevel as ThinkingLevel;
+        const thinkingLevel = normalizeThinkingLevelForModel(this.agent.state.model, level);
+        if (thinkingLevel === previousLevel) return;
 
-      await this.session.appendThinkingLevelChange(thinkingLevel);
-      this.agent.state.thinkingLevel = thinkingLevel;
-      await this.extensionRunner?.emit({
-        type: 'thinking_level_select',
-        level: thinkingLevel,
-        previousLevel,
+        await this.session.appendThinkingLevelChange(thinkingLevel);
+        this.agent.state.thinkingLevel = thinkingLevel;
+        await this.extensionRunner?.emit({
+          type: 'thinking_level_select',
+          level: thinkingLevel,
+          previousLevel,
+        });
+        this.emit({ type: 'state_change' });
+        this.emit({ type: 'thinking_level_changed', level: thinkingLevel });
       });
-      this.emit({ type: 'state_change' });
-      this.emit({ type: 'thinking_level_changed', level: thinkingLevel });
     } catch (error) {
+      if (isSessionMutationRejection(error)) throw error;
       this.logger.appendLine(
         `[scout] Thinking level select error: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -936,7 +1225,7 @@ export class AgentSession implements CoreDisposable {
 
   async compact(customInstructions?: string): Promise<void> {
     if (!this.agent) return;
-    if (this.manualCompactionAbortController) {
+    if (this.operations.has('manualCompaction')) {
       this.logger.appendLine(
         '[scout] Manual compaction already running, ignoring duplicate request',
       );
@@ -952,7 +1241,7 @@ export class AgentSession implements CoreDisposable {
       return;
     }
     const settings = this.configManager.getCompactionSettings();
-    const branchEntries = await this.session.getBranch();
+    const branchEntries = this.session.getBranch();
     const preparation = prepareCompaction(branchEntries, settings);
     if (!preparation) {
       this.logger.appendLine('[scout] Manual compaction skipped: nothing to compact');
@@ -964,42 +1253,67 @@ export class AgentSession implements CoreDisposable {
       return;
     }
 
+    const sessionPath = this.sessionFile;
+    const executionBegin =
+      this.sessionExecution && sessionPath
+        ? this.sessionExecution.tryBegin({
+            kind: 'compaction',
+            operationId: randomUUID(),
+            session: { sessionId: this.sessionId, sessionPath },
+          })
+        : undefined;
+    if (executionBegin && !executionBegin.ok) {
+      this.emit({
+        type: 'notification',
+        level: 'warning',
+        message: '当前会话正在执行其他操作，请稍后再试',
+      });
+      return;
+    }
+    const executionLease = executionBegin?.ok ? executionBegin.lease : undefined;
+
     const compactedAgent = this.agent;
     this.unsubscribeAgent?.();
     this.unsubscribeAgent = undefined;
-    this.retryAbortController?.abort();
-    this.bashAbortController?.abort();
-    this.autoCompactionAbortController?.abort();
-    this.branchSummaryAbortController?.abort();
+    this.operations.cancel('retry');
+    this.operations.cancel('bash');
+    this.operations.cancel('autoCompaction');
+    this.operations.cancel('treeNavigation');
     this.clearQueuedAgentMessages();
     compactedAgent.abort();
 
-    const abortController = new AbortController();
-    this.manualCompactionAbortController = abortController;
+    const operation = this.operations.startExclusive('manualCompaction');
+    if (!operation) {
+      executionLease?.finish();
+      return;
+    }
     this.emit({ type: 'compaction_start', reason: 'manual' });
     try {
-      this.logger.appendLine('[scout] Running manual compaction');
-      const result = await this.runCompactionCore({
-        signal: abortController.signal,
-        settings,
-        branchEntries,
-        preparation,
-        customInstructions,
-      });
-      await this.syncRuntimeMessagesFromSession();
-      await this.rebuildCachedSessionBranch();
-      this.emit({
-        type: 'compaction_end',
-        reason: 'manual',
-        result,
-        aborted: false,
-        willRetry: false,
-      });
-      this.emit({ type: 'state_change' });
-      this.emit({ type: 'tree_change' });
+      const run = async () => {
+        this.logger.appendLine('[scout] Running manual compaction');
+        const result = await this.runCompactionCore({
+          signal: operation.signal,
+          settings,
+          branchEntries,
+          preparation,
+          customInstructions,
+        });
+        await this.syncRuntimeMessagesFromSession();
+        await this.rebuildCachedSessionBranch();
+        this.emit({
+          type: 'compaction_end',
+          reason: 'manual',
+          result,
+          aborted: false,
+          willRetry: false,
+        });
+        this.emit({ type: 'state_change' });
+        this.emit({ type: 'tree_change' });
+      };
+      await (executionLease ? executionLease.run(run) : run());
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const aborted = abortController.signal.aborted;
+      const aborted = operation.signal.aborted;
       this.logger.appendLine(`[scout] Compaction failed: ${errorMessage}`);
       this.emit({
         type: 'compaction_end',
@@ -1009,9 +1323,8 @@ export class AgentSession implements CoreDisposable {
         errorMessage: aborted ? undefined : `Manual compaction failed: ${errorMessage}`,
       });
     } finally {
-      if (this.manualCompactionAbortController === abortController) {
-        this.manualCompactionAbortController = undefined;
-      }
+      operation.finish();
+      executionLease?.finish();
       if (this.agent === compactedAgent && !this.unsubscribeAgent) {
         this.unsubscribeAgent = compactedAgent.subscribe((event, signal) =>
           this.handleAgentEvent(event, signal),
@@ -1021,7 +1334,7 @@ export class AgentSession implements CoreDisposable {
   }
 
   async abortRetry(): Promise<void> {
-    this.retryAbortController?.abort();
+    this.operations.cancel('retry');
   }
 
   async executeBash(
@@ -1033,8 +1346,10 @@ export class AgentSession implements CoreDisposable {
       this.configManager as { getShellPath?: () => string | undefined }
     ).getShellPath?.();
     const operations = options?.operations ?? createLocalBashOperations({ shellPath });
-    const abortController = new AbortController();
-    this.bashAbortController = abortController;
+    const operation = this.operations.startExclusive('bash');
+    if (!operation) {
+      return { output: '', exitCode: undefined, cancelled: true, truncated: false };
+    }
     const output = new OutputAccumulator({ tempFilePrefix: 'scout-bash' });
     const decoder = new TextDecoder();
     let exitCode: number | null = null;
@@ -1046,11 +1361,11 @@ export class AgentSession implements CoreDisposable {
             output.append(data);
             onChunk?.(decoder.decode(data));
           },
-          signal: abortController.signal,
+          signal: operation.signal,
         });
         exitCode = result.exitCode;
       } catch (error) {
-        if (!abortController.signal.aborted) {
+        if (!operation.signal.aborted) {
           throw error;
         }
       } finally {
@@ -1061,26 +1376,24 @@ export class AgentSession implements CoreDisposable {
       await output.closeTempFile();
       const result: BashResult = {
         output: snapshot.content,
-        exitCode: abortController.signal.aborted ? undefined : (exitCode ?? undefined),
-        cancelled: abortController.signal.aborted,
+        exitCode: operation.signal.aborted ? undefined : (exitCode ?? undefined),
+        cancelled: operation.signal.aborted,
         truncated: snapshot.truncation.truncated,
         fullOutputPath: snapshot.fullOutputPath,
       };
       await this.recordBashResult(command, result, options);
       return result;
     } finally {
-      if (this.bashAbortController === abortController) {
-        this.bashAbortController = undefined;
-      }
+      operation.finish();
     }
   }
 
   abortBash(): void {
-    this.bashAbortController?.abort();
+    this.operations.cancel('bash');
   }
 
   get isBashRunning(): boolean {
-    return this.bashAbortController !== undefined;
+    return this.operations.has('bash');
   }
 
   get hasPendingBashMessages(): boolean {
@@ -1109,11 +1422,13 @@ export class AgentSession implements CoreDisposable {
       return;
     }
 
-    await this.persistAgentMessage(bashMessage);
-    this.appendRuntimeMessage(bashMessage);
-    await this.rebuildCachedSessionBranch();
-    this.emit({ type: 'state_change' });
-    this.emit({ type: 'tree_change' });
+    await this.runSessionMutation('session_mutation', async () => {
+      await this.persistAgentMessage(bashMessage);
+      this.appendRuntimeMessage(bashMessage);
+      await this.rebuildCachedSessionBranch();
+      this.emit({ type: 'state_change' });
+      this.emit({ type: 'tree_change' });
+    });
   }
 
   private async flushPendingBashMessages(): Promise<void> {
@@ -1166,12 +1481,18 @@ export class AgentSession implements CoreDisposable {
       throw new Error('startUserMessage requires an idle replacement session');
     }
 
-    const started = await this.startPromptRun(text, images, 'extension', {
-      userMessageDetails: options?.details,
+    const submission = await this.submitOwnedAgentTurn(async () => {
+      const started = await this.startPromptRun(text, images, 'extension', {
+        userMessageDetails: options?.details,
+      });
+      if (!started) return { status: 'accepted' };
+      await started.accepted;
+      return { status: 'accepted', turn: started.turn };
     });
-    if (!started) return { turn: Promise.resolve() };
-    await started.accepted;
-    return { turn: started.turn };
+    if (submission.status !== 'accepted') {
+      throw new Error(submission.error ?? `Session mutation rejected: ${submission.status}`);
+    }
+    return { turn: submission.turn ?? Promise.resolve() };
   }
 
   async sendMessage<TDetails = unknown>(
@@ -1181,8 +1502,10 @@ export class AgentSession implements CoreDisposable {
     const { customMessage } = this.createCustomMessageFromInput(message);
 
     if (options?.deliverAs === 'nextTurn') {
-      this.pendingNextTurnMessages.push(customMessage);
-      this.emit({ type: 'state_change' });
+      await this.runSessionMutation('session_mutation', async () => {
+        this.pendingNextTurnMessages.push(customMessage);
+        this.emit({ type: 'state_change' });
+      });
       return;
     }
 
@@ -1218,10 +1541,6 @@ export class AgentSession implements CoreDisposable {
     return (await this.session.getMetadata()) as JsonlSessionMetadata;
   }
 
-  getBackingSession(): Session {
-    return this.session;
-  }
-
   getAllToolInfos(): ToolInfo[] {
     return [...this.toolRegistry.values()].map((entry) => ({
       name: entry.definition.name,
@@ -1242,16 +1561,20 @@ export class AgentSession implements CoreDisposable {
   }
 
   async appendEntry<TData = unknown>(customType: string, data?: TData): Promise<void> {
-    await this.session.appendCustomEntry(customType, data);
-    this.cachedLeafId = await this.session.getLeafId();
-    await this.rebuildCachedSessionBranch();
-    this.emit({ type: 'state_change' });
-    this.emit({ type: 'tree_change' });
+    await this.runSessionMutation('session_mutation', async () => {
+      await this.session.appendCustomEntry(customType, data);
+      this.cachedLeafId = await this.session.getLeafId();
+      await this.rebuildCachedSessionBranch();
+      this.emit({ type: 'state_change' });
+      this.emit({ type: 'tree_change' });
+    });
   }
 
   async setSessionName(name: string): Promise<void> {
-    await this.session.appendSessionName(name);
-    this.emit({ type: 'state_change' });
+    await this.runSessionMutation('session_mutation', async () => {
+      await this.session.appendSessionName(name);
+      this.emit({ type: 'state_change' });
+    });
   }
 
   async getSessionName(): Promise<string | undefined> {
@@ -1300,53 +1623,61 @@ export class AgentSession implements CoreDisposable {
     systemPrompt?: string;
     appendSystemPrompt?: string[];
   }): Promise<void> {
-    this.skills = resources.skills ?? [];
-    this.promptTemplates = resources.promptTemplates ?? [];
-    this.contextFiles = resources.contextFiles ?? [];
-    this.resourceSystemPrompt = resources.systemPrompt;
-    this.resourceAppendSystemPrompt = resources.appendSystemPrompt ?? [];
-    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
-    if (this.agent) {
-      this.agent.state.systemPrompt = this.lastSystemPrompt;
-      this.agent.state.tools = this.getActiveTools();
-    }
-    this.emit({ type: 'state_change' });
+    await this.runSessionMutation('session_mutation', async () => {
+      this.skills = resources.skills ?? [];
+      this.promptTemplates = resources.promptTemplates ?? [];
+      this.contextFiles = resources.contextFiles ?? [];
+      this.resourceSystemPrompt = resources.systemPrompt;
+      this.resourceAppendSystemPrompt = resources.appendSystemPrompt ?? [];
+      this.lastSystemPrompt = this.buildCurrentSystemPrompt();
+      if (this.agent) {
+        this.agent.state.systemPrompt = this.lastSystemPrompt;
+        this.agent.state.tools = this.getActiveTools();
+      }
+      this.emit({ type: 'state_change' });
+    });
   }
 
   async setActiveTools(toolNames: string[]): Promise<void> {
-    const missing = toolNames.filter((name) => !this.toolRegistry.has(name));
-    if (missing.length > 0) {
-      throw new Error(`Unknown tool(s): ${missing.join(', ')}`);
-    }
+    await this.runSessionMutation('session_mutation', async () => {
+      const missing = toolNames.filter((name) => !this.toolRegistry.has(name));
+      if (missing.length > 0) {
+        throw new Error(`Unknown tool(s): ${missing.join(', ')}`);
+      }
 
-    this.applyActiveToolState({
-      selection: { kind: 'custom', toolNames: [...new Set(toolNames)] },
-      activeToolNames: [...new Set(toolNames)],
+      this.applyActiveToolState({
+        selection: { kind: 'custom', toolNames: [...new Set(toolNames)] },
+        activeToolNames: [...new Set(toolNames)],
+      });
+      this.emit({ type: 'state_change' });
     });
-    this.emit({ type: 'state_change' });
   }
 
   async setToolProfile(profileId: string): Promise<void> {
-    const profile = findToolProfile(this.getToolProfiles(), profileId);
-    if (!profile) {
-      throw new Error(`Unknown tool profile: ${profileId}`);
-    }
+    await this.runSessionMutation('session_mutation', async () => {
+      const profile = findToolProfile(this.getToolProfiles(), profileId);
+      if (!profile) {
+        throw new Error(`Unknown tool profile: ${profileId}`);
+      }
 
-    this.applyActiveToolState({
-      selection: { kind: 'profile', profileId: profile.id },
-      activeToolNames: this.resolveProfileToolNames(profile),
+      this.applyActiveToolState({
+        selection: { kind: 'profile', profileId: profile.id },
+        activeToolNames: this.resolveProfileToolNames(profile),
+      });
+      this.emit({ type: 'state_change' });
     });
-    this.emit({ type: 'state_change' });
   }
 
   async refreshTools(): Promise<void> {
-    const previousRegistryNames = new Set(this.toolRegistry.keys());
-    this.rebuildToolRegistry();
-    this.normalizeActiveToolState(previousRegistryNames);
-    this.applyToolsToAgent();
-    this.lastSystemPrompt = this.buildCurrentSystemPrompt();
-    if (this.agent) this.agent.state.systemPrompt = this.lastSystemPrompt;
-    this.emit({ type: 'state_change' });
+    await this.runSessionMutation('session_mutation', async () => {
+      const previousRegistryNames = new Set(this.toolRegistry.keys());
+      this.rebuildToolRegistry();
+      this.normalizeActiveToolState(previousRegistryNames);
+      this.applyToolsToAgent();
+      this.lastSystemPrompt = this.buildCurrentSystemPrompt();
+      if (this.agent) this.agent.state.systemPrompt = this.lastSystemPrompt;
+      this.emit({ type: 'state_change' });
+    });
   }
 
   getSystemPrompt(): string {
@@ -1464,168 +1795,271 @@ export class AgentSession implements CoreDisposable {
   async navigateTree(
     targetId: string,
     options?: {
+      navigationId?: string;
       summarize?: boolean;
       customInstructions?: string;
       replaceInstructions?: boolean;
       label?: string;
     },
+    requestSignal?: AbortSignal,
   ): Promise<NavigateTreeResult> {
+    const navigationId = options?.navigationId ?? randomUUID();
     if (!this.agent) {
-      this.emit({ type: 'error', message: 'No active agent for tree navigation' });
-      return { cancelled: true };
-    }
-    if (this.branchSummaryAbortController) {
-      this.logger.appendLine('[scout] Tree navigation already running, ignoring duplicate');
-      return { cancelled: true };
-    }
-
-    const abortController = new AbortController();
-    this.branchSummaryAbortController = abortController;
-    try {
-      const oldLeafId = await this.session.getLeafId();
-      if (oldLeafId === targetId) return { cancelled: false };
-      const targetEntry = await this.session.getEntry(targetId);
-      if (!targetEntry) throw new Error(`Entry ${targetId} not found`);
-
-      const { entries, commonAncestorId } = collectEntriesForBranchSummary(
-        this.session,
-        oldLeafId,
-        targetId,
-      );
-      const preparation = {
-        targetId,
-        oldLeafId,
-        commonAncestorId,
-        entriesToSummarize: entries,
-        userWantsSummary: options?.summarize ?? false,
-        customInstructions: options?.customInstructions,
-        replaceInstructions: options?.replaceInstructions,
-        label: options?.label,
+      return {
+        navigationId,
+        status: 'failed_before_commit',
+        error: 'No active agent for tree navigation',
       };
-      const branchSummarySettings = this.configManager.getBranchSummarySettings();
-      const hookResult = await this.extensionRunner?.emitSessionBeforeTree({
-        type: 'session_before_tree',
-        preparation,
-        signal: abortController.signal,
-      });
-      if (hookResult?.cancel || abortController.signal.aborted) return { cancelled: true };
+    }
+    const admission = this.getTreeNavigationAdmission();
+    if (!admission.allowed) {
+      return {
+        navigationId,
+        status:
+          admission.reason === 'session_blocked' || admission.reason === 'session_unavailable'
+            ? 'blocked'
+            : 'busy',
+        error: admission.message,
+      };
+    }
+    const sessionPath = this.sessionFile;
+    const executionBegin =
+      this.sessionExecution && sessionPath
+        ? this.sessionExecution.tryBegin({
+            kind: 'tree_navigation',
+            operationId: navigationId,
+            session: { sessionId: this.sessionId, sessionPath },
+          })
+        : undefined;
+    if (executionBegin && !executionBegin.ok) {
+      return { navigationId, status: executionBegin.reason };
+    }
+    const executionLease = executionBegin?.ok ? executionBegin.lease : undefined;
+    const operation = this.operations.startExclusive('treeNavigation', requestSignal);
+    if (!operation) {
+      executionLease?.finish();
+      this.logger.appendLine('[scout] Tree navigation already running, ignoring duplicate');
+      return { navigationId, status: 'busy' };
+    }
 
-      let summaryEntry: BranchSummaryEntry | undefined;
-      let summaryText = options?.summarize ? hookResult?.summary?.summary : undefined;
-      let summaryDetails: unknown = options?.summarize ? hookResult?.summary?.details : undefined;
-      if (!summaryText && options?.summarize && entries.length > 0) {
-        const model = this.agent.state.model;
-        if (!model) throw new Error('No model set for branch summary');
-        const auth = await this.getApiKeyAndHeaders(model);
-        if (!auth) throw new Error('No auth available for branch summary');
-        const summaryResult = await generateBranchSummary(entries, {
-          model,
-          apiKey: auth.apiKey,
-          headers: auth.headers,
-          signal: abortController.signal,
-          customInstructions: hookResult?.customInstructions ?? options?.customInstructions,
-          replaceInstructions: hookResult?.replaceInstructions ?? options?.replaceInstructions,
-          reserveTokens: branchSummarySettings.reserveTokens,
-        });
-        if (summaryResult.aborted) return { cancelled: true };
-        if (summaryResult.error) throw new Error(summaryResult.error);
-        summaryText = summaryResult.summary;
-        summaryDetails = {
-          readFiles: summaryResult.readFiles,
-          modifiedFiles: summaryResult.modifiedFiles,
+    let committed = false;
+    let editorText: string | undefined;
+    let summaryEntry: BranchSummaryEntry | undefined;
+    try {
+      const run = async (): Promise<NavigateTreeResult> => {
+        executionLease?.transition('preflight');
+        if (operation.signal.aborted) return { navigationId, status: 'cancelled' };
+        const oldLeafId = this.session.getLeafId();
+        const targetEntry = this.session.getEntry(targetId);
+        if (!targetEntry) throw new Error(`Entry ${targetId} not found`);
+        const reopensComposer =
+          (targetEntry.type === 'message' && targetEntry.message.role === 'user') ||
+          targetEntry.type === 'custom_message';
+        if (oldLeafId === targetId && !reopensComposer) {
+          return { navigationId, status: 'committed' };
+        }
+
+        const { entries, commonAncestorId } = collectEntriesForBranchSummary(
+          this.session,
+          oldLeafId,
+          targetId,
+        );
+        const preparation = {
+          targetId,
+          oldLeafId,
+          commonAncestorId,
+          entriesToSummarize: entries,
+          userWantsSummary: options?.summarize ?? false,
+          customInstructions: options?.customInstructions,
+          replaceInstructions: options?.replaceInstructions,
+          label: options?.label,
         };
-      }
-      if (abortController.signal.aborted) return { cancelled: true };
+        const branchSummarySettings = this.configManager.getBranchSummarySettings();
+        const hookResult = await this.extensionRunner?.emitSessionBeforeTree({
+          type: 'session_before_tree',
+          preparation,
+          signal: operation.signal,
+        });
+        if (hookResult?.cancel || operation.signal.aborted) {
+          return { navigationId, status: 'cancelled' };
+        }
 
-      let editorText: string | undefined;
-      let newLeafId: string | null;
-      if (targetEntry.type === 'message' && targetEntry.message.role === 'user') {
-        newLeafId = targetEntry.parentId;
-        const content = targetEntry.message.content;
-        editorText =
-          typeof content === 'string'
-            ? content
-            : content
-                .filter(
-                  (part): part is { readonly type: 'text'; readonly text: string } =>
-                    part.type === 'text',
-                )
-                .map((part) => part.text)
-                .join('');
-      } else if (targetEntry.type === 'custom_message') {
-        newLeafId = targetEntry.parentId;
-        editorText =
-          typeof targetEntry.content === 'string'
-            ? targetEntry.content
-            : targetEntry.content
-                .filter(
-                  (part): part is { readonly type: 'text'; readonly text: string } =>
-                    part.type === 'text',
-                )
-                .map((part) => part.text)
-                .join('');
-      } else {
-        newLeafId = targetId;
-      }
+        let summaryText = options?.summarize ? hookResult?.summary?.summary : undefined;
+        let summaryDetails: unknown = options?.summarize ? hookResult?.summary?.details : undefined;
+        if (!summaryText && options?.summarize && entries.length > 0) {
+          const model = this.agent!.state.model;
+          if (!model) throw new Error('No model set for branch summary');
+          const auth = await this.getApiKeyAndHeaders(model);
+          if (!auth) throw new Error('No auth available for branch summary');
+          const summaryResult = await generateBranchSummary(entries, {
+            model,
+            apiKey: auth.apiKey,
+            headers: auth.headers,
+            signal: operation.signal,
+            customInstructions: hookResult?.customInstructions ?? options?.customInstructions,
+            replaceInstructions: hookResult?.replaceInstructions ?? options?.replaceInstructions,
+            reserveTokens: branchSummarySettings.reserveTokens,
+          });
+          if (summaryResult.aborted) return { navigationId, status: 'cancelled' };
+          if (summaryResult.error) throw new Error(summaryResult.error);
+          summaryText = summaryResult.summary;
+          summaryDetails = {
+            readFiles: summaryResult.readFiles,
+            modifiedFiles: summaryResult.modifiedFiles,
+          };
+        }
+        if (operation.signal.aborted) return { navigationId, status: 'cancelled' };
 
-      const summaryId = await this.session.moveTo(
-        newLeafId,
-        summaryText
-          ? {
-              summary: summaryText,
-              details: summaryDetails,
-              fromHook: hookResult?.summary !== undefined,
-            }
-          : undefined,
-      );
-      if (summaryId) {
-        const entry = await this.session.getEntry(summaryId);
-        if (entry?.type === 'branch_summary') summaryEntry = entry;
-      }
+        let newLeafId: string | null;
+        if (targetEntry.type === 'message' && targetEntry.message.role === 'user') {
+          newLeafId = targetEntry.parentId;
+          const content = targetEntry.message.content;
+          editorText =
+            typeof content === 'string'
+              ? content
+              : content
+                  .filter(
+                    (part): part is { readonly type: 'text'; readonly text: string } =>
+                      part.type === 'text',
+                  )
+                  .map((part) => part.text)
+                  .join('');
+        } else if (targetEntry.type === 'custom_message') {
+          newLeafId = targetEntry.parentId;
+          editorText =
+            typeof targetEntry.content === 'string'
+              ? targetEntry.content
+              : targetEntry.content
+                  .filter(
+                    (part): part is { readonly type: 'text'; readonly text: string } =>
+                      part.type === 'text',
+                  )
+                  .map((part) => part.text)
+                  .join('');
+        } else {
+          newLeafId = targetId;
+        }
 
-      const label = hookResult?.label ?? options?.label;
-      if (label) {
-        await this.session.appendLabel(summaryId ?? targetId, label);
-      }
+        // Tree mutation is the navigation linearization point: cancellation is honored before
+        // this synchronous commit, while post-commit reconciliation must run to completion.
+        const summaryId = this.session.moveTo(
+          newLeafId,
+          summaryText
+            ? {
+                summary: summaryText,
+                details: summaryDetails,
+                fromHook: hookResult?.summary !== undefined,
+              }
+            : undefined,
+        );
+        committed = true;
+        executionLease?.transition('reconciling');
+        if (summaryId) {
+          const entry = this.session.getEntry(summaryId);
+          if (entry?.type === 'branch_summary') summaryEntry = entry;
+        }
 
-      const result: NavigateTreeResult = { cancelled: false, editorText, summaryEntry };
-      await this.extensionRunner?.emit({
-        type: 'session_tree',
-        newLeafId: await this.session.getLeafId(),
-        oldLeafId,
-        summaryEntry,
-        fromHook: hookResult?.summary !== undefined,
-        fromExtension: hookResult?.summary !== undefined,
-      });
-      if (!result.cancelled) {
+        const label = hookResult?.label ?? options?.label;
+        if (label) {
+          try {
+            await this.session.appendLabel(summaryId ?? targetId, label);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            this.logger.appendLine(`[scout] Tree navigation label update failed: ${errorMessage}`);
+            this.emit({
+              type: 'notification',
+              level: 'warning',
+              message: `Tree navigation committed, but label update failed: ${errorMessage}`,
+            });
+          }
+        }
+
         await this.syncRuntimeMessagesFromSession();
-        await this.rebuildCachedSessionBranch();
+        await this.rebuildCachedSessionBranchStrict();
         this.emit({ type: 'state_change' });
         this.emit({ type: 'tree_change' });
-      }
-      return result;
+        try {
+          await this.extensionRunner?.emit({
+            type: 'session_tree',
+            newLeafId: this.session.getLeafId(),
+            oldLeafId,
+            summaryEntry,
+            fromHook: hookResult?.summary !== undefined,
+            fromExtension: hookResult?.summary !== undefined,
+          });
+        } catch (error) {
+          this.logger.appendLine(
+            `[scout] Extension session_tree notification failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        return {
+          navigationId,
+          status: 'committed',
+          editorText,
+        };
+      };
+      return await (executionLease ? executionLease.run(run) : run());
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.appendLine(`[scout] Navigate tree failed: ${errorMessage}`);
-      this.emit({ type: 'error', message: `Navigate tree failed: ${errorMessage}` });
-      return { cancelled: true };
-    } finally {
-      if (this.branchSummaryAbortController === abortController) {
-        this.branchSummaryAbortController = undefined;
+      if (committed) {
+        this.sessionExecution?.block(navigationId, errorMessage);
+        this.logger.appendLine(`[scout] Tree navigation reconciliation failed: ${errorMessage}`);
+        return {
+          navigationId,
+          status: 'blocked_after_commit',
+          editorText,
+          error: errorMessage,
+        };
       }
+      if (operation.signal.aborted) return { navigationId, status: 'cancelled' };
+      this.logger.appendLine(`[scout] Navigate tree failed: ${errorMessage}`);
+      return { navigationId, status: 'failed_before_commit', error: errorMessage };
+    } finally {
+      operation.finish();
+      executionLease?.finish();
     }
   }
 
   /** 设置/清除 entry 标签 */
   async setLabel(entryId: string, label?: string): Promise<void> {
+    const sessionPath = this.sessionFile;
+    const executionBegin =
+      this.sessionExecution && sessionPath
+        ? this.sessionExecution.tryBegin({
+            kind: 'tree_mutation',
+            operationId: randomUUID(),
+            session: { sessionId: this.sessionId, sessionPath },
+          })
+        : undefined;
+    if (executionBegin && !executionBegin.ok) {
+      throw new Error(`Tree mutation rejected: ${executionBegin.reason}`);
+    }
     try {
-      await this.session.appendLabel(entryId, label);
-      this.emit({ type: 'tree_change' });
+      const run = async () => {
+        await this.session.appendLabel(entryId, label);
+        this.emit({ type: 'tree_change' });
+      };
+      await (executionBegin?.ok ? executionBegin.lease.run(run) : run());
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.appendLine(`[scout] Set label failed: ${errorMessage}`);
       throw error;
+    } finally {
+      if (executionBegin?.ok) executionBegin.lease.finish();
     }
+  }
+
+  abortTreeNavigation(navigationId: string): boolean {
+    const activity = this.sessionExecution?.snapshot().activity;
+    if (
+      activity?.kind !== 'tree_navigation' ||
+      activity.operationId !== navigationId ||
+      activity.phase !== 'preflight'
+    ) {
+      return false;
+    }
+    this.operations.cancel('treeNavigation');
+    return true;
   }
 
   async waitForIdle(): Promise<void> {
@@ -1654,7 +2088,11 @@ export class AgentSession implements CoreDisposable {
     ) as ReplacedSessionContext;
     context.sendMessage = (message, options) => this.sendMessage(message, options);
     context.sendUserMessage = (content, options) => this.sendUserMessage(content, options);
-    context.startUserMessage = (content, options) => this.startUserMessage(content, options);
+    context.startUserMessage = async (content, options) => {
+      const started = await this.startUserMessage(content, options);
+      await started.turn;
+      return { turn: Promise.resolve() };
+    };
     return context;
   }
 
@@ -1730,6 +2168,7 @@ export class AgentSession implements CoreDisposable {
 
   dispose(): void {
     this.rejectAllPromptAcceptances(new Error('Agent session disposed before prompt acceptance'));
+    this.operations.dispose();
     this.extensionRunner?.invalidate();
     this.unsubscribeAgent?.();
     this.unsubscribeAgent = undefined;
@@ -1759,15 +2198,20 @@ export class AgentSession implements CoreDisposable {
    */
   private async rebuildCachedSessionBranch(): Promise<void> {
     try {
-      const next = await this.session.getBranch();
-      this.cachedBranch = next;
-      this.cachedLeafId = await this.session.getLeafId();
+      await this.rebuildCachedSessionBranchStrict();
     } catch (error) {
       this.logger.appendLine(
         `[scout] rebuildCachedSessionBranch failed: ${error instanceof Error ? error.message : String(error)}`,
       );
       this.cachedBranch = [];
     }
+  }
+
+  private async rebuildCachedSessionBranchStrict(): Promise<void> {
+    const next = await this.session.getBranch();
+    const nextLeafId = await this.session.getLeafId();
+    this.cachedBranch = next;
+    this.cachedLeafId = nextLeafId;
   }
 
   async syncRuntimeMessagesFromSession(): Promise<AgentMessage[]> {
@@ -2027,13 +2471,13 @@ export class AgentSession implements CoreDisposable {
     }
   }
 
-  private async tryExecuteExtensionCommand(text: string): Promise<boolean> {
-    if (!text.startsWith('/') || !this.extensionRunner) return false;
+  private resolveExtensionCommand(text: string): ResolvedExtensionCommand | undefined {
+    if (!text.startsWith('/') || !this.extensionRunner) return undefined;
 
     const spaceIndex = text.search(/\s/);
     const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
     const args = spaceIndex === -1 ? '' : text.slice(spaceIndex + 1);
-    if (!commandName || commandName.startsWith('skill:')) return false;
+    if (!commandName || commandName.startsWith('skill:')) return undefined;
 
     const getCommand = (
       this.extensionRunner as {
@@ -2041,19 +2485,26 @@ export class AgentSession implements CoreDisposable {
       }
     ).getCommand;
     const command = getCommand?.call(this.extensionRunner, commandName);
-    if (!command) return false;
+    if (!command) return undefined;
 
+    return { args, command, name: commandName };
+  }
+
+  private async executeExtensionCommand(
+    command: ResolvedExtensionCommand,
+  ): Promise<ExtensionCommandResult> {
     try {
-      await command.handler(args, this.extensionRunner.createCommandContext());
+      await command.command.handler(command.args, this.extensionRunner!.createCommandContext());
     } catch (error) {
-      this.extensionRunner.emitError({
-        extensionPath: `command:${commandName}`,
+      this.extensionRunner!.emitError({
+        extensionPath: `command:${command.name}`,
         event: 'command',
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
       });
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
-    return true;
+    return { success: true };
   }
 
   private throwIfExtensionCommand(text: string): void {
@@ -2190,36 +2641,40 @@ export class AgentSession implements CoreDisposable {
   }
 
   private async appendCustomMessageWithLifecycle(message: CustomMessage): Promise<void> {
-    await this.session.appendCustomMessageEntry(
-      message.customType,
-      message.content,
-      message.display,
-      message.details,
-    );
-    this.appendRuntimeMessage(message);
-    await this.rebuildCachedSessionBranch();
-    this.emit({ type: 'state_change' });
-    this.emit({ type: 'tree_change' });
+    await this.runSessionMutation('session_mutation', async () => {
+      await this.session.appendCustomMessageEntry(
+        message.customType,
+        message.content,
+        message.display,
+        message.details,
+      );
+      this.appendRuntimeMessage(message);
+      await this.rebuildCachedSessionBranch();
+      this.emit({ type: 'state_change' });
+      this.emit({ type: 'tree_change' });
+    });
   }
 
   private async promptCustomMessage(message: CustomMessage): Promise<void> {
-    if (!this.agent) return;
+    await this.runSessionMutation('agent_turn', async () => {
+      if (!this.agent) return;
 
-    this.retryAttempt = 0;
+      this.retryAttempt = 0;
 
-    try {
-      this.queuedMessages.resumeFollowUps();
-      this._isStreaming = true;
-      this.emit({ type: 'state_change' });
-      const messages = await this.prepareAgentStartMessages(message, undefined);
-      await this.agent.prompt(messages);
-      await this.runPostAgentLoop();
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.appendLine(`[scout] Custom prompt error: ${errorMessage}`);
-      this._isStreaming = false;
-      this.emit({ type: 'error', message: errorMessage });
-    }
+      try {
+        this.queuedMessages.resumeFollowUps();
+        this._isStreaming = true;
+        this.emit({ type: 'state_change' });
+        const messages = await this.prepareAgentStartMessages(message, undefined);
+        await this.agent.prompt(messages);
+        await this.runPostAgentLoop();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.appendLine(`[scout] Custom prompt error: ${errorMessage}`);
+        this._isStreaming = false;
+        this.emit({ type: 'error', message: errorMessage });
+      }
+    });
   }
 
   /** 重建 Agent runtime（initialize/fork/resume 复用） */
@@ -2903,13 +3358,13 @@ export class AgentSession implements CoreDisposable {
     policy: QueueContinuationPolicy = {},
   ): Promise<boolean> {
     if (!this.agent) return false;
-    const abortController = new AbortController();
-    this.autoCompactionAbortController = abortController;
+    const operation = this.operations.startExclusive('autoCompaction');
+    if (!operation) return false;
     this.emit({ type: 'compaction_start', reason });
     try {
       this.logger.appendLine(`[scout] Running auto compaction: ${reason}`);
       const result = await this.runCompactionCore({
-        signal: abortController.signal,
+        signal: operation.signal,
         settings: this.configManager.getCompactionSettings(),
       });
       await this.syncRuntimeMessagesFromSession();
@@ -2935,7 +3390,7 @@ export class AgentSession implements CoreDisposable {
       return this.hasContinuationPendingMessages(policy);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      const aborted = abortController.signal.aborted;
+      const aborted = operation.signal.aborted;
       this.logger.appendLine(`[scout] Compaction failed: ${errorMessage}`);
       this.emit({
         type: 'compaction_end',
@@ -2950,9 +3405,7 @@ export class AgentSession implements CoreDisposable {
       });
       return false;
     } finally {
-      if (this.autoCompactionAbortController === abortController) {
-        this.autoCompactionAbortController = undefined;
-      }
+      operation.finish();
     }
   }
 
@@ -2996,16 +3449,17 @@ export class AgentSession implements CoreDisposable {
     // 保留持久 session history，只清理本次自动重试 runtime context 中的失败 assistant error。
     await this.removeLastRuntimeAssistantMessage();
 
-    this.retryAbortController = new AbortController();
+    const operation = this.operations.startExclusive('retry');
+    if (!operation) return false;
     try {
-      await this.interruptibleSleep(delayMs, this.retryAbortController.signal);
+      await this.interruptibleSleep(delayMs, operation.signal);
     } catch {
       const attempt = this.retryAttempt;
       this.retryAttempt = 0;
       this.emitAutoRetryEnd(false, attempt, 'Retry cancelled');
       return false;
     } finally {
-      this.retryAbortController = undefined;
+      operation.finish();
     }
 
     return true;

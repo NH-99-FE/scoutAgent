@@ -37,6 +37,7 @@ export interface ScoutProtocolHostServicesOptions {
   sessionIndex: SessionIndex;
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
+  openChatSurface?: () => void | Promise<void>;
   openChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
     options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
@@ -147,6 +148,7 @@ export function createScoutProtocolHostServices(
     pushState: (surface) => bundle.state.pushState(surface),
     requestSessions: (surface) => bundle.session.pushSessionsUpdate(surface),
     publishEvent: (message, surface) => bundle.eventPublisher.publish(message, surface),
+    openChatSurface: options.openChatSurface,
   });
 
   bundle.session = new SessionProtocolService({
@@ -287,13 +289,15 @@ export function createScoutProtocolHostServices(
       openSkillFile: (message, respond) => bundle.skills.openSkillFile(message, respond),
     },
     session: {
-      userMessage: (message) => bundle.session.userMessage(message),
+      userMessage: (message, respond) => bundle.session.userMessage(message, respond),
+      acknowledgeComposerIntent: (message, respond) =>
+        bundle.session.acknowledgeComposerIntent(message, respond),
       newSessionMessage: (message, respond) => bundle.session.newSessionMessage(message, respond),
       cancelFollowUp: (message) => bundle.session.cancelFollowUp(message),
       promoteFollowUp: (message) => bundle.session.promoteFollowUp(message),
       compact: (message) => bundle.session.compact(message),
       continueSession: (message) => bundle.session.continueSession(message),
-      clearConversation: () => bundle.session.clearConversation(),
+      clearConversation: (message) => bundle.session.clearConversation(message),
       requestSessions: (respond) => bundle.session.requestSessions(respond),
       openTask: (message, respond) => bundle.session.openTask(message, respond),
       restoreSession: (message, respond) => bundle.session.restoreSession(message, respond),
@@ -311,7 +315,9 @@ export function createScoutProtocolHostServices(
       requestForkCandidates: (message, respond) =>
         bundle.tree.requestForkCandidates(message, respond),
       requestTree: (respond) => bundle.tree.requestTree(respond),
-      navigateTree: (message, respond) => bundle.tree.navigateTree(message, respond),
+      navigateTree: (message, respond, signal) =>
+        bundle.tree.navigateTree(message, respond, signal),
+      abortTreeNavigation: (message, respond) => bundle.tree.abortTreeNavigation(message, respond),
       setLabel: (message, respond) => bundle.tree.setLabel(message, respond),
     },
     mention: {

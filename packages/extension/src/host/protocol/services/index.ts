@@ -97,8 +97,14 @@ export function registerScoutProtocolServices(
   });
 
   registerProtocolServiceHandlers(server, 'session', {
-    user_message: async (message) => {
-      await services.session.userMessage(payload<'user_message'>(message));
+    user_message: async (message, context) => {
+      await services.session.userMessage(payload<'user_message'>(message), context.respond);
+    },
+    ack_composer_intent: async (message, context) => {
+      await services.session.acknowledgeComposerIntent(
+        payload<'ack_composer_intent'>(message),
+        context.respond,
+      );
     },
     new_session_message: async (message, context) => {
       await services.session.newSessionMessage(
@@ -118,8 +124,8 @@ export function registerScoutProtocolServices(
     continue_session: async (message) => {
       await services.session.continueSession(payload<'continue_session'>(message));
     },
-    clear_conversation: () => {
-      services.session.clearConversation();
+    clear_conversation: async (message) => {
+      await services.session.clearConversation(payload<'clear_conversation'>(message));
     },
     request_sessions: async (_message, context) => {
       await services.session.requestSessions(context.respond);
@@ -170,7 +176,17 @@ export function registerScoutProtocolServices(
       await services.tree.requestTree(context.respond);
     },
     navigate_tree: async (message, context) => {
-      await services.tree.navigateTree(payload<'navigate_tree'>(message), context.respond);
+      await services.tree.navigateTree(
+        payload<'navigate_tree'>(message),
+        context.respond,
+        context.signal,
+      );
+    },
+    abort_tree_navigation: async (message, context) => {
+      await services.tree.abortTreeNavigation(
+        payload<'abort_tree_navigation'>(message),
+        context.respond,
+      );
     },
     set_label: async (message, context) => {
       await services.tree.setLabel(payload<'set_label'>(message), context.respond);

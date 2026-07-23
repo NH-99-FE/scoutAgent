@@ -10,10 +10,7 @@ import {
   createDefaultSessionExportFileName,
   readSessionFileInfo,
 } from '../../../core/session/index.ts';
-import type {
-  ExtensionSessionCoordinator,
-  UserSessionOperationToken,
-} from '../../session-coordinator.ts';
+import type { ExtensionSessionCoordinator } from '../../session-coordinator.ts';
 import type { SessionIndex } from '../../session-index.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
 import { type ProtocolPayload, type ProtocolResponder, type SessionProtocolHost } from './types.ts';
@@ -35,7 +32,6 @@ interface RestoreSessionByPathResult {
   type: 'restore_session_result';
   success: boolean;
   error?: string;
-  stale?: boolean;
 }
 
 // ---------- Service ----------
@@ -64,49 +60,55 @@ export class SessionProtocolService implements SessionProtocolHost {
     this.logError = options.logError;
   }
 
-  async userMessage(message: ProtocolPayload<'user_message'>): Promise<void> {
-    await this.sessionManager.prompt(message.text, {
+  async userMessage(
+    message: ProtocolPayload<'user_message'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    const submission = await this.sessionManager.prompt(message.text, {
+      session: message.session,
       deliverAs: message.deliverAs,
       document: message.document,
       images: message.images,
       clearFollowUpQueue: message.clearFollowUpQueue,
     });
+    const { turn, ...result } = submission;
+    respond({ type: 'user_message_result', ...result });
+    if (result.status !== 'accepted') return;
     await this.pushState();
+    void turn?.catch((error) => {
+      this.logError(
+        `[scout] Accepted user message turn failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+  }
+
+  async acknowledgeComposerIntent(
+    message: ProtocolPayload<'ack_composer_intent'>,
+    respond: ProtocolResponder,
+  ): Promise<void> {
+    const acknowledged = this.sessionManager.acknowledgeComposerIntent(
+      message.version,
+      message.session,
+    );
+    respond({
+      type: 'ack_composer_intent_result',
+      status: acknowledged ? 'acknowledged' : 'stale',
+    });
+    if (acknowledged) await this.pushState('chat');
   }
 
   async newSessionMessage(
     message: ProtocolPayload<'new_session_message'>,
     respond: ProtocolResponder,
   ): Promise<void> {
-    const operation = this.sessionManager.beginUserSessionOperation('new_session_message');
     let turnPromise: Promise<void> | undefined;
 
     try {
-      const operationResult = await this.sessionManager.newUserSession(operation, {
+      const result = await this.sessionManager.newSession({
         toolProfileId: message.toolProfileId,
-        withSession: async (ctx) => {
-          if (!operation.isLatest()) return;
-          const content =
-            message.images && message.images.length > 0
-              ? [{ type: 'text' as const, text: message.text }, ...message.images]
-              : message.text;
-          const started = await ctx.startUserMessage(content, { details: message.document });
-          turnPromise = started.turn;
-        },
       });
-      this.watchNewSessionInitialTurn(operation, turnPromise);
-      if (operationResult.status === 'stale') {
-        return;
-      }
-      if (operationResult.status === 'failed') {
-        respond({
-          type: 'new_session_result',
-          success: false,
-          error: operationResult.error,
-        });
-        return;
-      }
-      const result = operationResult.value;
       if (result.cancelled) {
         respond({
           type: 'new_session_result',
@@ -115,6 +117,18 @@ export class SessionProtocolService implements SessionProtocolHost {
         });
         return;
       }
+      const session = this.sessionManager.sessionIdentity;
+      if (!session) throw new Error('New session is unavailable');
+      const submission = await this.sessionManager.prompt(message.text, {
+        session,
+        images: message.images,
+        document: message.document,
+      });
+      if (submission.status !== 'accepted') {
+        throw new Error(submission.error ?? `Initial message rejected: ${submission.status}`);
+      }
+      turnPromise = submission.turn;
+      this.watchNewSessionInitialTurn(turnPromise);
       await this.pushState();
       this.sessionIndex.invalidate();
       respond({ type: 'new_session_result', success: true });
@@ -141,6 +155,7 @@ export class SessionProtocolService implements SessionProtocolHost {
   }
 
   async compact(message: ProtocolPayload<'compact'>): Promise<void> {
+    if (!this.sessionManager.matchesSessionIdentity(message.session)) return;
     try {
       await this.sessionManager.compact(message.customInstructions);
     } catch (error) {
@@ -153,13 +168,16 @@ export class SessionProtocolService implements SessionProtocolHost {
   }
 
   async continueSession(message: ProtocolPayload<'continue_session'>): Promise<void> {
+    if (!this.sessionManager.matchesSessionIdentity(message.session)) return;
     await this.sessionManager.continue({
       preserveFollowUpQueue: message.preserveFollowUpQueue,
     });
   }
 
-  clearConversation(): void {
-    void this.sessionManager.newSession();
+  async clearConversation(message: ProtocolPayload<'clear_conversation'>): Promise<void> {
+    if (!this.sessionManager.matchesSessionIdentity(message.session)) return;
+    const result = await this.sessionManager.newSession();
+    if (result.cancelled) throw new Error('New session cancelled');
     this.sessionIndex.invalidate();
   }
 
@@ -196,15 +214,12 @@ export class SessionProtocolService implements SessionProtocolHost {
   }
 
   async openTask(message: ProtocolPayload<'open_task'>, respond: ProtocolResponder): Promise<void> {
-    const operation = this.sessionManager.beginUserSessionOperation('open_task');
     try {
       const result = await this.restoreSessionByPath({
         sessionId: message.taskId,
         sessionPath: message.sessionPath,
         cwdOverride: message.cwdOverride,
-        operation,
       });
-      if (result.stale) return;
       respond({
         type: 'open_task_result',
         sessionPath: message.sessionPath,
@@ -225,10 +240,8 @@ export class SessionProtocolService implements SessionProtocolHost {
     message: ProtocolPayload<'restore_session'>,
     respond: ProtocolResponder,
   ): Promise<void> {
-    const operation = this.sessionManager.beginUserSessionOperation('restore_session');
     try {
-      const result = await this.restoreSessionByPath({ ...message, operation });
-      if (result.stale) return;
+      const result = await this.restoreSessionByPath(message);
       respond(result);
     } catch (error) {
       respond({
@@ -372,6 +385,10 @@ export class SessionProtocolService implements SessionProtocolHost {
     message: ProtocolPayload<'set_session_name'>,
     respond: ProtocolResponder,
   ): Promise<void> {
+    if (!this.sessionManager.matchesSessionIdentity(message.session)) {
+      respond({ type: 'set_session_name_result', success: false, error: 'stale' });
+      return;
+    }
     try {
       await this.sessionManager.setSessionName(message.name);
       this.sessionIndex.invalidate();
@@ -388,20 +405,15 @@ export class SessionProtocolService implements SessionProtocolHost {
     }
   }
 
-  private watchNewSessionInitialTurn(
-    operation: UserSessionOperationToken,
-    turnPromise: Promise<void> | undefined,
-  ): void {
+  private watchNewSessionInitialTurn(turnPromise: Promise<void> | undefined): void {
     if (!turnPromise) return;
     void turnPromise
       .then(async () => {
-        if (!operation.isLatest()) return;
         await this.pushState();
         this.sessionIndex.invalidate();
         await this.requestRecentTasks();
       })
       .catch((error) => {
-        if (!operation.isLatest()) return;
         this.publishEvent({
           type: 'notification',
           level: 'error',
@@ -418,16 +430,8 @@ export class SessionProtocolService implements SessionProtocolHost {
     sessionId: string;
     sessionPath: string;
     cwdOverride?: string;
-    operation?: UserSessionOperationToken;
   }): Promise<RestoreSessionByPathResult> {
     const sessions = await this.listAvailableSessions();
-    if (message.operation && !message.operation.isLatest()) {
-      return {
-        type: 'restore_session_result',
-        success: false,
-        stale: true,
-      };
-    }
 
     const target = this.findSessionByPath(sessions, message);
     if (!target) {
@@ -439,13 +443,6 @@ export class SessionProtocolService implements SessionProtocolHost {
     }
 
     const cwd = message.cwdOverride ?? (await this.resolveSessionCwd(target.cwd));
-    if (message.operation && !message.operation.isLatest()) {
-      return {
-        type: 'restore_session_result',
-        success: false,
-        stale: true,
-      };
-    }
     if (!cwd) {
       return {
         type: 'restore_session_result',
@@ -454,30 +451,7 @@ export class SessionProtocolService implements SessionProtocolHost {
       };
     }
 
-    const operationResult = message.operation
-      ? await this.sessionManager.restoreUserSession(message.operation, target, {
-          cwdOverride: cwd,
-        })
-      : {
-          status: 'completed' as const,
-          value: await this.sessionManager.restore(target, { cwdOverride: cwd }),
-        };
-    if (operationResult.status === 'stale') {
-      return {
-        type: 'restore_session_result',
-        success: false,
-        stale: true,
-      };
-    }
-    if (operationResult.status === 'failed') {
-      return {
-        type: 'restore_session_result',
-        success: false,
-        error: operationResult.error,
-      };
-    }
-
-    const result = operationResult.value;
+    const result = await this.sessionManager.restore(target, { cwdOverride: cwd });
     if (!result.cancelled) {
       await this.pushState();
       await this.pushTreeData();

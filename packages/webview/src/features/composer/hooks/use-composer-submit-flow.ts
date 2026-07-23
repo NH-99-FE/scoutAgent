@@ -9,6 +9,7 @@ import { retainComposerImageLease, type ComposerImageLease } from '@/store/compo
 import { getComposerDraftSnapshot, useComposerActions } from '@/store/composer-store';
 import type { ComposerDocument, ComposerImageDescriptor } from '@/store/composer-store';
 import { getComposerPlainText, hasComposerReferences } from '@/store/composer-document';
+import { useConversationStore } from '@/store/conversation-store';
 import { getVisualBusyStateSnapshot } from '@/store/runtime-overlay-store';
 import { useSessionStore } from '@/store/session-store';
 import { useUiActions, useUiStore } from '@/store/ui-store';
@@ -16,6 +17,7 @@ import { ComposerImageEncodeError, encodeComposerImageAttachments } from '../mod
 import {
   formatComposerSubmitText,
   INITIAL_COMPOSER_SUBMIT_STATE,
+  isComposerSubmissionBlocked,
   reduceComposerSubmitState,
 } from '../model/composer-submit';
 import type {
@@ -30,15 +32,18 @@ interface ComposerSubmitContext {
   generation: number;
   mode: ComposerMode;
   sessionId: string;
+  sessionPath: string;
 }
 
 interface SubmitGeneration {
   mode: ComposerMode;
   sessionId: string;
+  sessionPath: string;
   value: number;
 }
 
 interface UseComposerSubmitFlowOptions {
+  draftKey: string;
   document: ComposerDocument;
   images: ComposerImageDescriptor[];
   isStreaming: boolean;
@@ -47,7 +52,9 @@ interface UseComposerSubmitFlowOptions {
   onBeginNewSessionRequest?: () => void;
   onMessageSent?: () => void;
   queueState: ScoutQueueState;
+  sendBlocked: boolean;
   sessionId: string;
+  sessionPath: string;
   submitDisabled: boolean;
 }
 
@@ -65,6 +72,7 @@ interface ComposerSubmitFlow {
 const COMPACTION_SEND_BLOCKED_MESSAGE = '正在压缩上下文，请等待压缩完成后再发送';
 
 export function useComposerSubmitFlow({
+  draftKey,
   document,
   images,
   isStreaming,
@@ -73,7 +81,9 @@ export function useComposerSubmitFlow({
   onBeginNewSessionRequest,
   onMessageSent,
   queueState,
+  sendBlocked,
   sessionId,
+  sessionPath,
   submitDisabled,
 }: UseComposerSubmitFlowOptions): ComposerSubmitFlow {
   const [submitState, dispatchSubmitState] = useReducer(
@@ -85,7 +95,7 @@ export function useComposerSubmitFlow({
   const composerActions = useComposerActions();
   const uiActions = useUiActions();
   const { createSubmitContext, isSubmitContextActive, isSubmitContextMounted } =
-    useComposerSubmitContextGuard(mode, sessionId);
+    useComposerSubmitContextGuard(mode, sessionId, sessionPath);
 
   const isCurrentSessionMode = mode === 'currentSession';
   const hasText = getComposerPlainText(document).trim().length > 0;
@@ -95,7 +105,7 @@ export function useComposerSubmitFlow({
   const submitBusy = submitState.phase !== 'idle';
   const isSubmitPending = (mode === 'newSession' && submitDisabled) || submitBusy;
   const isDraftLocked = (mode === 'newSession' && submitDisabled) || submitBusy;
-  const canSubmit = hasDraft && !submitDisabled && !submitBusy;
+  const canSubmit = hasDraft && !submitDisabled && !submitBusy && !sendBlocked;
 
   const transitionSubmitState = useCallback((action: ComposerSubmitStateAction) => {
     submitStateRef.current = reduceComposerSubmitState(submitStateRef.current, action);
@@ -147,11 +157,11 @@ export function useComposerSubmitFlow({
 
   const blockCompactionSubmit = useCallback(
     (payload: ComposerSubmitPayload) => {
-      const currentImageCount = getComposerDraftSnapshot(sessionId).images?.length ?? 0;
+      const currentImageCount = getComposerDraftSnapshot(draftKey).images?.length ?? 0;
       if (payload.images && payload.images.length > 0 && currentImageCount === 0) {
         const restoredImageLease = retainComposerImageLease(payload.images);
         const restoredImages = restoredImageLease?.transfer() ?? [];
-        composerActions.addImages(sessionId, restoredImages);
+        composerActions.addImages(draftKey, restoredImages);
       }
       setLeasedPendingSubmit(null);
       uiActions.setNotification({
@@ -160,7 +170,29 @@ export function useComposerSubmitFlow({
         message: COMPACTION_SEND_BLOCKED_MESSAGE,
       });
     },
-    [composerActions, sessionId, setLeasedPendingSubmit, uiActions],
+    [composerActions, draftKey, setLeasedPendingSubmit, uiActions],
+  );
+
+  const blockCurrentSessionSubmit = useCallback(
+    (payload: ComposerSubmitPayload): boolean => {
+      if (!isCurrentSessionMode) return false;
+      const busyState = getVisualBusyStateSnapshot();
+      const conversation = useConversationStore.getState();
+      if (
+        !isComposerSubmissionBlocked(
+          busyState,
+          conversation.isStreaming,
+          conversation.treeNavigationAdmission,
+        )
+      ) {
+        return false;
+      }
+      if (busyState.kind === 'compaction') {
+        blockCompactionSubmit(payload);
+      }
+      return true;
+    },
+    [blockCompactionSubmit, isCurrentSessionMode],
   );
 
   const encodeImagesForProtocol = useCallback(
@@ -186,12 +218,9 @@ export function useComposerSubmitFlow({
       options?: { clearFollowUpQueue?: boolean },
       context = createSubmitContext(),
     ) => {
-      if (submitDisabled || submitStateRef.current.phase !== 'idle') return;
+      if (submitDisabled || sendBlocked || submitStateRef.current.phase !== 'idle') return;
       if (!isSubmitContextActive(context)) return;
-      if (isCurrentSessionMode && getVisualBusyStateSnapshot().kind === 'compaction') {
-        blockCompactionSubmit(payload);
-        return;
-      }
+      if (blockCurrentSessionSubmit(payload)) return;
 
       let protocolImages: ScoutImageContent[] | undefined;
       if (payload.images && payload.images.length > 0) {
@@ -206,52 +235,63 @@ export function useComposerSubmitFlow({
       }
       if (
         submitDisabled ||
+        sendBlocked ||
         submitStateRef.current.phase !== 'idle' ||
         !isSubmitContextActive(context)
       ) {
         return;
       }
-      if (isCurrentSessionMode && getVisualBusyStateSnapshot().kind === 'compaction') {
-        blockCompactionSubmit(payload);
-        return;
-      }
+      if (blockCurrentSessionSubmit(payload)) return;
 
       if (mode === 'newSession') {
         transitionSubmitState({ type: 'block_new_session_submit' });
         onBeginNewSessionRequest?.();
-        composerActions.stagePendingDraft(sessionId, payload);
+        composerActions.stagePendingDraft(draftKey, payload);
         protocolClient.newSessionMessage(
           formatComposerSubmitText(payload),
           protocolImages,
           hasComposerReferences(payload.document) ? payload.document : undefined,
           newSessionToolProfileId,
         );
-        composerActions.clearDraft(sessionId);
+        composerActions.clearDraft(draftKey);
         setLeasedPendingSubmit(null);
         return;
       }
-      protocolClient.userMessage(formatComposerSubmitText(payload), deliverAs, {
-        ...options,
-        document: hasComposerReferences(payload.document) ? payload.document : undefined,
-        images: protocolImages,
-      });
+      protocolClient.userMessage(
+        formatComposerSubmitText(payload),
+        deliverAs,
+        {
+          ...options,
+          document: hasComposerReferences(payload.document) ? payload.document : undefined,
+          images: protocolImages,
+        },
+        (result, requestId) => {
+          if (result.status === 'accepted') {
+            composerActions.discardPendingDraft(draftKey, requestId);
+          } else {
+            composerActions.restorePendingDraft(draftKey, requestId);
+          }
+        },
+        (_message, requestId) => composerActions.restorePendingDraft(draftKey, requestId),
+        (requestId) => composerActions.stagePendingDraft(draftKey, payload, requestId),
+      );
       onMessageSent?.();
-      composerActions.clearDraft(sessionId);
+      composerActions.clearDraft(draftKey);
       setLeasedPendingSubmit(null);
     },
     [
-      blockCompactionSubmit,
+      blockCurrentSessionSubmit,
       composerActions,
       encodeImagesForProtocol,
       createSubmitContext,
-      isCurrentSessionMode,
+      draftKey,
       isSubmitContextActive,
       mode,
       newSessionToolProfileId,
       onBeginNewSessionRequest,
       onMessageSent,
-      sessionId,
       setLeasedPendingSubmit,
+      sendBlocked,
       submitDisabled,
       notifyImageEncodeError,
       transitionSubmitState,
@@ -263,7 +303,7 @@ export function useComposerSubmitFlow({
       if (submitDisabled || submitStateRef.current.phase !== 'idle') return;
       const submitContext = createSubmitContext();
       if (!isSubmitContextActive(submitContext)) return;
-      const draft = getComposerDraftSnapshot(sessionId);
+      const draft = getComposerDraftSnapshot(draftKey);
       const nextDocument = draft.document;
       const nextImages = draft.images ?? [];
       if (
@@ -277,6 +317,10 @@ export function useComposerSubmitFlow({
         document: nextDocument,
         images: nextImages.length > 0 ? nextImages : undefined,
       };
+      if (sendBlocked) {
+        blockCurrentSessionSubmit(payload);
+        return;
+      }
       const deliverAs = isStreaming && !hasPausedFollowUps ? (delivery ?? 'followUp') : delivery;
       if (hasPausedFollowUps && !deliverAs) {
         setLeasedPendingSubmit(payload);
@@ -286,12 +330,14 @@ export function useComposerSubmitFlow({
     },
     [
       createSubmitContext,
+      blockCurrentSessionSubmit,
       hasPausedFollowUps,
       isStreaming,
       isSubmitContextActive,
       sendMessage,
+      sendBlocked,
       setLeasedPendingSubmit,
-      sessionId,
+      draftKey,
       submitDisabled,
     ],
   );
@@ -322,9 +368,9 @@ export function useComposerSubmitFlow({
   };
 }
 
-function useComposerSubmitContextGuard(mode: ComposerMode, sessionId: string) {
+function useComposerSubmitContextGuard(mode: ComposerMode, sessionId: string, sessionPath: string) {
   const mountedRef = useRef(true);
-  const generationRef = useRef<SubmitGeneration>({ mode, sessionId, value: 0 });
+  const generationRef = useRef<SubmitGeneration>({ mode, sessionId, sessionPath, value: 0 });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -335,21 +381,29 @@ function useComposerSubmitContextGuard(mode: ComposerMode, sessionId: string) {
 
   useLayoutEffect(() => {
     const current = generationRef.current;
-    if (current.mode === mode && current.sessionId === sessionId) return;
+    if (
+      current.mode === mode &&
+      current.sessionId === sessionId &&
+      current.sessionPath === sessionPath
+    ) {
+      return;
+    }
     generationRef.current = {
       mode,
       sessionId,
+      sessionPath,
       value: current.value + 1,
     };
-  }, [mode, sessionId]);
+  }, [mode, sessionId, sessionPath]);
 
   const createSubmitContext = useCallback(
     (): ComposerSubmitContext => ({
       generation: generationRef.current.value,
       mode,
       sessionId,
+      sessionPath,
     }),
-    [mode, sessionId],
+    [mode, sessionId, sessionPath],
   );
 
   const isSubmitContextActive = useCallback((context: ComposerSubmitContext): boolean => {
@@ -360,8 +414,11 @@ function useComposerSubmitContextGuard(mode: ComposerMode, sessionId: string) {
     if (context.mode === 'newSession') {
       return !uiState.newSessionPending && uiState.chatView !== 'detail';
     }
+    const session = useSessionStore.getState();
     return (
-      useSessionStore.getState().sessionId === context.sessionId && uiState.chatView !== 'home'
+      session.sessionId === context.sessionId &&
+      session.sessionFile === context.sessionPath &&
+      uiState.chatView !== 'home'
     );
   }, []);
 

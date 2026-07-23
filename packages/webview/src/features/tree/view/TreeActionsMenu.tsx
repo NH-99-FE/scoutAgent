@@ -12,9 +12,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 export function TreeActionsMenu({
+  disabled,
   onRefresh,
   onRevealCurrentLeaf,
 }: {
+  disabled?: boolean;
   onRefresh: () => void;
   onRevealCurrentLeaf: () => void;
 }) {
@@ -27,6 +29,7 @@ export function TreeActionsMenu({
           size="icon"
           type="button"
           variant="ghost"
+          disabled={disabled}
         >
           <MoreHorizontal />
         </Button>

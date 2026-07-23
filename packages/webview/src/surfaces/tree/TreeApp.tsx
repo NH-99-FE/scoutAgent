@@ -6,28 +6,43 @@ import { useCallback, useState } from 'react';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { useSessionFile, useSessionId } from '@/store/session-store';
 import {
   FILTERS,
   NodeInspector,
   TreeActionsMenu,
   TreeList,
+  TreeNavigationBlockedDialog,
+  TreeNavigationDialog,
   useTreePanelController,
 } from '@/features/tree';
 
 export function TreeApp() {
+  const sessionId = useSessionId();
+  const sessionFile = useSessionFile();
+  return <TreeAppSession key={`${sessionId}:${sessionFile}`} />;
+}
+
+function TreeAppSession() {
   const controller = useTreePanelController();
   const [highlightedFoldAnchorId, setHighlightedFoldAnchorId] = useState<string | null>(null);
   const { setSelectedId, toggleFold } = controller;
+  const selectedNodeIsNavigationNoop =
+    controller.selectedNode?.id === controller.leafId &&
+    controller.selectedNode.kind !== 'user' &&
+    controller.selectedNode.kind !== 'custom';
 
   const handleSelectNode = useCallback(
     (nodeId: string) => {
+      if (controller.interactionLocked) return;
       setSelectedId(nodeId);
     },
-    [setSelectedId],
+    [controller.interactionLocked, setSelectedId],
   );
 
   const handleToggleFoldNode = useCallback(
     (nodeId: string, folded: boolean) => {
+      if (controller.interactionLocked) return;
       if (!folded) {
         setHighlightedFoldAnchorId(nodeId);
       } else {
@@ -35,7 +50,7 @@ export function TreeApp() {
       }
       toggleFold(nodeId);
     },
-    [toggleFold],
+    [controller.interactionLocked, toggleFold],
   );
 
   const handleFoldAnchorHighlightEnd = useCallback((nodeId: string) => {
@@ -52,6 +67,7 @@ export function TreeApp() {
             className="h-7 rounded-full pl-8 text-xs"
             placeholder="搜索会话节点"
             value={controller.query}
+            disabled={controller.interactionLocked}
             onChange={(event) => controller.setQuery(event.target.value)}
           />
         </div>
@@ -66,6 +82,7 @@ export function TreeApp() {
                   : 'hover:bg-muted text-muted-foreground',
               )}
               type="button"
+              disabled={controller.interactionLocked}
               onClick={() => controller.setFilterMode(filter.mode)}
             >
               {filter.label}
@@ -73,6 +90,7 @@ export function TreeApp() {
           ))}
         </div>
         <TreeActionsMenu
+          disabled={controller.interactionLocked}
           onRefresh={controller.refreshTree}
           onRevealCurrentLeaf={controller.revealCurrentLeaf}
         />
@@ -94,19 +112,37 @@ export function TreeApp() {
 
         <aside className="bg-tree-background min-h-0 p-3">
           <NodeInspector
-            customInstructions={controller.effectiveSummaryDraft.customInstructions}
+            interactionLocked={controller.sessionMutationLocked}
+            navigationActionDisabled={controller.navigationActionDisabled}
+            isCurrentNode={selectedNodeIsNavigationNoop}
+            navigationPending={controller.navigationPending}
             labelSaved={controller.selectedNode?.id === controller.labelSavedNodeId}
             labelDraft={controller.effectiveLabelDraft}
             node={controller.selectedNode}
-            summaryMode={controller.effectiveSummaryDraft.mode}
-            onCustomInstructionsChange={controller.updateCustomInstructions}
+            onAbortNavigation={controller.abortNavigation}
             onLabelDraftChange={controller.updateLabelDraft}
             onNavigate={controller.navigateToSelectedNode}
+            onOpenSummaryOptions={controller.openSummaryOptions}
             onSaveLabel={controller.saveLabel}
-            onSummaryModeChange={controller.updateSummaryMode}
           />
         </aside>
       </section>
+      <TreeNavigationDialog
+        customInstructions={controller.effectiveSummaryDraft.customInstructions}
+        mode={controller.effectiveSummaryDraft.mode}
+        open={controller.summaryDialogOpen}
+        reopensComposer={controller.reopensComposer}
+        showSummaryOptions={controller.summaryOptionsVisible}
+        onConfirm={controller.confirmNavigation}
+        onCustomInstructionsChange={controller.updateCustomInstructions}
+        onModeChange={controller.updateSummaryMode}
+        onOpenChange={controller.setSummaryDialogOpen}
+      />
+      <TreeNavigationBlockedDialog
+        message={controller.navigationBlockedMessage}
+        open={controller.navigationBlockedDialogOpen}
+        onOpenChange={controller.setNavigationBlockedDialogOpen}
+      />
     </main>
   );
 }

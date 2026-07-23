@@ -104,6 +104,14 @@ function applyStateSnapshotToStores(state: ScoutWebviewState): void {
   useUiStore.getState().actions.resolveOpenTask(state.sessionFile);
   useUiStore.getState().actions.setDiagnostics(state.diagnostics ?? []);
   useUiStore.getState().actions.setExtensionUIRequests(state.extensionUIRequests ?? []);
+  const pendingComposerIntent = state.pendingComposerIntent;
+  if (
+    pendingComposerIntent?.kind === 'replace_text' &&
+    pendingComposerIntent?.session.sessionId === state.sessionId &&
+    pendingComposerIntent?.session.sessionPath === state.sessionFile
+  ) {
+    useUiStore.getState().actions.setChatView('detail');
+  }
 }
 
 function projectCommandResult(message: ScoutCommandResult): void {
@@ -134,25 +142,59 @@ function projectCommandResult(message: ScoutCommandResult): void {
   }
 
   if (message.type === 'navigate_tree_result') {
-    useTreeStore.getState().actions.setEditorText(message.editorText);
-    if (!message.success) {
+    if (message.status === 'blocked_after_commit') {
+      const details = message.error ? ` Details: ${message.error}` : '';
+      useUiStore.getState().actions.setNotification({
+        type: 'notification',
+        level: 'error',
+        message: `Tree navigation was committed, but runtime reconciliation failed. Reload or recover the session before continuing.${details}`,
+      });
+    } else if (message.status === 'failed_before_commit') {
       useUiStore.getState().actions.setNotification({
         type: 'notification',
         level: 'error',
         message: message.error ?? 'Tree navigation failed',
       });
+    } else if (message.status === 'busy' || message.status === 'blocked') {
+      useUiStore.getState().actions.setNotification({
+        type: 'notification',
+        level: 'warning',
+        message: message.error ?? 'Tree navigation is temporarily unavailable',
+      });
     }
+    return;
+  }
+
+  if (message.type === 'user_message_result') {
+    if (message.status !== 'accepted') {
+      const errorMessage = message.error ?? `Message was not sent: ${message.status}`;
+      useUiStore.getState().actions.setNotification({
+        type: 'notification',
+        level: 'error',
+        message: errorMessage,
+      });
+    }
+    return;
+  }
+
+  if (
+    message.type === 'abort_tree_navigation_result' ||
+    message.type === 'ack_composer_intent_result'
+  ) {
     return;
   }
 
   if (message.type === 'fork_result') {
     if (message.success) {
       // fork 成功：把被选用户消息文本回填到目标新会话 composer
-      if (message.selectedText && message.targetSessionId) {
+      if (message.selectedText && message.targetSessionId && message.targetSessionPath) {
         useComposerStore.getState().actions.setCommandEffect({
           kind: 'replace_text',
           source: 'fork',
-          targetSessionId: message.targetSessionId,
+          targetSession: {
+            sessionId: message.targetSessionId,
+            sessionPath: message.targetSessionPath,
+          },
           text: message.selectedText,
         });
       }

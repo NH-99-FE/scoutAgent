@@ -20,6 +20,7 @@ interface SendProtocolRequestOptions {
   streaming?: boolean;
   onResponse?: (payload: ScoutProtocolResponsePayload) => void;
   onError?: (message: string, code: string) => void;
+  onRequest?: (requestId: string) => void;
 }
 
 interface PendingProtocolRequest {
@@ -53,6 +54,7 @@ export function sendProtocolRequest(
       onError: options.onError,
     });
   }
+  options.onRequest?.(requestId);
 
   const message: ScoutProtocolRequest = {
     type: 'protocol_request',

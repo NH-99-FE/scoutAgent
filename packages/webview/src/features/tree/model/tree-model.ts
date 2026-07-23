@@ -32,9 +32,9 @@ export function getEffectiveSelectedId(
   leafId: string | null,
   visibleNodes: VisibleTreeNode[],
 ): string | null {
-  if (selectedId && visibleNodes.some((entry) => entry.node.id === selectedId)) return selectedId;
-  if (leafId && visibleNodes.some((entry) => entry.node.id === leafId)) return leafId;
-  return visibleNodes[0]?.node.id ?? null;
+  const preferredId = selectedId ?? leafId;
+  if (!preferredId) return null;
+  return visibleNodes.some((entry) => entry.node.id === preferredId) ? preferredId : null;
 }
 
 export function buildVisibleNodes(

@@ -39,9 +39,18 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
       useUiStore.getState().actions.resolveOpenTask(message.state.sessionFile);
       useUiStore.getState().actions.setDiagnostics(message.state.diagnostics ?? []);
       useUiStore.getState().actions.setExtensionUIRequests(message.state.extensionUIRequests ?? []);
+      if (
+        message.state.pendingComposerIntent?.kind === 'replace_text' &&
+        message.state.pendingComposerIntent?.session.sessionId === message.state.sessionId &&
+        message.state.pendingComposerIntent?.session.sessionPath === message.state.sessionFile
+      ) {
+        useUiStore.getState().actions.setChatView('detail');
+      }
       break;
     case 'queue_update':
-      useConversationStore.getState().actions.applyQueueState(message.queueState);
+      useConversationStore
+        .getState()
+        .actions.applyQueueState(message.queueState, message.treeNavigationAdmission);
       break;
     case 'changes_review_update':
       useConversationStore.getState().actions.applyChangesReviewUpdate(message);

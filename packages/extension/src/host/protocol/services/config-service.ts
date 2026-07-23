@@ -65,6 +65,7 @@ export class ConfigProtocolService implements ConfigProtocolHost {
   }
 
   async setModel(message: ProtocolPayload<'select_model'>): Promise<void> {
+    if (!this.sessionManager.matchesSessionIdentity(message.session)) return;
     await this.sessionManager.setModel(message.modelId, message.provider);
   }
 
@@ -141,10 +142,12 @@ export class ConfigProtocolService implements ConfigProtocolHost {
   }
 
   async setThinkingLevel(message: ProtocolPayload<'select_thinking'>): Promise<void> {
+    if (!this.sessionManager.matchesSessionIdentity(message.session)) return;
     await this.sessionManager.setThinkingLevel(message.level);
   }
 
   setToolProfile(message: ProtocolPayload<'set_tool_profile'>): void {
+    if (!this.sessionManager.matchesSessionIdentity(message.session)) return;
     void this.sessionManager.setToolProfile(message.profileId);
   }
 

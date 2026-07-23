@@ -29,6 +29,7 @@ export interface ScoutControllerOptions {
   cwd: string;
   openSettingsPanel?: () => void | Promise<void>;
   openTreePanel?: () => void | Promise<void>;
+  openChatSurface?: () => void | Promise<void>;
   openChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
     options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
@@ -100,6 +101,7 @@ export class ScoutController implements vscode.Disposable {
       postMessage: (message, surface) => this.postMessage(message, surface),
       openSettingsPanel: options.openSettingsPanel,
       openTreePanel: options.openTreePanel,
+      openChatSurface: options.openChatSurface,
       openChangesReviewPanel: options.openChangesReviewPanel,
       openCurrentChangesReviewPanel: options.openCurrentChangesReviewPanel,
       openTextFile: async (filePath) => {
@@ -140,7 +142,7 @@ export class ScoutController implements vscode.Disposable {
         void this.protocolServer.handleRequest(message, surface);
         break;
       case 'protocol_cancel':
-        this.protocolServer.cancel(message.requestId);
+        this.protocolServer.cancel(message.requestId, surface);
         break;
     }
   }

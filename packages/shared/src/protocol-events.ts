@@ -20,6 +20,7 @@ import type {
   ScoutContextUsage,
   ScoutMessage,
   ScoutQueueState,
+  ScoutTreeNavigationAdmission,
   ScoutToolCallPreviewUpdateEvent,
   ScoutToolExecutionResult,
   ScoutWebviewState,
@@ -162,7 +163,11 @@ export interface ScoutProtocolError {
 
 export type ExtensionEventMessage =
   | { type: 'state_update'; state: ScoutWebviewState }
-  | { type: 'queue_update'; queueState: ScoutQueueState }
+  | {
+      type: 'queue_update';
+      queueState: ScoutQueueState;
+      treeNavigationAdmission?: ScoutTreeNavigationAdmission;
+    }
   | ScoutRuntimeExtensionEvent
   | { type: 'config_update'; config: ScoutConfig }
   | { type: 'commands_update'; commands: ScoutCommandInfo[] }

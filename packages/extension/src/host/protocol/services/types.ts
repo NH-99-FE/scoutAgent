@@ -90,7 +90,14 @@ export interface ConfigProtocolHost {
 }
 
 export interface SessionProtocolHost {
-  userMessage: (message: ProtocolPayload<'user_message'>) => Promise<void>;
+  userMessage: (
+    message: ProtocolPayload<'user_message'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+  acknowledgeComposerIntent: (
+    message: ProtocolPayload<'ack_composer_intent'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
   newSessionMessage: (
     message: ProtocolPayload<'new_session_message'>,
     respond: ProtocolResponder,
@@ -99,7 +106,7 @@ export interface SessionProtocolHost {
   promoteFollowUp: (message: ProtocolPayload<'promote_follow_up'>) => Promise<void>;
   compact: (message: ProtocolPayload<'compact'>) => Promise<void>;
   continueSession: (message: ProtocolPayload<'continue_session'>) => Promise<void>;
-  clearConversation: () => void;
+  clearConversation: (message: ProtocolPayload<'clear_conversation'>) => Promise<void>;
   requestSessions: (respond: ProtocolResponder) => Promise<void>;
   openTask: (message: ProtocolPayload<'open_task'>, respond: ProtocolResponder) => Promise<void>;
   restoreSession: (
@@ -144,6 +151,11 @@ export interface TreeProtocolHost {
   ) => Promise<void>;
   navigateTree: (
     message: ProtocolPayload<'navigate_tree'>,
+    respond: ProtocolResponder,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+  abortTreeNavigation: (
+    message: ProtocolPayload<'abort_tree_navigation'>,
     respond: ProtocolResponder,
   ) => Promise<void>;
   setLabel: (message: ProtocolPayload<'set_label'>, respond: ProtocolResponder) => Promise<void>;

@@ -11,6 +11,7 @@ import type {
   ScoutProtocolResponsePayload,
   ScoutImageContent,
   ScoutRuntimeSettingsPatch,
+  ScoutSessionIdentity,
   ScoutSkillScope,
   ScoutSkillToggleIntent,
   ScoutSettingsScope,
@@ -33,6 +34,7 @@ import {
   sendProtocolRequest,
   setDefaultProtocolErrorHandler,
 } from './transport-client';
+import { useSessionStore } from '@/store/session-store';
 
 interface UserMessageOptions {
   clearFollowUpQueue?: boolean;
@@ -51,17 +53,31 @@ interface RequestFileMentionsOptions {
   query: string;
 }
 
-interface CancellableProtocolRequest {
+export interface CancellableProtocolRequest {
   cancel: () => void;
 }
 
 interface NavigateTreeOptions {
+  navigationId: string;
+  session: ScoutSessionIdentity;
   targetId: string;
   summarize: boolean;
   customInstructions?: string;
 }
 
 type LabelResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'label_result' }>;
+type NavigateTreeResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'navigate_tree_result' }
+>;
+type UserMessageResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'user_message_result' }
+>;
+type AckComposerIntentResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'ack_composer_intent_result' }
+>;
 type SetSessionNameResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'set_session_name_result' }
@@ -153,6 +169,7 @@ function sendRouted(
   payload: WebviewRequestPayload,
   onResponse: (payload: ScoutProtocolResponsePayload) => void,
   onError?: (message: string, code: string) => void,
+  onRequest?: (requestId: string) => void,
 ): string {
   return sendProtocolRequest(payload, {
     ...resolveProtocolRoute(payload),
@@ -164,6 +181,7 @@ function sendRouted(
         reportProtocolError(message);
       }
     },
+    onRequest,
   });
 }
 
@@ -324,13 +342,46 @@ export const protocolClient = {
       },
     ),
   requestTree: () => sendRouted({ type: 'request_tree' }, projectProtocolResponsePayload),
-  navigateTree: ({ targetId, summarize, customInstructions }: NavigateTreeOptions) => {
-    const payload: WebviewRequestPayload = { type: 'navigate_tree', targetId, summarize };
+  navigateTree: (
+    { navigationId, session, targetId, summarize, customInstructions }: NavigateTreeOptions,
+    onResult?: (payload: NavigateTreeResultPayload) => void,
+    onError?: (message: string) => void,
+  ) => {
+    const payload: WebviewRequestPayload = {
+      type: 'navigate_tree',
+      navigationId,
+      session,
+      targetId,
+      summarize,
+    };
     if (customInstructions) payload.customInstructions = customInstructions;
-    return sendRouted(payload, projectProtocolResponsePayload);
+    const requestId = sendRouted(
+      payload,
+      (response) => {
+        projectProtocolResponsePayload(response);
+        if (response.type === 'navigate_tree_result') onResult?.(response);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    );
+    return {
+      cancel: () => cancelProtocolRequest(requestId),
+    } satisfies CancellableProtocolRequest;
   },
-  setLabel: (entryId: string, label?: string, onResult?: (payload: LabelResultPayload) => void) =>
-    sendRouted({ type: 'set_label', entryId, label }, (payload) => {
+  abortTreeNavigation: (navigationId: string, session: ScoutSessionIdentity) =>
+    sendRouted(
+      { type: 'abort_tree_navigation', navigationId, session },
+      projectProtocolResponsePayload,
+    ),
+  setLabel: (
+    session: ScoutSessionIdentity,
+    entryId: string,
+    label?: string,
+    onResult?: (payload: LabelResultPayload) => void,
+  ) =>
+    sendRouted({ type: 'set_label', session, entryId, label }, (payload) => {
       projectProtocolResponsePayload(payload);
       if (payload.type === 'label_result') onResult?.(payload);
     }),
@@ -340,7 +391,7 @@ export const protocolClient = {
     onError?: (message: string) => void,
   ) =>
     sendRouted(
-      { type: 'set_session_name', name },
+      { type: 'set_session_name', session: getCurrentSessionIdentity(), name },
       (payload) => {
         projectProtocolResponsePayload(payload);
         if (payload.type === 'set_session_name_result') onResult?.(payload);
@@ -352,7 +403,12 @@ export const protocolClient = {
     ),
   forkSession: (entryId: string) =>
     sendRouted(
-      { type: 'fork_session', entryId, position: 'before' },
+      {
+        type: 'fork_session',
+        session: getCurrentSessionIdentity(),
+        entryId,
+        position: 'before',
+      },
       projectProtocolResponsePayload,
     ),
   requestForkCandidates: (
@@ -438,8 +494,20 @@ export const protocolClient = {
       'open_task_result',
     );
   },
-  userMessage: (text: string, deliverAs?: 'steer' | 'followUp', options?: UserMessageOptions) => {
-    const payload: WebviewRequestPayload = { type: 'user_message', text, deliverAs };
+  userMessage: (
+    text: string,
+    deliverAs?: 'steer' | 'followUp',
+    options?: UserMessageOptions,
+    onResult?: (result: UserMessageResultPayload, requestId: string) => void,
+    onError?: (message: string, requestId: string) => void,
+    onRequest?: (requestId: string) => void,
+  ) => {
+    const payload: WebviewRequestPayload = {
+      type: 'user_message',
+      session: getCurrentSessionIdentity(),
+      text,
+      deliverAs,
+    };
     if (options?.images && options.images.length > 0) {
       payload.images = options.images;
     }
@@ -447,8 +515,38 @@ export const protocolClient = {
     if (options?.clearFollowUpQueue) {
       payload.clearFollowUpQueue = true;
     }
-    send(payload);
+    let requestId = '';
+    requestId = sendRouted(
+      payload,
+      (response) => {
+        projectProtocolResponsePayload(response);
+        if (response.type === 'user_message_result') onResult?.(response, requestId);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message, requestId);
+      },
+      onRequest,
+    );
+    return requestId;
   },
+  acknowledgeComposerIntent: (
+    version: string,
+    session: ScoutSessionIdentity,
+    onResult?: (payload: AckComposerIntentResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'ack_composer_intent', version, session },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'ack_composer_intent_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
   newSessionMessage: (
     text: string,
     images?: ScoutImageContent[],
@@ -484,17 +582,22 @@ export const protocolClient = {
   },
   abort: () => sendControlMessage({ type: 'control_abort' }),
   abortRetry: () => sendControlMessage({ type: 'control_abort_retry' }),
-  compact: (customInstructions?: string) => send({ type: 'compact', customInstructions }),
+  compact: (customInstructions?: string) =>
+    send({ type: 'compact', session: getCurrentSessionIdentity(), customInstructions }),
   continueSession: (options?: ContinueSessionOptions) => {
-    const payload: WebviewRequestPayload = { type: 'continue_session' };
+    const payload: WebviewRequestPayload = {
+      type: 'continue_session',
+      session: getCurrentSessionIdentity(),
+    };
     if (options?.preserveFollowUpQueue) {
       payload.preserveFollowUpQueue = true;
     }
     send(payload);
   },
-  clearConversation: () => send({ type: 'clear_conversation' }),
+  clearConversation: () =>
+    send({ type: 'clear_conversation', session: getCurrentSessionIdentity() }),
   selectModel: (provider: string, modelId: string) =>
-    send({ type: 'select_model', provider, modelId }),
+    send({ type: 'select_model', session: getCurrentSessionIdentity(), provider, modelId }),
   setDefaultModel: (
     provider: string,
     modelId: string,
@@ -621,8 +724,10 @@ export const protocolClient = {
         onError?.(message);
       },
     ),
-  selectThinking: (level: ThinkingLevel) => send({ type: 'select_thinking', level }),
-  setToolProfile: (profileId: string) => send({ type: 'set_tool_profile', profileId }),
+  selectThinking: (level: ThinkingLevel) =>
+    send({ type: 'select_thinking', session: getCurrentSessionIdentity(), level }),
+  setToolProfile: (profileId: string) =>
+    send({ type: 'set_tool_profile', session: getCurrentSessionIdentity(), profileId }),
   requestCommands: () => sendRouted({ type: 'request_commands' }, projectProtocolResponsePayload),
   extensionUIResponse: (payload: ExtensionUIResponsePayload) =>
     send({ type: 'extension_ui_response', ...payload }),
@@ -646,6 +751,11 @@ export const protocolClient = {
     } satisfies CancellableProtocolRequest;
   },
 };
+
+function getCurrentSessionIdentity(): ScoutSessionIdentity {
+  const { sessionId, sessionFile } = useSessionStore.getState();
+  return { sessionId, sessionPath: sessionFile };
+}
 
 function createTaskHistoryQueryToken(): string {
   const random =

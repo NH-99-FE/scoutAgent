@@ -129,7 +129,6 @@ export type ScoutGenericCommandResultType =
   | 'restore_session_result'
   | 'import_session_result'
   | 'export_session_result'
-  | 'navigate_tree_result'
   | 'label_result'
   | 'set_session_name_result'
   | 'set_default_model_result'
@@ -145,7 +144,6 @@ interface ScoutCommandResultBase {
   error?: string;
   sessionPath?: string;
   path?: string;
-  editorText?: string;
 }
 
 export type ScoutGenericCommandResult = {
@@ -173,7 +171,38 @@ export interface ScoutForkResult {
   error?: string;
   // fork_result 专用：目标会话与被选中的用户消息文本，用于回填到新会话 composer
   targetSessionId?: string;
+  targetSessionPath?: string;
   selectedText?: string;
+}
+
+export type ScoutNavigateTreeResult = {
+  type: 'navigate_tree_result';
+  navigationId: string;
+  status:
+    | 'busy'
+    | 'blocked'
+    | 'stale'
+    | 'cancelled'
+    | 'failed_before_commit'
+    | 'committed'
+    | 'blocked_after_commit';
+  error?: string;
+};
+
+export interface ScoutUserMessageResult {
+  type: 'user_message_result';
+  status: 'accepted' | 'busy' | 'stale' | 'blocked';
+  error?: string;
+}
+
+export interface ScoutAbortTreeNavigationResult {
+  type: 'abort_tree_navigation_result';
+  status: 'accepted' | 'stale' | 'not_running';
+}
+
+export interface ScoutAckComposerIntentResult {
+  type: 'ack_composer_intent_result';
+  status: 'acknowledged' | 'stale';
 }
 
 export type ScoutCommandResult =
@@ -181,7 +210,11 @@ export type ScoutCommandResult =
   | ScoutSaveCustomModelsResult
   | ScoutSaveRuntimeSettingsResult
   | ScoutSaveSkillsSettingsResult
-  | ScoutForkResult;
+  | ScoutForkResult
+  | ScoutNavigateTreeResult
+  | ScoutUserMessageResult
+  | ScoutAbortTreeNavigationResult
+  | ScoutAckComposerIntentResult;
 
 // fork 候选：从当前 session raw entries 中提取的全部历史 user message。
 // 数据源为完整分支（root→leaf），不受压缩展示投影影响。

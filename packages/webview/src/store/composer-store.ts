@@ -3,6 +3,7 @@
 // ============================================================
 
 import { create } from 'zustand';
+import type { ScoutSessionIdentity } from '@scout-agent/shared';
 import {
   areComposerDocumentsEqual,
   cloneComposerDocument,
@@ -27,10 +28,14 @@ export interface ComposerDraft {
   images?: ComposerImageDescriptor[];
 }
 
+export interface RecoverableComposerDraft extends ComposerDraft {
+  id: string;
+}
+
 export interface ComposerReplaceTextEffect {
   kind: 'replace_text';
   source: 'fork';
-  targetSessionId: string;
+  targetSession: ScoutSessionIdentity;
   text: string;
 }
 
@@ -41,10 +46,13 @@ interface ComposerActions {
   removeImage: (sessionId: string, index: number) => void;
   setDocument: (sessionId: string, document: ComposerDocument) => void;
   setText: (sessionId: string, text: string) => void;
-  stagePendingDraft: (sessionId: string, draft: ComposerDraft) => void;
-  restorePendingDraft: (sessionId: string) => void;
-  discardPendingDraft: (sessionId: string) => void;
+  stagePendingDraft: (sessionId: string, draft: ComposerDraft, requestId?: string) => void;
+  restorePendingDraft: (sessionId: string, requestId?: string) => void;
+  discardPendingDraft: (sessionId: string, requestId?: string) => void;
+  recoverFailedDraft: (sessionId: string, draftId: string) => void;
+  discardFailedDraft: (sessionId: string, draftId: string) => void;
   clearDraft: (sessionId: string) => void;
+  applyComposerIntent: (sessionId: string, version: string, text: string) => boolean;
   setCommandEffect: (effect: ComposerCommandEffect) => void;
   consumeCommandEffect: () => void;
   reset: () => void;
@@ -53,7 +61,9 @@ interface ComposerActions {
 interface ComposerStore {
   documentBySessionId: Record<string, ComposerDocument>;
   imagesBySessionId: Record<string, ComposerImageDescriptor[]>;
-  pendingDraftBySessionId: Record<string, ComposerDraft>;
+  pendingDraftByRequestId: Record<string, ComposerDraft>;
+  recoverableDraftsBySessionId: Record<string, RecoverableComposerDraft[]>;
+  appliedComposerIntentVersionBySessionId: Record<string, string>;
   // 协议命令完成后要作用到 composer 的一次性 UI effect；由匹配的 composer 消费后清空
   pendingCommandEffect: ComposerCommandEffect | null;
   actions: ComposerActions;
@@ -61,17 +71,28 @@ interface ComposerStore {
 
 const EMPTY_SESSION_ID = '__empty_session__';
 const EMPTY_IMAGES: ComposerImageDescriptor[] = [];
+const EMPTY_RECOVERABLE_DRAFTS: RecoverableComposerDraft[] = [];
 export const HOME_COMPOSER_SESSION_ID = '__task_home__';
+
+export function createComposerDraftKey(sessionId: string, sessionPath: string): string {
+  return `${sessionId}\u0000${sessionPath}`;
+}
 
 const initialState = {
   documentBySessionId: {} as Record<string, ComposerDocument>,
   imagesBySessionId: {} as Record<string, ComposerImageDescriptor[]>,
-  pendingDraftBySessionId: {} as Record<string, ComposerDraft>,
+  pendingDraftByRequestId: {} as Record<string, ComposerDraft>,
+  recoverableDraftsBySessionId: {} as Record<string, RecoverableComposerDraft[]>,
+  appliedComposerIntentVersionBySessionId: {} as Record<string, string>,
   pendingCommandEffect: null as ComposerCommandEffect | null,
 };
 
 function getComposerSessionId(sessionId: string): string {
   return sessionId || EMPTY_SESSION_ID;
+}
+
+function getPendingDraftId(sessionId: string, requestId?: string): string {
+  return requestId ?? `session:${sessionId}`;
 }
 
 export const useComposerStore = create<ComposerStore>((set) => ({
@@ -124,33 +145,50 @@ export const useComposerStore = create<ComposerStore>((set) => ({
         else nextDocuments[key] = nextDocument;
         return { documentBySessionId: nextDocuments };
       }),
-    stagePendingDraft: (sessionId, draft) =>
+    stagePendingDraft: (sessionId, draft, requestId) =>
       set((state) => {
         const key = getComposerSessionId(sessionId);
-        releaseComposerImageDescriptors(state.pendingDraftBySessionId[key]?.images);
+        const pendingId = getPendingDraftId(key, requestId);
+        releaseComposerImageDescriptors(state.pendingDraftByRequestId[pendingId]?.images);
         retainComposerImageDescriptors(draft.images);
         return {
-          pendingDraftBySessionId: {
-            ...state.pendingDraftBySessionId,
-            [key]: {
+          pendingDraftByRequestId: {
+            ...state.pendingDraftByRequestId,
+            [pendingId]: {
               document: cloneComposerDocument(draft.document),
               images: draft.images ? [...draft.images] : undefined,
             },
           },
         };
       }),
-    restorePendingDraft: (sessionId) =>
+    restorePendingDraft: (sessionId, requestId) =>
       set((state) => {
         const key = getComposerSessionId(sessionId);
-        const pendingDraft = state.pendingDraftBySessionId[key];
+        const pendingId = getPendingDraftId(key, requestId);
+        const pendingDraft = state.pendingDraftByRequestId[pendingId];
         if (!pendingDraft) return state;
-        const nextPendingDrafts = { ...state.pendingDraftBySessionId };
-        delete nextPendingDrafts[key];
+        const nextPendingDrafts = { ...state.pendingDraftByRequestId };
+        delete nextPendingDrafts[pendingId];
         const currentDocument = state.documentBySessionId[key] ?? EMPTY_COMPOSER_DOCUMENT;
         const currentImages = state.imagesBySessionId[key] ?? [];
         if (!isComposerDocumentEmpty(currentDocument) || currentImages.length > 0) {
-          releaseComposerImageDescriptors(pendingDraft.images);
-          return { pendingDraftBySessionId: nextPendingDrafts };
+          const currentRecoverableDrafts = state.recoverableDraftsBySessionId[key] ?? [];
+          const replacedDraft = currentRecoverableDrafts.find((draft) => draft.id === pendingId);
+          releaseComposerImageDescriptors(replacedDraft?.images);
+          return {
+            pendingDraftByRequestId: nextPendingDrafts,
+            recoverableDraftsBySessionId: {
+              ...state.recoverableDraftsBySessionId,
+              [key]: [
+                ...currentRecoverableDrafts.filter((draft) => draft.id !== pendingId),
+                {
+                  id: pendingId,
+                  document: pendingDraft.document,
+                  images: pendingDraft.images,
+                },
+              ],
+            },
+          };
         }
         const nextDocuments = { ...state.documentBySessionId };
         const nextImagesBySessionId = { ...state.imagesBySessionId };
@@ -161,18 +199,66 @@ export const useComposerStore = create<ComposerStore>((set) => ({
         return {
           documentBySessionId: nextDocuments,
           imagesBySessionId: nextImagesBySessionId,
-          pendingDraftBySessionId: nextPendingDrafts,
+          pendingDraftByRequestId: nextPendingDrafts,
         };
       }),
-    discardPendingDraft: (sessionId) =>
+    discardPendingDraft: (sessionId, requestId) =>
       set((state) => {
         const key = getComposerSessionId(sessionId);
-        const pendingDraft = state.pendingDraftBySessionId[key];
+        const pendingId = getPendingDraftId(key, requestId);
+        const pendingDraft = state.pendingDraftByRequestId[pendingId];
         if (!pendingDraft) return state;
         releaseComposerImageDescriptors(pendingDraft.images);
-        const nextPendingDrafts = { ...state.pendingDraftBySessionId };
-        delete nextPendingDrafts[key];
-        return { pendingDraftBySessionId: nextPendingDrafts };
+        const nextPendingDrafts = { ...state.pendingDraftByRequestId };
+        delete nextPendingDrafts[pendingId];
+        return { pendingDraftByRequestId: nextPendingDrafts };
+      }),
+    recoverFailedDraft: (sessionId, draftId) =>
+      set((state) => {
+        const key = getComposerSessionId(sessionId);
+        const recoverableDrafts = state.recoverableDraftsBySessionId[key] ?? [];
+        const draft = recoverableDrafts.find((candidate) => candidate.id === draftId);
+        if (!draft) return state;
+        const currentDocument = state.documentBySessionId[key] ?? EMPTY_COMPOSER_DOCUMENT;
+        const currentImages = state.imagesBySessionId[key] ?? [];
+        if (!isComposerDocumentEmpty(currentDocument) || currentImages.length > 0) return state;
+
+        const nextRecoverableDrafts = recoverableDrafts.filter(
+          (candidate) => candidate.id !== draftId,
+        );
+        const nextRecoverableBySessionId = { ...state.recoverableDraftsBySessionId };
+        if (nextRecoverableDrafts.length > 0) {
+          nextRecoverableBySessionId[key] = nextRecoverableDrafts;
+        } else {
+          delete nextRecoverableBySessionId[key];
+        }
+        const nextDocuments = { ...state.documentBySessionId };
+        const nextImagesBySessionId = { ...state.imagesBySessionId };
+        if (isComposerDocumentEmpty(draft.document)) delete nextDocuments[key];
+        else nextDocuments[key] = cloneComposerDocument(draft.document);
+        if (draft.images?.length) nextImagesBySessionId[key] = [...draft.images];
+        else delete nextImagesBySessionId[key];
+        return {
+          documentBySessionId: nextDocuments,
+          imagesBySessionId: nextImagesBySessionId,
+          recoverableDraftsBySessionId: nextRecoverableBySessionId,
+        };
+      }),
+    discardFailedDraft: (sessionId, draftId) =>
+      set((state) => {
+        const key = getComposerSessionId(sessionId);
+        const recoverableDrafts = state.recoverableDraftsBySessionId[key] ?? [];
+        const discardedDraft = recoverableDrafts.find((draft) => draft.id === draftId);
+        if (!discardedDraft) return state;
+        releaseComposerImageDescriptors(discardedDraft.images);
+        const nextRecoverableDrafts = recoverableDrafts.filter((draft) => draft.id !== draftId);
+        const nextRecoverableBySessionId = { ...state.recoverableDraftsBySessionId };
+        if (nextRecoverableDrafts.length > 0) {
+          nextRecoverableBySessionId[key] = nextRecoverableDrafts;
+        } else {
+          delete nextRecoverableBySessionId[key];
+        }
+        return { recoverableDraftsBySessionId: nextRecoverableBySessionId };
       }),
     clearDraft: (sessionId) =>
       set((state) => {
@@ -193,6 +279,30 @@ export const useComposerStore = create<ComposerStore>((set) => ({
           imagesBySessionId: nextImagesBySessionId,
         };
       }),
+    applyComposerIntent: (sessionId, version, text) => {
+      let applied = false;
+      set((state) => {
+        const key = getComposerSessionId(sessionId);
+        if (state.appliedComposerIntentVersionBySessionId[key] === version) return state;
+        applied = true;
+        const nextDocuments = { ...state.documentBySessionId };
+        const nextImagesBySessionId = { ...state.imagesBySessionId };
+        releaseComposerImageDescriptors(nextImagesBySessionId[key]);
+        delete nextImagesBySessionId[key];
+        const nextDocument = createComposerTextDocument(text);
+        if (isComposerDocumentEmpty(nextDocument)) delete nextDocuments[key];
+        else nextDocuments[key] = nextDocument;
+        return {
+          documentBySessionId: nextDocuments,
+          imagesBySessionId: nextImagesBySessionId,
+          appliedComposerIntentVersionBySessionId: {
+            ...state.appliedComposerIntentVersionBySessionId,
+            [key]: version,
+          },
+        };
+      });
+      return applied;
+    },
     setCommandEffect: (effect) => set({ pendingCommandEffect: effect }),
     consumeCommandEffect: () =>
       set((state) =>
@@ -215,6 +325,13 @@ export const useComposerDocument = (sessionId: string) =>
   useComposerStore(
     (state) =>
       state.documentBySessionId[getComposerSessionId(sessionId)] ?? EMPTY_COMPOSER_DOCUMENT,
+  );
+
+export const useRecoverableComposerDrafts = (sessionId: string) =>
+  useComposerStore(
+    (state) =>
+      state.recoverableDraftsBySessionId[getComposerSessionId(sessionId)] ??
+      EMPTY_RECOVERABLE_DRAFTS,
   );
 
 export function getComposerDraftSnapshot(sessionId: string): ComposerDraft {

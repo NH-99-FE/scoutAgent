@@ -25,6 +25,9 @@ export function activate(context: vscode.ExtensionContext) {
     extensionUri: context.extensionUri,
     outputChannel,
     cwd,
+    openChatSurface: async () => {
+      await vscode.commands.executeCommand('workbench.view.extension.scout-agent');
+    },
     openSettingsPanel: () => {
       const panelManager = panelManagerRef.current;
       if (!panelManager) throw new Error('Scout panel manager is not initialized');

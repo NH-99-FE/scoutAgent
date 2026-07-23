@@ -9,6 +9,7 @@ import type { ScoutProtocolResponsePayloadType } from './protocol-results.ts';
 import type { ScoutImageContent } from './protocol-state.ts';
 import type {
   ScoutComposerDocument,
+  ScoutSessionIdentity,
   ScoutTaskHistoryPurpose,
   ScoutWebviewSurface,
 } from './protocol-core.ts';
@@ -81,6 +82,7 @@ export type WebviewRequestPayload =
   | { type: 'request_context_usage' }
   | {
       type: 'user_message';
+      session: ScoutSessionIdentity;
       text: string;
       document?: ScoutComposerDocument;
       images?: ScoutImageContent[];
@@ -101,8 +103,17 @@ export type WebviewRequestPayload =
       resume?: boolean;
       preserveFollowUpQueue?: boolean;
     }
-  | { type: 'compact'; customInstructions?: string }
-  | { type: 'select_model'; provider: string; modelId: string }
+  | {
+      type: 'compact';
+      session: ScoutSessionIdentity;
+      customInstructions?: string;
+    }
+  | {
+      type: 'select_model';
+      session: ScoutSessionIdentity;
+      provider: string;
+      modelId: string;
+    }
   | { type: 'set_default_model'; provider: string; modelId: string; scope: ScoutSettingsScope }
   | { type: 'save_custom_models'; settings: ScoutCustomModelsSaveSettings }
   | {
@@ -110,9 +121,17 @@ export type WebviewRequestPayload =
       scope: ScoutSettingsScope;
       patch: ScoutRuntimeSettingsPatch;
     }
-  | { type: 'select_thinking'; level: ThinkingLevel }
-  | { type: 'set_tool_profile'; profileId: string }
-  | { type: 'clear_conversation' }
+  | {
+      type: 'select_thinking';
+      session: ScoutSessionIdentity;
+      level: ThinkingLevel;
+    }
+  | {
+      type: 'set_tool_profile';
+      session: ScoutSessionIdentity;
+      profileId: string;
+    }
+  | { type: 'clear_conversation'; session: ScoutSessionIdentity }
   | { type: 'reload_resources' }
   | {
       type: 'create_extension_from_template';
@@ -134,20 +153,45 @@ export type WebviewRequestPayload =
   | { type: 'download_image'; data: string; mimeType: string; fileName: string }
   | { type: 'open_changes_review'; turnId: string; recordId?: string }
   | { type: 'open_current_changes_review' }
-  | { type: 'fork_session'; entryId: string; position: 'before' | 'at' }
+  | {
+      type: 'fork_session';
+      session: ScoutSessionIdentity;
+      entryId: string;
+      position: 'before' | 'at';
+    }
   | { type: 'request_fork_candidates'; sessionId: string }
   | { type: 'request_tree' }
   | {
       type: 'navigate_tree';
+      navigationId: string;
+      session: ScoutSessionIdentity;
       targetId: string;
       summarize: boolean;
       customInstructions?: string;
       replaceInstructions?: boolean;
       label?: string;
     }
-  | { type: 'set_label'; entryId: string; label?: string }
-  | { type: 'set_session_name'; name: string }
-  | { type: 'continue_session'; preserveFollowUpQueue?: boolean }
+  | {
+      type: 'abort_tree_navigation';
+      navigationId: string;
+      session: ScoutSessionIdentity;
+    }
+  | {
+      type: 'ack_composer_intent';
+      version: string;
+      session: ScoutSessionIdentity;
+    }
+  | { type: 'set_label'; session: ScoutSessionIdentity; entryId: string; label?: string }
+  | {
+      type: 'set_session_name';
+      session: ScoutSessionIdentity;
+      name: string;
+    }
+  | {
+      type: 'continue_session';
+      session: ScoutSessionIdentity;
+      preserveFollowUpQueue?: boolean;
+    }
   | { type: 'request_commands' }
   | { type: 'extension_ui_response'; id: string; action: 'confirm' }
   | { type: 'extension_ui_response'; id: string; action: 'select'; value: string }
@@ -243,6 +287,7 @@ export const SCOUT_PROTOCOL = {
     kind: 'command',
     service: 'session',
     method: 'user_message',
+    response: 'user_message_result',
     emits: [
       'state_update',
       'queue_update',
@@ -464,8 +509,23 @@ export const SCOUT_PROTOCOL = {
     service: 'tree',
     method: 'navigate_tree',
     response: 'navigate_tree_result',
-    emits: ['state_update', 'tree_update'],
+    emits: ['state_update', 'runtime_state_update', 'tree_update'],
     surfaces: ['tree'],
+  },
+  abort_tree_navigation: {
+    kind: 'command',
+    service: 'tree',
+    method: 'abort_tree_navigation',
+    response: 'abort_tree_navigation_result',
+    surfaces: ['tree'],
+  },
+  ack_composer_intent: {
+    kind: 'command',
+    service: 'session',
+    method: 'ack_composer_intent',
+    response: 'ack_composer_intent_result',
+    emits: ['state_update'],
+    surfaces: ['chat'],
   },
   set_label: {
     kind: 'command',

@@ -7,6 +7,7 @@ import type {
   ScoutSessionListItem,
   ScoutActiveToolSelection,
   ScoutWebviewState,
+  ScoutPendingComposerIntent,
   ThinkingLevel,
   ToolInfo,
 } from '@scout-agent/shared';
@@ -30,6 +31,7 @@ interface SessionStore {
   thinkingLevel: ThinkingLevel;
   tools: ToolInfo[];
   activeToolSelection?: ScoutActiveToolSelection;
+  pendingComposerIntent?: ScoutPendingComposerIntent;
   actions: SessionActions;
 }
 
@@ -46,6 +48,7 @@ const initialState = {
   thinkingLevel: 'off' as ThinkingLevel,
   tools: [] as ToolInfo[],
   activeToolSelection: undefined as ScoutActiveToolSelection | undefined,
+  pendingComposerIntent: undefined as ScoutPendingComposerIntent | undefined,
 };
 
 export const useSessionStore = create<SessionStore>((set) => ({
@@ -64,6 +67,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
         thinkingLevel: state.thinkingLevel,
         tools: state.tools,
         activeToolSelection: state.activeToolSelection,
+        pendingComposerIntent: state.pendingComposerIntent,
       }),
     setSessions: (sessions) => set({ sessions }),
     reset: () => set(initialState),
@@ -75,6 +79,8 @@ export const useSessionCount = () => useSessionStore((state) => state.sessions.l
 export const useSessionName = () => useSessionStore((state) => state.sessionName);
 export const useSessionId = () => useSessionStore((state) => state.sessionId);
 export const useSessionFile = () => useSessionStore((state) => state.sessionFile);
+export const usePendingComposerIntent = () =>
+  useSessionStore((state) => state.pendingComposerIntent);
 export const useParentSessionPath = () => useSessionStore((state) => state.parentSessionPath);
 export const useForkPointEntryId = () => useSessionStore((state) => state.forkPointEntryId);
 export const useSessionCwd = () => useSessionStore((state) => state.cwd);

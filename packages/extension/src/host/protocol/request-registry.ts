@@ -77,9 +77,10 @@ export class ProtocolRequestRegistry {
     };
   }
 
-  cancel(requestId: string): boolean {
+  cancel(requestId: string, surface?: ScoutWebviewSurface): boolean {
     const state = this.active.get(requestId);
     if (!state) return false;
+    if (surface && state.surface !== surface) return false;
 
     state.canceled = true;
     state.closed = true;

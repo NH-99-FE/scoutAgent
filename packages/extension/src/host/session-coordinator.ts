@@ -5,6 +5,7 @@
 
 import * as vscode from 'vscode';
 import { rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import type {
   ScoutAgentEvent,
   ScoutChangesReviewSummary,
@@ -14,8 +15,11 @@ import type {
   ScoutImageContent,
   ScoutMessage,
   ScoutQueueState,
+  ScoutPendingComposerIntent,
+  ScoutSessionIdentity,
   ScoutSessionStats,
   ScoutSessionTreeNode,
+  ScoutTreeNavigationAdmission,
   ScoutExtensionUIRequestClosedReason,
   ThinkingLevel,
   ToolInfo,
@@ -43,6 +47,7 @@ import {
 import {
   AgentSession,
   type AgentSessionEvent,
+  type PromptSubmissionResult,
   type NavigateTreeResult,
 } from '../core/agent-session.ts';
 import type { FileReviewTurnSnapshot } from '../core/review/file-review.ts';
@@ -86,12 +91,7 @@ import {
   createMemoizedFileChangeDetailsEnricher,
 } from './review/file-change-diff-preview.ts';
 import { FileReviewArtifactFlushScheduler } from './review/file-review-artifact-flush-scheduler.ts';
-import {
-  SessionOperationBroker,
-  type SessionOperationResult,
-  type SessionOperationToken,
-  type SessionUserOperationKind,
-} from './session-operation-broker.ts';
+import { SessionExecutionGate } from './session-execution-gate.ts';
 
 // ---------- 配置接口 ----------
 
@@ -119,9 +119,6 @@ type ExtensionSessionCoordinatorSessionReplacementOptions = SessionReplacementOp
 };
 
 type ExtensionSessionCoordinatorNewSessionOptions = AgentSessionRuntimeNewSessionOptions;
-
-export type UserSessionOperationToken = SessionOperationToken;
-export type UserSessionOperationResult<T> = SessionOperationResult<T>;
 
 type InitialRuntimeReason = 'startup' | 'new';
 
@@ -153,7 +150,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private isInitializing = false;
   private disposePromise?: Promise<void>;
   private previewGeneration = 0;
-  private readonly sessionOperationBroker = new SessionOperationBroker();
+  private readonly sessionExecutionGate: SessionExecutionGate;
+  private readonly pendingComposerIntents = new Map<string, ScoutPendingComposerIntent>();
   private readonly agentEventCorrelator = new AgentEventCorrelator();
   private extensionUIContext: ExtensionUIContext | undefined;
   private cancelExtensionUIRequests:
@@ -175,6 +173,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.agentDir = options.agentDir;
     this.outputChannel = options.outputChannel;
     this.configManager = options.configManager;
+    this.sessionExecutionGate = new SessionExecutionGate();
+    this.sessionExecutionGate.setOnExecutionChange(() => {
+      this.emit({ type: 'state_change' });
+    });
   }
 
   // ---------- 属性（委托给 AgentSession） ----------
@@ -213,6 +215,53 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   get sessionFile(): string | undefined {
     return this.agentSession?.sessionFile;
+  }
+
+  get sessionIdentity(): ScoutSessionIdentity | undefined {
+    const sessionPath = this.sessionFile;
+    if (!this.sessionId || !sessionPath) return undefined;
+    return { sessionId: this.sessionId, sessionPath };
+  }
+
+  get executionSnapshot() {
+    return this.sessionExecutionGate.snapshot();
+  }
+
+  matchesSessionIdentity(session: ScoutSessionIdentity): boolean {
+    const current = this.sessionIdentity;
+    return current?.sessionId === session.sessionId && current.sessionPath === session.sessionPath;
+  }
+
+  getPendingComposerIntent(): ScoutPendingComposerIntent | undefined {
+    const sessionPath = this.sessionFile;
+    return sessionPath ? this.pendingComposerIntents.get(sessionPath) : undefined;
+  }
+
+  setPendingComposerIntent(
+    intent: { commandId: string; session: ScoutSessionIdentity } & (
+      | { kind: 'replace_text'; text: string }
+      | { kind: 'clear' }
+    ),
+  ): ScoutPendingComposerIntent {
+    const versionedIntent = {
+      ...intent,
+      version: randomUUID(),
+    };
+    this.pendingComposerIntents.set(intent.session.sessionPath, versionedIntent);
+    return versionedIntent;
+  }
+
+  acknowledgeComposerIntent(version: string, session: ScoutSessionIdentity): boolean {
+    const current = this.pendingComposerIntents.get(session.sessionPath);
+    if (
+      !current ||
+      current.version !== version ||
+      current.session.sessionId !== session.sessionId
+    ) {
+      return false;
+    }
+    this.pendingComposerIntents.delete(session.sessionPath);
+    return true;
   }
 
   get leafId(): string | null {
@@ -291,11 +340,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private async createInitialRuntime(
     reason: InitialRuntimeReason,
     options?: ExtensionSessionCoordinatorNewSessionOptions,
-    operationToken?: UserSessionOperationToken,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     if (this.sessionRuntime) return { cancelled: false };
     if (this.isInitializing) {
-      throw new Error('Session initialization is already running outside the replacement queue');
+      throw new Error('Session initialization is already running');
     }
     this.isInitializing = true;
     let createdSession: Session | undefined;
@@ -339,7 +387,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       if (options?.withSession) {
         await options.withSession(runtime.session.createReplacedSessionContext());
       }
-      this.emitSessionStateChange(operationToken);
+      this.emitSessionStateChange();
 
       this.outputChannel.appendLine(
         reason === 'startup'
@@ -362,75 +410,31 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   }
 
   private async runSessionReplacement<T>(operation: () => Promise<T>): Promise<T> {
-    this.cancelExtensionUIRequests?.('session_replacement');
-    return await this.sessionOperationBroker.runExclusive(async () => {
+    const session = this.sessionIdentity;
+    if (!session) {
+      this.cancelExtensionUIRequests?.('session_replacement');
       await this.flushFileReviewArtifactSaves();
       return await operation();
-    });
-  }
-
-  beginUserSessionOperation(kind: SessionUserOperationKind): UserSessionOperationToken {
-    return this.sessionOperationBroker.beginUserOperation(kind);
-  }
-
-  async restoreUserSession(
-    token: UserSessionOperationToken,
-    sessionMeta: JsonlSessionMetadata,
-    options?: ExtensionSessionCoordinatorSessionReplacementOptions,
-  ): Promise<UserSessionOperationResult<ExtensionSessionCoordinatorReplacementResult>> {
-    return await this.sessionOperationBroker.runUserOperation(token, async (currentToken) => {
-      return await this.restoreUnlocked(
-        sessionMeta,
-        this.guardSessionReplacementOptions(options, currentToken),
-        currentToken,
-      );
-    });
-  }
-
-  async newUserSession(
-    token: UserSessionOperationToken,
-    options?: ExtensionSessionCoordinatorNewSessionOptions,
-  ): Promise<UserSessionOperationResult<ExtensionSessionCoordinatorReplacementResult>> {
-    return await this.sessionOperationBroker.runUserOperation(token, async (currentToken) => {
-      return await this.newSessionUnlocked(
-        this.guardNewSessionOptions(options, currentToken),
-        currentToken,
-      );
-    });
-  }
-
-  private guardSessionReplacementOptions(
-    options: ExtensionSessionCoordinatorSessionReplacementOptions | undefined,
-    token: UserSessionOperationToken,
-  ): ExtensionSessionCoordinatorSessionReplacementOptions | undefined {
-    if (!options?.withSession) return options;
-    const { withSession } = options;
-    return {
-      ...options,
-      withSession: async (ctx) => {
-        if (!token.isLatest()) return;
-        await withSession(ctx);
+    }
+    const result = await this.sessionExecutionGate.run(
+      {
+        kind: 'session_replacement',
+        operationId: randomUUID(),
+        session,
       },
-    };
-  }
-
-  private guardNewSessionOptions(
-    options: ExtensionSessionCoordinatorNewSessionOptions | undefined,
-    token: UserSessionOperationToken,
-  ): ExtensionSessionCoordinatorNewSessionOptions | undefined {
-    if (!options?.withSession) return options;
-    const { withSession } = options;
-    return {
-      ...options,
-      withSession: async (ctx) => {
-        if (!token.isLatest()) return;
-        await withSession(ctx);
+      async () => {
+        this.cancelExtensionUIRequests?.('session_replacement');
+        await this.flushFileReviewArtifactSaves();
+        return await operation();
       },
-    };
+    );
+    if (!result.ok) {
+      throw new Error(`Session replacement rejected: ${result.reason}`);
+    }
+    return result.value;
   }
 
-  private emitSessionStateChange(operationToken?: UserSessionOperationToken): void {
-    if (operationToken && !operationToken.isLatest()) return;
+  private emitSessionStateChange(): void {
     this.emit({ type: 'state_change' });
   }
 
@@ -445,7 +449,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private async restoreUnlocked(
     sessionMeta: JsonlSessionMetadata,
     options?: ExtensionSessionCoordinatorSessionReplacementOptions,
-    operationToken?: UserSessionOperationToken,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     if (!this.sessionRuntime) {
       const session = CoreSessionManager.open(
@@ -464,7 +467,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.sessionRuntime = runtime;
       this.cwd = runtime.cwd;
       runtime.appendDiagnostics(await this.rebindAgentSession(runtime.session));
-      this.emitSessionStateChange(operationToken);
+      this.emitSessionStateChange();
       this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
       if (options?.withSession) {
         await options.withSession(runtime.session.createReplacedSessionContext());
@@ -480,7 +483,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       return { cancelled: true };
     }
     this.cwd = this.sessionRuntime.cwd;
-    this.emitSessionStateChange(operationToken);
+    this.emitSessionStateChange();
     this.outputChannel.appendLine(`[scout] Session restored: ${sessionMeta.id}`);
     return result;
   }
@@ -530,10 +533,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   private async newSessionUnlocked(
     options?: ExtensionSessionCoordinatorNewSessionOptions,
-    operationToken?: UserSessionOperationToken,
   ): Promise<ExtensionSessionCoordinatorReplacementResult> {
     if (!this.sessionRuntime) {
-      return await this.createInitialRuntime('new', options, operationToken);
+      return await this.createInitialRuntime('new', options);
     }
 
     const result = await this.sessionRuntime.newSession(options);
@@ -541,7 +543,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.outputChannel.appendLine('[scout] New session cancelled by extension');
       return { cancelled: true };
     }
-    this.emitSessionStateChange(operationToken);
+    this.emitSessionStateChange();
     return result;
   }
 
@@ -577,12 +579,20 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       images?: ScoutImageContent[];
       document?: ScoutComposerDocument;
       clearFollowUpQueue?: boolean;
+      session?: ScoutSessionIdentity;
     },
-  ): Promise<void> {
+  ): Promise<PromptSubmissionResult> {
     if (!this.agentSession) {
       await this.initialize();
     }
-    if (!this.agentSession) return;
+    if (!this.agentSession) return { status: 'blocked', error: 'No active session' };
+    if (
+      options?.session &&
+      (options.session.sessionId !== this.sessionId ||
+        options.session.sessionPath !== this.sessionFile)
+    ) {
+      return { status: 'stale' };
+    }
     if (this.agentSession.isStreaming) {
       const queuedMessageOptions = {
         images: options?.images,
@@ -593,9 +603,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       } else {
         await this.agentSession.steer(text, queuedMessageOptions);
       }
-      return;
+      return { status: 'accepted' };
     }
-    await this.agentSession.prompt(text, {
+    return await this.agentSession.submitPrompt(text, {
       images: options?.images,
       userMessageDetails: options?.document,
       clearFollowUpQueue: options?.clearFollowUpQueue,
@@ -624,6 +634,16 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       paused: snapshot.followUpPaused,
       pauseReason: snapshot.followUpPauseReason,
     };
+  }
+
+  getTreeNavigationAdmission(): ScoutTreeNavigationAdmission {
+    return (
+      this.agentSession?.getTreeNavigationAdmission() ?? {
+        allowed: false,
+        reason: 'session_unavailable',
+        message: '当前没有可导航的会话。',
+      }
+    );
   }
 
   cancelFollowUp(id: string): boolean {
@@ -733,17 +753,26 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   async navigateTree(
     targetId: string,
     options?: {
+      navigationId?: string;
       summarize?: boolean;
       customInstructions?: string;
       replaceInstructions?: boolean;
       label?: string;
     },
+    signal?: AbortSignal,
   ): Promise<NavigateTreeResult> {
     if (!this.agentSession) {
-      this.emit({ type: 'error', message: 'No active session for tree navigation' });
-      return { cancelled: true };
+      return {
+        navigationId: options?.navigationId ?? 'unavailable',
+        status: 'failed_before_commit',
+        error: 'No active session for tree navigation',
+      };
     }
-    return this.agentSession.navigateTree(targetId, options);
+    return this.agentSession.navigateTree(targetId, options, signal);
+  }
+
+  abortTreeNavigation(navigationId: string): boolean {
+    return this.agentSession?.abortTreeNavigation(navigationId) ?? false;
   }
 
   async setLabel(entryId: string, label?: string): Promise<void> {
@@ -916,6 +945,11 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.cwd = agentSession.sessionManager.getCwd();
     this.previewGeneration += 1;
     this.setAgentSession(agentSession, false);
+    this.sessionExecutionGate.setCurrentSession(
+      agentSession.sessionFile
+        ? { sessionId: agentSession.sessionId, sessionPath: agentSession.sessionFile }
+        : undefined,
+    );
     return await agentSession.bindExtensions({
       bindCore: (extensionRunner, nextSession) =>
         this.bindExtensionActions(extensionRunner, nextSession),
@@ -1031,6 +1065,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       sessionStartEvent,
       onFileReviewUpdated: (agentSession, review) =>
         this.handleFileReviewUpdated(agentSession, review),
+      sessionExecution: this.sessionExecutionGate,
     });
 
     this.logRuntimeDiagnostics(result.diagnostics);
@@ -1267,7 +1302,12 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       switchSession: (sessionMeta, options) => this.restore(sessionMeta, options),
       waitForIdle: () => agentSession.waitForIdle(),
       reload: () => this.reload().then(() => undefined),
-      navigateTree: (targetId, options) => agentSession.navigateTree(targetId, options),
+      navigateTree: async (targetId, options) => {
+        const result = await agentSession.navigateTree(targetId, options);
+        return {
+          cancelled: result.status !== 'committed' && result.status !== 'blocked_after_commit',
+        };
+      },
     };
 
     extensionRunner.bindCore(extensionActions, contextActions);

@@ -15,4 +15,6 @@ export type {
 } from './model/tree-types';
 export { NodeInspector } from './view/NodeInspector';
 export { TreeActionsMenu } from './view/TreeActionsMenu';
+export { TreeNavigationDialog } from './view/TreeNavigationDialog';
+export { TreeNavigationBlockedDialog } from './view/TreeNavigationBlockedDialog';
 export { TreeList } from './view/TreeList';

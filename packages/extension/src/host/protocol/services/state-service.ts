@@ -58,8 +58,13 @@ export class StateProtocolService implements StateProtocolHost {
   }
 
   pushQueueState(surface?: ScoutWebviewSurface): void {
+    const treeNavigationAdmission = this.sessionManager.getTreeNavigationAdmission();
     this.publishEvent(
-      { type: 'queue_update', queueState: this.sessionManager.getQueueState() },
+      {
+        type: 'queue_update',
+        queueState: this.sessionManager.getQueueState(),
+        treeNavigationAdmission,
+      },
       surface,
     );
   }
@@ -86,11 +91,55 @@ export class StateProtocolService implements StateProtocolHost {
       this.sessionManager.getSessionStats(),
       this.sessionManager.getVisibleLeafId(),
     ]);
+    const execution = this.sessionManager.executionSnapshot;
+    const isStreaming = this.sessionManager.isStreaming;
+    const runtimeBusyState = this.getBusyState();
+    const treeNavigationAdmission = this.sessionManager.getTreeNavigationAdmission();
+    const executionBusyState =
+      execution.health.kind === 'blocked'
+        ? ({
+            kind: 'session_mutation',
+            label: 'Session reload required',
+            cancellable: false,
+          } as const)
+        : execution.activity.kind === 'agent_turn' &&
+            !isStreaming &&
+            (runtimeBusyState.kind === 'idle' || runtimeBusyState.kind === 'agent')
+          ? ({
+              kind: 'agent',
+              label: 'Preparing message',
+              cancellable: false,
+            } as const)
+          : execution.activity.kind === 'tree_navigation'
+            ? {
+                kind: 'tree_navigation' as const,
+                operationId: execution.activity.operationId,
+                phase: execution.activity.phase,
+                label:
+                  execution.activity.phase === 'preflight'
+                    ? 'Navigating conversation tree'
+                    : 'Finalizing tree navigation',
+                cancellable: execution.activity.phase === 'preflight',
+              }
+            : execution.activity.kind === 'compaction'
+              ? ({ kind: 'compaction', label: 'Compacting context', cancellable: true } as const)
+              : execution.activity.kind === 'session_replacement' ||
+                  execution.activity.kind === 'tree_mutation' ||
+                  execution.activity.kind === 'session_mutation' ||
+                  execution.activity.kind === 'extension_command'
+                ? ({
+                    kind: 'session_mutation',
+                    label: 'Updating session',
+                    cancellable: false,
+                  } as const)
+                : undefined;
+    const busyState = executionBusyState ?? runtimeBusyState;
     return {
       messages: this.sessionManager.getScoutMessages(),
-      isStreaming: this.sessionManager.isStreaming,
-      busyState: this.getBusyState(),
+      isStreaming,
+      busyState,
       queueState: this.sessionManager.getQueueState(),
+      treeNavigationAdmission,
       modelProvider: this.sessionManager.model?.provider ?? '',
       modelId: this.sessionManager.model?.id ?? '',
       thinkingLevel: this.sessionManager.thinkingLevel,
@@ -111,6 +160,7 @@ export class StateProtocolService implements StateProtocolHost {
       extensionUIRequests: this.getExtensionUIRequests(),
       modelFallbackMessage: this.sessionManager.modelFallbackMessage,
       activeChangesReview: this.sessionManager.getActiveChangesReview(),
+      pendingComposerIntent: this.sessionManager.getPendingComposerIntent(),
     };
   }
 }

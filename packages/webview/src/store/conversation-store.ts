@@ -11,6 +11,7 @@ import type {
   ScoutMessage,
   ScoutQueueState,
   ScoutRuntimeEvent,
+  ScoutTreeNavigationAdmission,
   ScoutToolCallPreview,
   ScoutToolExecutionResult,
   ScoutWebviewState,
@@ -42,7 +43,10 @@ export interface ToolCallPreviewState {
 interface ConversationActions {
   applyStateSnapshot: (state: ScoutWebviewState) => void;
   applyRuntimeState: (state: Pick<ConversationStore, 'isStreaming' | 'busyState'>) => void;
-  applyQueueState: (queueState: ScoutQueueState) => void;
+  applyQueueState: (
+    queueState: ScoutQueueState,
+    treeNavigationAdmission?: ScoutTreeNavigationAdmission,
+  ) => void;
   applyChangesReviewUpdate: (event: ScoutChangesReviewUpdateEvent) => void;
   applyRuntimeEvent: (event: ScoutRuntimeEvent) => void;
   setContextUsage: (contextUsage: ScoutContextUsage | undefined) => void;
@@ -60,6 +64,7 @@ interface ConversationStore {
   isStreaming: boolean;
   busyState: ScoutBusyState;
   queueState: ScoutQueueState;
+  treeNavigationAdmission: ScoutTreeNavigationAdmission;
   activeChangesReview: ScoutChangesReviewSummary | undefined;
   contextUsage: ScoutContextUsage | undefined;
   sessionId: string;
@@ -98,6 +103,8 @@ const EMPTY_QUEUE_STATE: ScoutQueueState = {
   paused: false,
 };
 
+const DEFAULT_TREE_NAVIGATION_ADMISSION: ScoutTreeNavigationAdmission = { allowed: true };
+
 const initialState = {
   messages: [] as ScoutMessage[],
   messageKeys: [] as string[],
@@ -109,6 +116,7 @@ const initialState = {
   isStreaming: false,
   busyState: IDLE_BUSY_STATE,
   queueState: EMPTY_QUEUE_STATE,
+  treeNavigationAdmission: DEFAULT_TREE_NAVIGATION_ADMISSION,
   activeChangesReview: undefined as ScoutChangesReviewSummary | undefined,
   contextUsage: undefined as ScoutContextUsage | undefined,
   sessionId: '',
@@ -311,6 +319,8 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           isStreaming: state.isStreaming,
           busyState: state.busyState,
           queueState: state.queueState ?? EMPTY_QUEUE_STATE,
+          treeNavigationAdmission:
+            state.treeNavigationAdmission ?? DEFAULT_TREE_NAVIGATION_ADMISSION,
           activeChangesReview: state.activeChangesReview,
           contextUsage: state.contextUsage,
           sessionId: state.sessionId ?? '',
@@ -319,8 +329,16 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           toolPreviewsById: {},
         };
       }),
-    applyRuntimeState: (state) => set(state),
-    applyQueueState: (queueState) => set({ queueState }),
+    applyRuntimeState: (state) =>
+      set(() => ({
+        isStreaming: state.isStreaming,
+        busyState: state.busyState,
+      })),
+    applyQueueState: (queueState, treeNavigationAdmission) =>
+      set((state) => ({
+        queueState,
+        treeNavigationAdmission: treeNavigationAdmission ?? state.treeNavigationAdmission,
+      })),
     applyChangesReviewUpdate: (event) =>
       set((state) => {
         if (!isChangesReviewUpdateForCurrentSession(event, state)) return {};
@@ -459,6 +477,8 @@ export const useConversationMessageCount = () =>
 export const useIsStreaming = () => useConversationStore((state) => state.isStreaming);
 export const useBusyState = () => useConversationStore((state) => state.busyState);
 export const useQueueState = () => useConversationStore((state) => state.queueState);
+export const useTreeNavigationAdmission = () =>
+  useConversationStore((state) => state.treeNavigationAdmission);
 export const useQueuedFollowUps = () => useConversationStore((state) => state.queueState.followUps);
 export const useActiveChangesReview = () =>
   useConversationStore((state) => state.activeChangesReview);

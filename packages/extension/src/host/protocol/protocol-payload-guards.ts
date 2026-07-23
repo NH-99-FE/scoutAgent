@@ -47,7 +47,8 @@ const PAYLOAD_VALIDATORS = {
   request_skills: fields('type'),
   request_context_usage: fields('type'),
   user_message: combine(
-    fields('type', 'text', 'document', 'images', 'deliverAs', 'clearFollowUpQueue'),
+    fields('type', 'session', 'text', 'document', 'images', 'deliverAs', 'clearFollowUpQueue'),
+    requiredSessionIdentity('session'),
     requiredString('text'),
     optionalComposerDocument('document'),
     optionalImages('images'),
@@ -68,9 +69,14 @@ const PAYLOAD_VALIDATORS = {
     optionalBoolean('resume'),
     optionalBoolean('preserveFollowUpQueue'),
   ),
-  compact: combine(fields('type', 'customInstructions'), optionalString('customInstructions')),
+  compact: combine(
+    fields('type', 'session', 'customInstructions'),
+    requiredSessionIdentity('session'),
+    optionalString('customInstructions'),
+  ),
   select_model: combine(
-    fields('type', 'provider', 'modelId'),
+    fields('type', 'session', 'provider', 'modelId'),
+    requiredSessionIdentity('session'),
     requiredString('provider'),
     requiredString('modelId'),
   ),
@@ -86,9 +92,17 @@ const PAYLOAD_VALIDATORS = {
     requiredEnum('scope', SCOUT_SETTINGS_SCOPES),
     requiredRuntimeSettingsPatch('patch'),
   ),
-  select_thinking: combine(fields('type', 'level'), requiredEnum('level', THINKING_LEVELS)),
-  set_tool_profile: combine(fields('type', 'profileId'), requiredString('profileId')),
-  clear_conversation: fields('type'),
+  select_thinking: combine(
+    fields('type', 'session', 'level'),
+    requiredSessionIdentity('session'),
+    requiredEnum('level', THINKING_LEVELS),
+  ),
+  set_tool_profile: combine(
+    fields('type', 'session', 'profileId'),
+    requiredSessionIdentity('session'),
+    requiredString('profileId'),
+  ),
+  clear_conversation: combine(fields('type', 'session'), requiredSessionIdentity('session')),
   reload_resources: fields('type'),
   create_extension_from_template: combine(
     fields('type', 'templateId', 'scope', 'overwrite'),
@@ -120,28 +134,56 @@ const PAYLOAD_VALIDATORS = {
   ),
   open_current_changes_review: fields('type'),
   fork_session: combine(
-    fields('type', 'entryId', 'position'),
+    fields('type', 'session', 'entryId', 'position'),
+    requiredSessionIdentity('session'),
     requiredString('entryId'),
     requiredEnum('position', ['before', 'at']),
   ),
   request_fork_candidates: combine(fields('type', 'sessionId'), requiredString('sessionId')),
   request_tree: fields('type'),
   navigate_tree: combine(
-    fields('type', 'targetId', 'summarize', 'customInstructions', 'replaceInstructions', 'label'),
+    fields(
+      'type',
+      'navigationId',
+      'session',
+      'targetId',
+      'summarize',
+      'customInstructions',
+      'replaceInstructions',
+      'label',
+    ),
+    requiredString('navigationId'),
+    requiredSessionIdentity('session'),
     requiredString('targetId'),
     requiredBoolean('summarize'),
     optionalString('customInstructions'),
     optionalBoolean('replaceInstructions'),
     optionalString('label'),
   ),
+  abort_tree_navigation: combine(
+    fields('type', 'navigationId', 'session'),
+    requiredString('navigationId'),
+    requiredSessionIdentity('session'),
+  ),
+  ack_composer_intent: combine(
+    fields('type', 'version', 'session'),
+    requiredString('version'),
+    requiredSessionIdentity('session'),
+  ),
   set_label: combine(
-    fields('type', 'entryId', 'label'),
+    fields('type', 'session', 'entryId', 'label'),
+    requiredSessionIdentity('session'),
     requiredString('entryId'),
     optionalString('label'),
   ),
-  set_session_name: combine(fields('type', 'name'), requiredString('name')),
+  set_session_name: combine(
+    fields('type', 'session', 'name'),
+    requiredSessionIdentity('session'),
+    requiredString('name'),
+  ),
   continue_session: combine(
-    fields('type', 'preserveFollowUpQueue'),
+    fields('type', 'session', 'preserveFollowUpQueue'),
+    requiredSessionIdentity('session'),
     optionalBoolean('preserveFollowUpQueue'),
   ),
   request_commands: fields('type'),
@@ -219,6 +261,23 @@ function fields(...allowedKeys: string[]): PayloadValidator {
       if (!allowed.has(key)) {
         return `${key} is not a protocol field`;
       }
+    }
+    return undefined;
+  };
+}
+
+function requiredSessionIdentity(key: string): PayloadValidator {
+  return (payload) => {
+    const value = payload[key];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return `${key} must be a session identity`;
+    }
+    const session = value as Record<string, unknown>;
+    if (typeof session.sessionId !== 'string' || typeof session.sessionPath !== 'string') {
+      return `${key} must contain string sessionId and sessionPath`;
+    }
+    if (Object.keys(session).some((field) => field !== 'sessionId' && field !== 'sessionPath')) {
+      return `${key} contains an unknown field`;
     }
     return undefined;
   };

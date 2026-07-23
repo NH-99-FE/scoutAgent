@@ -6,6 +6,11 @@
 
 export type ScoutWebviewSurface = 'chat' | 'settings' | 'tree' | 'changes-review';
 
+export interface ScoutSessionIdentity {
+  sessionId: string;
+  sessionPath: string;
+}
+
 // ---------- 来源与工具信息 ----------
 
 export type SourceScope = 'user' | 'project' | 'temporary';

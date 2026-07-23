@@ -2,6 +2,7 @@
 // Composer Submit — 输入区提交契约
 // ============================================================
 
+import type { ScoutBusyState, ScoutTreeNavigationAdmission } from '@scout-agent/shared';
 import type { ComposerDocument, ComposerImageDescriptor } from '@/store/composer-store';
 import { formatComposerReference } from './composer-reference-format';
 
@@ -36,6 +37,28 @@ export const INITIAL_COMPOSER_SUBMIT_STATE: ComposerSubmitState = {
   pendingSubmit: null,
   phase: 'idle',
 };
+
+export function isComposerSubmissionBlocked(
+  busyState: ScoutBusyState,
+  isStreaming: boolean,
+  treeNavigationAdmission?: ScoutTreeNavigationAdmission,
+): boolean {
+  if (busyState.kind === 'agent') {
+    return !busyState.cancellable && !isStreaming;
+  }
+  if (
+    busyState.kind === 'compaction' ||
+    busyState.kind === 'tree_navigation' ||
+    busyState.kind === 'session_mutation'
+  ) {
+    return true;
+  }
+  return (
+    treeNavigationAdmission?.allowed === false &&
+    (treeNavigationAdmission.reason === 'session_busy' ||
+      treeNavigationAdmission.reason === 'session_blocked')
+  );
+}
 
 export function formatComposerSubmitText(payload: Pick<ComposerSubmitPayload, 'document'>): string {
   return payload.document.segments
