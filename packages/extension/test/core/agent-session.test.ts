@@ -15,6 +15,10 @@ import {
 } from '@scout-agent/ai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentSession, type AgentSessionEvent } from '../../src/core/agent-session.ts';
+import type {
+  SessionExecutionActivity,
+  SessionExecutionPort,
+} from '../../src/core/session-execution.ts';
 import type { FileReviewTurnSnapshot } from '../../src/core/review/file-review.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
 import { createConfigManager, mockModel, userMessage, assistantMessage } from './test-utils.ts';
@@ -23,7 +27,11 @@ import { ConfigManager } from '../../src/config-manager.ts';
 const STREAM_OPTIONS_TEST_SOURCE = 'agent-session-compaction-stream-options-test';
 const STREAM_OPTIONS_TEST_API = 'test-agent-session-compaction-api';
 
-function createSession(tempDir: string, configValues?: Record<string, unknown>): AgentSession {
+function createSession(
+  tempDir: string,
+  configValues?: Record<string, unknown>,
+  sessionExecution?: SessionExecutionPort,
+): AgentSession {
   return new AgentSession({
     session: SessionManager.inMemory(tempDir),
     configManager: configValues
@@ -32,7 +40,50 @@ function createSession(tempDir: string, configValues?: Record<string, unknown>):
     cwd: tempDir,
     logger: { appendLine: vi.fn() },
     skills: [],
+    sessionExecution,
   });
+}
+
+function createTestSessionExecution(): SessionExecutionPort {
+  let activity: SessionExecutionActivity = { kind: 'idle' };
+  const execution: SessionExecutionPort = {
+    snapshot: () => ({ activity, health: { kind: 'ready' } }),
+    tryBegin: ({ kind, operationId }) => {
+      if (activity.kind !== 'idle') return { ok: false, reason: 'busy' };
+      activity =
+        kind === 'tree_navigation'
+          ? { kind, operationId, phase: 'preflight' }
+          : { kind, operationId };
+      return {
+        ok: true,
+        lease: {
+          operationId,
+          run: async (operation) => await operation(),
+          transition: (phase) => {
+            if (activity.kind === 'tree_navigation' && activity.operationId === operationId) {
+              activity = { ...activity, phase };
+            }
+          },
+          finish: () => {
+            if (activity.kind !== 'idle' && activity.operationId === operationId) {
+              activity = { kind: 'idle' };
+            }
+          },
+        },
+      };
+    },
+    run: async (input, operation) => {
+      const begin = execution.tryBegin(input);
+      if (!begin.ok) return begin;
+      try {
+        return { ok: true, value: await operation() };
+      } finally {
+        begin.lease.finish();
+      }
+    },
+    block: vi.fn(),
+  };
+  return execution;
 }
 
 function attachFakeAgent(session: AgentSession, agent: unknown): void {
@@ -1234,10 +1285,382 @@ describe('AgentSession', () => {
 
     const result = await session.navigateTree(firstId);
 
-    expect(result.cancelled).toBe(false);
+    expect(result.status).toBe('committed');
     expect(backingSession.getEntries().some((entry) => entry.type === 'branch_summary')).toBe(
       false,
     );
+  });
+
+  it.each([
+    {
+      delivery: 'steer' as const,
+      expectedReason: 'steering_pending' as const,
+      expectedMessage: '仍有 steering 消息待处理',
+    },
+    {
+      delivery: 'followUp' as const,
+      expectedReason: 'follow_up_pending' as const,
+      expectedMessage: '仍有 follow-up 待处理',
+    },
+  ])(
+    'blocks tree navigation while a $delivery message remains queued',
+    async ({ delivery, expectedMessage, expectedReason }) => {
+      const session = createSession(tempDir);
+      const backingSession = session.sessionManager;
+      const targetId = backingSession.appendMessage(userMessage('first'));
+      backingSession.appendMessage(assistantMessage('response'));
+      const queuedEntry = {
+        id: `queued-${delivery}`,
+        delivery,
+        message: userMessage('queued message'),
+        timestamp: 2,
+      };
+      attachFakeAgent(session, {
+        getQueuedMessages: vi.fn(() => [queuedEntry]),
+        getFollowUpQueue: vi.fn(() => (delivery === 'followUp' ? [queuedEntry] : [])),
+      });
+
+      expect(session.getTreeNavigationAdmission()).toMatchObject({
+        allowed: false,
+        reason: expectedReason,
+      });
+      const result = await session.navigateTree(targetId);
+
+      expect(result).toMatchObject({
+        status: 'busy',
+        error: expect.stringContaining(expectedMessage),
+      });
+      expect(backingSession.getLeafId()).not.toBe(targetId);
+    },
+  );
+
+  it('blocks tree navigation while queued follow-ups are paused', async () => {
+    const session = createSession(tempDir);
+    const queuedEntry = {
+      id: 'follow-paused',
+      delivery: 'followUp' as const,
+      message: userMessage('paused follow-up'),
+      timestamp: 2,
+    };
+    attachFakeAgent(session, {
+      abort: vi.fn(),
+      clearSteeringQueue: vi.fn(),
+      getFollowUpQueue: vi.fn(() => [queuedEntry]),
+    });
+
+    await session.abort();
+
+    expect(session.getTreeNavigationAdmission()).toMatchObject({
+      allowed: false,
+      reason: 'follow_up_paused',
+    });
+  });
+
+  it('blocks tree navigation while a next-turn extension message is pending', async () => {
+    const session = createSession(tempDir);
+    attachFakeAgent(session, {
+      getFollowUpQueue: vi.fn(() => []),
+      getQueuedMessages: vi.fn(() => []),
+    });
+
+    await session.sendMessage('next turn context', { deliverAs: 'nextTurn' });
+
+    expect(session.getTreeNavigationAdmission()).toMatchObject({
+      allowed: false,
+      reason: 'follow_up_pending',
+    });
+  });
+
+  it('blocks tree navigation while another session operation owns the execution lease', () => {
+    const execution = createTestSessionExecution();
+    const session = createSession(tempDir, undefined, execution);
+    attachFakeAgent(session, {});
+    execution.tryBegin({
+      kind: 'agent_turn',
+      operationId: 'turn-1',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+    });
+
+    expect(session.getTreeNavigationAdmission()).toMatchObject({
+      allowed: false,
+      reason: 'session_busy',
+    });
+  });
+
+  it('routes extension and metadata writes through the same session gate', async () => {
+    const run = vi.fn(async () => ({ ok: false as const, reason: 'busy' as const }));
+    const execution: SessionExecutionPort = {
+      snapshot: () => ({
+        session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+        activity: { kind: 'tree_navigation', operationId: 'navigation-1', phase: 'preflight' },
+        health: { kind: 'ready' },
+      }),
+      tryBegin: () => ({ ok: false, reason: 'busy' }),
+      run,
+      block: vi.fn(),
+    };
+    const session = createSession(tempDir, undefined, execution);
+    Object.defineProperty(session, 'sessionFile', {
+      configurable: true,
+      get: () => '/sessions/session-1.jsonl',
+    });
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    await expect(session.setSessionName('blocked rename')).rejects.toThrow(
+      'Session mutation rejected: busy',
+    );
+    await expect(session.appendEntry('blocked-entry')).rejects.toThrow(
+      'Session mutation rejected: busy',
+    );
+    await expect(session.sendUserMessage('blocked prompt')).rejects.toThrow(
+      'Session mutation rejected: busy',
+    );
+
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(await session.getSessionName()).toBeUndefined();
+    expect(session.getSessionEntries()).toEqual([]);
+  });
+
+  it('commits summarized navigation supplied by an extension hook', async () => {
+    const session = createSession(tempDir);
+    const backingSession = session.sessionManager;
+    const firstId = backingSession.appendMessage(userMessage('first'));
+    backingSession.appendMessage(assistantMessage('response'));
+    backingSession.appendMessage(userMessage('second'));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = {
+      emitSessionBeforeTree: vi.fn(async () => ({
+        summary: { summary: 'abandoned branch summary' },
+      })),
+      emit: vi.fn(async () => undefined),
+    };
+    const result = await session.navigateTree(firstId, { summarize: true });
+
+    expect(result.status).toBe('committed');
+  });
+
+  it('links tree navigation to an external cancellation signal', async () => {
+    const session = createSession(tempDir);
+    const backingSession = session.sessionManager;
+    const firstId = backingSession.appendMessage(userMessage('first'));
+    backingSession.appendMessage(assistantMessage('response'));
+    backingSession.appendMessage(userMessage('second'));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    let navigationSignal: AbortSignal | undefined;
+    const summaryStarted = createDeferred();
+    const finishSummary = createDeferred<{ cancel: true }>();
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = {
+      emitSessionBeforeTree: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+        navigationSignal = signal;
+        summaryStarted.resolve();
+        return await finishSummary.promise;
+      }),
+      emit: vi.fn(async () => undefined),
+    };
+    const requestAbortController = new AbortController();
+
+    const navigation = session.navigateTree(
+      firstId,
+      { summarize: true },
+      requestAbortController.signal,
+    );
+    await summaryStarted.promise;
+    requestAbortController.abort();
+    const signalWasAborted = navigationSignal?.aborted;
+    finishSummary.resolve({ cancel: true });
+
+    expect((await navigation).status).toBe('cancelled');
+    expect(signalWasAborted).toBe(true);
+    expect(backingSession.getLeafId()).not.toBe(firstId);
+  });
+
+  it('cancels an in-flight tree navigation when the session is disposed', async () => {
+    const session = createSession(tempDir);
+    const backingSession = session.sessionManager;
+    const firstId = backingSession.appendMessage(userMessage('first'));
+    backingSession.appendMessage(assistantMessage('response'));
+    backingSession.appendMessage(userMessage('second'));
+    attachFakeAgent(session, {
+      abort: vi.fn(),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    let navigationSignal: AbortSignal | undefined;
+    const summaryStarted = createDeferred();
+    const finishSummary = createDeferred<{ cancel: true }>();
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = {
+      emitSessionBeforeTree: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+        navigationSignal = signal;
+        summaryStarted.resolve();
+        return await finishSummary.promise;
+      }),
+      emit: vi.fn(async () => undefined),
+      invalidate: vi.fn(),
+    };
+
+    const navigation = session.navigateTree(firstId, { summarize: true });
+    await summaryStarted.promise;
+    session.dispose();
+    const signalWasAborted = navigationSignal?.aborted;
+    finishSummary.resolve({ cancel: true });
+
+    expect((await navigation).status).toBe('cancelled');
+    expect(signalWasAborted).toBe(true);
+    expect(backingSession.getLeafId()).not.toBe(firstId);
+  });
+
+  it('keeps a committed tree navigation successful when extension notification fails', async () => {
+    const session = createSession(tempDir);
+    const backingSession = session.sessionManager;
+    backingSession.appendMessage(userMessage('first'));
+    const targetId = backingSession.appendMessage(assistantMessage('response'));
+    backingSession.appendMessage(userMessage('second'));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = {
+      emitSessionBeforeTree: vi.fn(async () => undefined),
+      emit: vi.fn(async () => {
+        throw new Error('extension reconciliation failed');
+      }),
+    };
+
+    const result = await session.navigateTree(targetId, { summarize: false });
+
+    expect(result.status).toBe('committed');
+    expect(backingSession.getLeafId()).toBe(targetId);
+  });
+
+  it('reports a committed navigation as blocked when core runtime synchronization fails', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const backingSession = session.sessionManager;
+    backingSession.appendMessage(userMessage('first'));
+    const targetId = backingSession.appendMessage(assistantMessage('response'));
+    backingSession.appendMessage(userMessage('second'));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    const extensionNotification = vi.fn(async () => undefined);
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = {
+      emitSessionBeforeTree: vi.fn(async () => undefined),
+      emit: extensionNotification,
+    };
+    vi.spyOn(session, 'syncRuntimeMessagesFromSession').mockRejectedValue(
+      new Error('context sync failed'),
+    );
+
+    const result = await session.navigateTree(targetId, { summarize: false });
+
+    expect(result).toMatchObject({
+      status: 'blocked_after_commit',
+      error: 'context sync failed',
+    });
+    expect(backingSession.getLeafId()).toBe(targetId);
+    expect(extensionNotification).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('returns a pre-commit tree navigation failure without emitting a duplicate error', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    const result = await session.navigateTree('missing-entry', { summarize: false });
+
+    expect(result).toMatchObject({
+      status: 'failed_before_commit',
+      error: 'Entry missing-entry not found',
+    });
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('enters reconciliation before writing the optional navigation label', async () => {
+    const execution = createTestSessionExecution();
+    const session = createSession(tempDir, undefined, execution);
+    const backingSession = session.sessionManager;
+    backingSession.appendMessage(userMessage('first'));
+    const targetId = backingSession.appendMessage(assistantMessage('response'));
+    backingSession.appendMessage(userMessage('second'));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    const appendLabel = backingSession.appendLabel.bind(backingSession);
+    vi.spyOn(backingSession, 'appendLabel').mockImplementation((entryId, label) => {
+      expect(execution.snapshot().activity).toMatchObject({
+        kind: 'tree_navigation',
+        phase: 'reconciling',
+      });
+      return appendLabel(entryId, label);
+    });
+
+    const result = await session.navigateTree(targetId, { summarize: false, label: 'branch' });
+
+    expect(result.status).toBe('committed');
+  });
+
+  it('rejects tree cancellation after navigation enters reconciliation', () => {
+    const execution = createTestSessionExecution();
+    const session = createSession(tempDir, undefined, execution);
+    const begin = execution.tryBegin({
+      kind: 'tree_navigation',
+      operationId: 'navigation-1',
+      session: { sessionId: session.sessionId, sessionPath: session.sessionFile! },
+    });
+    expect(begin.ok).toBe(true);
+    if (!begin.ok) return;
+    begin.lease.transition('reconciling');
+
+    expect(session.abortTreeNavigation('navigation-1')).toBe(false);
   });
 
   it('rebuilds runtime context from the session tree after navigation', async () => {
@@ -1263,10 +1686,35 @@ describe('AgentSession', () => {
 
     const result = await session.navigateTree(firstId, { summarize: false });
 
-    expect(result).toEqual({ cancelled: false, editorText: 'first draft' });
+    expect(result).toMatchObject({ status: 'committed', editorText: 'first draft' });
     expect(backingSession.getLeafId()).toBeNull();
     expect(runtimeMessages).toEqual([]);
     expect(session.getSessionBranch()).toEqual([]);
+  });
+
+  it.each([
+    ['user message', 'current draft'],
+    ['custom message', 'current custom draft'],
+  ] as const)('returns editor text when the current leaf is a %s', async (entryType, text) => {
+    const session = createSession(tempDir);
+    const backingSession = session.sessionManager;
+    const entryId =
+      entryType === 'user message'
+        ? backingSession.appendMessage(userMessage(text))
+        : backingSession.appendCustomMessageEntry('visible-context', text, true);
+    attachFakeAgent(session, {
+      state: {
+        messages: entryType === 'user message' ? [userMessage(text)] : [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    const result = await session.navigateTree(entryId, { summarize: false });
+
+    expect(result).toMatchObject({ status: 'committed', editorText: text });
+    expect(backingSession.getLeafId()).toBeNull();
   });
 
   it('keeps runtime tool profile unchanged during tree navigation', async () => {
@@ -1415,6 +1863,31 @@ describe('AgentSession', () => {
     );
   });
 
+  it('publishes pre-acceptance failures from extension sendUserMessage calls', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    vi.spyOn(
+      session as unknown as { runPrePromptCompaction: () => Promise<void> },
+      'runPrePromptCompaction',
+    ).mockRejectedValue(new Error('Extension prompt preparation failed'));
+
+    await session.sendUserMessage('extension prompt');
+
+    expect(events).toContainEqual({
+      type: 'error',
+      message: 'Extension prompt preparation failed',
+    });
+  });
+
   it('keeps composer presentation attached to queued user messages', async () => {
     const session = createSession(tempDir);
     const steer = vi.fn();
@@ -1507,6 +1980,140 @@ describe('AgentSession', () => {
     await started.turn;
 
     expect(turnCompleted).toBe(true);
+  });
+
+  it('runs extension commands before acquiring an agent turn lease', async () => {
+    const execution = createTestSessionExecution();
+    const session = createSession(tempDir, undefined, execution);
+    const entryId = session.sessionManager.appendMessage(userMessage('entry'));
+    const appendLabel = vi.spyOn(session.sessionManager, 'appendLabel');
+    const emitError = vi.fn();
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = {
+      getCommand: vi.fn(() => ({
+        name: 'label',
+        handler: async () => await session.setLabel(entryId, 'from command'),
+      })),
+      createCommandContext: vi.fn(() => ({})),
+      emitError,
+    };
+
+    const result = await session.prompt('/label');
+
+    expect(result).toEqual({ status: 'accepted' });
+    expect(appendLabel).toHaveBeenCalledWith(entryId, 'from command');
+    expect(emitError).not.toHaveBeenCalled();
+  });
+
+  it('returns the extension command error when the prompt is blocked', async () => {
+    const session = createSession(tempDir);
+    attachFakeAgent(session, {
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    (session as unknown as { extensionRunner: unknown }).extensionRunner = {
+      getCommand: vi.fn(() => ({
+        name: 'broken',
+        handler: vi.fn(async () => {
+          throw new Error('Extension command failed');
+        }),
+      })),
+      createCommandContext: vi.fn(() => ({})),
+      emitError: vi.fn(),
+    };
+
+    const result = await session.prompt('/broken');
+
+    expect(result).toEqual({ status: 'blocked', error: 'Extension command failed' });
+  });
+
+  it('does not accept a prompt when preparation fails before persistence', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const prompt = vi.fn();
+    attachFakeAgent(session, {
+      prompt,
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+    vi.spyOn(
+      session as unknown as { runPrePromptCompaction: () => Promise<void> },
+      'runPrePromptCompaction',
+    ).mockRejectedValue(new Error('compaction failed'));
+
+    const result = await session.prompt('keep this draft');
+
+    expect(result).toEqual({ status: 'blocked', error: 'compaction failed' });
+    expect(prompt).not.toHaveBeenCalled();
+    expect(session.sessionManager.getEntries()).toHaveLength(0);
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('returns an initial agent failure without publishing a host error before acceptance', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    attachFakeAgent(session, {
+      prompt: vi.fn(async () => {
+        throw new Error('Agent failed before persistence');
+      }),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    const result = await session.prompt('keep this draft');
+
+    expect(result).toEqual({ status: 'blocked', error: 'Agent failed before persistence' });
+    expect(events.some((event) => event.type === 'error')).toBe(false);
+  });
+
+  it('publishes a host error when the turn fails after the prompt is accepted', async () => {
+    const session = createSession(tempDir);
+    const events: AgentSessionEvent[] = [];
+    session.subscribe((event) => events.push(event));
+    const handleAgentEvent = (event: unknown) =>
+      (
+        session as unknown as { handleAgentEvent: (event: unknown) => Promise<void> }
+      ).handleAgentEvent(event);
+    attachFakeAgent(session, {
+      prompt: vi.fn(async (messages: AgentMessage[]) => {
+        const user = messages[0];
+        await handleAgentEvent({ type: 'message_start', message: user });
+        await handleAgentEvent({ type: 'message_end', message: user });
+        throw new Error('Agent failed after persistence');
+      }),
+      state: {
+        messages: [],
+        model: mockModel(),
+        thinkingLevel: 'off',
+        tools: [],
+      },
+    });
+
+    const result = await session.prompt('persisted prompt');
+
+    expect(result).toEqual({ status: 'accepted' });
+    expect(events).toContainEqual({ type: 'error', message: 'Agent failed after persistence' });
   });
 
   it('emits tree changes when session messages are persisted', async () => {

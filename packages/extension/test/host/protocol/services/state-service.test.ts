@@ -31,6 +31,16 @@ function makeSessionManager(
     diagnostics: [],
     modelFallbackMessage: undefined,
     getActiveChangesReview: vi.fn(() => undefined),
+    getPendingComposerIntent: vi.fn(() => undefined),
+    getTreeNavigationAdmission: vi.fn(() => ({ allowed: true })),
+    executionSnapshot: {
+      session: {
+        sessionId: 'session-1',
+        sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+      },
+      activity: { kind: 'idle' },
+      health: { kind: 'ready' },
+    },
     ...overrides,
   } as unknown as ExtensionSessionCoordinator;
 }
@@ -42,6 +52,141 @@ function makeConfigManager(config = { provider: 'openai' }): ConfigManager {
 }
 
 describe('StateProtocolService', () => {
+  it('does not advertise follow-up readiness while an agent turn is still preparing', async () => {
+    const service = new StateProtocolService({
+      sessionManager: makeSessionManager({
+        isStreaming: false,
+        executionSnapshot: {
+          session: {
+            sessionId: 'session-1',
+            sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+          },
+          activity: {
+            kind: 'agent_turn',
+            operationId: 'turn-1',
+          },
+          health: { kind: 'ready' },
+        },
+      } as Partial<ExtensionSessionCoordinator>),
+      configManager: makeConfigManager(),
+      getCommands: () => [],
+      getBusyState: () => ({ kind: 'idle', cancellable: false }),
+      getExtensionUIRequests: () => [],
+      publishEvent: vi.fn(),
+    });
+
+    const state = await service.getState();
+
+    expect(state.isStreaming).toBe(false);
+    expect(state.busyState).toEqual({
+      kind: 'agent',
+      label: 'Preparing message',
+      cancellable: false,
+    });
+  });
+
+  it('preserves pre-prompt compaction state while an agent turn is preparing', async () => {
+    const service = new StateProtocolService({
+      sessionManager: makeSessionManager({
+        isStreaming: false,
+        executionSnapshot: {
+          session: {
+            sessionId: 'session-1',
+            sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+          },
+          activity: {
+            kind: 'agent_turn',
+            operationId: 'turn-1',
+          },
+          health: { kind: 'ready' },
+        },
+      } as Partial<ExtensionSessionCoordinator>),
+      configManager: makeConfigManager(),
+      getCommands: () => [],
+      getBusyState: () => ({
+        kind: 'compaction',
+        label: 'Compacting',
+        cancellable: true,
+        reason: 'threshold',
+      }),
+      getExtensionUIRequests: () => [],
+      publishEvent: vi.fn(),
+    });
+
+    const state = await service.getState();
+
+    expect(state.isStreaming).toBe(false);
+    expect(state.busyState).toEqual({
+      kind: 'compaction',
+      label: 'Compacting',
+      cancellable: true,
+      reason: 'threshold',
+    });
+  });
+
+  it('projects host tree navigation as the session busy state', async () => {
+    const service = new StateProtocolService({
+      sessionManager: makeSessionManager({
+        executionSnapshot: {
+          session: {
+            sessionId: 'session-1',
+            sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+          },
+          activity: {
+            kind: 'tree_navigation',
+            operationId: 'navigation-1',
+            phase: 'preflight',
+          },
+          health: { kind: 'ready' },
+        },
+      } as Partial<ExtensionSessionCoordinator>),
+      configManager: makeConfigManager(),
+      getCommands: () => [],
+      getBusyState: () => ({ kind: 'idle', cancellable: false }),
+      getExtensionUIRequests: () => [],
+      publishEvent: vi.fn(),
+    });
+
+    const state = await service.getState();
+
+    expect(state.isStreaming).toBe(false);
+    expect(state.busyState).toEqual({
+      kind: 'tree_navigation',
+      operationId: 'navigation-1',
+      phase: 'preflight',
+      label: 'Navigating conversation tree',
+      cancellable: true,
+    });
+  });
+
+  it('keeps manual compaction cancellable in complete state snapshots', async () => {
+    const service = new StateProtocolService({
+      sessionManager: makeSessionManager({
+        executionSnapshot: {
+          session: {
+            sessionId: 'session-1',
+            sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+          },
+          activity: { kind: 'compaction', operationId: 'compaction-1' },
+          health: { kind: 'ready' },
+        },
+      } as Partial<ExtensionSessionCoordinator>),
+      configManager: makeConfigManager(),
+      getCommands: () => [],
+      getBusyState: () => ({ kind: 'idle', cancellable: false }),
+      getExtensionUIRequests: () => [],
+      publishEvent: vi.fn(),
+    });
+
+    const state = await service.getState();
+
+    expect(state.busyState).toEqual({
+      kind: 'compaction',
+      label: 'Compacting context',
+      cancellable: true,
+    });
+  });
+
   it('projects only the active tool selection in session state', async () => {
     const service = new StateProtocolService({
       sessionManager: makeSessionManager(),
@@ -185,7 +330,11 @@ describe('StateProtocolService', () => {
     await service.requestContextUsage(respond);
 
     expect(publishEvent).toHaveBeenCalledWith(
-      { type: 'queue_update', queueState: { pending: [], activeId: undefined } },
+      {
+        type: 'queue_update',
+        queueState: { pending: [], activeId: undefined },
+        treeNavigationAdmission: { allowed: true },
+      },
       'tree',
     );
     expect(publishEvent).toHaveBeenCalledWith(

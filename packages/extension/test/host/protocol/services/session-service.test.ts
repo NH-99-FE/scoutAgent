@@ -1,10 +1,7 @@
 import * as vscode from 'vscode';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonlSessionMetadata } from '../../../../src/core/session/index.ts';
-import type {
-  ExtensionSessionCoordinator,
-  UserSessionOperationToken,
-} from '../../../../src/host/session-coordinator.ts';
+import type { ExtensionSessionCoordinator } from '../../../../src/host/session-coordinator.ts';
 import { SessionIndex } from '../../../../src/host/session-index.ts';
 import { SessionProtocolService } from '../../../../src/host/protocol/services/session-service.ts';
 
@@ -24,35 +21,23 @@ function makeSession(overrides: Partial<JsonlSessionMetadata> = {}): JsonlSessio
   };
 }
 
-function makeOperation(
-  kind: UserSessionOperationToken['kind'] = 'new_session_message',
-  isLatest = true,
-): UserSessionOperationToken {
-  return {
-    id: `${kind}:test`,
-    sequence: 1,
-    kind,
-    isLatest: vi.fn(() => isLatest),
-  };
-}
-
 function makeSessionManager(overrides: Record<string, unknown> = {}): ExtensionSessionCoordinator {
   return {
     sessionId: 'session-1',
     sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
-    beginUserSessionOperation: vi.fn((kind: UserSessionOperationToken['kind']) =>
-      makeOperation(kind),
-    ),
-    restoreUserSession: vi.fn(async () => ({ status: 'completed', value: { cancelled: false } })),
-    newUserSession: vi.fn(async () => ({ status: 'completed', value: { cancelled: false } })),
-    prompt: vi.fn(async () => undefined),
+    sessionIdentity: {
+      sessionId: 'session-1',
+      sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+    },
+    matchesSessionIdentity: vi.fn(() => true),
+    prompt: vi.fn(async () => ({ status: 'accepted' })),
     cancelFollowUp: vi.fn(),
     promoteFollowUp: vi.fn(() => false),
     continue: vi.fn(async () => undefined),
     abort: vi.fn(async () => undefined),
     abortRetry: vi.fn(async () => undefined),
     compact: vi.fn(async () => undefined),
-    newSession: vi.fn(async () => undefined),
+    newSession: vi.fn(async () => ({ cancelled: false })),
     setSessionName: vi.fn(async () => undefined),
     exportSessionToJsonl: vi.fn(() => '/workspace/session.jsonl'),
     importSessionFromJsonl: vi.fn(async () => ({ cancelled: false })),
@@ -118,15 +103,12 @@ describe('SessionProtocolService', () => {
     });
   });
 
-  it('opens a task through restoreUserSession and refreshes state and tree', async () => {
+  it('opens a task through fail-fast restore and refreshes state and tree', async () => {
     const session = makeSession({
       id: 'task-1',
       path: '/workspace/.scout/sessions/task-1.jsonl',
     });
-    const operation = makeOperation('open_task');
-    const sessionManager = makeSessionManager({
-      beginUserSessionOperation: vi.fn(() => operation),
-    });
+    const sessionManager = makeSessionManager();
     const pushState = vi.fn(async () => undefined);
     const pushTreeData = vi.fn(async () => undefined);
     const respond = vi.fn();
@@ -147,8 +129,7 @@ describe('SessionProtocolService', () => {
       respond,
     );
 
-    expect(sessionManager.beginUserSessionOperation).toHaveBeenCalledWith('open_task');
-    expect(sessionManager.restoreUserSession).toHaveBeenCalledWith(operation, session, {
+    expect(sessionManager.restore).toHaveBeenCalledWith(session, {
       cwdOverride: '/workspace',
     });
     expect(pushState).toHaveBeenCalledTimes(1);
@@ -166,14 +147,98 @@ describe('SessionProtocolService', () => {
     const { service } = makeService({ sessionManager });
     const document = { segments: [{ type: 'text' as const, text: 'hello' }] };
 
-    await service.userMessage({ type: 'user_message', text: 'hello', document });
+    const respond = vi.fn();
+    const session = {
+      sessionId: 'session-1',
+      sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+    };
+
+    await service.userMessage({ type: 'user_message', session, text: 'hello', document }, respond);
 
     expect(sessionManager.prompt).toHaveBeenCalledWith('hello', {
       clearFollowUpQueue: undefined,
       deliverAs: undefined,
       document,
       images: undefined,
+      session,
     });
+    expect(respond).toHaveBeenCalledWith({ type: 'user_message_result', status: 'accepted' });
+  });
+
+  it('responds after prompt acceptance without waiting for the full agent turn', async () => {
+    const turn = new Promise<void>(() => undefined);
+    const sessionManager = makeSessionManager({
+      prompt: vi.fn(async () => ({ status: 'accepted', turn })),
+    });
+    const { service } = makeService({ sessionManager });
+    const respond = vi.fn();
+
+    await service.userMessage(
+      {
+        type: 'user_message',
+        session: {
+          sessionId: 'session-1',
+          sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+        },
+        text: 'long running turn',
+      },
+      respond,
+    );
+
+    expect(respond).toHaveBeenCalledWith({
+      type: 'user_message_result',
+      status: 'accepted',
+    });
+  });
+
+  it('returns the concrete reason when a user message is blocked', async () => {
+    const sessionManager = makeSessionManager({
+      prompt: vi.fn(async () => ({ status: 'blocked', error: 'Extension command failed' })),
+    });
+    const pushState = vi.fn(async () => undefined);
+    const { service } = makeService({ sessionManager, pushState });
+    const respond = vi.fn();
+
+    await service.userMessage(
+      {
+        type: 'user_message',
+        session: {
+          sessionId: 'session-1',
+          sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+        },
+        text: '/broken',
+      },
+      respond,
+    );
+
+    expect(respond).toHaveBeenCalledWith({
+      type: 'user_message_result',
+      status: 'blocked',
+      error: 'Extension command failed',
+    });
+    expect(pushState).not.toHaveBeenCalled();
+  });
+
+  it('does not invalidate sessions when clearing the conversation is rejected as busy', async () => {
+    const busyRejection = Promise.reject(new Error('Session replacement rejected: busy'));
+    void busyRejection.catch(() => undefined);
+    const sessionManager = makeSessionManager({
+      newSession: vi.fn(() => busyRejection),
+    });
+    const { service, sessionIndex } = makeService({ sessionManager });
+    const invalidate = vi.spyOn(sessionIndex, 'invalidate');
+
+    await expect(
+      service.clearConversation({
+        type: 'clear_conversation',
+        session: {
+          sessionId: 'session-1',
+          sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+        },
+      }),
+    ).rejects.toThrow('Session replacement rejected: busy');
+
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   it('refreshes recent tasks after a new session initial turn finishes', async () => {
@@ -181,21 +246,9 @@ describe('SessionProtocolService', () => {
     const turn = new Promise<void>((resolve) => {
       resolveTurn = resolve;
     });
-    const operation = makeOperation('new_session_message');
-    const startUserMessage = vi.fn(async () => ({ turn }));
     const sessionManager = makeSessionManager({
-      beginUserSessionOperation: vi.fn(() => operation),
-      newUserSession: vi.fn(
-        async (
-          _operation,
-          options: { toolProfileId?: string; withSession: (ctx: unknown) => void },
-        ) => {
-          await options.withSession({
-            startUserMessage,
-          });
-          return { status: 'completed', value: { cancelled: false } };
-        },
-      ),
+      newSession: vi.fn(async () => ({ cancelled: false })),
+      prompt: vi.fn(async () => ({ status: 'accepted', turn })),
     });
     const pushState = vi.fn(async () => undefined);
     const requestRecentTasks = vi.fn(async () => undefined);
@@ -218,11 +271,12 @@ describe('SessionProtocolService', () => {
     expect(respond).toHaveBeenCalledWith({ type: 'new_session_result', success: true });
     expect(pushState).toHaveBeenCalledTimes(2);
     expect(requestRecentTasks).toHaveBeenCalledTimes(1);
-    expect(sessionManager.newUserSession).toHaveBeenCalledWith(
-      operation,
-      expect.objectContaining({ toolProfileId: 'review' }),
-    );
-    expect(startUserMessage).toHaveBeenCalledWith('hello', { details: document });
+    expect(sessionManager.newSession).toHaveBeenCalledWith({ toolProfileId: 'review' });
+    expect(sessionManager.prompt).toHaveBeenCalledWith('hello', {
+      document,
+      images: undefined,
+      session: sessionManager.sessionIdentity,
+    });
   });
 
   it('refreshes recent tasks after renaming the active session', async () => {
@@ -236,7 +290,17 @@ describe('SessionProtocolService', () => {
       requestRecentTasks,
     });
 
-    await service.setSessionName({ type: 'set_session_name', name: '新的对话标题' }, respond);
+    await service.setSessionName(
+      {
+        type: 'set_session_name',
+        session: {
+          sessionId: 'session-1',
+          sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+        },
+        name: '新的对话标题',
+      },
+      respond,
+    );
 
     expect(sessionManager.setSessionName).toHaveBeenCalledWith('新的对话标题');
     expect(respond).toHaveBeenCalledWith({ type: 'set_session_name_result', success: true });

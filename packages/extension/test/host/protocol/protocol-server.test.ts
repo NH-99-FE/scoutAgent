@@ -115,6 +115,44 @@ describe('ProtocolServer', () => {
     expect(postMessage).not.toHaveBeenCalled();
   });
 
+  it('does not cancel a request owned by another webview surface', async () => {
+    const postMessage = vi.fn();
+    const deferred = createDeferred();
+    const server = new ProtocolServer({ postMessage });
+
+    server.register(
+      { service: 'tree', method: 'request_tree', payloadType: 'request_tree' },
+      async (context) => {
+        await deferred.promise;
+        context.respond({
+          type: 'tree_result',
+          tree: [],
+          leafId: null,
+        });
+      },
+    );
+
+    const running = server.handleRequest(
+      {
+        type: 'protocol_request',
+        requestId: 'tree-request',
+        service: 'tree',
+        method: 'request_tree',
+        payload: { type: 'request_tree' },
+      },
+      'tree',
+    );
+
+    expect(server.cancel('tree-request', 'chat')).toBe(false);
+    deferred.resolve();
+    await running;
+
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'tree-request', type: 'protocol_response' }),
+      'tree',
+    );
+  });
+
   it('keeps streaming requests active until cancellation', async () => {
     const postMessage = vi.fn();
     const cleanup = vi.fn();

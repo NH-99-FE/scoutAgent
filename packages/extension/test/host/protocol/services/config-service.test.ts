@@ -26,6 +26,7 @@ function makeSession(overrides: Partial<JsonlSessionMetadata> = {}): JsonlSessio
 
 function makeSessionManager(overrides: Record<string, unknown> = {}): ExtensionSessionCoordinator {
   return {
+    matchesSessionIdentity: vi.fn(() => true),
     setModel: vi.fn(async () => undefined),
     setThinkingLevel: vi.fn(async () => undefined),
     setToolProfile: vi.fn(async () => undefined),
@@ -146,13 +147,54 @@ describe('ConfigProtocolService', () => {
     const sessionManager = makeSessionManager();
     const { service } = makeService({ sessionManager });
 
-    await service.setModel({ type: 'select_model', provider: 'openai', modelId: 'gpt-test' });
-    await service.setThinkingLevel({ type: 'select_thinking', level: 'high' });
-    service.setToolProfile({ type: 'set_tool_profile', profileId: 'review' });
+    const session = {
+      sessionId: 'session-1',
+      sessionPath: '/workspace/.scout/sessions/session-1.jsonl',
+    };
+    await service.setModel({
+      type: 'select_model',
+      session,
+      provider: 'openai',
+      modelId: 'gpt-test',
+    });
+    await service.setThinkingLevel({ type: 'select_thinking', session, level: 'high' });
+    service.setToolProfile({ type: 'set_tool_profile', session, profileId: 'review' });
 
     expect(sessionManager.setModel).toHaveBeenCalledWith('gpt-test', 'openai');
     expect(sessionManager.setThinkingLevel).toHaveBeenCalledWith('high');
     expect(sessionManager.setToolProfile).toHaveBeenCalledWith('review');
+  });
+
+  it('ignores delayed session-scoped config mutations for a replaced session', async () => {
+    const sessionManager = makeSessionManager({
+      matchesSessionIdentity: vi.fn(() => false),
+    });
+    const { service } = makeService({ sessionManager });
+    const staleSession = {
+      sessionId: 'session-old',
+      sessionPath: '/workspace/.scout/sessions/session-old.jsonl',
+    };
+
+    await service.setModel({
+      type: 'select_model',
+      session: staleSession,
+      provider: 'openai',
+      modelId: 'gpt-test',
+    });
+    await service.setThinkingLevel({
+      type: 'select_thinking',
+      session: staleSession,
+      level: 'high',
+    });
+    service.setToolProfile({
+      type: 'set_tool_profile',
+      session: staleSession,
+      profileId: 'review',
+    });
+
+    expect(sessionManager.setModel).not.toHaveBeenCalled();
+    expect(sessionManager.setThinkingLevel).not.toHaveBeenCalled();
+    expect(sessionManager.setToolProfile).not.toHaveBeenCalled();
   });
 
   it('returns editable custom models and runtime settings from the config manager', () => {

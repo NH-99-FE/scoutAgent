@@ -121,6 +121,23 @@ function resolvedWorkspacePath(path: string): string {
 }
 
 describe('SessionEventForwarder', () => {
+  it('leaves navigation admission to complete state and queue projections', () => {
+    const { forwarder, publishEvent } = makeForwarder();
+
+    forwarder.handle({ type: 'compaction_start', reason: 'manual' });
+
+    expect(publishEvent).toHaveBeenCalledWith({
+      type: 'runtime_state_update',
+      isStreaming: true,
+      busyState: {
+        kind: 'compaction',
+        label: 'Compacting',
+        cancellable: true,
+        reason: 'manual',
+      },
+    });
+  });
+
   afterEach(() => {
     vi.useRealTimers();
   });

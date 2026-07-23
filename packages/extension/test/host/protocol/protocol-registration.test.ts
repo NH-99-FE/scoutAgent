@@ -26,6 +26,8 @@ function protocolCase<TPayload extends WebviewRequestPayload>(
   return { payload, route };
 }
 
+const SESSION = { sessionId: 'session-1', sessionPath: '/workspace/session-1.jsonl' };
+
 const PAYLOAD_CASES = [
   protocolCase({ type: 'ready' }, { service: 'lifecycle', method: 'ready' }),
   protocolCase({ type: 'request_state' }, { service: 'state', method: 'request_state' }),
@@ -48,7 +50,7 @@ const PAYLOAD_CASES = [
     { service: 'state', method: 'request_context_usage' },
   ),
   protocolCase(
-    { type: 'user_message', text: 'hello' },
+    { type: 'user_message', session: SESSION, text: 'hello' },
     { service: 'session', method: 'user_message' },
   ),
   protocolCase(
@@ -64,11 +66,11 @@ const PAYLOAD_CASES = [
     { service: 'session', method: 'promote_follow_up' },
   ),
   protocolCase(
-    { type: 'compact', customInstructions: 'short' },
+    { type: 'compact', session: SESSION, customInstructions: 'short' },
     { service: 'session', method: 'compact' },
   ),
   protocolCase(
-    { type: 'select_model', provider: 'anthropic', modelId: 'claude-test' },
+    { type: 'select_model', session: SESSION, provider: 'anthropic', modelId: 'claude-test' },
     { service: 'config', method: 'select_model' },
   ),
   protocolCase(
@@ -118,15 +120,15 @@ const PAYLOAD_CASES = [
     { service: 'config', method: 'save_runtime_settings' },
   ),
   protocolCase(
-    { type: 'select_thinking', level: 'off' },
+    { type: 'select_thinking', session: SESSION, level: 'off' },
     { service: 'config', method: 'select_thinking' },
   ),
   protocolCase(
-    { type: 'set_tool_profile', profileId: 'review' },
+    { type: 'set_tool_profile', session: SESSION, profileId: 'review' },
     { service: 'config', method: 'set_tool_profile' },
   ),
   protocolCase(
-    { type: 'clear_conversation' },
+    { type: 'clear_conversation', session: SESSION },
     { service: 'session', method: 'clear_conversation' },
   ),
   protocolCase({ type: 'reload_resources' }, { service: 'config', method: 'reload_resources' }),
@@ -172,7 +174,7 @@ const PAYLOAD_CASES = [
     { service: 'ui', method: 'open_current_changes_review' },
   ),
   protocolCase(
-    { type: 'fork_session', entryId: 'entry-1', position: 'at' },
+    { type: 'fork_session', session: SESSION, entryId: 'entry-1', position: 'at' },
     { service: 'tree', method: 'fork_session' },
   ),
   protocolCase(
@@ -181,18 +183,35 @@ const PAYLOAD_CASES = [
   ),
   protocolCase({ type: 'request_tree' }, { service: 'tree', method: 'request_tree' }),
   protocolCase(
-    { type: 'navigate_tree', targetId: 'entry-1', summarize: false },
+    {
+      type: 'navigate_tree',
+      navigationId: 'navigation-1',
+      session: SESSION,
+      targetId: 'entry-1',
+      summarize: false,
+    },
     { service: 'tree', method: 'navigate_tree' },
   ),
   protocolCase(
-    { type: 'set_label', entryId: 'entry-1', label: 'Label' },
+    { type: 'abort_tree_navigation', navigationId: 'navigation-1', session: SESSION },
+    { service: 'tree', method: 'abort_tree_navigation' },
+  ),
+  protocolCase(
+    { type: 'set_label', session: SESSION, entryId: 'entry-1', label: 'Label' },
     { service: 'tree', method: 'set_label' },
   ),
   protocolCase(
-    { type: 'set_session_name', name: 'Session name' },
+    { type: 'ack_composer_intent', version: 'intent-1', session: SESSION },
+    { service: 'session', method: 'ack_composer_intent' },
+  ),
+  protocolCase(
+    { type: 'set_session_name', session: SESSION, name: 'Session name' },
     { service: 'session', method: 'set_session_name' },
   ),
-  protocolCase({ type: 'continue_session' }, { service: 'session', method: 'continue_session' }),
+  protocolCase(
+    { type: 'continue_session', session: SESSION },
+    { service: 'session', method: 'continue_session' },
+  ),
   protocolCase({ type: 'request_commands' }, { service: 'ui', method: 'request_commands' }),
   protocolCase(
     { type: 'extension_ui_response', id: 'approval-1', action: 'confirm' },
@@ -339,6 +358,7 @@ function makeServices(): ScoutProtocolServices {
     },
     session: {
       userMessage: vi.fn(async () => undefined),
+      acknowledgeComposerIntent: vi.fn(async () => undefined),
       newSessionMessage: vi.fn(async (_message, respond) => {
         respond({ type: 'new_session_result', success: true });
       }),
@@ -394,7 +414,14 @@ function makeServices(): ScoutProtocolServices {
       }),
       requestTree: vi.fn(async () => undefined),
       navigateTree: vi.fn(async (_message, respond) => {
-        respond({ type: 'navigate_tree_result', success: true });
+        respond({
+          type: 'navigate_tree_result',
+          navigationId: 'navigation-1',
+          status: 'committed',
+        });
+      }),
+      abortTreeNavigation: vi.fn(async (_message, respond) => {
+        respond({ type: 'abort_tree_navigation_result', status: 'accepted' });
       }),
       setLabel: vi.fn(async (_message, respond) => {
         respond({ type: 'label_result', success: true });

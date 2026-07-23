@@ -336,32 +336,12 @@ describe('ScoutController webview surfaces', () => {
     const chat = makeWebview();
     const acceptPrompt = createDeferred();
     const finishTurn = createDeferred();
-    const operation = {
-      id: 'request-1',
-      sequence: 1,
-      kind: 'new_session_message',
-      isLatest: vi.fn(() => true),
-    };
     const sessionManager = {
-      beginUserSessionOperation: vi.fn(() => operation),
-      newUserSession: vi.fn(
-        async (
-          _operation: unknown,
-          options?: {
-            withSession?: (ctx: {
-              startUserMessage: (content: unknown) => Promise<{ turn: Promise<void> }>;
-            }) => Promise<void>;
-          },
-        ) => {
-          await options?.withSession?.({
-            startUserMessage: vi.fn(async () => {
-              await acceptPrompt.promise;
-              return { turn: finishTurn.promise };
-            }),
-          });
-          return { status: 'completed' as const, value: { cancelled: false } };
-        },
-      ),
+      newSession: vi.fn(async () => ({ cancelled: false })),
+      prompt: vi.fn(async () => {
+        await acceptPrompt.promise;
+        return { status: 'accepted' as const, turn: finishTurn.promise };
+      }),
       getSessionName: vi.fn(async () => undefined),
       getSessionStats: vi.fn(async () => undefined),
       getVisibleLeafId: vi.fn(async () => null),
@@ -380,6 +360,10 @@ describe('ScoutController webview surfaces', () => {
       currentCwd: '/workspace',
       sessionId: 'new-session',
       sessionFile: '/workspace/.scout/new-session.jsonl',
+      sessionIdentity: {
+        sessionId: 'new-session',
+        sessionPath: '/workspace/.scout/new-session.jsonl',
+      },
       parentSessionPath: undefined,
       leafId: null,
       modelFallbackMessage: undefined,

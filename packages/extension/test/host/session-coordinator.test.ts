@@ -731,7 +731,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     );
   });
 
-  it('serializes session replacement operations', async () => {
+  it('rejects concurrent session replacement operations instead of queueing them', async () => {
     const coordinator = new ExtensionSessionCoordinator({
       cwd,
       agentDir,
@@ -758,154 +758,45 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       dispose: vi.fn(async () => undefined),
     };
     (coordinator as unknown as { sessionRuntime: unknown }).sessionRuntime = fakeRuntime;
+    (coordinator as unknown as { agentSession: unknown }).agentSession = {
+      sessionId: 'session-1',
+      sessionFile: path.join(tempDir, 'session-1.jsonl'),
+    };
+    (
+      coordinator as unknown as {
+        sessionExecutionGate: {
+          setCurrentSession(session: { sessionId: string; sessionPath: string }): void;
+        };
+      }
+    ).sessionExecutionGate.setCurrentSession({
+      sessionId: 'session-1',
+      sessionPath: path.join(tempDir, 'session-1.jsonl'),
+    });
 
     const newSessionPromise = coordinator.newSession();
     await Promise.resolve();
     await Promise.resolve();
     expect(calls).toEqual(['new:start']);
 
-    const restorePromise = coordinator.restore({
-      id: 'restored-session',
-      path: path.join(tempDir, 'restored-session.jsonl'),
-      cwd,
-      createdAt: '2026-01-01T00:00:00.000Z',
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(calls).toEqual(['new:start']);
+    await expect(
+      coordinator.restore({
+        id: 'restored-session',
+        path: path.join(tempDir, 'restored-session.jsonl'),
+        cwd,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toThrow('Session replacement rejected: busy');
 
     releaseNewSession.resolve();
-    await Promise.all([newSessionPromise, restorePromise]);
+    await newSessionPromise;
 
-    expect(calls).toEqual(['new:start', 'new:end', 'restore:start', 'restore:end']);
-    expect(fakeRuntime.switchSession).toHaveBeenCalledOnce();
-
-    await coordinator.disposeAsync();
-  });
-
-  it('skips queued stale user session operations before replacement side effects', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const releaseBlockingNewSession = createDeferred();
-    const calls: string[] = [];
-    const fakeRuntime = {
-      cwd,
-      diagnostics: [],
-      modelFallbackMessage: undefined,
-      newSession: vi.fn(async () => {
-        calls.push('new:block:start');
-        await releaseBlockingNewSession.promise;
-        calls.push('new:block:end');
-        return { cancelled: false };
-      }),
-      switchSession: vi.fn(async () => {
-        calls.push('restore:start');
-        calls.push('restore:end');
-        return { cancelled: false };
-      }),
-      dispose: vi.fn(async () => undefined),
-    };
-    (coordinator as unknown as { sessionRuntime: unknown }).sessionRuntime = fakeRuntime;
-
-    const blockingNewSession = coordinator.newSession();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(calls).toEqual(['new:block:start']);
-
-    const staleToken = coordinator.beginUserSessionOperation('new_session_message');
-    const staleNewSession = coordinator.newUserSession(staleToken, {
-      withSession: async () => {
-        calls.push('stale:withSession');
-      },
-    });
-    const latestToken = coordinator.beginUserSessionOperation('open_task');
-    const latestRestore = coordinator.restoreUserSession(latestToken, {
-      id: 'restored-session',
-      path: path.join(tempDir, 'restored-session.jsonl'),
-      cwd,
-      createdAt: '2026-01-01T00:00:00.000Z',
-    });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(calls).toEqual(['new:block:start']);
-
-    releaseBlockingNewSession.resolve();
-    const [, staleResult, latestResult] = await Promise.all([
-      blockingNewSession,
-      staleNewSession,
-      latestRestore,
-    ]);
-
-    expect(staleResult).toMatchObject({
-      status: 'stale',
-      id: 'new_session_message:1',
-      kind: 'new_session_message',
-    });
-    expect(latestResult).toMatchObject({
-      status: 'completed',
-      id: 'open_task:2',
-      kind: 'open_task',
-    });
-    expect(fakeRuntime.newSession).toHaveBeenCalledTimes(1);
-    expect(fakeRuntime.switchSession).toHaveBeenCalledOnce();
-    expect(calls).toEqual(['new:block:start', 'new:block:end', 'restore:start', 'restore:end']);
-
-    await coordinator.disposeAsync();
-  });
-
-  it('guards new session withSession when a running user operation becomes stale', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const calls: string[] = [];
-    const fakeRuntime = {
-      cwd,
-      diagnostics: [],
-      modelFallbackMessage: undefined,
-      newSession: vi.fn(async (options?: { withSession?: (ctx: unknown) => Promise<void> }) => {
-        calls.push('new:start');
-        coordinator.beginUserSessionOperation('open_task');
-        await options?.withSession?.({
-          sendUserMessage: async () => {
-            calls.push('sendUserMessage');
-          },
-        });
-        calls.push('new:end');
-        return { cancelled: false };
-      }),
-      switchSession: vi.fn(async () => ({ cancelled: false })),
-      dispose: vi.fn(async () => undefined),
-    };
-    (coordinator as unknown as { sessionRuntime: unknown }).sessionRuntime = fakeRuntime;
-
-    const staleToken = coordinator.beginUserSessionOperation('new_session_message');
-    const result = await coordinator.newUserSession(staleToken, {
-      withSession: async (ctx) => {
-        calls.push('withSession');
-        await ctx.sendUserMessage('queued prompt');
-      },
-    });
-
-    expect(result).toMatchObject({
-      status: 'stale',
-      id: 'new_session_message:1',
-      kind: 'new_session_message',
-    });
     expect(calls).toEqual(['new:start', 'new:end']);
+    expect(fakeRuntime.switchSession).not.toHaveBeenCalled();
 
     await coordinator.disposeAsync();
   });
 
-  it('waits for in-flight initialization before running newSession withSession', async () => {
+  it('rejects a new session while initialization is in flight', async () => {
     const coordinator = new ExtensionSessionCoordinator({
       cwd,
       agentDir,
@@ -935,21 +826,21 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
 
     expect(calls).toEqual(['create:startup']);
 
-    const newSessionPromise = coordinator.newSession({
-      withSession: async (ctx) => {
-        calls.push('withSession');
-        await ctx.sendUserMessage('queued prompt');
-      },
-    });
-    await Promise.resolve();
-    await Promise.resolve();
+    await expect(
+      coordinator.newSession({
+        withSession: async (ctx) => {
+          calls.push('withSession');
+          await ctx.sendUserMessage('queued prompt');
+        },
+      }),
+    ).rejects.toThrow('Session initialization is already running');
 
     expect(calls).toEqual(['create:startup']);
 
     releaseStartup.resolve();
-    await Promise.all([initializePromise, newSessionPromise]);
+    await initializePromise;
 
-    expect(calls).toEqual(['create:startup', 'create:new', 'withSession', 'sendUserMessage']);
+    expect(calls).toEqual(['create:startup']);
 
     await coordinator.disposeAsync();
   });

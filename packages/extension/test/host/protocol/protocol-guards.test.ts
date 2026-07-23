@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { SCOUT_PROTOCOL, type WebviewRequestPayload } from '@scout-agent/shared';
 import { validateWebviewMessage } from '../../../src/host/protocol/protocol-guards.ts';
 
+const SESSION = { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' };
+
 function request(payload: WebviewRequestPayload | Record<string, unknown>) {
   const payloadType = payload.type;
   const route =
@@ -39,7 +41,7 @@ describe('validateWebviewMessage', () => {
   });
 
   it('rejects missing required payload fields', () => {
-    const result = validateWebviewMessage(request({ type: 'user_message' }));
+    const result = validateWebviewMessage(request({ type: 'user_message', session: SESSION }));
 
     expect(result).toMatchObject({
       ok: false,
@@ -50,7 +52,7 @@ describe('validateWebviewMessage', () => {
 
   it('rejects invalid payload enum values', () => {
     const result = validateWebviewMessage(
-      request({ type: 'fork_session', entryId: 'entry-1', position: 'after' }),
+      request({ type: 'fork_session', session: SESSION, entryId: 'entry-1', position: 'after' }),
     );
 
     expect(result).toMatchObject({
@@ -109,6 +111,7 @@ describe('validateWebviewMessage', () => {
       validateWebviewMessage(
         request({
           type: 'user_message',
+          session: SESSION,
           text: '@src/a.ts',
           document: {
             segments: [
@@ -132,6 +135,7 @@ describe('validateWebviewMessage', () => {
       validateWebviewMessage(
         request({
           type: 'user_message',
+          session: SESSION,
           text: '@src/a.ts',
           document: {
             segments: [

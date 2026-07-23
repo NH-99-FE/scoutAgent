@@ -16,6 +16,16 @@ function makeSessionManager(): ExtensionSessionCoordinator {
     setExtensionUIContext: vi.fn(),
     reload: vi.fn(async () => ({ cancelled: false })),
     getActiveChangesReview: vi.fn(() => undefined),
+    getPendingComposerIntent: vi.fn(() => undefined),
+    getTreeNavigationAdmission: vi.fn(() => ({ allowed: true })),
+    executionSnapshot: {
+      session: {
+        sessionId: 'session-1',
+        sessionPath: '/workspace/.scout/sessions/current.jsonl',
+      },
+      activity: { kind: 'idle' },
+      health: { kind: 'ready' },
+    },
     isStreaming: false,
   } as unknown as ExtensionSessionCoordinator;
 }
