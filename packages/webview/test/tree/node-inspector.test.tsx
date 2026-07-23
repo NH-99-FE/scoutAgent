@@ -25,16 +25,17 @@ describe('NodeInspector', () => {
   it('shows the selected node type without repeating the preview as a title', () => {
     render(
       <NodeInspector
-        customInstructions=""
         labelDraft=""
         labelSaved={false}
+        interactionLocked={false}
+        isCurrentNode={false}
+        navigationPending={null}
         node={makeAssistantNode()}
-        summaryMode="none"
-        onCustomInstructionsChange={() => undefined}
+        onAbortNavigation={() => undefined}
         onLabelDraftChange={() => undefined}
         onNavigate={() => undefined}
+        onOpenSummaryOptions={() => undefined}
         onSaveLabel={() => undefined}
-        onSummaryModeChange={() => undefined}
       />,
     );
 

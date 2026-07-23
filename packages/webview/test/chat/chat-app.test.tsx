@@ -22,7 +22,11 @@ import {
   getComposerImageObjectUrl,
   registerComposerImageFile,
 } from '@/store/composer-image-registry';
-import { HOME_COMPOSER_SESSION_ID, useComposerStore } from '@/store/composer-store';
+import {
+  createComposerDraftKey,
+  HOME_COMPOSER_SESSION_ID,
+  useComposerStore,
+} from '@/store/composer-store';
 import { EMPTY_COMPOSER_DOCUMENT, getComposerPlainText } from '@/store/composer-document';
 import type { ComposerImageDescriptor } from '@/store/composer-store';
 import { useConversationStore } from '@/store/conversation-store';
@@ -152,6 +156,7 @@ function makeState(
       | 'thinkingLevel'
       | 'parentSessionPath'
       | 'forkPointEntryId'
+      | 'pendingComposerIntent'
     >
   > = {},
 ): ScoutWebviewState {
@@ -168,9 +173,10 @@ function makeState(
     commands: [],
     sessionId: overrides.sessionId ?? 'session-1',
     sessionName: overrides.sessionName ?? '检查未提交更改',
-    sessionFile: overrides.sessionFile,
+    sessionFile: overrides.sessionFile ?? '/sessions/session-1.jsonl',
     parentSessionPath: overrides.parentSessionPath,
     forkPointEntryId: overrides.forkPointEntryId,
+    pendingComposerIntent: overrides.pendingComposerIntent,
     cwd: '/workspace',
   };
 }
@@ -267,7 +273,17 @@ function getPostedControlMessages(type: string) {
 }
 
 function expectPostedPayload(payloadType: string, payload: Record<string, unknown>): void {
-  expect(getLatestPostedProtocolRequest(payloadType)?.payload).toEqual(payload);
+  const expected =
+    payloadType === 'user_message' && !('session' in payload)
+      ? {
+          ...payload,
+          session: {
+            sessionId: useSessionStore.getState().sessionId,
+            sessionPath: useSessionStore.getState().sessionFile,
+          },
+        }
+      : payload;
+  expect(getLatestPostedProtocolRequest(payloadType)?.payload).toEqual(expected);
 }
 
 function getHistoryQueryToken(): string | undefined {
@@ -330,9 +346,12 @@ function routeDetailState(overrides: Partial<ScoutWebviewState> = {}): void {
 }
 
 function typeComposerText(label: string, value: string): HTMLElement {
-  const sessionId =
-    label === '随心输入' ? HOME_COMPOSER_SESSION_ID : useSessionStore.getState().sessionId;
-  act(() => useComposerStore.getState().actions.setText(sessionId, value));
+  const session = useSessionStore.getState();
+  const draftKey =
+    label === '随心输入'
+      ? HOME_COMPOSER_SESSION_ID
+      : createComposerDraftKey(session.sessionId, session.sessionFile);
+  act(() => useComposerStore.getState().actions.setText(draftKey, value));
   const editor = screen.getByLabelText(label);
   const range = document.createRange();
   range.selectNodeContents(editor.querySelector('p') ?? editor);
@@ -357,10 +376,13 @@ function moveComposerCaretToStart(editor: HTMLElement): void {
 }
 
 function expectComposerText(label: string, value: string): void {
-  const sessionId =
-    label === '随心输入' ? HOME_COMPOSER_SESSION_ID : useSessionStore.getState().sessionId;
+  const session = useSessionStore.getState();
+  const draftKey =
+    label === '随心输入'
+      ? HOME_COMPOSER_SESSION_ID
+      : createComposerDraftKey(session.sessionId, session.sessionFile);
   const document =
-    useComposerStore.getState().documentBySessionId[sessionId] ?? EMPTY_COMPOSER_DOCUMENT;
+    useComposerStore.getState().documentBySessionId[draftKey] ?? EMPTY_COMPOSER_DOCUMENT;
   expect(getComposerPlainText(document)).toBe(value);
 }
 
@@ -541,6 +563,43 @@ describe('ChatApp', () => {
       text: '中文回答',
     });
     expectComposerText('随心输入', '');
+  });
+
+  it('opens the current session detail and applies a pending composer intent', async () => {
+    routeDetailState({ sessionFile: '/sessions/session-1.jsonl' });
+    useUiStore.getState().actions.setChatView('home');
+    render(<ChatApp />);
+
+    expect(screen.getByLabelText('随心输入')).toBeInTheDocument();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'state_update',
+        state: makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+          sessionFile: '/sessions/session-1.jsonl',
+          pendingComposerIntent: {
+            version: 'intent-1',
+            commandId: 'navigation-1',
+            session: {
+              sessionId: 'session-1',
+              sessionPath: '/sessions/session-1.jsonl',
+            },
+            kind: 'replace_text',
+            text: 'edit this tree prompt',
+          },
+        }),
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('要求后续变更')).toHaveTextContent('edit this tree prompt');
+    });
+    expect(useUiStore.getState().chatView).toBe('detail');
+    expectPostedPayload('ack_composer_intent', {
+      type: 'ack_composer_intent',
+      version: 'intent-1',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+    });
   });
 
   it('applies the task home tool profile to the new session without changing the hidden session', () => {
@@ -1506,7 +1565,11 @@ describe('ChatApp', () => {
 
     textarea = typeComposerText('要求后续变更', '/compact');
     fireEvent.keyDown(textarea, { key: 'Enter' });
-    expectPostedPayload('compact', { type: 'compact', customInstructions: undefined });
+    expectPostedPayload('compact', {
+      type: 'compact',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+      customInstructions: undefined,
+    });
     await waitFor(() => expectComposerText('要求后续变更', ''));
   });
 
@@ -1964,7 +2027,11 @@ describe('ChatApp', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     const renameMessage = getLatestPostedProtocolRequest('set_session_name');
-    expect(renameMessage?.payload).toEqual({ type: 'set_session_name', name: '新的对话标题' });
+    expect(renameMessage?.payload).toEqual({
+      type: 'set_session_name',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/current.jsonl' },
+      name: '新的对话标题',
+    });
 
     act(() => {
       routeProtocolResult(renameMessage, {
@@ -2046,6 +2113,7 @@ describe('ChatApp', () => {
 
     expect(getLatestPostedProtocolRequest('set_session_name')?.payload).toEqual({
       type: 'set_session_name',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/current.jsonl' },
       name: '设计对话重命名方案',
     });
   });
@@ -3014,6 +3082,119 @@ describe('ChatApp', () => {
     });
   });
 
+  it('keeps the draft editable but blocks submission while an agent turn is preparing', () => {
+    const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }], {
+      isStreaming: false,
+      busyState: { kind: 'agent', label: 'Preparing message', cancellable: false },
+    });
+    useConversationStore.getState().actions.applyStateSnapshot(state);
+    useSessionStore.getState().actions.applyState(state);
+
+    render(<ChatApp />);
+    const editor = screen.getByLabelText('要求后续变更');
+    fireEvent.change(editor, { target: { value: 'wait until queueable' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    expect(getPostedProtocolRequests('user_message')).toHaveLength(0);
+    expectComposerText('要求后续变更', 'wait until queueable');
+  });
+
+  it('restores the current-session draft when the message request fails', () => {
+    routeDetailState();
+    render(<ChatApp />);
+    const editor = screen.getByLabelText('要求后续变更');
+    fireEvent.change(editor, { target: { value: 'do not lose this' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    const request = getLatestPostedProtocolRequest('user_message');
+
+    expectComposerText('要求后续变更', '');
+    act(() => routeProtocolError(request, 'command failed'));
+
+    expectComposerText('要求后续变更', 'do not lose this');
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'error',
+      message: 'command failed',
+    });
+  });
+
+  it('keeps a failed draft recoverable without overwriting newer composer input', () => {
+    routeDetailState();
+    render(<ChatApp />);
+    const editor = screen.getByLabelText('要求后续变更');
+    fireEvent.change(editor, { target: { value: 'first unsent message' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    const request = getLatestPostedProtocolRequest('user_message');
+
+    fireEvent.change(editor, { target: { value: 'newer draft' } });
+    act(() => routeProtocolError(request, 'command failed'));
+
+    expectComposerText('要求后续变更', 'newer draft');
+    expect(screen.getByText('上一条消息发送失败')).toBeInTheDocument();
+
+    fireEvent.change(editor, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: '恢复未发送消息' }));
+
+    expectComposerText('要求后续变更', 'first unsent message');
+    expect(screen.queryByText('上一条消息发送失败')).not.toBeInTheDocument();
+  });
+
+  it('shows a blocked message error through the real toaster lifecycle', async () => {
+    routeDetailState();
+    render(
+      <>
+        <ChatApp />
+        <AppNotificationToaster />
+      </>,
+    );
+    const editor = screen.getByLabelText('要求后续变更');
+    fireEvent.change(editor, { target: { value: '/broken' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    const request = getLatestPostedProtocolRequest('user_message');
+
+    act(() => {
+      routeProtocolResult(request, {
+        type: 'user_message_result',
+        status: 'blocked',
+        error: 'Extension command failed',
+      });
+    });
+
+    expect(await screen.findByText('Extension command failed')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(useUiStore.getState().notification).toBeUndefined();
+    });
+    expectComposerText('要求后续变更', '/broken');
+  });
+
+  it('restores the matching draft when overlapping message requests settle out of order', () => {
+    routeDetailState();
+    render(<ChatApp />);
+    const editor = screen.getByLabelText('要求后续变更');
+
+    fireEvent.change(editor, { target: { value: 'first message' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    const firstRequest = getLatestPostedProtocolRequest('user_message');
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'runtime_state_update',
+        isStreaming: true,
+        busyState: { kind: 'agent', label: 'Working', cancellable: true },
+      });
+    });
+    fireEvent.change(editor, { target: { value: 'follow-up message' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    const followUpRequest = getLatestPostedProtocolRequest('user_message');
+
+    act(() => {
+      routeProtocolResult(followUpRequest, { type: 'user_message_result', status: 'accepted' });
+      routeProtocolError(firstRequest, 'first message failed');
+    });
+
+    expectComposerText('要求后续变更', 'first message');
+  });
+
   it('shows a live streaming changes review summary in the composer tray', () => {
     const queueState = {
       paused: false,
@@ -3371,7 +3552,11 @@ describe('ChatApp', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
     useConversationStore.getState().actions.applyStateSnapshot(state);
     useSessionStore.getState().actions.applyState(state);
-    useComposerStore.getState().actions.addImages('session-1', [makeComposerImageDescriptor()]);
+    useComposerStore
+      .getState()
+      .actions.addImages(createComposerDraftKey('session-1', '/sessions/session-1.jsonl'), [
+        makeComposerImageDescriptor(),
+      ]);
 
     render(<ChatApp />);
     fireEvent.change(screen.getByLabelText('要求后续变更'), {
@@ -3898,6 +4083,45 @@ describe('ChatApp', () => {
     expectComposerText('要求后续变更', 'session one draft');
   });
 
+  it('keeps composer drafts isolated between same-id session files', () => {
+    const original = makeState([{ role: 'user', content: 'one', timestamp: 1 }], {
+      sessionId: 'session-1',
+      sessionFile: '/sessions/original.jsonl',
+    });
+    const copy = makeState([{ role: 'user', content: 'copy', timestamp: 1 }], {
+      sessionId: 'session-1',
+      sessionFile: '/sessions/copy.jsonl',
+    });
+    useConversationStore.getState().actions.applyStateSnapshot(original);
+    useSessionStore.getState().actions.applyState(original);
+
+    render(<ChatApp />);
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: 'original draft' },
+    });
+
+    act(() => {
+      useConversationStore.getState().actions.applyStateSnapshot(copy);
+      useSessionStore.getState().actions.applyState(copy);
+    });
+    expectComposerText('要求后续变更', '');
+    fireEvent.change(screen.getByLabelText('要求后续变更'), {
+      target: { value: 'copy draft' },
+    });
+
+    act(() => {
+      useConversationStore.getState().actions.applyStateSnapshot(original);
+      useSessionStore.getState().actions.applyState(original);
+    });
+    expectComposerText('要求后续变更', 'original draft');
+
+    act(() => {
+      useConversationStore.getState().actions.applyStateSnapshot(copy);
+      useSessionStore.getState().actions.applyState(copy);
+    });
+    expectComposerText('要求后续变更', 'copy draft');
+  });
+
   it('does not reuse the conversation draft on the task home composer', () => {
     const state = makeState([{ role: 'user', content: 'hello', timestamp: 1 }]);
     useConversationStore.getState().actions.applyStateSnapshot(state);
@@ -4165,7 +4389,10 @@ describe('ChatApp', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '继续' }));
 
-    expectPostedPayload('continue_session', { type: 'continue_session' });
+    expectPostedPayload('continue_session', {
+      type: 'continue_session',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+    });
     expect(getLatestPostedProtocolRequest('continue_session')?.payload).not.toEqual(
       expect.objectContaining({ preserveFollowUpQueue: true }),
     );

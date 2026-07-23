@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  getComposerImageFile,
   registerComposerImageFile,
   releaseComposerImageDescriptors,
   resetComposerImageRegistry,
   retainComposerImageLease,
 } from '@/store/composer-image-registry';
+import { useComposerStore } from '@/store/composer-store';
 
 const createObjectUrl = vi.fn((file: File) => `blob:${file.name}`);
 const revokeObjectUrl = vi.fn();
@@ -25,6 +27,7 @@ describe('composer-image-registry', () => {
   });
 
   afterEach(() => {
+    useComposerStore.getState().actions.reset();
     resetComposerImageRegistry();
     vi.restoreAllMocks();
   });
@@ -62,5 +65,34 @@ describe('composer-image-registry', () => {
 
     expect(revokeObjectUrl).toHaveBeenCalledTimes(1);
     expect(revokeObjectUrl).toHaveBeenCalledWith('blob:transferred.png');
+  });
+
+  it('keeps a failed draft image alive until the recoverable draft is handled', () => {
+    const image = registerComposerImageFile(
+      new File(['image'], 'recoverable.png', { type: 'image/png' }),
+    );
+    const actions = useComposerStore.getState().actions;
+    actions.addImages('session-1', [image]);
+    actions.stagePendingDraft(
+      'session-1',
+      {
+        document: { segments: [{ type: 'text', text: 'failed message' }] },
+        images: [image],
+      },
+      'request-1',
+    );
+    actions.clearDraft('session-1');
+    actions.setText('session-1', 'newer draft');
+
+    actions.restorePendingDraft('session-1', 'request-1');
+
+    expect(getComposerImageFile(image)).toBeDefined();
+    expect(revokeObjectUrl).not.toHaveBeenCalled();
+
+    actions.discardFailedDraft('session-1', 'request-1');
+
+    expect(getComposerImageFile(image)).toBeUndefined();
+    expect(revokeObjectUrl).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:recoverable.png');
   });
 });

@@ -112,6 +112,7 @@ describe('ModelStatusMenu', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: '中' }));
     expect(getLatestPostedPayload('select_thinking')).toEqual({
       type: 'select_thinking',
+      session: { sessionId: 'session-1', sessionPath: '' },
       level: 'medium',
     });
 
@@ -128,6 +129,7 @@ describe('ModelStatusMenu', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'GPT-5.4' }));
     expect(getLatestPostedPayload('select_model')).toEqual({
       type: 'select_model',
+      session: { sessionId: 'session-1', sessionPath: '' },
       provider: 'openai',
       modelId: 'gpt-5.4',
     });
@@ -165,6 +167,7 @@ describe('ModelStatusMenu', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: '极低' }));
     expect(getLatestPostedPayload('select_thinking')).toEqual({
       type: 'select_thinking',
+      session: { sessionId: 'session-1', sessionPath: '' },
       level: 'minimal',
     });
   });
@@ -243,6 +246,7 @@ describe('ModelStatusMenu', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: '中' }));
     expect(getLatestPostedPayload('select_thinking')).toEqual({
       type: 'select_thinking',
+      session: { sessionId: 'session-1', sessionPath: '' },
       level: 'medium',
     });
 
@@ -256,6 +260,7 @@ describe('ModelStatusMenu', () => {
     fireEvent.click(screen.getByRole('switch', { name: '推理' }));
     expect(getLatestPostedPayload('select_thinking')).toEqual({
       type: 'select_thinking',
+      session: { sessionId: 'session-1', sessionPath: '' },
       level: 'off',
     });
   });

@@ -2,10 +2,37 @@ import { describe, expect, it } from 'vitest';
 import {
   formatComposerSubmitText,
   INITIAL_COMPOSER_SUBMIT_STATE,
+  isComposerSubmissionBlocked,
   reduceComposerSubmitState,
 } from '@/features/composer/model/composer-submit';
 
 describe('reduceComposerSubmitState', () => {
+  it('blocks submission for exclusive session mutations but keeps streaming follow-ups available', () => {
+    expect(isComposerSubmissionBlocked({ kind: 'agent', cancellable: true }, true)).toBe(false);
+    expect(isComposerSubmissionBlocked({ kind: 'agent', cancellable: false }, false)).toBe(true);
+    expect(
+      isComposerSubmissionBlocked(
+        {
+          kind: 'tree_navigation',
+          operationId: 'navigation-1',
+          phase: 'preflight',
+          cancellable: true,
+        },
+        false,
+      ),
+    ).toBe(true);
+    expect(
+      isComposerSubmissionBlocked({ kind: 'session_mutation', cancellable: false }, false),
+    ).toBe(true);
+    expect(
+      isComposerSubmissionBlocked({ kind: 'idle', cancellable: false }, false, {
+        allowed: false,
+        reason: 'session_busy',
+        message: '会话正在运行',
+      }),
+    ).toBe(true);
+  });
+
   it('models encoding and new-session block as explicit submit phases', () => {
     const encodingState = reduceComposerSubmitState(INITIAL_COMPOSER_SUBMIT_STATE, {
       type: 'begin_encoding_images',

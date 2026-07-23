@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ScoutCommandInfo } from '@scout-agent/shared';
 import { ChatComposer } from '@/features/composer';
-import { useComposerStore } from '@/store/composer-store';
+import { createComposerDraftKey, useComposerStore } from '@/store/composer-store';
 import {
   EMPTY_COMPOSER_DOCUMENT,
   getComposerPlainText,
@@ -10,6 +10,8 @@ import {
 } from '@/store/composer-document';
 import { useConfigStore } from '@/store/config-store';
 import { protocolClient } from '@/bridge/protocol-client';
+import { resetComposerIntentAcknowledgements } from '@/bridge/composer-intent-ack';
+import { useSessionStore } from '@/store/session-store';
 
 const PROMPT_SOURCE_INFO = {
   path: '<test:prompt>',
@@ -17,6 +19,8 @@ const PROMPT_SOURCE_INFO = {
   scope: 'temporary',
   origin: 'top-level',
 } as const;
+const SESSION = { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' };
+const DRAFT_KEY = createComposerDraftKey(SESSION.sessionId, SESSION.sessionPath);
 
 function promptCommand(name: string): ScoutCommandInfo {
   return {
@@ -53,7 +57,9 @@ function focusEditorAtEnd(editor: HTMLElement) {
 }
 
 function getDocument(): ComposerDocument {
-  return useComposerStore.getState().documentBySessionId['session-1'] ?? EMPTY_COMPOSER_DOCUMENT;
+  const session = useSessionStore.getState();
+  const draftKey = createComposerDraftKey(session.sessionId, session.sessionFile);
+  return useComposerStore.getState().documentBySessionId[draftKey] ?? EMPTY_COMPOSER_DOCUMENT;
 }
 
 function getText(): string {
@@ -61,15 +67,21 @@ function getText(): string {
 }
 
 describe('ChatComposer command effects', () => {
+  beforeEach(() => {
+    useSessionStore.setState({ sessionId: SESSION.sessionId, sessionFile: SESSION.sessionPath });
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
+    resetComposerIntentAcknowledgements();
     useComposerStore.getState().actions.reset();
     useConfigStore.getState().actions.reset();
+    useSessionStore.getState().actions.reset();
   });
 
   it('opens slash suggestions in a portal and applies the active option from the textarea', async () => {
     useConfigStore.getState().actions.setCommands([promptCommand('review')]);
-    useComposerStore.getState().actions.setText('session-1', '/re');
+    useComposerStore.getState().actions.setText(DRAFT_KEY, '/re');
     render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
 
     const editor = screen.getByRole('textbox', { name: '要求后续变更' });
@@ -92,7 +104,7 @@ describe('ChatComposer command effects', () => {
     useConfigStore
       .getState()
       .actions.setCommands([promptCommand('review'), promptCommand('rewrite')]);
-    useComposerStore.getState().actions.setText('session-1', '/');
+    useComposerStore.getState().actions.setText(DRAFT_KEY, '/');
     render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
 
     const editor = screen.getByRole('textbox', { name: '要求后续变更' });
@@ -117,7 +129,7 @@ describe('ChatComposer command effects', () => {
   it('renders a selected skill with a separating space and removes the reference atomically', async () => {
     const openSkillFile = vi.spyOn(protocolClient, 'openSkillFile').mockReturnValue('request-1');
     useConfigStore.getState().actions.setCommands([skillCommand('request-refactor-plan')]);
-    useComposerStore.getState().actions.setText('session-1', '/skill:r');
+    useComposerStore.getState().actions.setText(DRAFT_KEY, '/skill:r');
     render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
 
     const editor = screen.getByRole('textbox', { name: '要求后续变更' });
@@ -154,7 +166,7 @@ describe('ChatComposer command effects', () => {
     act(() =>
       useComposerStore
         .getState()
-        .actions.setDocument('session-1', { segments: reference ? [reference] : [] }),
+        .actions.setDocument(DRAFT_KEY, { segments: reference ? [reference] : [] }),
     );
     await waitFor(() => {
       expect(getText()).toBe('');
@@ -185,7 +197,7 @@ describe('ChatComposer command effects', () => {
     const openMentionedFile = vi
       .spyOn(protocolClient, 'openMentionedFile')
       .mockReturnValue('request-1');
-    useComposerStore.getState().actions.setDocument('session-1', {
+    useComposerStore.getState().actions.setDocument(DRAFT_KEY, {
       segments: [
         {
           type: 'reference',
@@ -210,7 +222,7 @@ describe('ChatComposer command effects', () => {
 
   it('keeps suggestions open on composer interaction and dismisses them on outside pointer down', async () => {
     useConfigStore.getState().actions.setCommands([promptCommand('review')]);
-    useComposerStore.getState().actions.setText('session-1', '/re');
+    useComposerStore.getState().actions.setText(DRAFT_KEY, '/re');
     render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
 
     const editor = screen.getByRole('textbox', { name: '要求后续变更' });
@@ -230,7 +242,7 @@ describe('ChatComposer command effects', () => {
 
   it('dismisses suggestions when focus moves outside the composer', async () => {
     useConfigStore.getState().actions.setCommands([promptCommand('review')]);
-    useComposerStore.getState().actions.setText('session-1', '/re');
+    useComposerStore.getState().actions.setText(DRAFT_KEY, '/re');
     render(
       <>
         <button type="button">外部操作</button>
@@ -252,7 +264,7 @@ describe('ChatComposer command effects', () => {
 
   it('dismisses suggestions with Escape after focus leaves the textarea', async () => {
     useConfigStore.getState().actions.setCommands([promptCommand('review')]);
-    useComposerStore.getState().actions.setText('session-1', '/re');
+    useComposerStore.getState().actions.setText(DRAFT_KEY, '/re');
     render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
 
     const editor = screen.getByRole('textbox', { name: '要求后续变更' });
@@ -274,10 +286,11 @@ describe('ChatComposer command effects', () => {
   });
 
   it('consumes a fork prefill that targets its session', async () => {
+    useSessionStore.setState({ sessionId: 'session-1' });
     useComposerStore.getState().actions.setCommandEffect({
       kind: 'replace_text',
       source: 'fork',
-      targetSessionId: 'session-1',
+      targetSession: SESSION,
       text: 'edit this prompt',
     });
 
@@ -295,11 +308,126 @@ describe('ChatComposer command effects', () => {
     expect(useComposerStore.getState().pendingCommandEffect).toBeNull();
   });
 
+  it('overwrites an existing composer draft after tree navigation', async () => {
+    useComposerStore.getState().actions.setText(DRAFT_KEY, 'keep my draft');
+    useComposerStore.getState().actions.addImages(DRAFT_KEY, [
+      {
+        id: 'draft-image',
+        mimeType: 'image/png',
+        name: 'draft.png',
+        size: 10,
+        type: 'image',
+      },
+    ]);
+    const acknowledge = vi
+      .spyOn(protocolClient, 'acknowledgeComposerIntent')
+      .mockReturnValue('request-1');
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      sessionFile: '/sessions/session-1.jsonl',
+      pendingComposerIntent: {
+        version: 'intent-1',
+        commandId: 'navigation-1',
+        session: SESSION,
+        kind: 'replace_text',
+        text: 'edit this tree prompt',
+      },
+    });
+
+    render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
+
+    await waitFor(() => {
+      expect(getText()).toBe('edit this tree prompt');
+    });
+    expect(useComposerStore.getState().imagesBySessionId[DRAFT_KEY]).toBeUndefined();
+    expect(useComposerStore.getState().recoverableDraftsBySessionId[DRAFT_KEY]).toBeUndefined();
+    expect(screen.getByRole('textbox', { name: '要求后续变更' })).toHaveFocus();
+    expect(acknowledge).toHaveBeenCalledWith(
+      'intent-1',
+      {
+        sessionId: 'session-1',
+        sessionPath: '/sessions/session-1.jsonl',
+      },
+      expect.any(Function),
+      expect.any(Function),
+    );
+  });
+
+  it('applies and acknowledges a composer intent once across component remounts', async () => {
+    const acknowledge = vi
+      .spyOn(protocolClient, 'acknowledgeComposerIntent')
+      .mockReturnValue('request-1');
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      sessionFile: '/sessions/session-1.jsonl',
+      pendingComposerIntent: {
+        version: 'intent-7',
+        commandId: 'navigation-7',
+        session: SESSION,
+        kind: 'replace_text',
+        text: 'tree prompt',
+      },
+    });
+    const first = render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
+    await waitFor(() => expect(getText()).toBe('tree prompt'));
+    first.unmount();
+    useComposerStore.getState().actions.setText(DRAFT_KEY, 'newer local edit');
+
+    render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
+
+    expect(getText()).toBe('newer local edit');
+    expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the composer for a clear intent and discards the previous draft', async () => {
+    useComposerStore.getState().actions.setText(DRAFT_KEY, 'unsent local draft');
+    vi.spyOn(protocolClient, 'acknowledgeComposerIntent').mockReturnValue('request-1');
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      sessionFile: '/sessions/session-1.jsonl',
+      pendingComposerIntent: {
+        version: 'intent-8',
+        commandId: 'navigation-8',
+        session: SESSION,
+        kind: 'clear',
+      },
+    });
+
+    render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
+
+    await waitFor(() => expect(getText()).toBe(''));
+    expect(useComposerStore.getState().recoverableDraftsBySessionId[DRAFT_KEY]).toBeUndefined();
+  });
+
+  it('does not apply an intent from a same-id session file copy', () => {
+    const acknowledge = vi
+      .spyOn(protocolClient, 'acknowledgeComposerIntent')
+      .mockReturnValue('request-1');
+    const copyDraftKey = createComposerDraftKey('session-1', '/sessions/session-1-copy.jsonl');
+    useComposerStore.getState().actions.setText(copyDraftKey, 'keep current file draft');
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      sessionFile: '/sessions/session-1-copy.jsonl',
+      pendingComposerIntent: {
+        version: 'intent-1',
+        commandId: 'navigation-1',
+        session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+        kind: 'replace_text',
+        text: 'wrong file prompt',
+      },
+    });
+
+    render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
+
+    expect(getText()).toBe('keep current file draft');
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
   it('leaves a command effect untouched when it targets another session', async () => {
     useComposerStore.getState().actions.setCommandEffect({
       kind: 'replace_text',
       source: 'fork',
-      targetSessionId: 'session-2',
+      targetSession: { sessionId: 'session-2', sessionPath: '/sessions/session-2.jsonl' },
       text: 'edit this prompt',
     });
 
@@ -309,7 +437,7 @@ describe('ChatComposer command effects', () => {
     expect(useComposerStore.getState().pendingCommandEffect).toEqual({
       kind: 'replace_text',
       source: 'fork',
-      targetSessionId: 'session-2',
+      targetSession: { sessionId: 'session-2', sessionPath: '/sessions/session-2.jsonl' },
       text: 'edit this prompt',
     });
   });

@@ -6,7 +6,10 @@ import { resetProtocolTransport } from '@/bridge/transport-client';
 import { TreeApp } from '@/surfaces/tree/TreeApp';
 import { TREE_SEARCH_DEBOUNCE_MS } from '@/features/tree/hooks/use-tree-panel-controller';
 import { useSessionStore } from '@/store/session-store';
+import { useConfigStore } from '@/store/config-store';
+import { useConversationStore } from '@/store/conversation-store';
 import { useTreeStore } from '@/store/tree-store';
+import { useUiStore } from '@/store/ui-store';
 
 const postMessage = vi.fn();
 
@@ -115,8 +118,24 @@ function routeProtocolResult(
   });
 }
 
-function renderTreeApp(tree = makeTree(), leafId = 'tool-1') {
-  useSessionStore.setState({ sessionName: 'Retry cleanup' });
+function renderTreeApp(
+  tree = makeTree(),
+  leafId = 'tool-1',
+  options: { skipPrompt?: boolean } = {},
+) {
+  useConfigStore.getState().actions.setConfig({
+    models: [],
+    defaultModelProvider: '',
+    defaultModelId: '',
+    defaultToolProfileId: 'develop',
+    toolProfiles: [],
+    branchSummary: { reserveTokens: 16384, skipPrompt: options.skipPrompt ?? false },
+  });
+  useSessionStore.setState({
+    sessionId: 'session-1',
+    sessionFile: '/sessions/session-1.jsonl',
+    sessionName: 'Retry cleanup',
+  });
   useTreeStore.getState().actions.setTreeData(tree, leafId);
   return render(<TreeApp />);
 }
@@ -138,6 +157,9 @@ describe('TreeApp', () => {
     resetProtocolTransport();
     useTreeStore.getState().actions.reset();
     useSessionStore.getState().actions.reset();
+    useConfigStore.getState().actions.reset();
+    useConversationStore.getState().actions.reset();
+    useUiStore.getState().actions.reset();
   });
 
   afterEach(() => {
@@ -200,6 +222,28 @@ describe('TreeApp', () => {
     });
     expect(screen.getAllByText('[read: agent-session.ts:1360-1420]').length).toBeGreaterThan(0);
     vi.useRealTimers();
+  });
+
+  it('does not silently retarget navigation when filtering hides the selected node', () => {
+    vi.useFakeTimers();
+    renderTreeApp();
+
+    fireEvent.change(screen.getByLabelText('搜索会话节点'), {
+      target: { value: 'pnpm test' },
+    });
+    act(() => {
+      vi.advanceTimersByTime(TREE_SEARCH_DEBOUNCE_MS);
+    });
+
+    expect(screen.getAllByText('[bash] pnpm test').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '切换到此节点' })).not.toBeInTheDocument();
+
+    const bashRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText('[bash] pnpm test'));
+    fireEvent.click(bashRow!);
+
+    expect(screen.getByRole('button', { name: '切换到此节点' })).toBeInTheDocument();
   });
 
   it('keeps only refresh and reveal actions in the toolbar menu', () => {
@@ -290,8 +334,13 @@ describe('TreeApp', () => {
   });
 
   it('does not select a row when keyboard events originate from the fold button', () => {
-    renderTreeApp();
+    renderTreeApp(makeTree(), 'tool-1', { skipPrompt: true });
     postMessage.mockClear();
+
+    const assistantRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/助手：runtime context restored/));
+    fireEvent.click(assistantRow!);
 
     const userRow = screen
       .getAllByRole('treeitem')
@@ -303,16 +352,16 @@ describe('TreeApp', () => {
     fireEvent.keyDown(foldButton, { key: ' ' });
     fireEvent.click(screen.getByRole('button', { name: '切换到此节点' }));
 
-    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toEqual({
+    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toMatchObject({
       type: 'navigate_tree',
-      targetId: 'tool-1',
+      targetId: 'assistant-1',
       summarize: false,
     });
   });
 
   it('selects the folded ancestor when the current selection is hidden by collapse', () => {
     const introRoot = makeNode('intro-root', 'user', 'earlier root', [], { role: 'user' });
-    renderTreeApp([introRoot, ...makeTree()]);
+    renderTreeApp([introRoot, ...makeTree()], 'tool-1', { skipPrompt: true });
     postMessage.mockClear();
 
     const userRow = screen
@@ -321,9 +370,10 @@ describe('TreeApp', () => {
     expect(userRow).toBeDefined();
 
     fireEvent.click(within(userRow!).getByLabelText('折叠分支'));
-    fireEvent.click(screen.getByRole('button', { name: '切换到此节点' }));
+    fireEvent.click(screen.getByRole('button', { name: '回到此处编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '回到此处编辑' }));
 
-    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toEqual({
+    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toMatchObject({
       type: 'navigate_tree',
       targetId: 'user-1',
       summarize: false,
@@ -341,40 +391,279 @@ describe('TreeApp', () => {
     fireEvent.click(userRow!);
     expect(getPostedProtocolRequests('navigate_tree')).toEqual([]);
 
-    fireEvent.click(screen.getByRole('radio', { name: '摘要被放弃的分支' }));
-    fireEvent.click(screen.getByRole('button', { name: '切换到此节点' }));
+    fireEvent.click(screen.getByRole('button', { name: '回到此处编辑' }));
+    expect(getPostedProtocolRequests('navigate_tree')).toEqual([]);
+    expect(
+      screen.getByText('继续后，聊天输入框中的现有草稿（包括图片）将被该节点内容替换。'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '回到此处编辑' }).parentElement).toHaveClass(
+      'bg-popover',
+      'border-t-0',
+      'pt-0',
+    );
 
-    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toEqual({
+    fireEvent.click(screen.getByRole('radio', { name: '摘要被放弃的分支' }));
+    fireEvent.click(screen.getByRole('button', { name: '回到此处编辑' }));
+
+    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toMatchObject({
       type: 'navigate_tree',
       targetId: 'user-1',
       summarize: true,
     });
   });
 
-  it('sends custom summary instructions and label updates', () => {
+  it('does not offer navigation actions for the current leaf', () => {
     renderTreeApp();
+
+    expect(screen.getByRole('button', { name: '当前节点' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '更多切换方式' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      id: 'user-current',
+      kind: 'user' as const,
+      overrides: { role: 'user' as const },
+      preview: 'edit current user prompt',
+    },
+    {
+      id: 'custom-current',
+      kind: 'custom' as const,
+      overrides: { type: 'custom_message' as const },
+      preview: 'edit current custom prompt',
+    },
+  ])('offers editing when the current leaf is $kind', ({ id, kind, overrides, preview }) => {
+    renderTreeApp([makeNode(id, kind, preview, [], overrides)], id, { skipPrompt: true });
+
+    fireEvent.click(screen.getByRole('button', { name: '回到此处编辑' }));
+    fireEvent.click(screen.getByRole('button', { name: '回到此处编辑' }));
+
+    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toMatchObject({
+      type: 'navigate_tree',
+      targetId: id,
+      summarize: false,
+    });
+  });
+
+  it('sends custom summary instructions and label updates', () => {
+    renderTreeApp(makeTree(), 'assistant-1');
     postMessage.mockClear();
+
+    const toolRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText('[read: agent-session.ts:1360-1420]'));
+    fireEvent.click(toolRow!);
 
     fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'before retry' } });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
     expect(getPostedProtocolRequests('set_label').at(-1)?.payload).toEqual({
       type: 'set_label',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
       entryId: 'tool-1',
       label: 'before retry',
     });
 
+    fireEvent.click(screen.getByRole('button', { name: '切换到此节点' }));
     fireEvent.click(screen.getByRole('radio', { name: '自定义摘要' }));
     fireEvent.change(screen.getByPlaceholderText('自定义摘要指令'), {
       target: { value: 'Focus on runtime context recovery' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '切换到此节点' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续切换' }));
 
-    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toEqual({
+    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toMatchObject({
       type: 'navigate_tree',
       targetId: 'tool-1',
       summarize: true,
       customInstructions: 'Focus on runtime context recovery',
     });
+  });
+
+  it('skips the summary prompt when configured and locks duplicate mutations while navigating', () => {
+    renderTreeApp(makeTree(), 'tool-1', { skipPrompt: true });
+    postMessage.mockClear();
+
+    const targetRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/助手：provider exploded/));
+    fireEvent.click(targetRow!);
+
+    const navigate = screen.getByRole('button', { name: '切换到此节点' });
+    fireEvent.click(navigate);
+    fireEvent.click(navigate);
+
+    expect(getPostedProtocolRequests('navigate_tree')).toHaveLength(1);
+    expect(getPostedProtocolRequests('navigate_tree')[0]?.payload).toMatchObject({
+      type: 'navigate_tree',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+      targetId: 'assistant-error-1',
+      summarize: false,
+    });
+    expect(screen.getByRole('button', { name: '正在切换…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '更多会话树操作' })).toBeDisabled();
+  });
+
+  it('explains a host-projected navigation block without sending a request', () => {
+    renderTreeApp(makeTree(), 'tool-1', { skipPrompt: true });
+    act(() => {
+      useConversationStore.setState({
+        busyState: { kind: 'agent', cancellable: true },
+        treeNavigationAdmission: {
+          allowed: false,
+          reason: 'session_busy',
+          message: '会话正在运行，请等待当前操作完成后再切换分支。',
+        },
+      });
+    });
+    const targetRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/助手：provider exploded/));
+    fireEvent.click(targetRow!);
+    postMessage.mockClear();
+
+    const navigate = screen.getByRole('button', { name: '切换到此节点' });
+    expect(navigate).toBeEnabled();
+    fireEvent.click(navigate);
+
+    expect(getPostedProtocolRequests('navigate_tree')).toEqual([]);
+    expect(screen.getByRole('heading', { name: '暂时无法切换分支' })).toBeInTheDocument();
+    expect(screen.getByText('会话正在运行，请等待当前操作完成后再切换分支。')).toBeInTheDocument();
+  });
+
+  it('keeps explicit branch-summary navigation available when skipPrompt is enabled', () => {
+    renderTreeApp(makeTree(), 'tool-1', { skipPrompt: true });
+    postMessage.mockClear();
+
+    const targetRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/助手：provider exploded/));
+    fireEvent.click(targetRow!);
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: '切换到此节点' }));
+    fireEvent.click(screen.getByRole('radio', { name: '摘要被放弃的分支' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续切换' }));
+
+    expect(getPostedProtocolRequests('navigate_tree').at(-1)?.payload).toMatchObject({
+      type: 'navigate_tree',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+      targetId: 'assistant-error-1',
+      summarize: true,
+    });
+    expect(screen.getByRole('button', { name: '正在切换…' })).toBeDisabled();
+    expect(document.querySelector('.lucide-loader-circle.animate-spin')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '停止摘要' })).toBeEnabled();
+
+    const request = getPostedProtocolRequests('navigate_tree').at(-1);
+    fireEvent.click(screen.getByRole('button', { name: '停止摘要' }));
+    expect(getPostedProtocolRequests('abort_tree_navigation').at(-1)?.payload).toEqual({
+      type: 'abort_tree_navigation',
+      navigationId: request!.payload.navigationId,
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+    });
+    expect(screen.getByRole('button', { name: '正在停止…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '正在切换…' })).toBeDisabled();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'protocol_response',
+        requestId: request!.requestId,
+        payload: {
+          type: 'navigate_tree_result',
+          navigationId: request!.payload.navigationId as string,
+          status: 'cancelled',
+        },
+      });
+    });
+
+    expect(screen.getByRole('button', { name: '切换到此节点' })).toBeEnabled();
+    expect(useUiStore.getState().notification).toBeUndefined();
+  });
+
+  it('uses the host phase to hide cancellation after navigation commits', () => {
+    renderTreeApp(makeTree(), 'tool-1', { skipPrompt: true });
+    const targetRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/助手：provider exploded/));
+    fireEvent.click(targetRow!);
+    fireEvent.contextMenu(screen.getByRole('button', { name: '切换到此节点' }));
+    fireEvent.click(screen.getByRole('radio', { name: '摘要被放弃的分支' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续切换' }));
+    const navigationId = getPostedProtocolRequests('navigate_tree').at(-1)!.payload
+      .navigationId as string;
+    expect(screen.getByRole('button', { name: '停止摘要' })).toBeEnabled();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'runtime_state_update',
+        isStreaming: true,
+        busyState: {
+          kind: 'tree_navigation',
+          operationId: navigationId,
+          phase: 'reconciling',
+          cancellable: false,
+        },
+      });
+    });
+
+    expect(screen.queryByRole('button', { name: '停止摘要' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '正在切换…' })).toBeDisabled();
+  });
+
+  it('shows aborting state for navigation restored from host state', () => {
+    renderTreeApp();
+
+    act(() => {
+      routeExtensionMessage({
+        type: 'runtime_state_update',
+        isStreaming: true,
+        busyState: {
+          kind: 'tree_navigation',
+          operationId: 'navigation-restored',
+          phase: 'preflight',
+          cancellable: true,
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '停止切换' }));
+
+    expect(getPostedProtocolRequests('abort_tree_navigation').at(-1)?.payload).toEqual({
+      type: 'abort_tree_navigation',
+      navigationId: 'navigation-restored',
+      session: { sessionId: 'session-1', sessionPath: '/sessions/session-1.jsonl' },
+    });
+    expect(screen.getByRole('button', { name: '正在停止…' })).toBeDisabled();
+  });
+
+  it('cancels the pending tree navigation when the active session changes', () => {
+    useSessionStore.setState({
+      sessionId: 'session-1',
+      sessionFile: '/sessions/session-1.jsonl',
+    });
+    renderTreeApp(makeTree(), 'tool-1', { skipPrompt: true });
+    postMessage.mockClear();
+
+    const targetRow = screen
+      .getAllByRole('treeitem')
+      .find((row) => within(row).queryByText(/助手：provider exploded/));
+    fireEvent.click(targetRow!);
+    fireEvent.contextMenu(screen.getByRole('button', { name: '切换到此节点' }));
+    fireEvent.click(screen.getByRole('radio', { name: '摘要被放弃的分支' }));
+    fireEvent.click(screen.getByRole('button', { name: '继续切换' }));
+    const request = getPostedProtocolRequests('navigate_tree').at(-1);
+
+    act(() => {
+      useSessionStore.setState({
+        sessionId: 'session-2',
+        sessionFile: '/sessions/session-2.jsonl',
+      });
+    });
+
+    expect(postMessage.mock.calls.map(([message]) => message)).toContainEqual({
+      type: 'protocol_cancel',
+      requestId: request!.requestId,
+    });
+    expect(screen.queryByRole('button', { name: '停止摘要' })).not.toBeInTheDocument();
   });
 
   it('marks labels saved only after a successful label_result', () => {

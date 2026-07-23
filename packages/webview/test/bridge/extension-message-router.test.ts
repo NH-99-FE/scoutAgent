@@ -577,13 +577,17 @@ describe('routeExtensionMessage', () => {
       type: 'fork_result',
       success: true,
       targetSessionId: 'fork-session-id',
+      targetSessionPath: '/sessions/fork-session.jsonl',
       selectedText: 'edit this prompt',
     });
 
     expect(useComposerStore.getState().pendingCommandEffect).toEqual({
       kind: 'replace_text',
       source: 'fork',
-      targetSessionId: 'fork-session-id',
+      targetSession: {
+        sessionId: 'fork-session-id',
+        sessionPath: '/sessions/fork-session.jsonl',
+      },
       text: 'edit this prompt',
     });
   });
@@ -596,6 +600,46 @@ describe('routeExtensionMessage', () => {
     });
 
     expect(useComposerStore.getState().pendingCommandEffect).toBeNull();
+  });
+
+  it('explains that a blocked post-commit tree navigation requires recovery', () => {
+    projectProtocolResponsePayload({
+      type: 'navigate_tree_result',
+      navigationId: 'navigation-1',
+      status: 'blocked_after_commit',
+      error: 'runtime reconciliation failed',
+    });
+
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'error',
+      message:
+        'Tree navigation was committed, but runtime reconciliation failed. Reload or recover the session before continuing. Details: runtime reconciliation failed',
+    });
+  });
+
+  it('shows a fallback error when a blocked user message has no detail', () => {
+    projectProtocolResponsePayload({ type: 'user_message_result', status: 'blocked' });
+
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'error',
+      message: 'Message was not sent: blocked',
+    });
+  });
+
+  it('shows the concrete error returned for a blocked user message', () => {
+    projectProtocolResponsePayload({
+      type: 'user_message_result',
+      status: 'blocked',
+      error: 'Extension command failed',
+    });
+
+    expect(useUiStore.getState().notification).toEqual({
+      type: 'notification',
+      level: 'error',
+      message: 'Extension command failed',
+    });
   });
 
   it('ignores stale new session results', () => {
