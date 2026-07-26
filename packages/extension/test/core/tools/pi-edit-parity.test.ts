@@ -7,6 +7,7 @@
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createEditToolDefinition, type EditOperations } from '../../../src/core/tools/edit.ts';
+import { generateUnifiedPatch } from '../../../src/core/tools/shared/edit-diff.ts';
 
 function makeOperations(content: string, overrides: Partial<EditOperations> = {}) {
   let stored = content;
@@ -63,6 +64,53 @@ describe('Pi edit parity', () => {
     expect(result.content).toEqual([
       { type: 'text', text: 'Successfully replaced 2 block(s) in file.ts.' },
     ]);
+  });
+
+  it.each([
+    {
+      name: 'single-line replacement',
+      path: 'file.ts',
+      before: 'a\nb\nc\n',
+      after: 'a\nx\nc\n',
+      patch: '--- file.ts\n+++ file.ts\n@@ -1,3 +1,3 @@\n a\n-b\n+x\n c\n',
+    },
+    {
+      name: 'file start with a spaced filename',
+      path: 'space name.ts',
+      before: 'a\nb\n',
+      after: 'x\nb\n',
+      patch: '--- space name.ts\n+++ space name.ts\n@@ -1,2 +1,2 @@\n-a\n+x\n b\n',
+    },
+    {
+      name: 'file end without a trailing newline',
+      path: 'file.ts',
+      before: 'a\nb',
+      after: 'a\nx',
+      patch:
+        '--- file.ts\n+++ file.ts\n@@ -1,2 +1,2 @@\n a\n-b\n\\ No newline at end of file\n+x\n\\ No newline at end of file\n',
+    },
+    {
+      name: 'empty file',
+      path: 'file.ts',
+      before: '',
+      after: 'x',
+      patch:
+        '--- file.ts\n+++ file.ts\n@@ -0,0 +1,1 @@\n+x\n\\ No newline at end of file\n',
+    },
+    {
+      name: 'multiple hunks',
+      path: 'file.ts',
+      before: `${Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n')}\n`,
+      after: `${[
+        'changed 1',
+        ...Array.from({ length: 18 }, (_, index) => `line ${index + 2}`),
+        'changed 20',
+      ].join('\n')}\n`,
+      patch:
+        '--- file.ts\n+++ file.ts\n@@ -1,5 +1,5 @@\n-line 1\n+changed 1\n line 2\n line 3\n line 4\n line 5\n@@ -16,5 +16,5 @@\n line 16\n line 17\n line 18\n line 19\n-line 20\n+changed 20\n',
+    },
+  ])('matches the exact Pi patch for $name', ({ path, before, after, patch }) => {
+    expect(generateUnifiedPatch(path, before, after)).toBe(patch);
   });
 
   it.each([

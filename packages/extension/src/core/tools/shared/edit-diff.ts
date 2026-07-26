@@ -243,12 +243,10 @@ export function generateUnifiedPatch(
   newContent: string,
   contextLines = 4,
 ): string {
-  return (
-    Diff.createTwoFilesPatch(path, path, oldContent, newContent, '', '', {
-      context: contextLines,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- diff 库的类型定义不包含 options 参数
-    } as any) ?? ''
-  );
+  return Diff.createTwoFilesPatch(path, path, oldContent, newContent, undefined, undefined, {
+    context: contextLines,
+    headerOptions: Diff.FILE_HEADERS_ONLY,
+  });
 }
 
 /**

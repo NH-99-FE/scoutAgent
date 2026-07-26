@@ -73,7 +73,7 @@
     "@scout-agent/ai": "workspace:*",
     "@scout-agent/shared": "workspace:*",
     "@sinclair/typebox": "^0.34.0",
-    "diff": "^9.0.0",
+    "diff": "8.0.4",
     "glob": "13.0.6",
     "highlight.js": "^11.11.1",
     "ignore": "^6.0.0",
@@ -83,7 +83,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/diff": "^8.0.0",
+    "@types/diff": "7.0.2",
     "@types/mocha": "^10.0.10",
     "@types/node": "25.9.1",
     "@types/vscode": "^1.120.0",
