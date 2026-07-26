@@ -60,6 +60,19 @@ Webview 发出的消息分两层：
 
 如果 Webview UI 自己需要过滤过期结果，应使用独立 UI token。当前任务历史面板使用 `history:*` query token，它只在 webview store 内判断响应是否过期，不参与 Extension 协议取消和回包关联。
 
+## Changes Review Lazy Diff
+
+Changes Review 的文件内容走 request-scoped `request_file_diff`，不会随普通 `agent_event` 或 panel bootstrap 广播 rows/tokens。
+
+- payload 使用 `(sessionId, turnId, fileId, revision)` 作为业务 identity，另带 `view/mode/includeTokens/range`；`requestId` 仍只存在于 envelope。
+- route 为 `review.request_file_diff`，允许 `chat` 与 `changes-review` surface，返回 `file_diff_result`。
+- Host 只从当前 runtime Journal projection 或当前 session branch artifact 解析 identity，不接受任意 path 读取。
+- `pending` 不是失败。Worker 完成后会广播 `changes_review_projection_updated`；Webview 仅对相同 identity 的 pending cache entry 重试。
+- Webview 对完全相同的请求 key 做 in-flight dedupe 和引用计数取消；结果 cache 有界，revision 变化自然形成新 key。
+- `file_diff_result` 由 transport callback 交给请求者，不写入全局 conversation store。
+
+Changes Review panel 另有两个 panel-local shared 消息：`changes_review_set_view_mode` 与 `changes_review_open_file`。它们经过 Webview 边界 guard，但由 panel manager 消费，不进入 core/session。
+
 ## 新增协议 Checklist
 
 1. 在 `packages/shared/src/index.ts` 增加新的 `WebviewRequestPayload`、response/event 类型，并同步 `SCOUT_PROTOCOL` 的 `service/method`、`response`、`emits`、`surfaces`。
@@ -72,6 +85,8 @@ Webview 发出的消息分两层：
    - `packages/webview/test/bridge/transport-client.test.ts`，如果 transport 行为变化
    - `packages/extension/test/host/protocol/protocol-registration.test.ts`
    - 对应 service 单元测试
+
+Lazy diff 还必须覆盖 host identity/revision/range 校验、runtime/artifact fallback、Webview 未展开不请求、dedupe/cancel 和 projection event 重试。
 
 ## 性能与可维护性收益
 

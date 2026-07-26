@@ -39,18 +39,8 @@ describe('DomainEventPublisher', () => {
       nextOffset: 0,
     });
     publisher.publishForProtocol('new_session_message', {
-      type: 'tool_call_preview_update',
-      sessionId: 'session-1',
-      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
-      toolCallId: 'tool-1',
-      toolName: 'edit',
-      preview: {
-        kind: 'file_edit',
-        path: 'src/app.ts',
-        diff: '-1 old\n+1 new',
-        additions: 1,
-        deletions: 1,
-      },
+      type: 'sessions_update',
+      sessions: [],
     });
 
     expect(() =>

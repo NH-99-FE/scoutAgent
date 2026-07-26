@@ -16,6 +16,7 @@ export type {
   ScoutProtocolRequest,
   ScoutProtocolRoute,
   ScoutProtocolService,
+  RequestFileDiffMessage,
   WebviewMessage,
   WebviewRequestPayload,
 } from './protocol-requests.ts';
@@ -62,6 +63,7 @@ export type {
   ScoutChangesReviewTokenDiff,
   ScoutChangesReviewViewMode,
   ScoutChangesReviewWebviewMessage,
+  ScoutFileDiffView,
 } from './protocol-review.ts';
 
 export type {
@@ -94,10 +96,8 @@ export type {
   ScoutContent,
   ScoutContextUsage,
   ScoutCustomMessage,
-  ScoutFileChangeDiffPreview,
   ScoutFileChangeDetails,
   ScoutFileChangeReviewRef,
-  ScoutFileEditPreview,
   ScoutImageContent,
   ScoutMessage,
   ScoutQueuedFollowUp,
@@ -110,8 +110,6 @@ export type {
   ScoutTextContent,
   ScoutThinkingContent,
   ScoutToolCallContent,
-  ScoutToolCallPreview,
-  ScoutToolCallPreviewUpdateEvent,
   ScoutToolExecutionResult,
   ScoutToolResultMessage,
   ScoutUserMessage,
@@ -132,6 +130,7 @@ export type {
   ScoutFileMentionsResult,
   ScoutForkCandidate,
   ScoutForkCandidatesResult,
+  FileDiffResultMessage,
   ScoutForkResult,
   ScoutNavigateTreeResult,
   ScoutGenericCommandResult,
@@ -170,6 +169,7 @@ export type {
   ScoutCompactionResult,
   ScoutCompactionStartEvent,
   ScoutChangesReviewUpdateEvent,
+  ChangesReviewProjectionUpdatedEvent,
   ScoutDomainEventType,
   ScoutNotificationMessage,
   ScoutProtocolError,

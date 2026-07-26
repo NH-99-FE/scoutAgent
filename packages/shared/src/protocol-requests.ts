@@ -14,6 +14,7 @@ import type {
   ScoutWebviewSurface,
 } from './protocol-core.ts';
 import type { ScoutExtensionScope, ScoutExtensionTemplateId } from './protocol-extensions.ts';
+import type { ScoutChangesReviewWebviewMessage } from './protocol-review.ts';
 import type { ScoutSkillScope, ScoutSkillToggleIntent } from './protocol-skills.ts';
 
 // ---------- Webview 到 Extension ----------
@@ -28,6 +29,7 @@ export type ScoutProtocolService =
   | 'mention'
   | 'extensions'
   | 'skills'
+  | 'review'
   | 'ui';
 
 export type ScoutProtocolKind = 'lifecycle' | 'query' | 'command';
@@ -62,13 +64,19 @@ export interface ScoutProtocolCancel {
 
 export type ScoutControlMessage = { type: 'control_abort' } | { type: 'control_abort_retry' };
 
-export type WebviewMessage = ScoutProtocolRequest | ScoutProtocolCancel | ScoutControlMessage;
+export type WebviewMessage =
+  | ScoutProtocolRequest
+  | ScoutProtocolCancel
+  | ScoutControlMessage
+  | ScoutChangesReviewWebviewMessage;
 
 export const WEBVIEW_TO_EXTENSION_MESSAGE_TYPES = [
   'protocol_request',
   'protocol_cancel',
   'control_abort',
   'control_abort_retry',
+  'changes_review_set_view_mode',
+  'changes_review_open_file',
 ] as const satisfies readonly WebviewMessage['type'][];
 
 export type WebviewRequestPayload =
@@ -153,6 +161,7 @@ export type WebviewRequestPayload =
   | { type: 'download_image'; data: string; mimeType: string; fileName: string }
   | { type: 'open_changes_review'; turnId: string; recordId?: string }
   | { type: 'open_current_changes_review' }
+  | RequestFileDiffMessage
   | {
       type: 'fork_session';
       session: ScoutSessionIdentity;
@@ -226,6 +235,18 @@ export type WebviewRequestPayload =
   | { type: 'delete_session'; sessionId: string; sessionPath: string }
   | { type: 'export_session'; format: 'jsonl'; outputPath?: string };
 
+export interface RequestFileDiffMessage {
+  type: 'request_file_diff';
+  sessionId: string;
+  turnId: string;
+  fileId: string;
+  revision: number;
+  view: 'inline' | 'panel';
+  mode: 'unified' | 'split';
+  includeTokens: boolean;
+  range?: { hunkOffset: number; hunkLimit: number };
+}
+
 export const SCOUT_PROTOCOL = {
   ready: {
     kind: 'lifecycle',
@@ -293,7 +314,6 @@ export const SCOUT_PROTOCOL = {
       'queue_update',
       'runtime_state_update',
       'agent_event',
-      'tool_call_preview_update',
       'context_usage_update',
       'tree_update',
       'task_history_update',
@@ -309,7 +329,6 @@ export const SCOUT_PROTOCOL = {
       'state_update',
       'runtime_state_update',
       'agent_event',
-      'tool_call_preview_update',
       'tree_update',
       'task_history_update',
       'sessions_update',
@@ -327,14 +346,7 @@ export const SCOUT_PROTOCOL = {
     kind: 'command',
     service: 'session',
     method: 'promote_follow_up',
-    emits: [
-      'state_update',
-      'queue_update',
-      'runtime_state_update',
-      'agent_event',
-      'tool_call_preview_update',
-      'tree_update',
-    ],
+    emits: ['state_update', 'queue_update', 'runtime_state_update', 'agent_event', 'tree_update'],
     surfaces: ['chat'],
   },
   compact: {
@@ -482,6 +494,13 @@ export const SCOUT_PROTOCOL = {
     response: 'open_current_changes_review_result',
     surfaces: ['chat'],
   },
+  request_file_diff: {
+    kind: 'query',
+    service: 'review',
+    method: 'request_file_diff',
+    response: 'file_diff_result',
+    surfaces: ['chat', 'changes-review'],
+  },
   fork_session: {
     kind: 'command',
     service: 'tree',
@@ -547,14 +566,7 @@ export const SCOUT_PROTOCOL = {
     kind: 'command',
     service: 'session',
     method: 'continue_session',
-    emits: [
-      'state_update',
-      'queue_update',
-      'runtime_state_update',
-      'agent_event',
-      'tool_call_preview_update',
-      'tree_update',
-    ],
+    emits: ['state_update', 'queue_update', 'runtime_state_update', 'agent_event', 'tree_update'],
     surfaces: ['chat'],
   },
   request_commands: {

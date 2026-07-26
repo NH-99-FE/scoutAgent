@@ -118,8 +118,6 @@ function isScoutFileChangeDetails(value: unknown): value is ScoutFileChangeDetai
   return (
     details.kind === 'file_change' &&
     typeof details.path === 'string' &&
-    typeof details.additions === 'number' &&
-    typeof details.deletions === 'number' &&
     Boolean(details.review) &&
     typeof details.review?.turnId === 'string' &&
     typeof details.review?.recordId === 'string'

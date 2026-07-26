@@ -29,7 +29,6 @@ import {
   useConversationItems,
   useConversationTitle,
   useToolExecutionsById,
-  useToolPreviewsById,
 } from '@/store/conversation-store';
 import { getConversationExpansionScope } from '@/store/conversation-expansion-store';
 import { useVisualBusyState, useVisualIsStreaming } from '@/store/runtime-overlay-store';
@@ -163,7 +162,6 @@ const ConversationPanel = memo(function ConversationPanel() {
   const isStreaming = useVisualIsStreaming();
   const busyState = useVisualBusyState();
   const toolExecutionsById = useToolExecutionsById();
-  const toolPreviewsById = useToolPreviewsById();
   const extensionUIRequests = useExtensionUIRequests();
   const sessionFile = useSessionFile();
   const sessionId = useSessionId();
@@ -193,7 +191,6 @@ const ConversationPanel = memo(function ConversationPanel() {
       showScrollToBottomButton
       transcriptAddons={transcriptAddons}
       toolExecutionsById={toolExecutionsById}
-      toolPreviewsById={toolPreviewsById}
     />
   );
 });

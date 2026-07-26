@@ -2,20 +2,15 @@
 // Tool Display Helpers — 通用展示构造与格式化
 // ============================================================
 
-import type { ToolCallPreviewState } from '@/store/conversation-store';
-import type { ScoutChangesReviewRow, ScoutFileChangeDetails } from '@scout-agent/shared';
+import type { ScoutFileChangeDetails } from '@scout-agent/shared';
 import type {
-  FileEditToolDisplayResult,
   GenericToolDisplayResult,
   ToolDisplayContext,
   ToolDisplayIcon,
-  ToolDisplayMetric,
   ToolDisplayResult,
   ToolDisplaySummary,
   ToolDisplayStatus,
 } from './types';
-
-const FILE_CHANGE_DIFF_PREVIEW_TRUNCATED_LINE = '… 预览已截断，请打开审查查看完整变更';
 
 export function createGenericDisplay(
   context: ToolDisplayContext,
@@ -70,7 +65,6 @@ export function createFileChangeDisplayFromDetails({
   details: unknown;
 }): ToolDisplayResult | undefined {
   if (!isFileChangeDetails(details)) return undefined;
-  const detail = status === 'error' ? undefined : createFileChangeDiffDetail(details);
   const displayPath = details.displayPath ?? details.path;
   const summaryArgs = { path: displayPath };
   return {
@@ -78,48 +72,18 @@ export function createFileChangeDisplayFromDetails({
     status,
     toolName,
     icon: 'edit',
-    detail,
-    metrics: createChangeMetrics(details.additions, details.deletions),
+    detail: {
+      kind: 'lazy_diff',
+      path: details.path,
+      displayPath: details.displayPath,
+      review: details.review,
+      toolOutcome: details.toolOutcome,
+    },
+    metrics: undefined,
     metricsPlacement: 'end',
     detailLabel: '文件变更',
     detailTarget: displayPath,
     summary: createToolExecutionSummary(status, toolName, summaryArgs),
-  };
-}
-
-export function createFileEditDisplayFromPreview({
-  status,
-  toolName,
-  preview,
-}: {
-  status: ToolDisplayStatus;
-  toolName: string;
-  preview: ToolCallPreviewState;
-}): FileEditToolDisplayResult {
-  const fileEdit = preview.preview;
-  const previewError = fileEdit.error;
-  const displayPath = fileEdit.displayPath ?? fileEdit.path;
-  const actionLabel = getToolActionLabel(toolName, { path: displayPath });
-  const summary = previewError
-    ? createToolDisplaySummary({
-        action: '预览失败',
-        target: actionLabel ?? `${toolName} ${fileEdit.path}`,
-      })
-    : createToolExecutionSummary(status, toolName, { path: displayPath });
-
-  return {
-    kind: 'file_edit',
-    status,
-    toolName,
-    icon: 'edit',
-    path: displayPath,
-    additions: fileEdit.additions,
-    deletions: fileEdit.deletions,
-    metrics: previewError ? undefined : createChangeMetrics(fileEdit.additions, fileEdit.deletions),
-    metricsPlacement: 'end',
-    detailLabel: toolName === 'write' ? '写入差异' : '编辑差异',
-    detailTarget: displayPath,
-    summary,
   };
 }
 
@@ -190,57 +154,15 @@ function isFileChangeDetails(value: unknown): value is ScoutFileChangeDetails {
   return (
     details.kind === 'file_change' &&
     typeof details.path === 'string' &&
-    typeof details.additions === 'number' &&
-    typeof details.deletions === 'number'
+    Boolean(details.review) &&
+    typeof details.review?.turnId === 'string' &&
+    typeof details.review?.recordId === 'string' &&
+    typeof details.review?.fileId === 'string' &&
+    Number.isInteger(details.review?.revision) &&
+    (details.review?.status === 'pending' ||
+      details.review?.status === 'ready' ||
+      details.review?.status === 'unavailable')
   );
-}
-
-function createChangeMetrics(
-  additions: number,
-  deletions: number,
-): ToolDisplayMetric[] | undefined {
-  const metrics: ToolDisplayMetric[] = [];
-  if (additions > 0) {
-    metrics.push({ key: 'additions', value: additions, prefix: '+', tone: 'added' });
-  }
-  if (deletions > 0) {
-    metrics.push({ key: 'deletions', value: deletions, prefix: '-', tone: 'deleted' });
-  }
-  return metrics.length > 0 ? metrics : undefined;
-}
-
-function createFileChangeDiffDetail(
-  details: ScoutFileChangeDetails,
-): ToolDisplayResult['detail'] | undefined {
-  const preview = details.diffPreview;
-  if (!preview) return undefined;
-  const diffLines = preview.rows.map(formatFileChangeDiffPreviewRow);
-  const unavailableReason = preview.unavailableReason?.trim();
-  if (preview.truncated) {
-    diffLines.push(FILE_CHANGE_DIFF_PREVIEW_TRUNCATED_LINE);
-  }
-  if (unavailableReason && diffLines.length > 0) {
-    diffLines.push(`… ${unavailableReason}`);
-  }
-  if (diffLines.length === 0 && !unavailableReason) return undefined;
-  const displayPath = details.displayPath ?? details.path;
-  return {
-    kind: 'diff',
-    path: displayPath,
-    diffText: diffLines.join('\n'),
-    additions: details.additions,
-    deletions: details.deletions,
-    previewError: diffLines.length === 0 ? unavailableReason : undefined,
-  };
-}
-
-function formatFileChangeDiffPreviewRow(row: ScoutChangesReviewRow): string {
-  if (row.type === 'fold') {
-    return `… ${row.count ?? 0} unmodified ${(row.count ?? 0) === 1 ? 'line' : 'lines'}`;
-  }
-  const marker = row.type === 'added' ? '+' : row.type === 'removed' ? '-' : ' ';
-  const lineNumber = row.type === 'removed' ? row.oldLineNumber : row.newLineNumber;
-  return `${marker}${lineNumber ?? ''} ${row.text ?? ''}`;
 }
 
 export function formatToolExecutionSummary(

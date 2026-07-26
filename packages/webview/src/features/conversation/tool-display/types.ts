@@ -2,8 +2,12 @@
 // Tool Display Types — 工具展示模型类型
 // ============================================================
 
-import type { ScoutToolCallContent, ScoutToolResultMessage } from '@scout-agent/shared';
-import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
+import type {
+  ScoutFileChangeReviewRef,
+  ScoutToolCallContent,
+  ScoutToolResultMessage,
+} from '@scout-agent/shared';
+import type { ToolExecutionState } from '@/store/conversation-store';
 
 export type ToolDisplayStatus = 'pending' | 'running' | 'done' | 'error' | 'stopped';
 export type ToolDisplayIcon =
@@ -52,7 +56,18 @@ export interface DiffToolDisplayDetail {
   previewError?: string;
 }
 
-export type ToolDisplayDetail = TextToolDisplayDetail | DiffToolDisplayDetail;
+export interface LazyDiffToolDisplayDetail {
+  kind: 'lazy_diff';
+  path: string;
+  displayPath?: string;
+  review: ScoutFileChangeReviewRef;
+  toolOutcome?: 'success' | 'error_after_write';
+}
+
+export type ToolDisplayDetail =
+  | TextToolDisplayDetail
+  | DiffToolDisplayDetail
+  | LazyDiffToolDisplayDetail;
 
 export interface ToolDisplayResult {
   kind: string;
@@ -80,7 +95,7 @@ export interface GenericToolDisplayResult extends ToolDisplayResult {
 export interface FileEditToolDisplayResult extends ToolDisplayResult {
   kind: 'file_edit';
   path: string;
-  detail?: DiffToolDisplayDetail;
+  detail?: DiffToolDisplayDetail | LazyDiffToolDisplayDetail;
   additions: number;
   deletions: number;
 }
@@ -88,7 +103,6 @@ export interface FileEditToolDisplayResult extends ToolDisplayResult {
 export interface ResolveToolDisplayOptions {
   toolCall: ScoutToolCallContent;
   runtime?: ToolExecutionState;
-  preview?: ToolCallPreviewState;
   toolResult?: ScoutToolResultMessage;
   assistantErrorMessage?: string;
   assistantStopReason?: string;
@@ -103,14 +117,12 @@ export interface ToolDisplayContext {
   isError: boolean;
   completionLabel: string;
   details?: unknown;
-  preview?: ToolCallPreviewState;
 }
 
 export interface CreateToolDisplayContextOptions {
   toolName: string;
   args: Record<string, unknown> | undefined;
   runtime?: ToolExecutionState;
-  preview?: ToolCallPreviewState;
   toolResult?: ScoutToolResultMessage;
   assistantErrorMessage?: string;
   assistantStopReason?: string;

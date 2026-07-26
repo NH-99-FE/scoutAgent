@@ -22,8 +22,6 @@ export interface ConversationTranscriptProjectorOptions extends BuildConversatio
   transcriptAddons: ConversationTranscriptAddon[];
 }
 
-const EMPTY_TOOL_PREVIEWS: NonNullable<BuildConversationRowsOptions['toolPreviewsById']> = {};
-
 class StructuralSharingConversationTranscriptProjector implements ConversationTranscriptProjector {
   private readonly rowsProjector = createConversationRowsProjector();
   private previousRows: ConversationTranscriptRow[] = [];
@@ -33,7 +31,6 @@ class StructuralSharingConversationTranscriptProjector implements ConversationTr
     items,
     isStreaming,
     toolExecutionsById,
-    toolPreviewsById = EMPTY_TOOL_PREVIEWS,
     transcriptAddons,
   }: ConversationTranscriptProjectorOptions): ConversationTranscriptRow[] {
     const baseRows = this.rowsProjector.project({
@@ -41,7 +38,6 @@ class StructuralSharingConversationTranscriptProjector implements ConversationTr
       isStreaming,
       busyState,
       toolExecutionsById,
-      toolPreviewsById,
     });
     const nextRows = createConversationTranscriptRows({
       addons: transcriptAddons,

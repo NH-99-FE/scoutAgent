@@ -1,149 +1,102 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createReviewContentFingerprint,
-  FileReviewStore,
-} from '../../../src/core/review/file-review.ts';
+  MutationJournal,
+  captureStringSnapshot,
+  projectDiffDocumentRows,
+} from '../../../src/core/review/index.ts';
+import { runDiffWorkerRequest, type DiffWorkerClientPort } from '../../../src/core/review/index.ts';
 import {
   collectCurrentBranchFileReviewArtifacts,
   collectFileReviewArtifacts,
   createFileReviewArtifact,
+  decodeFileReviewArtifact,
   FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
   isFileReviewArtifact,
+  isFileReviewArtifactV1,
   prepareFileReviewArtifactForSession,
+  type FileReviewArtifactV1,
 } from '../../../src/host/review/file-review-artifact.ts';
 import type { SessionTreeEntry } from '../../../src/core/session/index.ts';
 
-describe('file review artifact', () => {
-  it('creates a persisted artifact without storing original or modified content', () => {
-    const store = new FileReviewStore();
-    store.addRecord('turn-1', 'tool-1', {
-      kind: 'file_review_payload',
-      operation: 'edit',
-      path: 'src/app.ts',
-      absolutePath: '/workspace/src/app.ts',
-      originalContent: Array.from({ length: 8 }, (_, index) => `line-${index + 1}`).join('\n'),
-      modifiedContent: [
-        'line-1',
-        'line-2',
-        'changed',
-        'line-4',
-        'line-5',
-        'line-6',
-        'line-7',
-        'line-8',
-      ].join('\n'),
-    });
+/** 同步 fake worker：append 后 projection 立即 ready，无需等待异步 Worker。 */
+function createSyncMutationJournal(): MutationJournal {
+  const client: DiffWorkerClientPort = {
+    request: (request, listener) => listener(runDiffWorkerRequest(request)),
+    dispose: () => undefined,
+  };
+  return new MutationJournal({ diffWorkerClient: client });
+}
 
-    const review = store.getTurn('turn-1');
-    if (!review) throw new Error('Expected review turn');
+describe('file review artifact v2', () => {
+  it('persists canonical DiffDocument without snapshots, rows, or syntax tokens', () => {
+    const artifact = makeArtifact();
+    const serialized = JSON.stringify(artifact);
 
-    const artifact = createFileReviewArtifact('session-1', review, {
-      createdAt: '2026-01-01T00:00:00.000Z',
-    });
-
-    expect(JSON.stringify(artifact)).not.toContain('originalContent');
-    expect(JSON.stringify(artifact)).not.toContain('modifiedContent');
-    expect(JSON.stringify(artifact)).not.toContain('hiddenRows');
     expect(artifact).toMatchObject({
-      version: 1,
+      version: 2,
       sessionId: 'session-1',
       turnId: 'turn-1',
       createdAt: '2026-01-01T00:00:00.000Z',
+      records: [
+        {
+          recordId: 'mutation-1',
+          fileId: expect.any(String),
+          toolOutcome: 'success',
+        },
+      ],
       files: [
         {
+          fileId: expect.any(String),
           path: 'src/app.ts',
-          additions: 1,
-          deletions: 1,
-          recordIds: ['review-1'],
-          modifiedFingerprint: createReviewContentFingerprint(
-            ['line-1', 'line-2', 'changed', 'line-4', 'line-5', 'line-6', 'line-7', 'line-8'].join(
-              '\n',
-            ),
-          ),
+          latestRevision: 1,
+          document: {
+            additions: 1,
+            deletions: 1,
+            hunks: expect.any(Array),
+          },
         },
       ],
     });
-    const fold = artifact.files[0]?.rows.find((row) => row.type === 'fold');
-    expect(fold).toMatchObject({
-      count: 2,
-      oldStartLine: 7,
-      newStartLine: 7,
-    });
+    expect(serialized).not.toContain('originalContent');
+    expect(serialized).not.toContain('modifiedContent');
+    expect(serialized).not.toContain('"rows"');
+    expect(serialized).not.toContain('"tokens"');
   });
 
-  it('does not persist full-file context rows for no-op writes', () => {
-    const store = new FileReviewStore();
-    store.addRecord('turn-1', 'tool-1', {
-      kind: 'file_review_payload',
+  it('persists no-op writes as an empty canonical document', () => {
+    const journal = createSyncMutationJournal();
+    journal.append({
+      ownerId: 'session-1',
+      turnId: 'turn-1',
+      toolCallId: 'tool-1',
       operation: 'write',
       path: 'src/app.ts',
       absolutePath: '/workspace/src/app.ts',
-      originalContent: 'line-1\r\nline-2\r\nline-3\r\n',
-      modifiedContent: 'line-1\nline-2\nline-3\n',
+      before: captureStringSnapshot('line-1\r\nline-2\r\nline-3\r\n'),
+      after: captureStringSnapshot('line-1\nline-2\nline-3\n'),
+      toolOutcome: 'success',
     });
-
-    const review = store.getTurn('turn-1');
-    if (!review) throw new Error('Expected review turn');
-
-    const artifact = createFileReviewArtifact('session-1', review, {
-      createdAt: '2026-01-01T00:00:00.000Z',
-    });
-
-    expect(artifact.files[0]).toMatchObject({
-      path: 'src/app.ts',
-      additions: 0,
-      deletions: 0,
-      rows: [],
-    });
-    expect(JSON.stringify(artifact)).not.toContain('line-1');
-  });
-
-  it('persists syntax tokens for review artifact rows', () => {
-    const store = new FileReviewStore();
-    store.addRecord('turn-1', 'tool-1', {
-      kind: 'file_review_payload',
-      operation: 'edit',
-      path: 'src/app.ts',
-      absolutePath: '/workspace/src/app.ts',
-      originalContent: 'const value = 1;\n',
-      modifiedContent: 'const value = 2;\n',
-    });
-    const review = store.getTurn('turn-1');
+    const review = journal.toReviewTurnSnapshot('turn-1');
     if (!review) throw new Error('Expected review turn');
 
     const artifact = createFileReviewArtifact('session-1', review);
 
-    expect(artifact.files[0]?.rows.find((row) => row.type === 'added')?.tokens).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          text: '2',
-          diff: 'added',
-          syntaxScopes: expect.arrayContaining(['hljs-number']),
-        }),
-      ]),
-    );
+    expect(artifact.files[0]?.document).toMatchObject({
+      additions: 0,
+      deletions: 0,
+      hunks: [],
+    });
+    expect(JSON.stringify(artifact)).not.toContain('line-1');
   });
 
-  it('rejects artifacts with malformed nested files, records, or rows', () => {
+  it('rejects malformed v2 documents and inconsistent record references', () => {
     const artifact = makeArtifact();
 
     expect(isFileReviewArtifact(artifact)).toBe(true);
     expect(
       isFileReviewArtifact({
         ...artifact,
-        records: [{ ...artifact.records[0], absolutePath: undefined }],
-      }),
-    ).toBe(false);
-    expect(
-      isFileReviewArtifact({
-        ...artifact,
-        files: [{ ...artifact.files[0], recordIds: [123] }],
-      }),
-    ).toBe(false);
-    expect(
-      isFileReviewArtifact({
-        ...artifact,
-        files: [{ ...artifact.files[0], rows: [{ type: 'added', newLineNumber: '1' }] }],
+        files: [{ ...artifact.files[0], latestRevision: 0 }],
       }),
     ).toBe(false);
     expect(
@@ -152,103 +105,110 @@ describe('file review artifact', () => {
         files: [
           {
             ...artifact.files[0],
-            rows: [
-              {
-                type: 'added',
-                newLineNumber: 1,
-                text: 'new',
-                tokens: [{ text: 'new', diff: 'changed' }],
-              },
-            ],
+            document: { ...artifact.files[0]!.document, hunks: [{ broken: true }] },
           },
         ],
       }),
     ).toBe(false);
+    expect(
+      isFileReviewArtifact({
+        ...artifact,
+        records: [{ ...artifact.records[0], fileId: 'wrong-file' }],
+      }),
+    ).toBe(false);
+    expect(decodeFileReviewArtifact({ ...artifact, version: 99 })).toBeUndefined();
   });
 
-  it('accepts artifacts with original-content-unavailable records and files', () => {
-    const artifact = makeArtifact();
-    const unavailable = {
-      ...artifact,
-      records: [
-        {
-          ...artifact.records[0],
-          unavailableReason: 'Original content unavailable',
-        },
-      ],
+  it('reads v1 rows through a centralized adapter and drops persisted tokens', () => {
+    const legacy = makeV1Artifact();
+
+    expect(isFileReviewArtifactV1(legacy)).toBe(true);
+    const decoded = decodeFileReviewArtifact(legacy);
+
+    expect(decoded).toMatchObject({
+      version: 2,
+      sessionId: 'session-1',
+      turnId: 'turn-1',
       files: [
         {
-          ...artifact.files[0],
-          unavailableReason: 'Original content unavailable',
-          rows: [],
+          latestRevision: 1,
+          document: {
+            additions: 1,
+            deletions: 1,
+            afterFingerprint: legacy.files[0]?.modifiedFingerprint,
+          },
         },
       ],
-    };
-
-    expect(isFileReviewArtifact(unavailable)).toBe(true);
+    });
+    expect(projectDiffDocumentRows(decoded!.files[0]!.document)).toEqual([
+      { type: 'removed', oldLineNumber: 1, text: 'old' },
+      { type: 'added', newLineNumber: 1, text: 'new' },
+    ]);
+    expect(JSON.stringify(decoded)).not.toContain('hljs-keyword');
   });
 
-  it('keeps changes-no-longer-available as an open-time fallback, not an artifact reason', () => {
-    const artifact = makeArtifact();
-
-    expect(
-      isFileReviewArtifact({
-        ...artifact,
-        files: [
-          {
-            ...artifact.files[0],
-            unavailableReason: 'Changes are no longer available',
-          },
-        ],
-      }),
-    ).toBe(false);
-  });
-
-  it('bounds oversized artifacts into persisted unavailable file summaries', () => {
-    const artifact = makeArtifact();
-    artifact.files[0] = {
-      ...artifact.files[0]!,
-      modifiedFingerprint: createReviewContentFingerprint('new\n'),
-      rows: Array.from({ length: 40 }, (_, index) => ({
-        type: 'context' as const,
-        oldLineNumber: index + 1,
-        newLineNumber: index + 1,
-        text: `large persisted context row ${index} ${'x'.repeat(80)}`,
-        tokens: [{ text: 'token', syntaxScopes: ['hljs-keyword'] }],
-      })),
-    };
+  it('marks oversized canonical diffs unavailable while retaining lightweight statistics', () => {
+    const artifact = makeArtifact(
+      Array.from({ length: 40 }, (_, index) => `old-${index}`).join('\n'),
+      Array.from({ length: 40 }, (_, index) => `new-${index}`).join('\n'),
+    );
 
     const { artifact: bounded, warnings } = prepareFileReviewArtifactForSession(artifact, {
       maxRows: 1,
     });
 
-    expect(warnings).toEqual(
-      expect.arrayContaining([expect.stringContaining('large file rows were collapsed')]),
-    );
+    expect(warnings).toEqual(expect.arrayContaining([expect.stringContaining('hunk lines')]));
     expect(isFileReviewArtifact(bounded)).toBe(true);
-    expect(JSON.stringify(bounded)).not.toContain('originalContent');
-    expect(JSON.stringify(bounded)).not.toContain('modifiedContent');
-    expect(bounded.files[0]).toMatchObject({
-      path: 'src/app.ts',
-      additions: 1,
-      deletions: 1,
-      unavailableReason: 'Diff too large to review',
-      rows: [],
+    expect(bounded.files[0]?.document).toMatchObject({
+      additions: 40,
+      deletions: 40,
+      unavailableReason: 'diff_too_large',
+      hunks: [],
     });
-    expect(bounded.files[0]?.modifiedFingerprint).toBeUndefined();
   });
 
-  it('indexes hidden custom review artifact entries by turn and keeps the latest branch entry', () => {
-    const first = makeArtifact();
+  it('persists and restores canonical unavailable documents', () => {
+    const journal = createSyncMutationJournal();
+    journal.append({
+      ownerId: 'session-1',
+      turnId: 'turn-1',
+      toolCallId: 'tool-1',
+      operation: 'write',
+      path: 'binary.bin',
+      absolutePath: '/workspace/binary.bin',
+      before: {
+        content: null,
+        byteLength: 2,
+        unavailableReason: 'binary_or_unsupported',
+      },
+      after: captureStringSnapshot('replacement'),
+      toolOutcome: 'success',
+    });
+    const review = journal.toReviewTurnSnapshot('turn-1');
+    if (!review) throw new Error('Expected review turn');
+
+    const artifact = createFileReviewArtifact('session-1', review);
+    const restored = decodeFileReviewArtifact(JSON.parse(JSON.stringify(artifact)));
+
+    expect(artifact.files).toHaveLength(1);
+    expect(artifact.files[0]?.document).toMatchObject({
+      additions: 0,
+      deletions: 0,
+      hunks: [],
+      unavailableReason: 'binary_or_unsupported',
+    });
+    expect(restored).toEqual(artifact);
+  });
+
+  it('indexes v1 and v2 hidden entries by turn and keeps the latest branch artifact', () => {
+    const first = makeV1Artifact();
     const second = {
       ...makeArtifact(),
       createdAt: '2026-01-01T00:00:01.000Z',
-      files: [{ ...makeArtifact().files[0], additions: 2 }],
     };
     const otherTurn = {
       ...makeArtifact(),
       turnId: 'turn-2',
-      records: [{ ...makeArtifact().records[0], turnId: 'turn-2' }],
     };
     const entries: SessionTreeEntry[] = [
       makeCustomEntry('artifact-1', first),
@@ -259,8 +219,8 @@ describe('file review artifact', () => {
     const index = collectFileReviewArtifacts(entries);
 
     expect(index.artifactsByTurnId.get('turn-1')).toMatchObject({
+      version: 2,
       createdAt: '2026-01-01T00:00:01.000Z',
-      files: [expect.objectContaining({ additions: 2 })],
     });
     expect(index.latestTurnId).toBe('turn-2');
     expect(index.latestArtifact).toMatchObject({ turnId: 'turn-2' });
@@ -271,7 +231,6 @@ describe('file review artifact', () => {
     const siblingArtifact = {
       ...makeArtifact(),
       turnId: 'turn-sibling',
-      records: [{ ...makeArtifact().records[0], turnId: 'turn-sibling' }],
     };
     const branch: SessionTreeEntry[] = [makeMessageEntry('assistant', null)];
     const entries: SessionTreeEntry[] = [
@@ -289,19 +248,69 @@ describe('file review artifact', () => {
   });
 });
 
-function makeArtifact(): ReturnType<typeof createFileReviewArtifact> {
-  const store = new FileReviewStore();
-  store.addRecord('turn-1', 'tool-1', {
-    kind: 'file_review_payload',
+function makeArtifact(originalContent = 'old\n', modifiedContent = 'new\n') {
+  const journal = createSyncMutationJournal();
+  journal.append({
+    ownerId: 'session-1',
+    turnId: 'turn-1',
+    toolCallId: 'tool-1',
     operation: 'edit',
     path: 'src/app.ts',
     absolutePath: '/workspace/src/app.ts',
-    originalContent: 'old\n',
-    modifiedContent: 'new\n',
+    before: captureStringSnapshot(originalContent),
+    after: captureStringSnapshot(modifiedContent),
+    toolOutcome: 'success',
   });
-  const review = store.getTurn('turn-1');
+  const review = journal.toReviewTurnSnapshot('turn-1');
   if (!review) throw new Error('Expected review turn');
-  return createFileReviewArtifact('session-1', review);
+  return createFileReviewArtifact('session-1', review, {
+    createdAt: '2026-01-01T00:00:00.000Z',
+  });
+}
+
+function makeV1Artifact(): FileReviewArtifactV1 {
+  return {
+    version: 1,
+    sessionId: 'session-1',
+    turnId: 'turn-1',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    records: [
+      {
+        recordId: 'review-1',
+        turnId: 'turn-1',
+        toolCallId: 'tool-1',
+        operation: 'edit',
+        path: 'src/app.ts',
+        absolutePath: '/workspace/src/app.ts',
+        sequence: 1,
+      },
+    ],
+    files: [
+      {
+        absolutePath: '/workspace/src/app.ts',
+        path: 'src/app.ts',
+        recordIds: ['review-1'],
+        latestRecordId: 'review-1',
+        latestSequence: 1,
+        additions: 1,
+        deletions: 1,
+        firstChangedLine: 1,
+        modifiedFingerprint: {
+          size: 4,
+          sha256: '7aa7a5359173a81cf0d9b5f5f9c07ed8f26b782bf75a1ee5f5d5f6b0d6f4f65a',
+        },
+        rows: [
+          {
+            type: 'removed',
+            oldLineNumber: 1,
+            text: 'old',
+            tokens: [{ text: 'old', syntaxScopes: ['hljs-keyword'] }],
+          },
+          { type: 'added', newLineNumber: 1, text: 'new' },
+        ],
+      },
+    ],
+  };
 }
 
 function makeMessageEntry(id: string, parentId: string | null): SessionTreeEntry {

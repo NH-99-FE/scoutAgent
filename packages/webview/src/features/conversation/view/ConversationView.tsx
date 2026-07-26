@@ -5,7 +5,7 @@
 import { useMemo } from 'react';
 import type { ScoutBusyState } from '@scout-agent/shared';
 import { getConversationExpansionScope } from '@/store/conversation-expansion-store';
-import type { ToolCallPreviewState, ToolExecutionState } from '@/store/conversation-store';
+import type { ToolExecutionState } from '@/store/conversation-store';
 import { ConversationScroller } from './ConversationScroller';
 import { ConversationTranscript } from './ConversationTranscript';
 import type { ConversationViewItem } from '../render-model/conversation-view-model';
@@ -18,13 +18,11 @@ interface ConversationViewProps {
   items: ConversationViewItem[];
   isStreaming: boolean;
   toolExecutionsById: Record<string, ToolExecutionState>;
-  toolPreviewsById?: Record<string, ToolCallPreviewState>;
   className?: string;
   showScrollToBottomButton?: boolean;
   transcriptAddons?: ConversationTranscriptAddon[];
 }
 
-const EMPTY_TOOL_PREVIEWS: Record<string, ToolCallPreviewState> = {};
 const EMPTY_TRANSCRIPT_ADDONS: ConversationTranscriptAddon[] = [];
 
 export function ConversationView({
@@ -33,7 +31,6 @@ export function ConversationView({
   items,
   isStreaming,
   toolExecutionsById,
-  toolPreviewsById = EMPTY_TOOL_PREVIEWS,
   className,
   showScrollToBottomButton = false,
   transcriptAddons = EMPTY_TRANSCRIPT_ADDONS,
@@ -46,18 +43,9 @@ export function ConversationView({
         isStreaming,
         busyState,
         toolExecutionsById,
-        toolPreviewsById,
         transcriptAddons,
       }),
-    [
-      projector,
-      items,
-      isStreaming,
-      busyState,
-      toolExecutionsById,
-      toolPreviewsById,
-      transcriptAddons,
-    ],
+    [projector, items, isStreaming, busyState, toolExecutionsById, transcriptAddons],
   );
 
   // 发送消息不隐式滚底；用户可用一键到底，已在底部时由 autoScroll 自然跟随。

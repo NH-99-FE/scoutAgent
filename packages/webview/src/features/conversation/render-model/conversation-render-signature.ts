@@ -184,8 +184,8 @@ function appendToolActivitySignature(
   sink: SignatureSink,
 ): void {
   appendToolCallSignature(activity.toolCall, sink);
-  // runtime/preview/toolResult 是展示态的临时 owner，引用变化即表示对应过程块需要失效。
-  sink.push(activity.runtime, activity.preview, activity.toolResult);
+  // runtime/toolResult 是展示态的临时 owner，引用变化即表示对应过程块需要失效。
+  sink.push(activity.runtime, activity.toolResult);
   appendStableValue(activity.display, sink);
 }
 

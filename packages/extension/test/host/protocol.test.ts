@@ -243,13 +243,40 @@ describe('agent event mapper', () => {
     });
   });
 
-  it('enriches tool result message details at the protocol boundary', () => {
-    const message = convertMessage(
-      {
-        role: 'toolResult' as const,
-        toolCallId: 'tool-1',
-        toolName: 'edit',
-        content: [],
+  it('preserves tool result message details at the protocol boundary', () => {
+    const message = convertMessage({
+      role: 'toolResult' as const,
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      content: [],
+      details: {
+        kind: 'file_change',
+        path: '/workspace/src/app.ts',
+        additions: 1,
+        deletions: 1,
+        review: { turnId: 'turn-1', recordId: 'record-1' },
+      },
+      isError: false,
+      timestamp: 1,
+    });
+
+    expect(message).toMatchObject({
+      role: 'toolResult',
+      details: {
+        kind: 'file_change',
+        additions: 1,
+        deletions: 1,
+      },
+    });
+  });
+
+  it('preserves runtime tool execution result details at the protocol boundary', () => {
+    const event = mapAgentEventToScout({
+      type: 'tool_execution_end',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      result: {
+        content: [{ type: 'text', text: 'done' }],
         details: {
           kind: 'file_change',
           path: '/workspace/src/app.ts',
@@ -257,104 +284,40 @@ describe('agent event mapper', () => {
           deletions: 1,
           review: { turnId: 'turn-1', recordId: 'record-1' },
         },
-        isError: false,
-        timestamp: 1,
       },
-      {
-        enrichToolResultDetails: (details) => ({
-          ...(details as Record<string, unknown>),
-          diffPreview: {
-            rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
-          },
-        }),
-      },
-    );
-
-    expect(message).toMatchObject({
-      role: 'toolResult',
-      details: {
-        kind: 'file_change',
-        diffPreview: {
-          rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
-        },
-      },
+      isError: false,
     });
-  });
-
-  it('enriches runtime tool execution result details at the protocol boundary', () => {
-    const event = mapAgentEventToScout(
-      {
-        type: 'tool_execution_end',
-        toolCallId: 'tool-1',
-        toolName: 'edit',
-        result: {
-          content: [{ type: 'text', text: 'done' }],
-          details: {
-            kind: 'file_change',
-            path: '/workspace/src/app.ts',
-            additions: 1,
-            deletions: 1,
-            review: { turnId: 'turn-1', recordId: 'record-1' },
-          },
-        },
-        isError: false,
-      },
-      {
-        enrichToolResultDetails: (details) => ({
-          ...(details as Record<string, unknown>),
-          diffPreview: {
-            rows: [{ type: 'removed', oldLineNumber: 1, text: 'old' }],
-          },
-        }),
-      },
-    );
 
     expect(event).toMatchObject({
       type: 'tool_execution_end',
       result: {
         details: {
           kind: 'file_change',
-          diffPreview: {
-            rows: [{ type: 'removed', oldLineNumber: 1, text: 'old' }],
-          },
+          additions: 1,
+          deletions: 1,
         },
       },
     });
   });
 
-  it('does not enrich partial tool execution update details', () => {
-    let enrichCount = 0;
-    const event = mapAgentEventToScout(
-      {
-        type: 'tool_execution_update',
-        toolCallId: 'tool-1',
-        toolName: 'edit',
-        args: {},
-        partialResult: {
-          content: [{ type: 'text', text: 'partial' }],
-          details: {
-            kind: 'file_change',
-            path: '/workspace/src/app.ts',
-            additions: 1,
-            deletions: 1,
-            review: { turnId: 'turn-1', recordId: 'record-1' },
-          },
+  it('preserves partial tool execution update details', () => {
+    const event = mapAgentEventToScout({
+      type: 'tool_execution_update',
+      toolCallId: 'tool-1',
+      toolName: 'edit',
+      args: {},
+      partialResult: {
+        content: [{ type: 'text', text: 'partial' }],
+        details: {
+          kind: 'file_change',
+          path: '/workspace/src/app.ts',
+          additions: 1,
+          deletions: 1,
+          review: { turnId: 'turn-1', recordId: 'record-1' },
         },
       },
-      {
-        enrichToolResultDetails: (details) => {
-          enrichCount += 1;
-          return {
-            ...(details as Record<string, unknown>),
-            diffPreview: {
-              rows: [{ type: 'added', newLineNumber: 1, text: 'should not attach' }],
-            },
-          };
-        },
-      },
-    );
+    });
 
-    expect(enrichCount).toBe(0);
     expect(event).toMatchObject({
       type: 'tool_execution_update',
       partialResult: {
@@ -364,15 +327,9 @@ describe('agent event mapper', () => {
         },
       },
     });
-    expect(
-      event?.type === 'tool_execution_update'
-        ? (event.partialResult.details as Record<string, unknown>).diffPreview
-        : undefined,
-    ).toBeUndefined();
   });
 
-  it('enriches final tool result message_end details', () => {
-    let enrichCount = 0;
+  it('preserves final tool result message_end details', () => {
     const event = mapAgentEventToScout(
       {
         type: 'message_end',
@@ -394,19 +351,9 @@ describe('agent event mapper', () => {
       } as any,
       {
         messageId: 'message-1',
-        enrichToolResultDetails: (details) => {
-          enrichCount += 1;
-          return {
-            ...(details as Record<string, unknown>),
-            diffPreview: {
-              rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
-            },
-          };
-        },
       },
     );
 
-    expect(enrichCount).toBe(1);
     expect(event).toMatchObject({
       type: 'message_end',
       message: {
@@ -414,16 +361,14 @@ describe('agent event mapper', () => {
         details: {
           kind: 'file_change',
           path: '/workspace/src/app.ts',
-          diffPreview: {
-            rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
-          },
+          additions: 1,
+          deletions: 1,
         },
       },
     });
   });
 
-  it('does not enrich runtime tool result message_update details', () => {
-    let enrichCount = 0;
+  it('preserves runtime tool result message_update details', () => {
     const event = mapAgentEventToScout(
       {
         type: 'message_update',
@@ -445,19 +390,9 @@ describe('agent event mapper', () => {
       } as any,
       {
         messageId: 'message-1',
-        enrichToolResultDetails: (details) => {
-          enrichCount += 1;
-          return {
-            ...(details as Record<string, unknown>),
-            diffPreview: {
-              rows: [{ type: 'added', newLineNumber: 1, text: 'should not attach' }],
-            },
-          };
-        },
       },
     );
 
-    expect(enrichCount).toBe(0);
     expect(event).toMatchObject({
       type: 'message_update',
       message: {
@@ -468,11 +403,6 @@ describe('agent event mapper', () => {
         },
       },
     });
-    expect(
-      event?.type === 'message_update' && event.message.role === 'toolResult'
-        ? (event.message.details as Record<string, unknown>).diffPreview
-        : undefined,
-    ).toBeUndefined();
   });
 
   it('projects display args for declared tool execution path fields', () => {

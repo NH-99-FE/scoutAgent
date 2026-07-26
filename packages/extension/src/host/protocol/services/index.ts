@@ -10,6 +10,7 @@ import type {
   LifecycleProtocolHost,
   MentionProtocolHost,
   ProtocolPayload,
+  ReviewProtocolHost,
   SessionProtocolHost,
   SkillManagementProtocolHost,
   StateProtocolHost,
@@ -31,6 +32,7 @@ export interface ScoutProtocolServices {
   task: TaskProtocolHost;
   tree: TreeProtocolHost;
   mention: MentionProtocolHost;
+  review: ReviewProtocolHost;
   extensions: ExtensionManagementProtocolHost;
   skills: SkillManagementProtocolHost;
   ui: UiProtocolHost;
@@ -211,6 +213,16 @@ export function registerScoutProtocolServices(
       await services.mention.openMentionedFile(
         payload<'open_mentioned_file'>(message),
         context.respond,
+      );
+    },
+  });
+
+  registerProtocolServiceHandlers(server, 'review', {
+    request_file_diff: async (message, context) => {
+      await services.review.requestFileDiff(
+        payload<'request_file_diff'>(message),
+        context.respond,
+        context.signal,
       );
     },
   });

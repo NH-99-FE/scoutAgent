@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createDiffDocument } from '../../../src/core/review/diff-document.ts';
 import type { FileReviewTurnSnapshot } from '../../../src/core/review/file-review.ts';
 import {
   createArtifactChangesReviewSummary,
@@ -64,24 +65,29 @@ describe('createRuntimeChangesReviewSummary', () => {
 describe('createArtifactChangesReviewSummary', () => {
   it('projects persisted artifact files without carrying row previews into the summary', () => {
     const artifact: FileReviewArtifact = {
-      version: 1,
+      version: 2,
       sessionId: 'session-1',
       turnId: 'turn-1',
       createdAt: '2026-01-01T00:00:00.000Z',
-      records: [],
+      records: ['test.c', 'test.py', 'Test.java', 'test.js'].map((_path, index) => ({
+        recordId: `review-${index + 1}`,
+        toolCallId: `tool-${index + 1}`,
+        operation: 'edit',
+        fileId: `file-${index + 1}`,
+        sequence: index + 1,
+        toolOutcome: 'success',
+      })),
       files: ['test.c', 'test.py', 'Test.java', 'test.js'].map((path, index) => ({
+        fileId: `file-${index + 1}`,
         absolutePath: `/workspace/${path}`,
         path,
         displayPath: path,
         recordIds: [`review-${index + 1}`],
-        latestRecordId: `review-${index + 1}`,
-        latestSequence: index + 1,
-        additions: index + 1,
-        deletions: 1,
-        rows: [
-          { type: 'removed', oldLineNumber: 1, text: `old ${path}` },
-          { type: 'added', newLineNumber: 1, text: `new ${path}` },
-        ],
+        latestRevision: 1,
+        document: {
+          ...createDiffDocument(`old ${path}\n`, `new ${path}\n`),
+          additions: index + 1,
+        },
       })),
     };
 

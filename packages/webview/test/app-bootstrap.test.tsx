@@ -4,6 +4,7 @@ import App from '@/App';
 import { routeExtensionMessage } from '@/bridge/extension-message-router';
 import { projectProtocolResponsePayload } from '@/bridge/protocol-response-projector';
 import { resetProtocolTransport } from '@/bridge/transport-client';
+import { clearFileDiffCache } from '@/features/changes-review/model/use-file-diff';
 import { useConfigStore } from '@/store/config-store';
 import { useConversationStore } from '@/store/conversation-store';
 import { useSessionStore } from '@/store/session-store';
@@ -12,6 +13,7 @@ import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
 import type {
   ScoutBusyState,
+  ScoutChangesReviewFile,
   ScoutChangesReviewModel,
   ScoutConfig,
   ScoutProtocolRequest,
@@ -20,6 +22,7 @@ import type {
 import { expectCssRule, expectNoCssRule } from './webview-css';
 
 const postMessage = vi.fn();
+const reviewFilesById = new Map<string, ScoutChangesReviewFile>();
 
 function makeConfig(): ScoutConfig {
   return {
@@ -54,7 +57,7 @@ function makeState(): ScoutWebviewState {
 }
 
 function makeChangesReviewModel(): ScoutChangesReviewModel {
-  return {
+  const model: ScoutChangesReviewModel = {
     turnId: 'turn-1',
     viewMode: 'unified',
     files: [
@@ -65,12 +68,24 @@ function makeChangesReviewModel(): ScoutChangesReviewModel {
         external: false,
         additions: 1,
         deletions: 0,
+        sessionId: 'session-1',
+        fileId: 'file-1',
+        revision: 1,
+        projectionStatus: 'ready',
         recordIds: ['review-1'],
         rows: [{ type: 'added', newLineNumber: 1, text: 'export default App;' }],
       },
     ],
     totals: { fileCount: 1, additions: 1, deletions: 0 },
   };
+  trackChangesReviewModel(model);
+  return model;
+}
+
+function trackChangesReviewModel(model: ScoutChangesReviewModel): void {
+  for (const file of model.files) {
+    if (file.fileId) reviewFilesById.set(file.fileId, file);
+  }
 }
 
 function getReadyRequest(): ScoutProtocolRequest {
@@ -100,6 +115,42 @@ describe('App bootstrap', () => {
 
   beforeEach(() => {
     postMessage.mockClear();
+    reviewFilesById.clear();
+    clearFileDiffCache();
+    postMessage.mockImplementation((message: ScoutProtocolRequest) => {
+      if (message.type !== 'protocol_request' || message.payload.type !== 'request_file_diff') {
+        return;
+      }
+      const file = reviewFilesById.get(message.payload.fileId);
+      routeExtensionMessage({
+        type: 'protocol_response',
+        requestId: message.requestId,
+        payload: file
+          ? {
+              type: 'file_diff_result',
+              turnId: message.payload.turnId,
+              fileId: message.payload.fileId,
+              revision: message.payload.revision,
+              status: 'ready',
+              diff: {
+                mode: message.payload.mode,
+                rows: file.rows,
+                additions: file.additions,
+                deletions: file.deletions,
+                hunkOffset: 0,
+                hunkCount: 1,
+                totalHunks: 1,
+              },
+            }
+          : {
+              type: 'file_diff_result',
+              turnId: message.payload.turnId,
+              fileId: message.payload.fileId,
+              revision: message.payload.revision,
+              status: 'unavailable',
+            },
+      });
+    });
     window.__SCOUT_WEBVIEW_SURFACE__ = 'chat';
   });
 
@@ -237,12 +288,17 @@ describe('App bootstrap', () => {
         external: false,
         additions: 1,
         deletions: 0,
+        sessionId: 'session-1',
+        fileId: 'file-2',
+        revision: 1,
+        projectionStatus: 'ready',
         recordIds: ['review-2'],
         rows: [{ type: 'added', newLineNumber: 1, text: 'export const other = true;' }],
       },
       appFile,
     ];
     nextModel.totals = { fileCount: 2, additions: 2, deletions: 0 };
+    trackChangesReviewModel(nextModel);
 
     act(() => {
       window.dispatchEvent(

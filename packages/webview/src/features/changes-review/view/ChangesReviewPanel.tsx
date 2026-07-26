@@ -54,6 +54,7 @@ export function ChangesReviewPanel({
               onExpandFold={actions.expandFold}
               onOpenFile={actions.openFile}
               onToggleFile={actions.toggleFile}
+              turnId={model.turnId}
               viewMode={viewMode}
             />
           );

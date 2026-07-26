@@ -3,11 +3,7 @@
 // ============================================================
 
 import type { ScoutAssistantMessage, ScoutToolResultMessage } from '@scout-agent/shared';
-import type {
-  ConversationItem,
-  ToolCallPreviewState,
-  ToolExecutionState,
-} from '@/store/conversation-store';
+import type { ConversationItem, ToolExecutionState } from '@/store/conversation-store';
 import type {
   AssistantContentEntry,
   AssistantConversationRow,
@@ -77,7 +73,6 @@ export function appendAssistantMessageEntries({
   isStreaming,
   runtimeActivity,
   toolExecutionsById,
-  toolPreviewsById,
   resolveToolResult,
 }: {
   item: ConversationItem;
@@ -86,7 +81,6 @@ export function appendAssistantMessageEntries({
   isStreaming: boolean;
   runtimeActivity: AssistantRuntimeActivity;
   toolExecutionsById: Record<string, ToolExecutionState>;
-  toolPreviewsById: Record<string, ToolCallPreviewState>;
   resolveToolResult: (toolCallId: string) => ScoutToolResultMessage | undefined;
 }): void {
   turn.isStreaming ||= isStreaming;
@@ -127,19 +121,16 @@ export function appendAssistantMessageEntries({
 
     if (content.type === 'toolCall') {
       const runtime = toolExecutionsById[content.id];
-      const preview = toolPreviewsById[content.id];
       const toolResult = resolveToolResult(content.id);
       appendProcessActivity(turn, 'tool_processing', `${item.key}:tool-phase:${content.id}`, {
         type: 'tool',
         key: `${item.key}:tool:${content.id}`,
         toolCall: content,
         runtime,
-        preview,
         toolResult,
         display: resolveToolDisplayResult({
           toolCall: content,
           runtime,
-          preview,
           toolResult,
           assistantErrorMessage: message.errorMessage,
           assistantStopReason: message.stopReason,

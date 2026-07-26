@@ -4,7 +4,6 @@
 
 import {
   createFileChangeDisplayFromDetails,
-  createFileEditDisplayFromPreview,
   createToolExecutionSummary,
   createGenericDisplay,
   createPathOnlyToolDisplay,
@@ -54,18 +53,6 @@ function presentEditTool(context: ToolDisplayContext): ToolDisplayResult | undef
   if (fileChangeDisplay) return fileChangeDisplay;
 
   if (
-    context.preview?.preview.kind === 'file_edit' &&
-    context.status !== 'done' &&
-    context.status !== 'error'
-  ) {
-    return createFileEditDisplayFromPreview({
-      status: context.status,
-      toolName: context.toolName,
-      preview: context.preview,
-    });
-  }
-
-  if (
     context.status === 'pending' ||
     context.status === 'running' ||
     context.status === 'stopped'
@@ -108,18 +95,6 @@ function presentWriteTool(context: ToolDisplayContext): ToolDisplayResult {
     details: context.details,
   });
   if (fileChangeDisplay) return fileChangeDisplay;
-
-  if (
-    context.preview?.preview.kind === 'file_edit' &&
-    context.status !== 'done' &&
-    context.status !== 'error'
-  ) {
-    return createFileEditDisplayFromPreview({
-      status: context.status,
-      toolName: context.toolName,
-      preview: context.preview,
-    });
-  }
 
   const path = getStringArg(context.args, ['path', 'filePath', 'file', 'target']) || '文件';
   const errorText = context.isError && context.bodyText.trim() ? context.bodyText : undefined;

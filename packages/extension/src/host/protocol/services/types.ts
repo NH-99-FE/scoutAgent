@@ -177,6 +177,14 @@ export interface MentionProtocolHost {
   ) => Promise<void>;
 }
 
+export interface ReviewProtocolHost {
+  requestFileDiff: (
+    message: ProtocolPayload<'request_file_diff'>,
+    respond: ProtocolResponder,
+    signal?: AbortSignal,
+  ) => Promise<void>;
+}
+
 export interface ExtensionManagementProtocolHost {
   requestExtensions: (respond: ProtocolResponder) => Promise<void>;
   createExtensionFromTemplate: (

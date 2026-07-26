@@ -1,22 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolve } from 'node:path';
-import type { ScoutAgentEvent } from '@scout-agent/shared';
 import type { ScoutSessionEvent } from '../../../src/host/session-coordinator.ts';
 import { SessionEventForwarder } from '../../../src/host/protocol/session-event-forwarder.ts';
-import type {
-  CaptureWritePreviewBase,
-  ComputeEditPreview,
-  ComputeWritePreview,
-  ToolCallPreviewContext,
-} from '../../../src/host/protocol/tool-call-preview-projector.ts';
 
 function makeForwarder(
   options: {
     isStreaming?: () => boolean;
-    getPreviewContext?: () => ToolCallPreviewContext;
-    computeEditPreview?: ComputeEditPreview;
-    computeWritePreview?: ComputeWritePreview;
-    captureWritePreviewBase?: CaptureWritePreviewBase;
     agentEventFlushDelayMs?: number;
   } = {},
 ) {
@@ -30,10 +18,6 @@ function makeForwarder(
     pushState,
     pushQueueState,
     pushTreeData,
-    getPreviewContext: options.getPreviewContext,
-    computeEditPreview: options.computeEditPreview,
-    computeWritePreview: options.computeWritePreview,
-    captureWritePreviewBase: options.captureWritePreviewBase,
     agentEventFlushDelayMs: options.agentEventFlushDelayMs,
   });
   return { forwarder, publishEvent, pushState, pushQueueState, pushTreeData };
@@ -56,68 +40,6 @@ function messageUpdate(messageId: string, text: string): ScoutSessionEvent {
       message: assistantMessage(text),
     },
   } as unknown as ScoutSessionEvent;
-}
-
-function editToolCallEvent(): ScoutAgentEvent {
-  return {
-    type: 'message_update',
-    messageId: 'assistant-1',
-    message: {
-      role: 'assistant',
-      content: [
-        {
-          type: 'toolCall',
-          id: 'tool-1',
-          name: 'edit',
-          arguments: {
-            path: 'src/app.ts',
-            edits: [{ oldText: 'old', newText: 'new' }],
-          },
-        },
-      ],
-      timestamp: 1,
-    },
-  };
-}
-
-function editToolCallMessageUpdate(): ScoutSessionEvent {
-  return {
-    type: 'agent_event',
-    event: editToolCallEvent(),
-  } as unknown as ScoutSessionEvent;
-}
-
-function writeToolCallEvent(): ScoutAgentEvent {
-  return {
-    type: 'message_update',
-    messageId: 'assistant-1',
-    message: {
-      role: 'assistant',
-      content: [
-        {
-          type: 'toolCall',
-          id: 'tool-1',
-          name: 'write',
-          arguments: {
-            path: 'src/generated.ts',
-            content: 'line 1\nline 2\n',
-          },
-        },
-      ],
-      timestamp: 1,
-    },
-  };
-}
-
-function writeToolCallMessageUpdate(): ScoutSessionEvent {
-  return {
-    type: 'agent_event',
-    event: writeToolCallEvent(),
-  } as unknown as ScoutSessionEvent;
-}
-
-function resolvedWorkspacePath(path: string): string {
-  return resolve('/workspace', path);
 }
 
 describe('SessionEventForwarder', () => {
@@ -245,119 +167,6 @@ describe('SessionEventForwarder', () => {
         message: assistantMessage('chunk-99'),
       },
     });
-  });
-
-  it('projects edit previews from raw message updates before coalesced webview publishing', () => {
-    vi.useFakeTimers();
-    const computeEditPreview: ComputeEditPreview = vi.fn(() => new Promise<never>(() => undefined));
-    const { forwarder, publishEvent } = makeForwarder({
-      agentEventFlushDelayMs: 16,
-      getPreviewContext: () => ({
-        generation: 1,
-        sessionId: 'session-1',
-        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
-        cwd: '/workspace',
-        tools: {
-          edit: {
-            active: true,
-            source: 'builtin',
-            path: '<builtin:edit>',
-          },
-        },
-      }),
-      computeEditPreview,
-    });
-
-    forwarder.handle(editToolCallMessageUpdate());
-
-    expect(computeEditPreview).toHaveBeenCalledWith(
-      'src/app.ts',
-      [{ oldText: 'old', newText: 'new' }],
-      '/workspace',
-    );
-    expect(publishEvent).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(16);
-
-    expect(publishEvent).toHaveBeenCalledWith({
-      type: 'agent_event',
-      event: editToolCallEvent(),
-    });
-  });
-
-  it('projects write progress from raw message updates before coalesced webview publishing', () => {
-    vi.useFakeTimers();
-    const computeWritePreview: ComputeWritePreview = vi.fn(
-      () => new Promise<never>(() => undefined),
-    );
-    const { forwarder, publishEvent } = makeForwarder({
-      agentEventFlushDelayMs: 16,
-      getPreviewContext: () => ({
-        generation: 1,
-        sessionId: 'session-1',
-        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
-        cwd: '/workspace',
-        tools: {
-          write: {
-            active: true,
-            source: 'builtin',
-            path: '<builtin:write>',
-          },
-        },
-      }),
-      computeWritePreview,
-    });
-
-    forwarder.handle(writeToolCallMessageUpdate());
-
-    expect(computeWritePreview).not.toHaveBeenCalled();
-    expect(publishEvent).toHaveBeenCalledWith({
-      type: 'tool_call_preview_update',
-      sessionId: 'session-1',
-      sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
-      toolCallId: 'tool-1',
-      toolName: 'write',
-      preview: {
-        kind: 'file_edit',
-        path: resolvedWorkspacePath('src/generated.ts'),
-        displayPath: 'src/generated.ts',
-        additions: 2,
-        deletions: 0,
-      },
-    });
-
-    vi.advanceTimersByTime(16);
-
-    expect(publishEvent).toHaveBeenCalledWith({
-      type: 'agent_event',
-      event: writeToolCallEvent(),
-    });
-  });
-
-  it('passes write baseline capture overrides to the preview projector', () => {
-    const captureWritePreviewBase: CaptureWritePreviewBase = vi.fn(
-      () => new Promise<never>(() => undefined),
-    );
-    const { forwarder } = makeForwarder({
-      getPreviewContext: () => ({
-        generation: 1,
-        sessionId: 'session-1',
-        sessionFile: '/workspace/.scout/sessions/session-1.jsonl',
-        cwd: '/workspace',
-        tools: {
-          write: {
-            active: true,
-            source: 'builtin',
-            path: '<builtin:write>',
-          },
-        },
-      }),
-      captureWritePreviewBase,
-    });
-
-    forwarder.handle(writeToolCallMessageUpdate());
-
-    expect(captureWritePreviewBase).toHaveBeenCalledWith('src/generated.ts', '/workspace');
   });
 
   it('publishes message_end immediately and drops any pending update for the same message', () => {

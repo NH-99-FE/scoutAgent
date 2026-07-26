@@ -24,6 +24,18 @@ export interface ScoutChangesReviewRow {
   hiddenRows?: ScoutChangesReviewRow[];
 }
 
+export interface ScoutFileDiffView {
+  mode: ScoutChangesReviewViewMode;
+  rows: ScoutChangesReviewRow[];
+  additions: number;
+  deletions: number;
+  firstChangedLine?: number;
+  hunkOffset: number;
+  hunkCount: number;
+  totalHunks: number;
+  truncated?: boolean;
+}
+
 export interface ScoutChangesReviewFile {
   /** UI-only DOM/scroll anchor，不能作为文件业务 identity；跨热更新状态请使用 absolutePath。 */
   id: string;
@@ -36,6 +48,10 @@ export interface ScoutChangesReviewFile {
   external: boolean;
   additions: number;
   deletions: number;
+  sessionId?: string;
+  fileId?: string;
+  revision?: number;
+  projectionStatus?: 'pending' | 'ready' | 'unavailable';
   recordIds: string[];
   unavailableReason?: string;
   statusNote?: string;

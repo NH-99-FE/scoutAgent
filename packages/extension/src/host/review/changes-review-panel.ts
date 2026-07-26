@@ -1,38 +1,21 @@
 // ============================================================
 // Scout Diff review panel — 多文件变更审查 WebviewPanel
-// 负责：渲染 runtime review store 快照，支持 unified/split diff 视图
+// 负责：只投影轻量文件摘要；展开后的 diff 通过 review protocol 按需请求。
 // ============================================================
 
 import * as vscode from 'vscode';
-import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, relative } from 'node:path';
 import type {
   ScoutChangesReviewFile,
   ScoutChangesReviewHostMessage,
   ScoutChangesReviewModel,
-  ScoutChangesReviewRow,
   ScoutChangesReviewViewMode,
   ScoutChangesReviewWebviewMessage,
 } from '@scout-agent/shared';
-import type { FileReviewFile, FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
-import type { FileReviewArtifact, FileReviewArtifactFile } from './file-review-artifact.ts';
-import { MAX_REVIEW_TEXT_BYTES } from '../../core/text-size.ts';
+import type { FileReviewFile, FileReviewTurnSnapshot } from '../../core/review/index.ts';
 import { formatPathRelativeToCwd } from '../../core/tools/shared/path-utils.ts';
-import {
-  computeReviewDiff,
-  createReviewContentFingerprint,
-  decodeReviewContent,
-  isSameReviewContentFingerprint,
-  REVIEW_CONTEXT_LINES,
-  type FileReviewContentFingerprint,
-  type ReviewDisplayRow,
-} from '../../core/review/file-review.ts';
-import {
-  addReviewRowTokens,
-  createReviewLineTokens,
-} from '../../core/review/review-syntax-tokens.ts';
-import { splitReviewLines } from '../../core/review/review-text.ts';
 import { configureScoutWebview, getScoutWebviewHtml } from '../../webview-content.ts';
+import type { FileReviewArtifact, FileReviewArtifactFile } from './file-review-artifact.ts';
 
 // ---------- 类型 ----------
 
@@ -41,6 +24,7 @@ export interface OpenChangesReviewPanelInput {
   cwd: string;
   recordId?: string;
   review: FileReviewTurnSnapshot | FileReviewArtifact;
+  sessionId: string;
 }
 
 export interface OpenCurrentChangesReviewPanelInput {
@@ -49,27 +33,14 @@ export interface OpenCurrentChangesReviewPanelInput {
   sessionId: string;
 }
 
-type ReviewPanelRow = ScoutChangesReviewRow;
-type ReviewPanelTarget =
-  | { kind: 'turn'; turnId: string }
-  | { kind: 'current'; sessionId: string };
+type ReviewPanelTarget = { kind: 'turn'; turnId: string } | { kind: 'current'; sessionId: string };
 
 // ---------- 常量 ----------
 
 const VIEW_TYPE = 'scout-agent.changesReview';
 const VIEW_MODE_KEY = 'scout.changesReview.viewMode';
 const SCOUT_DIFF_TITLE = 'Scout Diff';
-const REVIEW_PANEL_RENDER_VERSION = 2;
-const MAX_CURRENT_REVIEW_CONTENT_BYTES = MAX_REVIEW_TEXT_BYTES;
-const MAX_REVIEW_HIDDEN_CONTEXT_ROWS = 500;
-const MAX_REVIEW_HIDDEN_CONTEXT_BYTES = 256 * 1024;
-const MAX_REVIEW_HIDDEN_CONTEXT_TOKENS = 20_000;
-const FILE_CHANGED_STATUS_NOTE =
-  'File changed since this review; collapsed context cannot be expanded.';
-const FILE_TOO_LARGE_STATUS_NOTE =
-  'Current file is too large to read for collapsed context expansion.';
-const FOLD_CONTEXT_LIMIT_STATUS_NOTE =
-  'Large collapsed context is not expanded to keep the review responsive.';
+const REVIEW_PANEL_RENDER_VERSION = 3;
 
 // ---------- Manager ----------
 
@@ -77,15 +48,23 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
   private readonly extensionUri: vscode.Uri;
   private readonly globalState: vscode.Memento;
   private readonly isDev: boolean;
+  private readonly bindProtocol?: (webview: vscode.Webview) => vscode.Disposable;
   private panel?: vscode.WebviewPanel;
   private messageSubscription?: vscode.Disposable;
+  private protocolSubscription?: vscode.Disposable;
   private signature?: string;
   private target?: ReviewPanelTarget;
 
-  constructor(extensionUri: vscode.Uri, globalState: vscode.Memento, isDev: boolean) {
+  constructor(
+    extensionUri: vscode.Uri,
+    globalState: vscode.Memento,
+    isDev: boolean,
+    bindProtocol?: (webview: vscode.Webview) => vscode.Disposable,
+  ) {
     this.extensionUri = extensionUri;
     this.globalState = globalState;
     this.isDev = isDev;
+    this.bindProtocol = bindProtocol;
   }
 
   async open(input: OpenChangesReviewPanelInput): Promise<void> {
@@ -116,6 +95,7 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
             allowCurrentFileContextExpansion: true,
             cwd: input.cwd,
             review: input.review,
+            sessionId: input.sessionId,
           },
           this.getViewMode(),
         )
@@ -147,6 +127,7 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
             allowCurrentFileContextExpansion: true,
             cwd: input.cwd,
             review: input.review,
+            sessionId: input.sessionId,
           },
           this.getViewMode(),
         )
@@ -161,8 +142,10 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
 
   dispose(): void {
     this.messageSubscription?.dispose();
+    this.protocolSubscription?.dispose();
     this.panel?.dispose();
     this.messageSubscription = undefined;
+    this.protocolSubscription = undefined;
     this.panel = undefined;
     this.signature = undefined;
     this.target = undefined;
@@ -197,8 +180,7 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
       type: 'changes_review_model_update',
       model,
     });
-    if (delivered) return;
-    await this.render(panel, model);
+    if (!delivered) await this.render(panel, model);
   }
 
   private ensurePanel(): vscode.WebviewPanel {
@@ -214,12 +196,15 @@ export class ScoutChangesReviewPanelManager implements vscode.Disposable {
     );
     configureScoutWebview(this.extensionUri, panel.webview);
     this.panel = panel;
+    this.protocolSubscription = this.bindProtocol?.(panel.webview);
     this.messageSubscription = panel.webview.onDidReceiveMessage((message: unknown) => {
       void this.handleMessage(message);
     });
     panel.onDidDispose(() => {
       this.messageSubscription?.dispose();
+      this.protocolSubscription?.dispose();
       this.messageSubscription = undefined;
+      this.protocolSubscription = undefined;
       this.panel = undefined;
       this.signature = undefined;
       this.target = undefined;
@@ -264,16 +249,8 @@ async function createReviewPanelModel(
   input: OpenChangesReviewPanelInput,
   viewMode: ScoutChangesReviewViewMode,
 ): Promise<ScoutChangesReviewModel> {
-  const runtimeContentReleased = isRuntimeReviewContentReleased(input.review);
-  const files = await Promise.all(
-    input.review.files.map((file) =>
-      createReviewPanelFile(
-        file,
-        input.cwd,
-        input.allowCurrentFileContextExpansion ?? false,
-        runtimeContentReleased,
-      ),
-    ),
+  const files = input.review.files.map((file) =>
+    createReviewPanelFile(file, input.cwd, input.sessionId),
   );
   return {
     turnId: input.review.turnId,
@@ -288,243 +265,49 @@ async function createReviewPanelModel(
   };
 }
 
-async function createReviewPanelFile(
+function createReviewPanelFile(
   file: FileReviewFile | FileReviewArtifactFile,
   cwd: string,
-  allowCurrentFileContextExpansion: boolean,
-  runtimeContentReleased: boolean,
-): Promise<ScoutChangesReviewFile> {
-  const displayPath = formatDisplayPath(cwd, file.absolutePath);
-  const id = createReviewPanelFileId(file.absolutePath);
-  if (isArtifactFile(file)) {
-    const hydrated = await hydrateArtifactRows(file, allowCurrentFileContextExpansion);
-    return {
-      id,
-      path: file.absolutePath,
-      displayPath,
-      absolutePath: file.absolutePath,
-      external: isExternalPath(cwd, file.absolutePath),
-      additions: file.additions,
-      deletions: file.deletions,
-      recordIds: file.recordIds,
-      unavailableReason: file.unavailableReason,
-      statusNote: hydrated.statusNote,
-      rows: addReviewRowTokens(hydrated.rows, file.absolutePath),
-    };
-  }
-
-  if (runtimeContentReleased) {
-    return {
-      id,
-      path: file.absolutePath,
-      displayPath,
-      absolutePath: file.absolutePath,
-      external: isExternalPath(cwd, file.absolutePath),
-      additions: file.additions,
-      deletions: file.deletions,
-      recordIds: file.recordIds,
-      unavailableReason: 'Changes are no longer available',
-      rows: [],
-    };
-  }
-
-  const diff = computeReviewDiff(file.originalContent, file.modifiedContent, {
-    collapseContext: true,
-    contextLines: REVIEW_CONTEXT_LINES,
-    filePath: file.absolutePath,
-    includeTokens: true,
-    unavailableReason: file.unavailableReason,
-  });
-  const hydrated = hydrateFoldRowsFromContent(diff.rows, file.modifiedContent, file.absolutePath);
-  return {
-    id,
+  sessionId: string,
+): ScoutChangesReviewFile {
+  const common = {
+    id: createReviewPanelFileId(file.absolutePath),
     path: file.absolutePath,
-    displayPath,
+    displayPath: formatDisplayPath(cwd, file.absolutePath),
     absolutePath: file.absolutePath,
     external: isExternalPath(cwd, file.absolutePath),
-    additions: diff.unavailableReason ? file.additions : diff.additions,
-    deletions: diff.unavailableReason ? file.deletions : diff.deletions,
-    recordIds: file.recordIds,
-    unavailableReason: diff.unavailableReason,
-    statusNote: hydrated.limited ? FOLD_CONTEXT_LIMIT_STATUS_NOTE : undefined,
-    rows: hydrated.rows,
+    sessionId,
+    recordIds: [...file.recordIds],
+    rows: [],
   };
-}
 
-function isRuntimeReviewContentReleased(
-  review: FileReviewTurnSnapshot | FileReviewArtifact,
-): boolean {
-  return 'contentReleased' in review && review.contentReleased === true;
-}
-
-async function hydrateArtifactRows(
-  file: FileReviewArtifactFile,
-  allowCurrentFileContextExpansion: boolean,
-): Promise<{ rows: ReviewPanelRow[]; statusNote?: string }> {
-  if (file.unavailableReason || !hasExpandableFold(file.rows)) {
-    return { rows: file.rows };
-  }
-  if (!allowCurrentFileContextExpansion) {
-    return { rows: file.rows };
-  }
-  if (!file.modifiedFingerprint) {
+  if (isArtifactFile(file)) {
     return {
-      rows: file.rows,
-      statusNote: FILE_CHANGED_STATUS_NOTE,
+      ...common,
+      fileId: file.fileId,
+      revision: file.latestRevision,
+      projectionStatus: file.document.unavailableReason ? 'unavailable' : 'ready',
+      additions: file.document.additions,
+      deletions: file.document.deletions,
+      unavailableReason: file.document.unavailableReason,
     };
   }
 
-  const current = await readCurrentReviewContent(file.absolutePath, file.modifiedFingerprint);
-  if (current.content === undefined) {
-    return {
-      rows: file.rows,
-      statusNote: current.statusNote,
-    };
-  }
-
-  const currentFingerprint = createReviewContentFingerprint(current.content);
-  if (!isSameReviewContentFingerprint(file.modifiedFingerprint, currentFingerprint)) {
-    return { rows: file.rows, statusNote: FILE_CHANGED_STATUS_NOTE };
-  }
-
-  const hydrated = hydrateFoldRowsFromContent(file.rows, current.content, file.absolutePath);
   return {
-    rows: hydrated.rows,
-    statusNote: hydrated.limited ? FOLD_CONTEXT_LIMIT_STATUS_NOTE : undefined,
+    ...common,
+    fileId: file.fileId,
+    revision: file.revision,
+    projectionStatus: file.projectionStatus,
+    additions: file.additions,
+    deletions: file.deletions,
+    unavailableReason: file.unavailableReason,
   };
-}
-
-function hasExpandableFold(rows: readonly ReviewDisplayRow[]): boolean {
-  return rows.some((row) => row.type === 'fold' && Boolean(row.count && row.newStartLine));
-}
-
-async function readCurrentReviewContent(
-  absolutePath: string,
-  expectedFingerprint: FileReviewContentFingerprint,
-): Promise<{ content?: string; statusNote: string }> {
-  try {
-    const fileStat = await stat(absolutePath);
-    if (fileStat.size !== expectedFingerprint.size) {
-      return { statusNote: FILE_CHANGED_STATUS_NOTE };
-    }
-    if (fileStat.size > MAX_CURRENT_REVIEW_CONTENT_BYTES) {
-      return { statusNote: FILE_TOO_LARGE_STATUS_NOTE };
-    }
-    const decoded = decodeReviewContent(await readFile(absolutePath));
-    if (decoded.content === null) {
-      return {
-        statusNote: 'File cannot be decoded; collapsed context cannot be expanded.',
-      };
-    }
-    return { content: decoded.content, statusNote: '' };
-  } catch (error) {
-    const code =
-      error && typeof error === 'object' ? (error as { code?: unknown }).code : undefined;
-    if (code === 'ENOENT') {
-      return { statusNote: FILE_CHANGED_STATUS_NOTE };
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      statusNote: `File cannot be read; collapsed context cannot be expanded. ${message}`,
-    };
-  }
-}
-
-function hydrateFoldRowsFromContent(
-  rows: readonly ReviewDisplayRow[],
-  modifiedContent: string | null,
-  filePath: string,
-): { rows: ReviewPanelRow[]; limited: boolean } {
-  if (modifiedContent === null) return { rows: [...rows], limited: false };
-  if (!hasExpandableFold(rows)) return { rows: [...rows], limited: false };
-  const lines = splitReviewLines(modifiedContent);
-  const budget: HiddenContextBudget = {
-    remainingRows: MAX_REVIEW_HIDDEN_CONTEXT_ROWS,
-    remainingBytes: MAX_REVIEW_HIDDEN_CONTEXT_BYTES,
-    remainingTokens: MAX_REVIEW_HIDDEN_CONTEXT_TOKENS,
-  };
-  let limited = false;
-  const next = rows.map((row) => {
-    if (row.type !== 'fold') return row;
-    const hiddenRows = createHiddenContextRows(row, lines, filePath, budget);
-    if (hiddenRows === undefined) {
-      limited = true;
-      return row;
-    }
-    if (hiddenRows.length === 0) return row;
-    return { ...row, hiddenRows };
-  });
-  return { rows: next, limited };
-}
-
-interface HiddenContextBudget {
-  remainingRows: number;
-  remainingBytes: number;
-  remainingTokens: number;
-}
-
-function createHiddenContextRows(
-  fold: ReviewDisplayRow,
-  modifiedLines: readonly string[],
-  filePath: string,
-  budget: HiddenContextBudget,
-): ScoutChangesReviewRow[] | undefined {
-  const count = fold.count ?? 0;
-  const newStartLine = fold.newStartLine;
-  if (!newStartLine || count <= 0) return [];
-  const measurement = measureHiddenContext(fold, modifiedLines);
-  if (!measurement) return undefined;
-  if (measurement.count > budget.remainingRows || measurement.byteLength > budget.remainingBytes) {
-    return undefined;
-  }
-
-  const oldStartLine = fold.oldStartLine ?? newStartLine;
-  const hiddenTexts = modifiedLines.slice(newStartLine - 1, newStartLine - 1 + count);
-  if (hiddenTexts.length !== count) return undefined;
-  const tokenLines = createReviewLineTokens(hiddenTexts.join('\n'), filePath);
-  const tokenCount = tokenLines.reduce((sum, tokens) => sum + tokens.length, 0);
-  if (tokenCount > budget.remainingTokens) return undefined;
-
-  const rows: ScoutChangesReviewRow[] = [];
-  for (let offset = 0; offset < count; offset += 1) {
-    const newLineNumber = newStartLine + offset;
-    const text = hiddenTexts[offset];
-    if (text === undefined) return undefined;
-    rows.push({
-      type: 'context',
-      oldLineNumber: oldStartLine + offset,
-      newLineNumber,
-      text,
-      tokens: tokenLines[offset],
-    });
-  }
-  budget.remainingRows -= measurement.count;
-  budget.remainingBytes -= measurement.byteLength;
-  budget.remainingTokens -= tokenCount;
-  return rows;
-}
-
-function measureHiddenContext(
-  fold: ReviewDisplayRow,
-  modifiedLines: readonly string[],
-): { count: number; byteLength: number } | undefined {
-  const count = fold.count ?? 0;
-  const newStartLine = fold.newStartLine;
-  if (!newStartLine || count <= 0) return { count: 0, byteLength: 0 };
-
-  let byteLength = 0;
-  for (let offset = 0; offset < count; offset += 1) {
-    const text = modifiedLines[newStartLine + offset - 1];
-    if (text === undefined) return undefined;
-    byteLength += Buffer.byteLength(text, 'utf-8') + 1;
-  }
-  return { count, byteLength };
 }
 
 function isArtifactFile(
   file: FileReviewFile | FileReviewArtifactFile,
 ): file is FileReviewArtifactFile {
-  return Array.isArray((file as FileReviewArtifactFile).rows);
+  return 'latestRevision' in file;
 }
 
 function formatDisplayPath(cwd: string, absolutePath: string): string {
@@ -551,19 +334,11 @@ function createPanelSignature(model: ScoutChangesReviewModel): string {
       displayPath: file.displayPath,
       additions: file.additions,
       deletions: file.deletions,
+      fileId: file.fileId,
+      revision: file.revision,
+      projectionStatus: file.projectionStatus,
       unavailableReason: file.unavailableReason,
       recordIds: file.recordIds,
-      rowCount: file.rows.length,
-      statusNote: file.statusNote,
-      folds: file.rows
-        .filter((row) => row.type === 'fold')
-        .map((row) => ({
-          count: row.count,
-          oldStartLine: row.oldStartLine,
-          newStartLine: row.newStartLine,
-          hiddenCount: row.hiddenRows?.length ?? 0,
-        })),
-      tokens: createRowsTokenSignature(file.rows),
     })),
   });
 }
@@ -580,13 +355,9 @@ function isSameReviewPanelTarget(
   left: ReviewPanelTarget | undefined,
   right: ReviewPanelTarget,
 ): boolean {
-  if (!left) return false;
-  if (left.kind !== right.kind) return false;
+  if (!left || left.kind !== right.kind) return false;
   if (left.kind === 'turn' && right.kind === 'turn') return left.turnId === right.turnId;
-  if (left.kind === 'current' && right.kind === 'current') {
-    return left.sessionId === right.sessionId;
-  }
-  return false;
+  return left.kind === 'current' && right.kind === 'current' && left.sessionId === right.sessionId;
 }
 
 function isCurrentReviewPanelTarget(
@@ -594,18 +365,4 @@ function isCurrentReviewPanelTarget(
   sessionId: string,
 ): target is { kind: 'current'; sessionId: string } {
   return target?.kind === 'current' && target.sessionId === sessionId;
-}
-
-function createRowsTokenSignature(rows: readonly ScoutChangesReviewRow[]): string {
-  return rows
-    .map((row) => {
-      if (row.type === 'fold') {
-        return `fold:${row.count}:${createRowsTokenSignature(row.hiddenRows ?? [])}`;
-      }
-      const tokens = row.tokens ?? [];
-      const diffCount = tokens.filter((token) => token.diff).length;
-      const scopeCount = tokens.filter((token) => token.syntaxScopes?.length).length;
-      return `${row.type}:${tokens.length}:${diffCount}:${scopeCount}`;
-    })
-    .join('|');
 }

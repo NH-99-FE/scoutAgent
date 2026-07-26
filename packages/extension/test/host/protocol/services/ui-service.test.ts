@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { join } from 'node:path';
+import { createDiffDocument } from '../../../../src/core/review/diff-document.ts';
 import type { FileReviewTurnSnapshot } from '../../../../src/core/review/file-review.ts';
 import type { FileReviewArtifact } from '../../../../src/host/review/file-review-artifact.ts';
 import { UiProtocolService } from '../../../../src/host/protocol/services/ui-service.ts';
@@ -37,34 +38,28 @@ function makeReviewSnapshot(turnId: string, recordId: string): FileReviewTurnSna
 
 function makeReviewArtifact(turnId: string, recordId: string): FileReviewArtifact {
   return {
-    version: 1,
+    version: 2,
     sessionId: 'session-1',
     turnId,
     createdAt: '2026-01-01T00:00:00.000Z',
     records: [
       {
         recordId,
-        turnId,
         toolCallId: 'tool-1',
         operation: 'edit',
-        path: 'src/app.ts',
-        absolutePath: '/workspace/src/app.ts',
+        fileId: 'file-1',
         sequence: 1,
+        toolOutcome: 'success',
       },
     ],
     files: [
       {
+        fileId: 'file-1',
         absolutePath: '/workspace/src/app.ts',
         path: 'src/app.ts',
         recordIds: [recordId],
-        latestRecordId: recordId,
-        latestSequence: 1,
-        additions: 1,
-        deletions: 1,
-        rows: [
-          { type: 'removed', oldLineNumber: 1, text: 'old' },
-          { type: 'added', newLineNumber: 1, text: 'new' },
-        ],
+        latestRevision: 1,
+        document: createDiffDocument('old\n', 'new\n'),
       },
     ],
   };
@@ -261,6 +256,7 @@ describe('UiProtocolService', () => {
       publishEvent: vi.fn(),
       getChangesReview: () => undefined,
       getChangesReviewArtifact: () => artifact,
+      getCurrentSessionId: () => 'session-1',
       openChangesReviewPanel,
     });
 
@@ -276,6 +272,7 @@ describe('UiProtocolService', () => {
     expect(openChangesReviewPanel).toHaveBeenCalledWith(artifact, {
       allowCurrentFileContextExpansion: false,
       recordId: 'review-1',
+      sessionId: 'session-1',
     });
     expect(respond).toHaveBeenCalledWith({
       type: 'open_changes_review_result',
@@ -294,6 +291,7 @@ describe('UiProtocolService', () => {
       getChangesReview: () => requestedReview,
       getChangesReviewArtifact: () => artifact,
       canExpandChangesReviewContext: () => true,
+      getCurrentSessionId: () => 'session-1',
       openChangesReviewPanel,
     });
 
@@ -309,6 +307,7 @@ describe('UiProtocolService', () => {
     expect(openChangesReviewPanel).toHaveBeenCalledWith(artifact, {
       allowCurrentFileContextExpansion: true,
       recordId: 'review-1',
+      sessionId: 'session-1',
     });
     expect(respond).toHaveBeenCalledWith({
       type: 'open_changes_review_result',

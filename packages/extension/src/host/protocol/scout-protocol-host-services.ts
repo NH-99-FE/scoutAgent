@@ -3,16 +3,16 @@
 // 负责：集中创建 host/protocol service，隔离 controller 与具体 service 构造细节。
 // ============================================================
 
-import type { ExtensionMessage, ToolInfo } from '@scout-agent/shared';
+import type { ExtensionMessage } from '@scout-agent/shared';
 import type { ConfigManager } from '../../config-manager.ts';
 import type { FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
-import type { ToolPreviewContext, ToolPreviewToolIdentity } from '../../core/tool-preview/index.ts';
 import { ensureTool } from '../../core/tools/shared/tools-manager.ts';
 import type { FileReviewArtifact } from '../review/file-review-artifact.ts';
 import type { ExtensionSessionCoordinator } from '../session-coordinator.ts';
 import type { SessionIndex } from '../session-index.ts';
 import type { ScoutWebviewSurface } from '../webview-surface.ts';
 import { DomainEventPublisher } from './domain-event-publisher.ts';
+import { FileDiffRequestHandler } from './file-diff-request-handler.ts';
 import { SessionEventForwarder } from './session-event-forwarder.ts';
 import { type ScoutProtocolServices } from './services/index.ts';
 import { ConfigProtocolService } from './services/config-service.ts';
@@ -40,7 +40,12 @@ export interface ScoutProtocolHostServicesOptions {
   openChatSurface?: () => void | Promise<void>;
   openChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
-    options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
+    options: {
+      allowCurrentFileContextExpansion?: boolean;
+      cwd: string;
+      recordId?: string;
+      sessionId: string;
+    },
   ) => void | Promise<void>;
   openCurrentChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | undefined,
@@ -63,6 +68,7 @@ export interface ScoutProtocolHostServices {
   tree: TreeProtocolService;
   mention: MentionProtocolService;
   ui: UiProtocolService;
+  fileDiffRequestHandler: FileDiffRequestHandler;
   eventPublisher: DomainEventPublisher;
   sessionEventForwarder: SessionEventForwarder;
   protocolServices: ScoutProtocolServices;
@@ -119,6 +125,7 @@ export function createScoutProtocolHostServices(
             allowCurrentFileContextExpansion: panelOptions.allowCurrentFileContextExpansion,
             cwd: options.sessionManager.currentCwd,
             recordId: panelOptions.recordId,
+            sessionId: panelOptions.sessionId,
           })
       : undefined,
     openCurrentChangesReviewPanel: options.openCurrentChangesReviewPanel
@@ -132,6 +139,12 @@ export function createScoutProtocolHostServices(
   options.sessionManager.setExtensionUIContext(bundle.ui.createExtensionUIContext(), (reason) =>
     bundle.ui.cancelExtensionUIRequests(reason),
   );
+
+  bundle.fileDiffRequestHandler = new FileDiffRequestHandler({
+    getCurrentSessionId: () => options.sessionManager.sessionId,
+    getRuntimeReview: (turnId) => options.sessionManager.getFileReviewTurn(turnId),
+    getArtifact: (turnId) => options.sessionManager.getFileReviewArtifact(turnId),
+  });
 
   bundle.state = new StateProtocolService({
     sessionManager: options.sessionManager,
@@ -239,13 +252,6 @@ export function createScoutProtocolHostServices(
 
   bundle.sessionEventForwarder = new SessionEventForwarder({
     isStreaming: () => options.sessionManager.isStreaming,
-    getPreviewContext: () => ({
-      generation: options.sessionManager.toolPreviewGeneration,
-      sessionId: options.sessionManager.sessionId,
-      sessionFile: options.sessionManager.sessionFile,
-      cwd: options.sessionManager.currentCwd,
-      tools: createToolPreviewToolMap(options.sessionManager.getAllToolInfos()),
-    }),
     publishEvent: (message) => bundle.eventPublisher.publish(message),
     pushState: () => bundle.state.pushState(),
     pushQueueState: () => bundle.state.pushQueueState(),
@@ -327,6 +333,14 @@ export function createScoutProtocolHostServices(
         bundle.mention.requestFileMentions(message, respond, signal),
       openMentionedFile: (message, respond) => bundle.mention.openMentionedFile(message, respond),
     },
+    review: {
+      requestFileDiff: async (message, respond, signal) => {
+        if (signal?.aborted) return;
+        const result = await bundle.fileDiffRequestHandler.handle(message);
+        if (signal?.aborted) return;
+        respond(result);
+      },
+    },
     ui: {
       requestCommands: (respond) => bundle.ui.requestCommands(respond),
       extensionUIResponse: (message) => bundle.ui.extensionUIResponse(message),
@@ -340,16 +354,4 @@ export function createScoutProtocolHostServices(
   };
 
   return bundle;
-}
-
-function createToolPreviewToolMap(tools: readonly ToolInfo[]): ToolPreviewContext['tools'] {
-  const previewTools: Record<string, ToolPreviewToolIdentity> = {};
-  for (const tool of tools) {
-    previewTools[tool.name] = {
-      active: tool.active,
-      source: tool.sourceInfo.source,
-      path: tool.sourceInfo.path,
-    };
-  }
-  return previewTools;
 }

@@ -2,11 +2,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ScoutChangesReviewSummary, ScoutFileChangeDetails } from '@scout-agent/shared';
 import { ExtensionSessionCoordinator } from '../../src/host/session-coordinator.ts';
 import { ConfigManager } from '../../src/config-manager.ts';
 import type { AgentSession } from '../../src/core/agent-session.ts';
 import type { FileReviewTurnSnapshot } from '../../src/core/review/file-review.ts';
+import {
+  createDiffDocument,
+  createUnavailableDiffDocument,
+} from '../../src/core/review/diff-document.ts';
 import {
   mapSessionTreeToScout,
   projectSessionTreeToScout,
@@ -118,6 +121,7 @@ function makeReviewSnapshot(): FileReviewTurnSnapshot {
     ],
     files: [
       {
+        fileId: 'file-1',
         absolutePath: '/workspace/src/app.ts',
         path: 'src/app.ts',
         originalContent: 'old\n',
@@ -125,10 +129,29 @@ function makeReviewSnapshot(): FileReviewTurnSnapshot {
         recordIds: ['review-1'],
         latestRecordId: 'review-1',
         latestSequence: 1,
+        revision: 1,
+        projectionStatus: 'ready',
+        document: createDiffDocument('old\n', 'new\n'),
         additions: 1,
         deletions: 1,
       },
     ],
+  };
+}
+
+function makeUnavailableReviewSnapshot(): FileReviewTurnSnapshot {
+  const snapshot = makeReviewSnapshot();
+  return {
+    ...snapshot,
+    files: snapshot.files.map((file) => ({
+      ...file,
+      originalContent: null,
+      modifiedContent: null,
+      projectionStatus: 'unavailable' as const,
+      document: createUnavailableDiffDocument('binary_or_unsupported'),
+      additions: 0,
+      deletions: 0,
+    })),
   };
 }
 
@@ -149,6 +172,7 @@ function makeLargeFileCountReviewSnapshot(): FileReviewTurnSnapshot {
     turnId: 'turn-large',
     records,
     files: records.map((record) => ({
+      fileId: `file-${record.sequence}`,
       absolutePath: record.absolutePath,
       path: record.path,
       originalContent: 'old\n',
@@ -156,6 +180,9 @@ function makeLargeFileCountReviewSnapshot(): FileReviewTurnSnapshot {
       recordIds: [record.recordId],
       latestRecordId: record.recordId,
       latestSequence: record.sequence,
+      revision: 1,
+      projectionStatus: 'ready' as const,
+      document: createDiffDocument('old\n', 'new\n'),
       additions: 1,
       deletions: 1,
     })),
@@ -362,7 +389,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       getSessionEntries: () => branch,
       getSessionBranch: () => branch,
       isStreaming: false,
-      releaseFileReviewTurnContent,
+      releaseFileReviewFileContent: releaseFileReviewTurnContent,
       sessionId: 'session-1',
     };
     const review = makeReviewSnapshot();
@@ -387,12 +414,100 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
       expect.objectContaining({ turnId: 'turn-1' }),
     );
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('turn-1');
+    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
     await expect(coordinator.getFileReviewArtifact('turn-1')).resolves.toMatchObject({
       turnId: 'turn-1',
       files: [expect.objectContaining({ path: 'src/app.ts' })],
     });
     expect(coordinator.isLatestFileReviewArtifact('turn-1')).toBe(true);
+  });
+
+  it('persists canonical unavailable documents before releasing runtime content', async () => {
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
+    });
+    const releaseFileReviewFileContent = vi.fn();
+    const appendEntry = vi.fn(async () => undefined);
+    (coordinator as unknown as { agentSession: unknown }).agentSession = {
+      appendEntry,
+      releaseFileReviewFileContent,
+      sessionId: 'session-1',
+    };
+    const review = makeUnavailableReviewSnapshot();
+    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
+
+    (
+      coordinator as unknown as {
+        scheduleFileReviewArtifactSave: (
+          agentSession: AgentSession,
+          review: FileReviewTurnSnapshot,
+        ) => void;
+        flushFileReviewArtifactSaves: () => Promise<void>;
+      }
+    ).scheduleFileReviewArtifactSave(agentSession, review);
+    await (
+      coordinator as unknown as {
+        flushFileReviewArtifactSaves: () => Promise<void>;
+      }
+    ).flushFileReviewArtifactSaves();
+
+    expect(appendEntry).toHaveBeenCalledWith(
+      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+      expect.objectContaining({
+        files: [
+          expect.objectContaining({
+            document: expect.objectContaining({
+              unavailableReason: 'binary_or_unsupported',
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(releaseFileReviewFileContent).toHaveBeenCalledWith('file-1');
+    expect(appendEntry.mock.invocationCallOrder[0]).toBeLessThan(
+      releaseFileReviewFileContent.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('retains runtime content when artifact persistence fails', async () => {
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
+    });
+    const releaseFileReviewFileContent = vi.fn();
+    const appendEntry = vi.fn(async () => {
+      throw new Error('disk full');
+    });
+    (coordinator as unknown as { agentSession: unknown }).agentSession = {
+      appendEntry,
+      releaseFileReviewFileContent,
+      sessionId: 'session-1',
+    };
+    const review = makeReviewSnapshot();
+    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
+
+    (
+      coordinator as unknown as {
+        scheduleFileReviewArtifactSave: (
+          agentSession: AgentSession,
+          review: FileReviewTurnSnapshot,
+        ) => void;
+        flushFileReviewArtifactSaves: () => Promise<void>;
+      }
+    ).scheduleFileReviewArtifactSave(agentSession, review);
+    await (
+      coordinator as unknown as {
+        flushFileReviewArtifactSaves: () => Promise<void>;
+      }
+    ).flushFileReviewArtifactSaves();
+
+    expect(appendEntry).toHaveBeenCalledOnce();
+    expect(releaseFileReviewFileContent).not.toHaveBeenCalled();
   });
 
   it('finds hidden review artifact children after navigating back to the visible branch entry', async () => {
@@ -469,7 +584,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       getSessionEntries: () => branch,
       getSessionBranch: () => branch,
       isStreaming: false,
-      releaseFileReviewTurnContent,
+      releaseFileReviewFileContent: releaseFileReviewTurnContent,
       sessionId: 'session-1',
     };
     const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
@@ -496,7 +611,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     );
     expect(persistedArtifact?.files).toHaveLength(MAX_REVIEW_ARTIFACT_FILES);
     expect(persistedArtifact?.records).toHaveLength(MAX_REVIEW_ARTIFACT_FILES);
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('turn-large');
+    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
   });
 
   it('does not persist a late review update into a newer active session', async () => {
@@ -511,7 +626,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     const staleSession = {
       appendEntry: staleAppendEntry,
       isStreaming: false,
-      releaseFileReviewTurnContent: staleReleaseFileReviewTurnContent,
+      releaseFileReviewFileContent: staleReleaseFileReviewTurnContent,
       sessionId: 'old-session',
     } as unknown as AgentSession;
     const activeAppendEntry = vi.fn(async () => undefined);
@@ -520,7 +635,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       getSessionEntries: () => [],
       getSessionBranch: () => [],
       isStreaming: false,
-      releaseFileReviewTurnContent: vi.fn(),
+      releaseFileReviewFileContent: vi.fn(),
       sessionId: 'new-session',
     };
 
@@ -560,7 +675,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       getSessionEntries: () => [],
       getSessionBranch: () => [],
       isStreaming: false,
-      releaseFileReviewTurnContent,
+      releaseFileReviewFileContent: releaseFileReviewTurnContent,
       sessionId: 'session-1',
     };
     const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
@@ -580,7 +695,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
       expect.objectContaining({ turnId: 'turn-1' }),
     );
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('turn-1');
+    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
     expect(dispose).toHaveBeenCalledOnce();
   });
 
@@ -602,7 +717,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       get isStreaming() {
         return isStreaming;
       },
-      releaseFileReviewTurnContent,
+      releaseFileReviewFileContent: releaseFileReviewTurnContent,
       sessionId: 'session-1',
     } as unknown as AgentSession;
     (coordinator as unknown as { agentSession: AgentSession }).agentSession = agentSession;
@@ -633,59 +748,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
       expect.objectContaining({ turnId: 'turn-1' }),
     );
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('turn-1');
-  });
-
-  it('reuses file change diff previews across coordinator enricher instances', () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const getFileReviewTurn = vi.fn((turnId: string) =>
-      turnId === 'turn-1' ? makeReviewSnapshot() : undefined,
-    );
-    const agentSession = {
-      sessionId: 'session-1',
-      getFileReviewTurn,
-      getSessionEntries: () => [],
-      getSessionBranch: () => [],
-    } as unknown as AgentSession;
-    (coordinator as unknown as { agentSession: AgentSession }).agentSession = agentSession;
-    const details: ScoutFileChangeDetails = {
-      kind: 'file_change',
-      path: '/workspace/src/app.ts',
-      displayPath: 'src/app.ts',
-      additions: 1,
-      deletions: 1,
-      review: { turnId: 'turn-1', recordId: 'review-1' },
-    };
-    const privateCoordinator = coordinator as unknown as {
-      createFileChangeDetailsEnricher: () => ((details: unknown) => unknown) | undefined;
-      setActiveChangesReview: (changesReview: ScoutChangesReviewSummary | undefined) => void;
-    };
-
-    const firstEnrich = privateCoordinator.createFileChangeDetailsEnricher();
-    const secondEnrich = privateCoordinator.createFileChangeDetailsEnricher();
-    const first = firstEnrich?.(details) as ScoutFileChangeDetails;
-    const second = secondEnrich?.({ ...details, additions: 2 }) as ScoutFileChangeDetails;
-
-    expect(first.diffPreview?.rows.length).toBeGreaterThan(0);
-    expect(second.diffPreview).toEqual(first.diffPreview);
-    expect(getFileReviewTurn).toHaveBeenCalledTimes(1);
-
-    privateCoordinator.setActiveChangesReview({
-      turnId: 'turn-1',
-      fileCount: 1,
-      additions: 1,
-      deletions: 1,
-      files: [{ path: '/workspace/src/app.ts', additions: 1, deletions: 1 }],
-    });
-    const nextProjectionEnrich = privateCoordinator.createFileChangeDetailsEnricher();
-    nextProjectionEnrich?.(details);
-
-    expect(getFileReviewTurn).toHaveBeenCalledTimes(2);
+    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
   });
 
   it('flushes pending review artifacts before exporting the active session', async () => {
@@ -703,7 +766,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       getSessionEntries: () => [],
       getSessionBranch: () => [],
       isStreaming: false,
-      releaseFileReviewTurnContent: vi.fn(),
+      releaseFileReviewFileContent: vi.fn(),
       sessionId: 'session-1',
     };
     const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;

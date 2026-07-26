@@ -21,6 +21,7 @@ import type {
   ScoutImageContent,
   ScoutWebviewState,
 } from './protocol-state.ts';
+import type { ScoutFileDiffView } from './protocol-review.ts';
 
 // ---------- 请求级协议结果 ----------
 
@@ -229,6 +230,24 @@ export interface ScoutForkCandidatesResult {
   candidates: ScoutForkCandidate[];
 }
 
+export type FileDiffResultMessage =
+  | {
+      type: 'file_diff_result';
+      turnId: string;
+      fileId: string;
+      revision: number;
+      status: 'ready';
+      diff: ScoutFileDiffView;
+    }
+  | {
+      type: 'file_diff_result';
+      turnId: string;
+      fileId: string;
+      revision: number;
+      status: 'pending' | 'unavailable' | 'error';
+      message?: string;
+    };
+
 export type ScoutProtocolResponsePayload =
   | ScoutBootstrapResult
   | ScoutStateResult
@@ -245,6 +264,7 @@ export type ScoutProtocolResponsePayload =
   | ScoutComposerContentPickResult
   | ScoutTaskHistoryResult
   | ScoutForkCandidatesResult
+  | FileDiffResultMessage
   | ScoutCommandResult;
 
 export type ScoutProtocolResponsePayloadType = ScoutProtocolResponsePayload['type'];

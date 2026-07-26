@@ -233,7 +233,6 @@ function planConversationSegments({
   isStreaming,
   items,
   toolExecutionsById,
-  toolPreviewsById = {},
 }: BuildConversationRowsOptions): SegmentPlan[] {
   const isTurnStreaming = isStreaming && busyState.kind === 'agent';
   const messageItems = items.filter(isMessageConversationItem);
@@ -313,7 +312,6 @@ function planConversationSegments({
       runtimeActivity,
       streamingAssistantKey: pairingPlan.streamingAssistantKey,
       toolExecutionsById,
-      toolPreviewsById,
     }),
   );
 }
@@ -433,7 +431,6 @@ function createSegmentPlan(
     runtimeActivity: AssistantRuntimeActivity;
     streamingAssistantKey?: string;
     toolExecutionsById: BuildConversationRowsOptions['toolExecutionsById'];
-    toolPreviewsById: NonNullable<BuildConversationRowsOptions['toolPreviewsById']>;
   },
 ): SegmentPlan {
   if (segment.kind === 'user') {
@@ -491,20 +488,18 @@ function createAssistantSignature(
     runtimeActivity,
     streamingAssistantKey,
     toolExecutionsById,
-    toolPreviewsById,
   }: {
     isLatestAssistant: boolean;
     runtimeActivity: AssistantRuntimeActivity;
     streamingAssistantKey?: string;
     toolExecutionsById: BuildConversationRowsOptions['toolExecutionsById'];
-    toolPreviewsById: NonNullable<BuildConversationRowsOptions['toolPreviewsById']>;
   },
 ): SegmentSignature {
   const refs: unknown[] = [];
   for (const item of segment.items) {
     refs.push(item.message, item.message.changesReviews, ...item.pairedToolResults);
     for (const toolCallId of item.toolCallIds) {
-      refs.push(toolExecutionsById[toolCallId], toolPreviewsById[toolCallId]);
+      refs.push(toolExecutionsById[toolCallId]);
     }
   }
 
@@ -575,7 +570,7 @@ function projectSegment(
 
 function projectAssistantSegment(
   segment: AssistantSegmentPlan,
-  { toolExecutionsById, toolPreviewsById = {} }: BuildConversationRowsOptions,
+  { toolExecutionsById }: BuildConversationRowsOptions,
 ): ConversationRow[] {
   const turn = createAssistantTurnBuilder({
     anchorKey: segment.anchorKey,
@@ -590,7 +585,6 @@ function projectAssistantSegment(
       isStreaming: item.item.key === segment.streamingAssistantKey,
       runtimeActivity: segment.runtimeActivity,
       toolExecutionsById,
-      toolPreviewsById,
       resolveToolResult: createToolResultResolver(item),
     });
   }

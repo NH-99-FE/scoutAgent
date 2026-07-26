@@ -10,6 +10,7 @@ import type {
   ScoutForkCandidate,
   ScoutProtocolResponsePayload,
   ScoutImageContent,
+  RequestFileDiffMessage,
   ScoutRuntimeSettingsPatch,
   ScoutSessionIdentity,
   ScoutSkillScope,
@@ -51,6 +52,12 @@ interface RequestFileMentionsOptions {
   onError?: (message: string) => void;
   onResult: (result: FileMentionsResultPayload) => void;
   query: string;
+}
+
+interface RequestFileDiffOptions {
+  payload: Omit<RequestFileDiffMessage, 'type'>;
+  onError?: (message: string) => void;
+  onResult: (result: FileDiffResultPayload) => void;
 }
 
 export interface CancellableProtocolRequest {
@@ -137,6 +144,7 @@ type FileMentionsResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'file_mentions_result' }
 >;
+type FileDiffResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'file_diff_result' }>;
 
 interface PromoteFollowUpOptions extends ContinueSessionOptions {
   resume?: boolean;
@@ -743,6 +751,18 @@ export const protocolClient = {
       { type: 'request_file_mentions', query, limit },
       (payload) => {
         if (payload.type === 'file_mentions_result') onResult(payload);
+      },
+      (message) => onError?.(message),
+    );
+    return {
+      cancel: () => cancelProtocolRequest(requestId),
+    } satisfies CancellableProtocolRequest;
+  },
+  requestFileDiff: ({ payload, onError, onResult }: RequestFileDiffOptions) => {
+    const requestId = sendRouted(
+      { type: 'request_file_diff', ...payload },
+      (response) => {
+        if (response.type === 'file_diff_result') onResult(response);
       },
       (message) => onError?.(message),
     );

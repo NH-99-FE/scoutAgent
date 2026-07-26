@@ -174,6 +174,19 @@ const PAYLOAD_CASES = [
     { service: 'ui', method: 'open_current_changes_review' },
   ),
   protocolCase(
+    {
+      type: 'request_file_diff',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      fileId: 'file-1',
+      revision: 1,
+      view: 'inline',
+      mode: 'unified',
+      includeTokens: false,
+    },
+    { service: 'review', method: 'request_file_diff' },
+  ),
+  protocolCase(
     { type: 'fork_session', session: SESSION, entryId: 'entry-1', position: 'at' },
     { service: 'tree', method: 'fork_session' },
   ),
@@ -432,6 +445,17 @@ function makeServices(): ScoutProtocolServices {
       requestFileMentions: vi.fn(async () => undefined),
       openMentionedFile: vi.fn(async (message, respond) => {
         respond({ type: 'open_mentioned_file_result', success: true, path: message.path });
+      }),
+    },
+    review: {
+      requestFileDiff: vi.fn(async (message, respond) => {
+        respond({
+          type: 'file_diff_result',
+          turnId: message.turnId,
+          fileId: message.fileId,
+          revision: message.revision,
+          status: 'pending',
+        });
       }),
     },
     extensions: {

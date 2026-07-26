@@ -50,7 +50,10 @@ import {
   type PromptSubmissionResult,
   type NavigateTreeResult,
 } from '../core/agent-session.ts';
-import type { FileReviewTurnSnapshot } from '../core/review/file-review.ts';
+import type {
+  FileReviewProjectionUpdate,
+  FileReviewTurnSnapshot,
+} from '../core/review/file-review.ts';
 import {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -82,14 +85,6 @@ import {
   createArtifactChangesReviewSummary,
   createRuntimeChangesReviewSummary,
 } from './review/changes-review-summary-projector.ts';
-import {
-  CHAT_FILE_CHANGE_DIFF_PREVIEW_POLICY,
-  ArtifactFileChangeDiffPreviewProvider,
-  CompositeFileChangeDiffPreviewProvider,
-  FileChangeDiffPreviewMemo,
-  RuntimeFileChangeDiffPreviewProvider,
-  createMemoizedFileChangeDetailsEnricher,
-} from './review/file-change-diff-preview.ts';
 import { FileReviewArtifactFlushScheduler } from './review/file-review-artifact-flush-scheduler.ts';
 import { SessionExecutionGate } from './session-execution-gate.ts';
 
@@ -103,6 +98,17 @@ export type ScoutSessionEvent =
       sessionId: string;
       sessionFile?: string;
       changesReview?: ScoutChangesReviewSummary;
+    }
+  | {
+      type: 'changes_review_projection_updated';
+      sessionId: string;
+      sessionFile?: string;
+      turnId: string;
+      fileId: string;
+      revision: number;
+      status: 'ready' | 'unavailable';
+      additions: number;
+      deletions: number;
     };
 
 export interface ExtensionSessionCoordinatorOptions {
@@ -144,12 +150,12 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     startSave: (entry) => this.startFileReviewArtifactSave(entry),
   });
   private readonly fileReviewArtifactWrites = new Set<Promise<void>>();
+  private fileReviewArtifactWriteTail: Promise<void> = Promise.resolve();
 
   private agentSession?: AgentSession;
   private sessionRuntime?: AgentSessionRuntime;
   private isInitializing = false;
   private disposePromise?: Promise<void>;
-  private previewGeneration = 0;
   private readonly sessionExecutionGate: SessionExecutionGate;
   private readonly pendingComposerIntents = new Map<string, ScoutPendingComposerIntent>();
   private readonly agentEventCorrelator = new AgentEventCorrelator();
@@ -166,7 +172,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   /** 投影记忆化：按 branch 引用稳定性缓存 ScoutMessage，AgentSession 切换时显式失效。 */
   private readonly scoutMessagesCache = new SessionMessageProjectionCache();
-  private readonly fileChangeDiffPreviewMemo = new FileChangeDiffPreviewMemo();
 
   constructor(options: ExtensionSessionCoordinatorOptions) {
     this.cwd = options.cwd;
@@ -207,10 +212,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   get currentCwd(): string {
     return this.cwd;
-  }
-
-  get toolPreviewGeneration(): number {
-    return this.previewGeneration;
   }
 
   get sessionFile(): string | undefined {
@@ -791,7 +792,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       toolPresentationKey: String(this.agentSession?.getToolRegistryVersion() ?? 0),
       formatDisplayPath: (path) => this.formatDisplayPath(path),
       resolveChangesReviewSummary: this.createChangesReviewSummaryResolver(),
-      enrichToolResultDetails: this.createFileChangeDetailsEnricher(),
       getToolPresentation: (toolName) => this.getToolPresentation(toolName),
     });
   }
@@ -870,7 +870,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       sessionId: this.sessionId,
       formatDisplayPath: (path) => this.formatDisplayPath(path),
       getToolPresentation: (toolName) => this.getToolPresentation(toolName),
-      enrichToolResultDetails: this.createFileChangeDetailsEnricher(),
       getUserMessageDetails: (message) => this.agentSession?.getUserMessageDetails(message),
     });
     if (scoutEvent) {
@@ -927,7 +926,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.unsubscribeAgentSession?.();
     this.agentEventCorrelator.reset();
     this.scoutMessagesCache.invalidate();
-    this.fileChangeDiffPreviewMemo.clear();
     this.setActiveChangesReview(undefined);
     if (disposePrevious) {
       this.agentSession?.dispose();
@@ -943,7 +941,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     agentSession: AgentSession,
   ): Promise<AgentSessionRuntimeDiagnostic[]> {
     this.cwd = agentSession.sessionManager.getCwd();
-    this.previewGeneration += 1;
     this.setAgentSession(agentSession, false);
     this.sessionExecutionGate.setCurrentSession(
       agentSession.sessionFile
@@ -963,7 +960,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.agentSession = undefined;
     this.agentEventCorrelator.reset();
     this.scoutMessagesCache.invalidate();
-    this.fileChangeDiffPreviewMemo.clear();
   }
 
   private logReplacementTeardownError(error: unknown): void {
@@ -1063,8 +1059,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       initialModel,
       initialThinkingLevel,
       sessionStartEvent,
-      onFileReviewUpdated: (agentSession, review) =>
-        this.handleFileReviewUpdated(agentSession, review),
+      onFileReviewUpdated: (agentSession, review, projectionUpdate) =>
+        this.handleFileReviewUpdated(agentSession, review, projectionUpdate),
       sessionExecution: this.sessionExecutionGate,
     });
 
@@ -1087,9 +1083,28 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private handleFileReviewUpdated(
     agentSession: AgentSession,
     review: FileReviewTurnSnapshot,
+    projectionUpdate?: FileReviewProjectionUpdate,
   ): void {
     if (this.agentSession === agentSession && this.sessionId === agentSession.sessionId) {
       this.setActiveChangesReview(createRuntimeChangesReviewSummary(review));
+      if (projectionUpdate) {
+        const file = review.files.find(
+          (candidate) =>
+            candidate.fileId === projectionUpdate.fileId &&
+            candidate.revision === projectionUpdate.revision,
+        );
+        this.emit({
+          type: 'changes_review_projection_updated',
+          sessionId: agentSession.sessionId,
+          sessionFile: agentSession.sessionFile,
+          turnId: projectionUpdate.turnId,
+          fileId: projectionUpdate.fileId,
+          revision: projectionUpdate.revision,
+          status: projectionUpdate.status,
+          additions: file?.additions ?? 0,
+          deletions: file?.deletions ?? 0,
+        });
+      }
     }
     this.scheduleFileReviewArtifactSave(agentSession, review);
   }
@@ -1142,7 +1157,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     sessionId: string;
     review: FileReviewTurnSnapshot;
   }): Promise<void> {
-    const write = this.saveFileReviewArtifact(entry);
+    const write = this.fileReviewArtifactWriteTail
+      .catch(() => undefined)
+      .then(() => this.saveFileReviewArtifact(entry));
+    this.fileReviewArtifactWriteTail = write;
     this.fileReviewArtifactWrites.add(write);
     void write.finally(() => {
       this.fileReviewArtifactWrites.delete(write);
@@ -1169,11 +1187,14 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       const { artifact, warnings } = prepareFileReviewArtifactForSession(
         createFileReviewArtifact(sessionId, review),
       );
+      if (artifact.files.length === 0) return;
       for (const warning of warnings) {
         this.outputChannel.appendLine(`[scout] ${warning}`);
       }
       await agentSession.appendEntry(FILE_REVIEW_ARTIFACT_CUSTOM_TYPE, artifact);
-      agentSession.releaseFileReviewTurnContent(review.turnId);
+      for (const file of artifact.files) {
+        agentSession.releaseFileReviewFileContent(file.fileId);
+      }
       this.advanceReviewProjectionVersion();
       this.scoutMessagesCache.invalidate();
     } catch (error) {
@@ -1228,32 +1249,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     };
   }
 
-  private createFileChangeDetailsEnricher(): ((details: unknown) => unknown) | undefined {
-    if (!this.agentSession) return undefined;
-    const agentSession = this.agentSession;
-    let artifactIndex: FileReviewArtifactIndex | undefined;
-    const provider = new CompositeFileChangeDiffPreviewProvider([
-      new RuntimeFileChangeDiffPreviewProvider((turnId) => agentSession.getFileReviewTurn(turnId)),
-      new ArtifactFileChangeDiffPreviewProvider((turnId) => {
-        artifactIndex ??= this.getFileReviewArtifactIndex();
-        return artifactIndex.artifactsByTurnId.get(turnId);
-      }),
-    ]);
-    return createMemoizedFileChangeDetailsEnricher(
-      provider,
-      CHAT_FILE_CHANGE_DIFF_PREVIEW_POLICY,
-      this.fileChangeDiffPreviewMemo,
-      this.createFileChangeDiffPreviewMemoScopeKey(agentSession),
-    );
-  }
-
-  private createFileChangeDiffPreviewMemoScopeKey(agentSession: AgentSession): string {
-    return [agentSession.sessionId, this.reviewProjectionVersion].join('\u0000');
-  }
-
   private advanceReviewProjectionVersion(): void {
     this.reviewProjectionVersion += 1;
-    this.fileChangeDiffPreviewMemo.clear();
   }
 
   /** 绑定扩展 core actions 到指定 AgentSession */
@@ -1333,7 +1330,6 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.agentSession = undefined;
       this.agentEventCorrelator.reset();
       this.scoutMessagesCache.invalidate();
-      this.fileChangeDiffPreviewMemo.clear();
       this.listeners.length = 0;
       for (const d of this.disposables) {
         try {

@@ -32,7 +32,12 @@ export interface ScoutControllerOptions {
   openChatSurface?: () => void | Promise<void>;
   openChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
-    options: { allowCurrentFileContextExpansion?: boolean; cwd: string; recordId?: string },
+    options: {
+      allowCurrentFileContextExpansion?: boolean;
+      cwd: string;
+      recordId?: string;
+      sessionId: string;
+    },
   ) => void | Promise<void>;
   openCurrentChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | undefined,
@@ -143,6 +148,10 @@ export class ScoutController implements vscode.Disposable {
         break;
       case 'protocol_cancel':
         this.protocolServer.cancel(message.requestId, surface);
+        break;
+      case 'changes_review_set_view_mode':
+      case 'changes_review_open_file':
+        // Changes review panel manager owns these panel-local commands.
         break;
     }
   }

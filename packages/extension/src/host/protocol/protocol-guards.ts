@@ -30,6 +30,26 @@ export function validateWebviewMessage(value: unknown): WebviewMessageGuardResul
     return { ok: true, message: value as unknown as WebviewMessage, error: '' };
   }
 
+  if (value.type === 'changes_review_set_view_mode') {
+    if (value.mode !== 'unified' && value.mode !== 'split') {
+      return {
+        ok: false,
+        error: 'changes_review_set_view_mode.mode must be unified or split',
+      };
+    }
+    return { ok: true, message: value as unknown as WebviewMessage, error: '' };
+  }
+
+  if (value.type === 'changes_review_open_file') {
+    if (typeof value.path !== 'string' || value.path.length === 0) {
+      return {
+        ok: false,
+        error: 'changes_review_open_file.path must be a non-empty string',
+      };
+    }
+    return { ok: true, message: value as unknown as WebviewMessage, error: '' };
+  }
+
   if (value.type !== 'protocol_request') {
     return { ok: false, requestId, error: `Unknown message type: ${String(value.type)}` };
   }

@@ -15,11 +15,17 @@ export function activate(context: vscode.ExtensionContext) {
   const cwd = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
   const panelManagerRef: { current?: ScoutWebviewPanelManager } = {};
+  const controllerRef: { current?: ScoutController } = {};
   const isDev = context.extensionMode === vscode.ExtensionMode.Development;
   const changesReviewPanelManager = new ScoutChangesReviewPanelManager(
     context.extensionUri,
     context.globalState,
     isDev,
+    (webview) => {
+      const controller = controllerRef.current;
+      if (!controller) throw new Error('Scout controller is not initialized');
+      return controller.bindWebview(webview, 'changes-review');
+    },
   );
   const controller = new ScoutController({
     extensionUri: context.extensionUri,
@@ -44,6 +50,7 @@ export function activate(context: vscode.ExtensionContext) {
         allowCurrentFileContextExpansion: options.allowCurrentFileContextExpansion,
         cwd: options.cwd,
         recordId: options.recordId,
+        sessionId: options.sessionId,
       }),
     openCurrentChangesReviewPanel: (review, options) =>
       changesReviewPanelManager.openCurrent({
@@ -58,6 +65,7 @@ export function activate(context: vscode.ExtensionContext) {
         sessionId: options.sessionId,
       }),
   });
+  controllerRef.current = controller;
   activeControllers.add(controller);
 
   const panelManager = new ScoutWebviewPanelManager(context.extensionUri, isDev, controller);

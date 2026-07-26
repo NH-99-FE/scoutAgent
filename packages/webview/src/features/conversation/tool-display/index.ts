@@ -14,6 +14,7 @@ export type {
   DiffToolDisplayDetail,
   FileEditToolDisplayResult,
   GenericToolDisplayResult,
+  LazyDiffToolDisplayDetail,
   ResolveToolDisplayOptions,
   TextToolDisplayDetail,
   ToolDisplayDetail,

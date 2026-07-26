@@ -3,7 +3,7 @@
 // ============================================================
 
 import { memo, useMemo } from 'react';
-import { useActiveChangesReview, useToolPreviewsById } from '@/store/conversation-store';
+import { useActiveChangesReview } from '@/store/conversation-store';
 import { ComposerActivityTray } from './ComposerActivityTray';
 import { createComposerChangesReviewSummary } from '../model/composer-changes-review-summary';
 
@@ -11,10 +11,9 @@ import { createComposerChangesReviewSummary } from '../model/composer-changes-re
 
 export const ComposerActivityTrayContainer = memo(function ComposerActivityTrayContainer() {
   const activeChangesReview = useActiveChangesReview();
-  const toolPreviewsById = useToolPreviewsById();
   const composerChangesReview = useMemo(
-    () => createComposerChangesReviewSummary(activeChangesReview, toolPreviewsById),
-    [activeChangesReview, toolPreviewsById],
+    () => createComposerChangesReviewSummary(activeChangesReview),
+    [activeChangesReview],
   );
 
   return <ComposerActivityTray changesReview={composerChangesReview} />;

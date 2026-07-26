@@ -19,6 +19,8 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { useFileDiff } from '@/features/changes-review/model/use-file-diff';
+import { useSessionStore } from '@/store/session-store';
 import {
   getProcessExpansionId,
   getToolDetailExpansionId,
@@ -35,6 +37,7 @@ import type {
 import { hasExpandableToolDisplayDetail, hasToolDisplaySummary } from '../tool-display';
 import type {
   DiffToolDisplayDetail,
+  LazyDiffToolDisplayDetail,
   TextToolDisplayDetail,
   ToolDisplayDetail,
   ToolDisplayIcon,
@@ -496,7 +499,109 @@ function ToolDetailPanel({
   status: ToolDisplayResult['status'];
 }) {
   if (detail.kind === 'diff') return <FileEditDiffPanel detail={detail} />;
+  if (detail.kind === 'lazy_diff') return <LazyFileDiffPanel detail={detail} />;
   return <TextToolDetailPanel detail={detail} status={status} />;
+}
+
+function LazyFileDiffPanel({ detail }: { detail: LazyDiffToolDisplayDetail }) {
+  const sessionId = useSessionStore((state) => state.sessionId);
+  const state = useFileDiff({
+    sessionId,
+    turnId: detail.review.turnId,
+    fileId: detail.review.fileId,
+    revision: detail.review.revision,
+    view: 'inline',
+    mode: 'unified',
+    includeTokens: false,
+    range: { hunkOffset: 0, hunkLimit: 8 },
+  });
+  const displayPath = detail.displayPath ?? detail.path;
+
+  if (detail.review.status === 'unavailable') {
+    return <LazyFileDiffStatus path={displayPath} message="Changes are unavailable" />;
+  }
+  if (state.status === 'idle' || state.status === 'loading' || state.status === 'pending') {
+    return (
+      <LazyFileDiffStatus
+        path={displayPath}
+        message={state.status === 'pending' ? '正在生成文件变更' : '正在加载文件变更'}
+      />
+    );
+  }
+  if (state.status === 'error' || state.status === 'unavailable') {
+    return (
+      <LazyFileDiffStatus path={displayPath} message={state.message ?? 'Changes are unavailable'} />
+    );
+  }
+  if (state.status !== 'ready') return null;
+
+  return (
+    <div
+      className="border-border/70 bg-surface-subtle max-w-full min-w-0 overflow-hidden rounded-lg border shadow-sm"
+      data-lazy-file-diff-panel="true"
+    >
+      <div className="border-border/60 flex min-h-8 items-center gap-1.5 border-b px-2.5 py-1 text-[12px] leading-5">
+        <FileDiff
+          aria-hidden="true"
+          className="text-muted-foreground/70 size-3.5 shrink-0"
+          strokeWidth={2}
+        />
+        <span className="text-foreground min-w-0 flex-1 truncate font-mono">{displayPath}</span>
+        <span className="text-diff-added shrink-0 font-mono">+{state.diff.additions}</span>
+        <span className="text-diff-removed shrink-0 font-mono">-{state.diff.deletions}</span>
+      </div>
+      <ScrollArea
+        className="max-h-44 max-w-full min-w-0 sm:max-h-56"
+        scrollbars="both"
+        type="always"
+        viewportClassName="max-h-44 sm:max-h-56"
+        viewportProps={{ style: { overflowX: 'auto' } }}
+      >
+        <pre className="m-0 w-max min-w-full py-1 font-mono text-[12px] leading-5">
+          {state.diff.rows.map((row, index) => {
+            const prefix =
+              row.type === 'added'
+                ? '+'
+                : row.type === 'removed'
+                  ? '-'
+                  : row.type === 'fold'
+                    ? '…'
+                    : ' ';
+            const text = row.type === 'fold' ? `${row.count ?? 0} unchanged lines` : row.text;
+            return (
+              <span
+                className={cn(
+                  'block min-h-5 min-w-full border-l-2 border-transparent px-2.5 whitespace-pre',
+                  row.type === 'added' && 'border-l-diff-added bg-diff-added-bg text-diff-added',
+                  row.type === 'removed' &&
+                    'border-l-diff-removed bg-diff-removed-bg text-diff-removed',
+                  row.type === 'fold' && 'text-muted-foreground',
+                )}
+                key={`${row.type}:${index}`}
+              >
+                {prefix}
+                {text || ' '}
+              </span>
+            );
+          })}
+        </pre>
+      </ScrollArea>
+      {state.diff.truncated ? (
+        <div className="border-border/60 text-muted-foreground border-t px-2.5 py-1 text-[11px]">
+          仅显示部分变更；打开 Scout Diff 查看更多
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LazyFileDiffStatus({ path, message }: { path: string; message: string }) {
+  return (
+    <div className="border-border/70 bg-surface-subtle max-w-full min-w-0 rounded-lg border px-2.5 py-2 text-[12px]">
+      <div className="text-foreground truncate font-mono">{path}</div>
+      <div className="text-muted-foreground mt-1">{message}</div>
+    </div>
+  );
 }
 
 function FileEditDiffPanel({ detail }: { detail: DiffToolDisplayDetail }) {

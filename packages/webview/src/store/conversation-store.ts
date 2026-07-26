@@ -12,7 +12,6 @@ import type {
   ScoutQueueState,
   ScoutRuntimeEvent,
   ScoutTreeNavigationAdmission,
-  ScoutToolCallPreview,
   ScoutToolExecutionResult,
   ScoutWebviewState,
 } from '@scout-agent/shared';
@@ -32,12 +31,6 @@ export interface ToolExecutionState {
   partialResult?: ScoutToolExecutionResult;
   result?: ScoutToolExecutionResult;
   isError: boolean;
-}
-
-export interface ToolCallPreviewState {
-  toolCallId: string;
-  toolName: string;
-  preview: ScoutToolCallPreview;
 }
 
 interface ConversationActions {
@@ -70,7 +63,6 @@ interface ConversationStore {
   sessionId: string;
   sessionFile: string;
   toolExecutionsById: Record<string, ToolExecutionState>;
-  toolPreviewsById: Record<string, ToolCallPreviewState>;
   actions: ConversationActions;
 }
 
@@ -122,7 +114,6 @@ const initialState = {
   sessionId: '',
   sessionFile: '',
   toolExecutionsById: {} as Record<string, ToolExecutionState>,
-  toolPreviewsById: {} as Record<string, ToolCallPreviewState>,
 };
 
 function getStateMessageKeys(messages: ScoutMessage[]): string[] {
@@ -326,7 +317,6 @@ export const useConversationStore = create<ConversationStore>((set) => ({
           sessionId: state.sessionId ?? '',
           sessionFile: state.sessionFile ?? '',
           toolExecutionsById: {},
-          toolPreviewsById: {},
         };
       }),
     applyRuntimeState: (state) =>
@@ -349,13 +339,11 @@ export const useConversationStore = create<ConversationStore>((set) => ({
         if (event.type === 'agent_start') {
           return {
             toolExecutionsById: {},
-            toolPreviewsById: {},
           };
         }
         if (event.type === 'agent_end') {
           return {
             toolExecutionsById: keepSettledToolExecutions(state.toolExecutionsById),
-            toolPreviewsById: {},
           };
         }
         if (
@@ -415,24 +403,8 @@ export const useConversationStore = create<ConversationStore>((set) => ({
               isError: event.isError,
             },
           };
-          const toolPreviewsById = { ...state.toolPreviewsById };
-          delete toolPreviewsById[event.toolCallId];
           return {
             toolExecutionsById: nextToolExecutionsById,
-            toolPreviewsById,
-          };
-        }
-        if (event.type === 'tool_call_preview_update') {
-          if (!isPreviewForCurrentSession(event, state)) return {};
-          return {
-            toolPreviewsById: {
-              ...state.toolPreviewsById,
-              [event.toolCallId]: {
-                toolCallId: event.toolCallId,
-                toolName: event.toolName,
-                preview: event.preview,
-              },
-            },
           };
         }
         return {};
@@ -441,13 +413,6 @@ export const useConversationStore = create<ConversationStore>((set) => ({
     reset: () => set(initialState),
   },
 }));
-
-function isPreviewForCurrentSession(
-  event: Extract<ScoutRuntimeEvent, { type: 'tool_call_preview_update' }>,
-  state: ConversationStore,
-): boolean {
-  return isEventForCurrentSession(event.sessionId, event.sessionFile, state);
-}
 
 function isChangesReviewUpdateForCurrentSession(
   event: ScoutChangesReviewUpdateEvent,
@@ -485,5 +450,4 @@ export const useActiveChangesReview = () =>
 export const useContextUsage = () => useConversationStore((state) => state.contextUsage);
 export const useToolExecutionsById = () =>
   useConversationStore((state) => state.toolExecutionsById);
-export const useToolPreviewsById = () => useConversationStore((state) => state.toolPreviewsById);
 export const useConversationActions = () => useConversationStore((state) => state.actions);

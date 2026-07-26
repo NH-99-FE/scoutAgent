@@ -133,6 +133,27 @@ const PAYLOAD_VALIDATORS = {
     optionalString('recordId'),
   ),
   open_current_changes_review: fields('type'),
+  request_file_diff: combine(
+    fields(
+      'type',
+      'sessionId',
+      'turnId',
+      'fileId',
+      'revision',
+      'view',
+      'mode',
+      'includeTokens',
+      'range',
+    ),
+    requiredString('sessionId'),
+    requiredString('turnId'),
+    requiredString('fileId'),
+    requiredInteger('revision'),
+    requiredEnum('view', ['inline', 'panel']),
+    requiredEnum('mode', ['unified', 'split']),
+    requiredBoolean('includeTokens'),
+    optionalHunkRange('range'),
+  ),
   fork_session: combine(
     fields('type', 'session', 'entryId', 'position'),
     requiredSessionIdentity('session'),
@@ -320,6 +341,28 @@ function optionalInteger(key: string): PayloadValidator {
     (typeof payload[key] === 'number' && Number.isInteger(payload[key]))
       ? undefined
       : `${key} must be an integer when provided`;
+}
+
+function requiredInteger(key: string): PayloadValidator {
+  return (payload) =>
+    typeof payload[key] === 'number' && Number.isInteger(payload[key])
+      ? undefined
+      : `${key} must be an integer`;
+}
+
+function optionalHunkRange(key: string): PayloadValidator {
+  return (payload) => {
+    const value = payload[key];
+    if (value === undefined) return undefined;
+    if (!isRecord(value)) return `${key} must be an object when provided`;
+    const fieldError = fields('hunkOffset', 'hunkLimit')(value);
+    if (fieldError) return `${key}.${fieldError}`;
+    const offsetError = requiredInteger('hunkOffset')(value);
+    if (offsetError) return `${key}.${offsetError}`;
+    const limitError = requiredInteger('hunkLimit')(value);
+    if (limitError) return `${key}.${limitError}`;
+    return undefined;
+  };
 }
 
 function requiredStringArray(key: string): PayloadValidator {

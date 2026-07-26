@@ -4,7 +4,10 @@
 // ============================================================
 
 import type { ScoutChangesReviewSummary } from '@scout-agent/shared';
-import type { FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
+import {
+  projectDiffDocumentSummary,
+  type FileReviewTurnSnapshot,
+} from '../../core/review/index.ts';
 import type { FileReviewArtifact } from './file-review-artifact.ts';
 
 // ---------- 类型 ----------
@@ -33,27 +36,37 @@ export function createRuntimeChangesReviewSummary(
 ): ScoutChangesReviewSummary {
   return createChangesReviewSummary({
     turnId: review.turnId,
-    files: review.files.map((file) => ({
-      path: file.absolutePath,
-      displayPath: file.displayPath ?? file.path,
-      additions: file.additions,
-      deletions: file.deletions,
-      latestSequence: file.latestSequence,
-    })),
+    files: review.files.map((file) => {
+      const summary = file.document
+        ? projectDiffDocumentSummary(file.document)
+        : { additions: file.additions, deletions: file.deletions };
+      return {
+        path: file.absolutePath,
+        displayPath: file.displayPath ?? file.path,
+        additions: summary.additions,
+        deletions: summary.deletions,
+        latestSequence: file.latestSequence,
+      };
+    }),
   });
 }
 
 export function createArtifactChangesReviewSummary(
   artifact: FileReviewArtifact,
 ): ScoutChangesReviewSummary {
+  const sequenceByRecordId = new Map(
+    artifact.records.map((record) => [record.recordId, record.sequence]),
+  );
   return createChangesReviewSummary({
     turnId: artifact.turnId,
     files: artifact.files.map((file) => ({
       path: file.absolutePath,
       displayPath: file.displayPath ?? file.path,
-      additions: file.additions,
-      deletions: file.deletions,
-      latestSequence: file.latestSequence,
+      additions: file.document.additions,
+      deletions: file.document.deletions,
+      latestSequence: Math.max(
+        ...file.recordIds.map((recordId) => sequenceByRecordId.get(recordId) ?? -1),
+      ),
     })),
   });
 }

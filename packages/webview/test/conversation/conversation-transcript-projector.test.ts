@@ -18,7 +18,6 @@ function makeProjectorOptions(
     items: [],
     isStreaming: false,
     toolExecutionsById: {},
-    toolPreviewsById: {},
     transcriptAddons: [],
     ...overrides,
   };

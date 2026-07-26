@@ -343,7 +343,7 @@ describe('session message projector', () => {
     });
   });
 
-  it('enriches tool result details while projecting session messages', () => {
+  it('preserves tool result details while projecting session messages', () => {
     const session = SessionManager.inMemory();
     session.appendMessage({
       role: 'toolResult',
@@ -361,23 +361,15 @@ describe('session message projector', () => {
       timestamp: 1,
     });
 
-    const messages = projectSessionBranchToScoutMessages(session.getBranch(), {
-      enrichToolResultDetails: (details) => ({
-        ...(details as Record<string, unknown>),
-        diffPreview: {
-          rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
-        },
-      }),
-    });
+    const messages = projectSessionBranchToScoutMessages(session.getBranch());
 
     expect(messages).toMatchObject([
       {
         role: 'toolResult',
         details: {
           kind: 'file_change',
-          diffPreview: {
-            rows: [{ type: 'added', newLineNumber: 1, text: 'const value = 1;' }],
-          },
+          additions: 1,
+          deletions: 1,
         },
       },
     ]);

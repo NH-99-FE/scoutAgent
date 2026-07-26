@@ -20,6 +20,27 @@ function request(payload: WebviewRequestPayload | Record<string, unknown>) {
 }
 
 describe('validateWebviewMessage', () => {
+  it('accepts changes review panel-local messages with validated fields', () => {
+    expect(
+      validateWebviewMessage({
+        type: 'changes_review_set_view_mode',
+        mode: 'split',
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      validateWebviewMessage({
+        type: 'changes_review_open_file',
+        path: '/workspace/src/app.ts',
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      validateWebviewMessage({
+        type: 'changes_review_set_view_mode',
+        mode: 'side-by-side',
+      }),
+    ).toMatchObject({ ok: false });
+  });
+
   it('accepts high-priority control abort messages without protocol envelope fields', () => {
     expect(validateWebviewMessage({ type: 'control_abort' })).toMatchObject({
       ok: true,

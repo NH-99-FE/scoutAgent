@@ -1,344 +1,147 @@
-# Changes Review Diff 当前实现
+# Changes Review Diff Architecture
 
-本文记录 Scout 当前“文件变更审查 diff”的实现。它包含两种互补体验：
+本文档描述 Scout 文件变更审查的当前实现。核心原则是：工具执行只提交文件突变事实，`DiffDocument` 是唯一 canonical diff，summary、artifact、聊天内 diff 与完整 panel 都从它单向投影。
 
-- 聊天里的 `write` / `edit` tool row：运行中显示轻量的动态 add/remove 预览，工具结束后把最终 `diffPreview` 附到 `file_change` details，允许“已编辑”行展开一个小 diff 卡片。
-- 独立 Changes Review panel：通过 `turnId` / `recordId` 打开完整审查视图，支持 unified / split diff、折叠上下文、历史恢复和 artifact fallback。
-
-核心边界是：完整文件内容不进入 shared 协议和聊天消息；webview 只消费 `@scout-agent/shared` 契约；host 负责把 runtime review 或 artifact 投影成可展示的协议数据。
+## 数据流
 
 ```mermaid
-flowchart TD
-  Tool["write / edit tool"] --> Payload["file_review_payload"]
-  Payload --> AgentSession["AgentSession capture"]
-  AgentSession --> Store["FileReviewStore runtime review"]
-  Store --> FileChange["tool result details: file_change"]
-  Store --> RuntimeSummary["runtime changes review summary"]
-  Store --> Artifact["session tree custom artifact"]
-  Artifact --> Released["release runtime content"]
-
-  FileChange --> HostProjection["host protocol projection"]
-  Store --> DiffProvider["RuntimeFileChangeDiffPreviewProvider"]
-  Artifact --> ArtifactProvider["ArtifactFileChangeDiffPreviewProvider"]
-  DiffProvider --> Memo["coordinator FileChangeDiffPreviewMemo"]
-  ArtifactProvider --> Memo
-  Memo --> DiffPreview["details.diffPreview"]
-  DiffPreview --> Chat["completed tool row diff card"]
-
-  Store --> Panel["ChangesReviewPanelManager"]
-  Artifact --> Panel
-  Panel --> ReviewModel["ScoutChangesReviewModel"]
-  ReviewModel --> ReviewWebview["changes-review webview"]
+flowchart LR
+  Tool["Pi-compatible edit/write"] --> Decorator["Operations capture decorator"]
+  Decorator --> Capture["MutationCaptureCoordinator"]
+  Capture --> Journal["MutationJournal"]
+  Journal --> Worker["single Diff Worker"]
+  Worker --> Document["canonical DiffDocument"]
+  Document --> Summary["summary projection"]
+  Document --> Artifact["artifact v2"]
+  Document --> Resolver["lazy file-diff resolver"]
+  Resolver --> Chat["expanded tool row"]
+  Resolver --> Panel["expanded review file"]
 ```
 
-## 1. 分层职责
+分层职责：
 
-当前实现按 Scout / Pi 分层放置：
+- `extension/core/tools` 保持 Pi 的 edit/write 参数、执行顺序、返回值与错误语义，不包含 Scout UI/review payload。
+- `extension/core/review` 装饰 Operations，捕获 before/after snapshot，写入 append-only `MutationJournal`，并把 diff 交给单 Worker。
+- `extension/core/agent-session` 冻结 mutation scope 的 session/turn/tool identity，并把 Journal record 投影为轻量 `file_change` details。
+- `extension/host/review` 负责 summary、artifact、bounded rows 与 syntax tokens 等 host 投影。
+- `extension/host/protocol` 只按 shared 协议解析 `(sessionId, turnId, fileId, revision)`，不接受任意文件路径。
+- `webview` 只保存轻量 identity/status；用户展开文件或工具行时才请求 rows。
 
-- `extension/core/tools` 捕获工具写文件前后的文本，生成内部 `file_review_payload`。
-- `extension/core/agent-session` 捕获工具结果，把 payload 写入 `FileReviewStore`，再把工具返回降级成轻量 `file_change` details。
-- `extension/core/review` 负责 runtime review store、diff 计算、上下文折叠和 token 计算，不感知 VS Code webview。
-- `extension/host/review` 负责 artifact 持久化、完整 panel model、chat 内 final diff preview provider。
-- `extension/host/protocol` 负责把 agent/session 事件投影成 shared 协议，并在协议边界装饰 `file_change.diffPreview`。
-- `shared` 定义 `ScoutFileChangeDetails`、`ScoutFileChangeDiffPreview`、`ScoutChangesReviewModel` 等跨边界契约。
-- `webview` 只根据 shared 契约渲染聊天 tool row 和独立 review panel。
+## Mutation capture 与提交点
 
-## 2. 工具层捕获
+内置 edit/write 依据 tool source identity 装配 capture decorator；同名 extension tool 不会被误捕获。
 
-文件修改的第一手数据来自：
+- edit 的 baseline 复用 Pi edit 本次 `readFile` 的同一 Buffer，没有额外磁盘读取。
+- write 通过 snapshot provider 读取 baseline；远程 Operations 没有 provider 时不会回退读取本地磁盘。
+- `writeFile` 成功返回是 mutation 提交点。成功写入后即使工具随后报错，Journal 仍记录 `toolOutcome: 'error_after_write'`。
+- 同一路径的写入仍由 file mutation queue 串行化。
+- snapshot 使用 fatal UTF-8 解码；二进制、非法编码和超限内容以 unavailable metadata 表达，不阻止工具写入。
 
-- `packages/extension/src/core/tools/write.ts`
-- `packages/extension/src/core/tools/edit.ts`
+`MutationJournal` 的聚合键是 owner、turn 与规范化 absolute path。一个 turn 内同一文件的多次写入保留第一份 baseline 和最后一份 after，并递增 revision；每个工具调用仍保留独立 record。
 
-工具执行后不会直接返回补丁文本，而是返回内部 details：
+## Canonical DiffDocument
+
+`packages/extension/src/core/review/diff-document.ts` 定义唯一 diff 事实：
 
 ```ts
-{
-  kind: 'file_review_payload',
-  operation: 'write' | 'edit',
-  path,
-  absolutePath,
-  displayPath,
-  originalContent,
-  modifiedContent,
-  unavailableReason,
+interface DiffDocument {
+  version: 1;
+  beforeFingerprint?: DiffContentFingerprint;
+  afterFingerprint?: DiffContentFingerprint;
+  beforeLineCount: number;
+  afterLineCount: number;
+  additions: number;
+  deletions: number;
+  firstChangedLine?: number;
+  unavailableReason?: DiffDocumentUnavailableReason;
+  hunks: DiffHunk[];
 }
 ```
 
-`write` 在写入前尽量读取旧文件内容；文件不存在按新增文件处理。`edit` 因为本身需要读取原文件，所以会复用原始 buffer 做 review 解码。两者都会通过文本大小、UTF-8 解码和二进制判断保护审查路径，超大文件或不适合展示的内容会写入 `unavailableReason`，但不影响工具本身完成写入。
+Diff Worker 对某个 file revision 只执行一次 line diff。Worker 响应必须同时匹配 fileId 和 revision；旧 revision 的迟到结果直接丢弃。Extension Host 的 summary、artifact encode 与 lazy row 投影不得重新执行 line diff，也不得读取当前工作区文件来伪造历史上下文。
 
-## 3. AgentSession 与 FileReviewStore
+`DiffDocument` 不保存 syntax tokens。tokens 只在 lazy 请求要求时由 host 生成并进入 bounded LRU。
 
-`packages/extension/src/core/agent-session.ts` 在工具调用结束时捕获成功的 `file_review_payload`，并写入 `FileReviewStore`。
+## Runtime details 与投影事件
 
-`FileReviewStore` 的聚合语义在 `packages/extension/src/core/review/file-review.ts`：
-
-- 每个 assistant run 对应一个 review turn。
-- 每次工具写入生成一个全局递增的 `recordId`，例如 `review-1`。
-- 同一 turn 内按文件聚合：同一文件多次修改时保留第一次修改前的 `originalContent`，持续更新最终 `modifiedContent`。
-- 每个文件记录 `recordIds`、`latestRecordId`、`latestSequence`、`additions`、`deletions` 和 `firstChangedLine`。
-- 聊天 tool result 只得到轻量 `ScoutFileChangeDetails`。
-
-`file_change` details 形态：
+工具结果只携带轻量引用：
 
 ```ts
-{
-  kind: 'file_change',
-  path,
-  displayPath,
-  additions,
-  deletions,
-  firstChangedLine,
+interface ScoutFileChangeDetails {
+  kind: 'file_change';
+  path: string;
+  displayPath?: string;
   review: {
-    turnId,
-    recordId,
-  },
+    turnId: string;
+    recordId: string;
+    fileId: string;
+    revision: number;
+    status: 'pending' | 'ready' | 'unavailable';
+  };
+  toolOutcome?: 'success' | 'error_after_write';
 }
 ```
 
-这个对象是聊天消息里的稳定入口。它不保存原文、修改后文本，也不保存完整 diff。后续 host 可以根据 `turnId` / `recordId` 回到 runtime review 或 artifact。
+它不包含 before/after、rows、tokens 或预测 preview。投影完成时 host 发布 `changes_review_projection_updated`，其中带 session/turn/file/revision/status 与统计。Webview 只对完全相同 identity 的 pending 请求重试，避免旧事件唤醒新 revision。
 
-## 4. Diff 计算
+## Lazy diff 协议
 
-核心入口是 `computeReviewDiff(originalContent, modifiedContent, options)`。
-
-主要防线：
-
-- 已有 `unavailableReason` 时直接返回不可审查状态。
-- 原文和修改后文本完全一致时短路。
-- CRLF / CR 会归一化为 LF，避免换行差异制造噪声。
-- 超过 `MAX_REVIEW_TEXT_BYTES` 或 `MAX_REVIEW_DIFF_ROWS` 时降级为不可审查。
-- 行级 diff 使用结构化 row：`context`、`added`、`removed`、`fold`。
-- 只有需要 token 的路径才生成语法 token 和行内 diff token。
-
-完整 review panel 需要更丰富的视觉信息，因此 runtime 或 artifact 路径可以包含 token；聊天内 `diffPreview` 默认 `includeTokens: false`，只保留最多 40 行文本预览。
-
-## 5. Artifact 持久化与恢复
-
-artifact 位于 host 层：
-
-- `packages/extension/src/host/review/file-review-artifact.ts`
-- `packages/extension/src/host/session-coordinator.ts`
-
-当 `AgentSession` 报告 review 更新时，`ExtensionSessionCoordinator` 会调度 `FileReviewArtifactFlushScheduler`。在 session 空闲、导出、dispose 或显式打开 artifact 前，会 flush pending review，并写入 session tree custom entry：
-
-```ts
-scout.file_review_artifact
-```
-
-artifact 保存：
-
-- `sessionId`
-- `turnId`
-- `createdAt`
-- `records`
-- `files`
-- 每个文件的统计、`latestRecordId`、`recordIds`
-- 折叠后的 diff rows
-- `unavailableReason`
-- 修改后内容 fingerprint
-
-写入成功后 host 调用 `releaseFileReviewTurnContent(turnId)`，runtime store 释放原文和修改后文本，只保留轻量记录。之后完整 review panel 和聊天 final preview 都可以从 artifact 恢复 diff。
-
-artifact 有边界控制：
-
-- `MAX_REVIEW_ARTIFACT_FILES = 100`
-- `MAX_REVIEW_ARTIFACT_BYTES = 2 * 1024 * 1024`
-- `MAX_REVIEW_ARTIFACT_ROWS = 20_000`
-
-降级顺序优先保住文件列表和统计：裁 rows、去 token、全折叠、最后才丢弃溢出文件。
-
-## 6. 聊天内 final diffPreview
-
-聊天内小 diff 卡片由 `packages/extension/src/host/review/file-change-diff-preview.ts` 生成。它只发生在 host 协议投影边界，不污染 core runtime，也不进入 provider 请求上下文。
-
-### Provider 组合
-
-当前有三个 provider：
-
-- `RuntimeFileChangeDiffPreviewProvider`：从 runtime review 计算 collapsed diff。若 review 不存在或 `contentReleased`，直接跳过。
-- `ArtifactFileChangeDiffPreviewProvider`：从已持久化 artifact 的 rows 截取预览。
-- `CompositeFileChangeDiffPreviewProvider`：按顺序尝试 runtime，再尝试 artifact。
-
-匹配规则要求：
-
-- `details.kind === 'file_change'`
-- `details.review.turnId` 是字符串
-- `details.review.recordId` 是字符串
-- 文件的 `latestRecordId === details.review.recordId`
-- 路径匹配 `absolutePath`，或 `displayPath` 匹配
-
-`recordId` 是必须条件，因为同一个文件在一轮中可能多次修改。没有 `recordId` 时不能把“同文件最新 diff”挂到旧 tool row 上。
-
-### Preview policy
-
-聊天内使用 `CHAT_FILE_CHANGE_DIFF_PREVIEW_POLICY`：
+聊天和 changes-review surface 都通过 `request_file_diff` 请求：
 
 ```ts
 {
-  maxRows: 40,
-  includeTokens: false,
+  type: 'request_file_diff';
+  sessionId: string;
+  turnId: string;
+  fileId: string;
+  revision: number;
+  view: 'inline' | 'panel';
+  mode: 'unified' | 'split';
+  includeTokens: boolean;
+  range?: { hunkOffset: number; hunkLimit: number };
 }
 ```
 
-`createDiffPreview()` 会：
+Host resolver 的查找顺序是当前 runtime review，然后是当前 session branch 的 artifact。它校验 session、turn、file 和 revision，不接受 path lookup。响应状态为 `ready`、`pending`、`unavailable` 或 `error`。
 
-- 截取前 40 行。
-- 设置 `truncated: true` 表示预览被截断。
-- 保留 `unavailableReason`，即使没有 rows 也能让 webview 展示不可用原因。
-- 复制 row，默认去掉 token，避免聊天消息携带过重结构。
+边界策略：
 
-## 7. Coordinator 级 memo
+- inline：最多 40 rows / 8 hunks。
+- panel：最多 2000 rows / 200 hunks。
+- Host projection cache 与 token cache 都是 bounded LRU。
+- Webview 对相同请求去重并引用计数；最后一个消费者卸载时取消 transport 请求。
+- 工具行和 review 文件折叠时不请求 diff；展开后才挂载 lazy hook。
+- Panel 分段加载 hunks，避免一次把完整大 diff 挂到 DOM。
 
-为了避免同一条 final diff 在多个投影阶段重复计算，缓存不放在 provider 内部，而是放在 `ExtensionSessionCoordinator` 实例级：
+## Artifact v2
 
-```ts
-private readonly fileChangeDiffPreviewMemo = new FileChangeDiffPreviewMemo();
-```
+Artifact v2 只持久化 records、file identity/revision 和 canonical `DiffDocument`。它明确不保存：
 
-memo 是一个有界 Map，默认最多 64 条，缓存 value 和 miss。命中后会刷新插入顺序，超过上限时淘汰最旧项。
+- original/modified full content；
+- projected rows 或 fold hidden rows；
+- syntax tokens；
+- 当前磁盘文件内容。
 
-cache key 由两层组成：
+写入前会校验结构、交叉引用和规模上限。持久化成功后 runtime 按文件释放 snapshot 字符串，ready `DiffDocument` 与轻量 metadata 保留。
 
-- scope：`sessionId + reviewProjectionVersion`
-- item：`turnId + recordId + policy.maxRows + policy.includeTokens`
+只写 v2；v1 通过 `decodeFileReviewArtifact()` 的集中 adapter 只读恢复为内存 v2，旧 rows 会转换成 canonical hunks，旧 tokens 被丢弃。其余生产路径不保留 v1 分支。
 
-这样 `tool_execution_end` 和后续 `toolResult message_end` 即使通过不同 enricher factory，也能复用同一条 `diffPreview`。同时 review 投影变化后会换 scope，并且主动清空 memo，避免 stale cache。
+## Webview 展示
 
-清理时机：
+- 会话中的 completed edit/write 行始终先展示路径与状态。
+- 用户展开行后才请求 inline diff；pending 时等待精确 projection event，再重试。
+- 完整 Changes Review panel 初始只接收文件摘要和 lazy identity，`rows` 为空。
+- 展开文件后请求 panel diff；view mode 只改变 projection/render 方式，不改变 canonical document。
+- `file_diff_result` 是 request-scoped response，不写入全局 conversation event store。
 
-- `setAgentSession()`
-- `teardownAgentSessionBinding()`
-- `disposeAsync()`
-- `advanceReviewProjectionVersion()`
+## 回归约束
 
-`reviewProjectionVersion` 会在 active review 更新、artifact 写入并 release runtime content 后推进。它同时用于 `SessionMessageProjectionCache` 的 `reviewProjectionKey`，确保历史消息投影和 diff preview 投影一起失效。
+相关测试必须覆盖：
 
-这个设计的取舍是：provider 保持纯解析职责，coordinator 负责生命周期和投影版本。provider 不需要知道 session 切换、artifact flush 或 runtime release。
-
-## 8. 协议投影时机
-
-`packages/extension/src/host/protocol/agent-event-mapper.ts` 控制哪些事件会附加 `diffPreview`。
-
-运行中：
-
-- `tool_execution_update` 不 enrich details。
-- `message_start` / `message_update` 不 enrich tool result details。
-- webview 使用 `file_edit` preview 展示动态 add/remove。这个阶段内容可能持续变化，不生成最终 diff 卡片。
-
-结束后：
-
-- `tool_execution_end` 会 enrich result details。
-- `message_end` 如果是 `toolResult`，会 enrich message details。
-- `getScoutMessages()` 对 session branch 做静态投影时，也传入同一个 final details enricher。
-
-因此“正在编辑”保持轻量且稳定，“已编辑”才拥有可展开的 final diff 卡片。这个时机避免了运行中 diff 不断变化导致 UI 预览跳动，也让刷新或恢复消息时仍能通过 artifact 补回最终 preview。
-
-## 9. Webview tool row 展示
-
-聊天 webview 的展示链路在：
-
-- `packages/webview/src/features/conversation/tool-display/resolve-tool-display.ts`
-- `packages/webview/src/features/conversation/tool-display/presenters.ts`
-- `packages/webview/src/features/conversation/tool-display/helpers.ts`
-- `packages/webview/src/features/conversation/AssistantProcessBlock.tsx`
-
-`resolveToolDisplayResult()` 优先使用已完成的 `toolResult`，其次才使用 runtime result 或 partial result。`presentEditTool()` / `presentWriteTool()` 会先尝试 `createFileChangeDisplayFromDetails()`：
-
-- 有 `file_change` details 时显示“已编辑/已写入”状态和 `+N -M` 指标。
-- 有 `details.diffPreview` 且工具不是 error 时生成 `DiffToolDisplayDetail`。
-- `truncated` 会追加“预览已截断，请打开审查查看完整变更”提示行。
-- 只有 `unavailableReason` 没有 rows 时，会渲染 error panel。
-
-没有 final `file_change.diffPreview` 时，“已编辑”行只展示路径和统计，不会错误地展开空 diff。运行中则使用 `file_edit` preview 的动态 diff，而不是 final preview。
-
-## 10. 完整 Changes Review panel
-
-完整审查通过 shared request 打开：
-
-```ts
-{
-  type: 'open_changes_review',
-  turnId,
-  recordId,
-}
-```
-
-host 处理时会：
-
-1. 非 streaming 状态下先 flush 指定 turn 的 pending artifact。
-2. 优先读取当前分支 artifact。
-3. artifact 不存在时回退 runtime review。
-4. 校验 `recordId` 属于当前 review records。
-5. 打开或更新 Changes Review webview panel。
-
-panel model 由 `packages/extension/src/host/review/changes-review-panel.ts` 生成，输出 `ScoutChangesReviewModel`。
-
-runtime review 路径会重新调用 `computeReviewDiff()`，并根据原文/修改后文本补充 fold hidden rows。artifact 路径复用持久化 rows；如果当前磁盘文件 fingerprint 与 artifact 的修改后内容一致，才补全可展开隐藏上下文。否则仍展示 artifact collapsed diff，但不展开隐藏行，避免拿当前已变化的文件伪造历史上下文。
-
-panel manager 还会计算 model signature。signature 未变化时不重载 HTML，只发送滚动指令，减少闪烁。
-
-## 11. Webview review panel
-
-独立 panel 的 webview 代码在：
-
-- `packages/webview/src/surfaces/changes-review/ChangesReviewApp.tsx`
-- `packages/webview/src/surfaces/changes-review/ChangesReviewPanel.tsx`
-- `packages/webview/src/surfaces/changes-review/ReviewFileSection.tsx`
-- `packages/webview/src/surfaces/changes-review/ReviewDiff.tsx`
-- `packages/webview/src/surfaces/changes-review/split-diff-model.ts`
-
-panel 内维护纯 UI 状态：
-
-- 当前 view mode：`unified` / `split`
-- 文件 section 展开状态
-- fold reveal 数量
-
-view mode 会通过 `changes_review_set_view_mode` 发回 extension 并写入 `globalState`。打开文件通过 `changes_review_open_file` 发回 host。两者仍然使用 shared review 协议，不直接引用 extension 内部类型。
-
-## 12. 性能边界
-
-当前实现的性能控制点：
-
-- 工具捕获层限制文本大小、编码和二进制内容。
-- `computeReviewDiff()` 对相同内容、换行归一化、大 diff rows 做短路或降级。
-- artifact 有文件数、字节数和 row 数上限，持久化后释放 runtime 原文。
-- 聊天 `diffPreview` 最多 40 行、不带 token，只在 final 阶段生成。
-- `FileChangeDiffPreviewMemo` 在 coordinator 层跨多个 enricher factory 复用同一 projection 的 preview。
-- `SessionMessageProjectionCache` 使用 `reviewProjectionKey`，避免无变化时重复投影整条消息分支。
-- review panel 通过 model signature 避免重复重建 webview。
-
-常规小文件会展示完整而清晰的 diff；超大文件、二进制文件或不可恢复历史会降级成统计和明确原因，而不是让 extension 或 webview 处理无界文本。
-
-## 13. 测试覆盖
-
-主要回归测试分布：
-
-- `packages/extension/test/core/file-review.test.ts`
-  - review store 聚合、文本限制、二进制/编码、换行归一化、diff rows。
-- `packages/extension/test/host/review/file-review-artifact.test.ts`
-  - artifact 创建、大小控制、降级策略、当前分支 artifact 收集。
-- `packages/extension/test/host/review/file-change-diff-preview.test.ts`
-  - runtime/artifact preview provider、`recordId` 匹配、`truncated` / `unavailableReason`、memo value/miss、有界淘汰、跨 enricher 复用。
-- `packages/extension/test/host/session-coordinator.test.ts`
-  - artifact flush 生命周期、coordinator 级 preview memo 复用、projection version 变化后重新 resolve。
-- `packages/extension/test/host/protocol.test.ts`
-  - `tool_execution_end` 和 `toolResult message_end` enrich final details，运行中的 update 不 enrich。
-- `packages/extension/test/host/protocol/session-message-projector.test.ts`
-  - session branch 静态投影、review projection key、assistant changes review attach。
-- `packages/webview/test/conversation/conversation-view.test.tsx`
-  - completed file change row 展开 diff、截断/不可用提示、运行中 preview 展示。
-- `packages/webview/test/store/conversation-store.test.ts`
-  - runtime event 与 persisted message 合并行为。
-- `packages/webview/test/changes-review/split-diff-model.test.ts`
-  - split diff 投影、added/removed 对齐、fold reveal。
-
-## 14. 当前设计结论
-
-现在的实现把两种审查体验分开了：
-
-- 运行中 tool preview 是动态、轻量、视觉稳定的过程反馈。
-- 已完成 tool row 的 `diffPreview` 是 final projection，只在工具结束和消息落定后出现。
-- 完整 review panel 是可恢复的权威审查视图，runtime 与 artifact 都能提供数据源。
-
-coordinator 级 memo 是合适的位置：它既能跨 `tool_execution_end`、`message_end`、session branch 投影复用计算，又掌握 session 生命周期、artifact flush 和 review projection version。provider 继续保持纯解析，webview 继续只消费 shared 协议，整体职责边界比较清晰。
+- edit 无额外 baseline read，write provider/fallback 语义与 error-after-write；
+- Journal 聚合、revision、stale Worker response 与 snapshot release；
+- canonical diff 的 CRLF、create/delete、fold 与单次 diff；
+- artifact v2 encode、v1 decode、规模/引用校验；
+- lazy resolver 的 runtime/artifact、pending/stale、range/token/cache；
+- Webview 未展开不请求、展开请求、dedupe/cancel、projection event 重试；
+- panel model 不含 eager rows，聊天协议不含预测 preview。

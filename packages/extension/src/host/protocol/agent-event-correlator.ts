@@ -12,7 +12,6 @@ export interface AgentEventCorrelationContext {
   sessionId?: string;
   formatDisplayPath?: (path: string) => string;
   getToolPresentation?: (toolName: string) => ToolPresentationMetadata | undefined;
-  enrichToolResultDetails?: (details: unknown) => unknown;
   getUserMessageDetails?: (message: UserMessage) => unknown;
 }
 
@@ -31,7 +30,6 @@ export class AgentEventCorrelator {
       messageId: this.getMessageId(event, context.sessionId),
       formatDisplayPath: context.formatDisplayPath,
       getToolPresentation: context.getToolPresentation,
-      enrichToolResultDetails: context.enrichToolResultDetails,
       getUserMessageDetails: context.getUserMessageDetails,
     });
   }

@@ -15,7 +15,6 @@ import type {
 export function resolveToolDisplayResult({
   toolCall,
   runtime,
-  preview,
   toolResult,
   assistantErrorMessage,
   assistantStopReason,
@@ -27,7 +26,6 @@ export function resolveToolDisplayResult({
     toolName,
     args,
     runtime,
-    preview,
     toolResult,
     assistantErrorMessage,
     assistantStopReason,
@@ -40,7 +38,6 @@ function createToolDisplayContext({
   toolName,
   args,
   runtime,
-  preview,
   toolResult,
   assistantErrorMessage,
   assistantStopReason,
@@ -57,7 +54,6 @@ function createToolDisplayContext({
       isError: toolResult.isError,
       completionLabel: toolResult.isError ? '失败' : '成功',
       details: toolResult.details,
-      preview,
     };
   }
 
@@ -71,7 +67,6 @@ function createToolDisplayContext({
       isError: runtime.isError,
       completionLabel: runtime.isError ? '失败' : '成功',
       details: runtime.result.details,
-      preview,
     };
   }
 
@@ -84,7 +79,6 @@ function createToolDisplayContext({
       bodyText: '',
       isError: false,
       completionLabel: '已停止',
-      preview,
     };
   }
 
@@ -97,7 +91,6 @@ function createToolDisplayContext({
       bodyText: assistantErrorMessage ?? '',
       isError: true,
       completionLabel: '失败',
-      preview,
     };
   }
 
@@ -111,7 +104,6 @@ function createToolDisplayContext({
       isError: false,
       completionLabel: '',
       details: runtime.partialResult.details,
-      preview,
     };
   }
 
@@ -119,10 +111,9 @@ function createToolDisplayContext({
     toolName,
     args,
     argsText,
-    status: runtime || preview ? 'running' : 'pending',
+    status: runtime ? 'running' : 'pending',
     bodyText: '',
     isError: false,
     completionLabel: '',
-    preview,
   };
 }

@@ -6,26 +6,15 @@
 import type { ExtensionEventMessage, ScoutBusyState } from '@scout-agent/shared';
 import type { ScoutSessionEvent } from '../session-coordinator.ts';
 import { AgentEventUpdateCoalescer } from './agent-event-update-coalescer.ts';
-import {
-  ToolCallPreviewProjector,
-  type CaptureWritePreviewBase,
-  type ComputeEditPreview,
-  type ComputeWritePreview,
-  type ToolCallPreviewContext,
-} from './tool-call-preview-projector.ts';
 
 // ---------- 类型 ----------
 
 export interface SessionEventForwarderOptions {
   isStreaming: () => boolean;
-  getPreviewContext?: () => ToolCallPreviewContext;
   publishEvent: (message: ExtensionEventMessage) => void;
   pushState: () => Promise<void>;
   pushQueueState: () => void;
   pushTreeData: () => Promise<void>;
-  computeEditPreview?: ComputeEditPreview;
-  computeWritePreview?: ComputeWritePreview;
-  captureWritePreviewBase?: CaptureWritePreviewBase;
   logError?: (message: string) => void;
   agentEventFlushDelayMs?: number;
 }
@@ -125,7 +114,6 @@ export class SessionEventForwarder {
   private readonly pushState: () => Promise<void>;
   private readonly pushQueueState: () => void;
   private readonly pushTreeData: () => Promise<void>;
-  private readonly previewProjector?: ToolCallPreviewProjector;
   private readonly agentEventCoalescer: AgentEventUpdateCoalescer;
   private busyState: ScoutBusyState = IDLE_BUSY_STATE;
 
@@ -135,16 +123,6 @@ export class SessionEventForwarder {
     this.pushState = options.pushState;
     this.pushQueueState = options.pushQueueState;
     this.pushTreeData = options.pushTreeData;
-    if (options.getPreviewContext) {
-      this.previewProjector = new ToolCallPreviewProjector({
-        getPreviewContext: options.getPreviewContext,
-        publishEvent: options.publishEvent,
-        computeEditPreview: options.computeEditPreview,
-        computeWritePreview: options.computeWritePreview,
-        captureWritePreviewBase: options.captureWritePreviewBase,
-        logError: options.logError,
-      });
-    }
     this.agentEventCoalescer = new AgentEventUpdateCoalescer({
       publishEvent: (event) => {
         this.publishEvent({ type: 'agent_event', event });
@@ -173,7 +151,6 @@ export class SessionEventForwarder {
     }
 
     if (event.type === 'agent_event') {
-      this.previewProjector?.handleAgentEvent(event.event);
       this.agentEventCoalescer.handle(event.event);
     }
 
@@ -183,6 +160,20 @@ export class SessionEventForwarder {
         sessionId: event.sessionId,
         sessionFile: event.sessionFile,
         changesReview: event.changesReview,
+      });
+    }
+
+    if (event.type === 'changes_review_projection_updated') {
+      this.publishEvent({
+        type: 'changes_review_projection_updated',
+        sessionId: event.sessionId,
+        sessionFile: event.sessionFile,
+        turnId: event.turnId,
+        fileId: event.fileId,
+        revision: event.revision,
+        status: event.status,
+        additions: event.additions,
+        deletions: event.deletions,
       });
     }
 

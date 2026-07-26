@@ -3225,8 +3225,6 @@ describe('ChatApp', () => {
     const makeToolResult = (
       toolCallId: string,
       path: string,
-      additions: number,
-      deletions: number,
       recordId: string,
       timestamp: number,
     ): Extract<ScoutMessage, { role: 'toolResult' }> => ({
@@ -3238,11 +3236,12 @@ describe('ChatApp', () => {
         kind: 'file_change',
         path,
         displayPath: path.replace(/^\/workspace\//, ''),
-        additions,
-        deletions,
         review: {
           turnId: 'turn-1',
           recordId,
+          fileId: path,
+          revision: 1,
+          status: 'ready',
         },
       },
       isError: false,
@@ -3275,8 +3274,8 @@ describe('ChatApp', () => {
           },
         ],
       },
-      makeToolResult('tool-1', '/workspace/src/app.ts', 19, 19, 'review-1', 3),
-      makeToolResult('tool-2', '/workspace/src/other.ts', 8, 4, 'review-2', 4),
+      makeToolResult('tool-1', '/workspace/src/app.ts', 'review-1', 3),
+      makeToolResult('tool-2', '/workspace/src/other.ts', 'review-2', 4),
     ];
     const streamingState = makeState(streamingMessages, {
       isStreaming: true,
@@ -3290,40 +3289,6 @@ describe('ChatApp', () => {
     const { container } = render(<ChatApp />);
 
     expect(container.querySelector('[data-composer-changes-review-summary="true"]')).toBeNull();
-
-    act(() => {
-      routeExtensionMessage({
-        type: 'tool_call_preview_update',
-        sessionId: 'session-1',
-        toolCallId: 'tool-1',
-        toolName: 'edit',
-        preview: {
-          kind: 'file_edit',
-          path: '/workspace/src/app.ts',
-          displayPath: 'src/app.ts',
-          diff: ' 1 const value = 1;\n-2 old\n+2 new',
-          additions: 19,
-          deletions: 19,
-        },
-      });
-    });
-
-    let summary = container.querySelector(
-      '[data-composer-changes-review-summary="true"]',
-    ) as HTMLElement;
-    expect(summary).not.toBeNull();
-    expect(within(summary).getByText('1 个文件已更改')).toBeInTheDocument();
-    expect(within(summary).getByText('+19')).toBeInTheDocument();
-    expect(within(summary).getByText('-19')).toBeInTheDocument();
-    expect(within(summary).getByRole('button', { name: '审查' })).toBeInTheDocument();
-    const liveEditTitle = screen.getByText('正在编辑 src/app.ts');
-    expect(liveEditTitle).toBeInTheDocument();
-    const liveEditRow = liveEditTitle.parentElement as HTMLElement;
-    const liveEditMetrics = within(liveEditRow).getByText('+19').parentElement as HTMLElement;
-    expect(liveEditMetrics).toHaveClass('ml-auto');
-    expect(liveEditRow.lastElementChild).toBe(liveEditMetrics);
-    expect(within(liveEditRow).getByText('-19')).toBeInTheDocument();
-    expect(screen.queryByText('正在编辑 /workspace/src/app.ts')).not.toBeInTheDocument();
 
     act(() => {
       routeExtensionMessage({
@@ -3346,7 +3311,7 @@ describe('ChatApp', () => {
       });
     });
 
-    summary = container.querySelector(
+    let summary = container.querySelector(
       '[data-composer-changes-review-summary="true"]',
     ) as HTMLElement;
     const queue = container.querySelector('[data-composer-follow-up-queue="true"]') as HTMLElement;
@@ -3363,28 +3328,6 @@ describe('ChatApp', () => {
     expectPostedPayload('open_current_changes_review', {
       type: 'open_current_changes_review',
     });
-
-    act(() => {
-      routeExtensionMessage({
-        type: 'tool_call_preview_update',
-        sessionId: 'session-1',
-        toolCallId: 'tool-2',
-        toolName: 'edit',
-        preview: {
-          kind: 'file_edit',
-          path: '/workspace/src/other.ts',
-          displayPath: 'src/other.ts',
-          additions: 8,
-          deletions: 4,
-        },
-      });
-    });
-    summary = container.querySelector(
-      '[data-composer-changes-review-summary="true"]',
-    ) as HTMLElement;
-    expect(within(summary).getByText('2 个文件已更改')).toBeInTheDocument();
-    expect(within(summary).getByText('+27')).toBeInTheDocument();
-    expect(within(summary).getByText('-23')).toBeInTheDocument();
 
     act(() => {
       routeExtensionMessage({

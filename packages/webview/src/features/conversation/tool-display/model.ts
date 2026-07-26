@@ -17,5 +17,8 @@ export function hasToolDisplayDetail(detail: ToolDisplayDetail): boolean {
   if (detail.kind === 'diff') {
     return Boolean(detail.previewError?.trim() || detail.diffText.trim());
   }
+  if (detail.kind === 'lazy_diff') {
+    return Boolean(detail.review.fileId && detail.review.revision > 0);
+  }
   return false;
 }

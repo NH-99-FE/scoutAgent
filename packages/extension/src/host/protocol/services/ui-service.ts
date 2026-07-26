@@ -107,7 +107,11 @@ export interface UiProtocolServiceOptions {
   canExpandChangesReviewContext?: (turnId: string) => boolean;
   openChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
-    options: { allowCurrentFileContextExpansion?: boolean; recordId?: string },
+    options: {
+      allowCurrentFileContextExpansion?: boolean;
+      recordId?: string;
+      sessionId: string;
+    },
   ) => void | Promise<void>;
   openCurrentChangesReviewPanel?: (
     review: FileReviewTurnSnapshot | undefined,
@@ -135,7 +139,11 @@ export class UiProtocolService implements UiProtocolHost {
   private readonly canExpandChangesReviewContext?: (turnId: string) => boolean;
   private readonly openChangesReviewPanelCallback?: (
     review: FileReviewTurnSnapshot | FileReviewArtifact,
-    options: { allowCurrentFileContextExpansion?: boolean; recordId?: string },
+    options: {
+      allowCurrentFileContextExpansion?: boolean;
+      recordId?: string;
+      sessionId: string;
+    },
   ) => void | Promise<void>;
   private readonly openCurrentChangesReviewPanelCallback?: (
     review: FileReviewTurnSnapshot | undefined,
@@ -316,6 +324,7 @@ export class UiProtocolService implements UiProtocolHost {
           ? (this.canExpandChangesReviewContext?.(artifact.turnId) ?? false)
           : true,
         recordId,
+        sessionId: this.getCurrentSessionId?.() ?? '',
       });
       respond({ type: 'open_changes_review_result', success: true });
     } catch (error) {

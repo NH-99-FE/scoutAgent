@@ -21,7 +21,6 @@ import type {
   ScoutMessage,
   ScoutQueueState,
   ScoutTreeNavigationAdmission,
-  ScoutToolCallPreviewUpdateEvent,
   ScoutToolExecutionResult,
   ScoutWebviewState,
 } from './protocol-state.ts';
@@ -110,7 +109,6 @@ export interface ScoutCompactionEndEvent {
  */
 export type ScoutRuntimeEvent =
   | ScoutAgentEvent
-  | ScoutToolCallPreviewUpdateEvent
   | ScoutAutoRetryStartEvent
   | ScoutAutoRetryEndEvent
   | ScoutCompactionStartEvent
@@ -129,10 +127,21 @@ export interface ScoutChangesReviewUpdateEvent {
   changesReview?: ScoutChangesReviewSummary;
 }
 
+export interface ChangesReviewProjectionUpdatedEvent {
+  type: 'changes_review_projection_updated';
+  sessionId: string;
+  sessionFile?: string;
+  turnId: string;
+  fileId: string;
+  revision: number;
+  status: 'ready' | 'unavailable';
+  additions: number;
+  deletions: number;
+}
+
 export type ScoutRuntimeExtensionEvent =
   | ScoutRuntimeStateUpdateEvent
   | { type: 'agent_event'; event: ScoutAgentEvent }
-  | ScoutToolCallPreviewUpdateEvent
   | ScoutAutoRetryStartEvent
   | ScoutAutoRetryEndEvent
   | ScoutCompactionStartEvent
@@ -173,6 +182,7 @@ export type ExtensionEventMessage =
   | { type: 'commands_update'; commands: ScoutCommandInfo[] }
   | { type: 'context_usage_update'; contextUsage?: ScoutContextUsage }
   | ScoutChangesReviewUpdateEvent
+  | ChangesReviewProjectionUpdatedEvent
   | ScoutNotificationMessage
   | ScoutExtensionUIRequest
   | ScoutExtensionUIRequestClosedEvent
@@ -195,9 +205,9 @@ export const EXTENSION_TO_WEBVIEW_MESSAGE_TYPES = [
   'state_update',
   'queue_update',
   'changes_review_update',
+  'changes_review_projection_updated',
   'runtime_state_update',
   'agent_event',
-  'tool_call_preview_update',
   'config_update',
   'context_usage_update',
   'commands_update',

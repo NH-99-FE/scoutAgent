@@ -15,6 +15,7 @@ import { useSessionStore } from '@/store/session-store';
 import { useTaskStore } from '@/store/task-store';
 import { useTreeStore } from '@/store/tree-store';
 import { useUiStore } from '@/store/ui-store';
+import { applyChangesReviewProjectionUpdated } from '@/features/changes-review/model/use-file-diff';
 
 export function projectExtensionEvent(message: ExtensionEventMessage): void {
   if (message.type === 'runtime_state_update') {
@@ -55,6 +56,9 @@ export function projectExtensionEvent(message: ExtensionEventMessage): void {
     case 'changes_review_update':
       useConversationStore.getState().actions.applyChangesReviewUpdate(message);
       break;
+    case 'changes_review_projection_updated':
+      applyChangesReviewProjectionUpdated(message);
+      break;
     case 'config_update':
       useConfigStore.getState().actions.setConfig(message.config);
       break;
@@ -90,7 +94,6 @@ function isRuntimeExtensionEvent(
 ): message is Exclude<ScoutRuntimeExtensionEvent, ScoutRuntimeStateUpdateEvent> {
   return (
     message.type === 'agent_event' ||
-    message.type === 'tool_call_preview_update' ||
     message.type === 'auto_retry_start' ||
     message.type === 'auto_retry_end' ||
     message.type === 'compaction_start' ||
@@ -140,9 +143,9 @@ export const EXTENSION_EVENT_TYPES = new Set<string>([
   'state_update',
   'queue_update',
   'changes_review_update',
+  'changes_review_projection_updated',
   'runtime_state_update',
   'agent_event',
-  'tool_call_preview_update',
   'config_update',
   'commands_update',
   'context_usage_update',
