@@ -59,6 +59,7 @@ export {
   captureStringSnapshot,
   captureTextSnapshot,
   createUnavailableSnapshot,
+  normalizeCapturedReviewText,
 } from './mutation-capture-context.ts';
 export type {
   CapturedTextSnapshot,

@@ -9,6 +9,8 @@ import {
   MutationJournal,
   captureStringSnapshot,
   captureTextSnapshot,
+  projectDiffDocumentRows,
+  runDiffWorkerRequest,
   withEditReviewCapture,
   withWriteReviewCapture,
   type MutationCaptureScope,
@@ -79,7 +81,10 @@ describe('edit review capture', () => {
       content: 'first\r\n你好\r\n',
       byteLength: buffer.byteLength,
     });
-    expect(record.after).toEqual({ content: after, byteLength: Buffer.byteLength(after) });
+    expect(record.after).toEqual({
+      content: 'second\r\n你好\r\n',
+      byteLength: Buffer.byteLength(after),
+    });
     expect(record.toolOutcome).toBe('success');
   });
 
@@ -226,6 +231,33 @@ describe('captured text snapshots', () => {
       content: 'line 1\r\n中文\r\n',
       byteLength: Buffer.byteLength(content),
     });
+  });
+
+  it('normalizes BOM on both capture paths so only the edited line reaches the diff', () => {
+    const before = captureTextSnapshot(Buffer.from('\uFEFFline 1\r\nline 2\r\n'));
+    const after = captureStringSnapshot('\uFEFFline 1\r\nchanged 2\r\n');
+    const response = runDiffWorkerRequest({
+      requestId: 'bom-request',
+      ownerId: 'owner-1',
+      turnId: 'turn-1',
+      fileId: 'file-1',
+      revision: 1,
+      filePath: '/workspace/file.txt',
+      originalContent: before.content,
+      modifiedContent: after.content,
+      maxBytes: MAX_REVIEW_TEXT_BYTES,
+      contextLines: 3,
+    });
+
+    expect(before.content).toBe('line 1\r\nline 2\r\n');
+    expect(after.content).toBe('line 1\r\nchanged 2\r\n');
+    expect(response.status).toBe('settled');
+    if (response.status !== 'settled') throw new Error('expected settled BOM diff');
+    expect(projectDiffDocumentRows(response.document, { collapseContext: false })).toEqual([
+      { type: 'context', oldLineNumber: 1, newLineNumber: 1, text: 'line 1' },
+      { type: 'removed', oldLineNumber: 2, text: 'line 2' },
+      { type: 'added', newLineNumber: 2, text: 'changed 2' },
+    ]);
   });
 
   it('reports binary and oversized buffers explicitly', () => {

@@ -47,6 +47,11 @@ const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 
 // ---------- Snapshot ----------
 
+/** Review 比较文本统一去除 UTF-8 BOM；不改变文件字节或 Pi 的写入参数。 */
+export function normalizeCapturedReviewText(content: string): string {
+  return content.startsWith('\uFEFF') ? content.slice(1) : content;
+}
+
 /**
  * 从实际 readFile Buffer 创建 before 快照。Buffer 本身只被解码，不复制到运行态。
  */
@@ -61,7 +66,7 @@ export function captureTextSnapshot(buffer: Buffer): CapturedTextSnapshot {
   }
 
   try {
-    const content = UTF8_DECODER.decode(buffer);
+    const content = normalizeCapturedReviewText(UTF8_DECODER.decode(buffer));
     if (content.includes(String.fromCharCode(0))) {
       return { content: null, byteLength, unavailableReason: 'binary_or_unsupported' };
     }
@@ -86,7 +91,7 @@ export function captureStringSnapshot(content: string): CapturedTextSnapshot {
   if (content.includes(String.fromCharCode(0))) {
     return { content: null, byteLength, unavailableReason: 'binary_or_unsupported' };
   }
-  return { content, byteLength };
+  return { content: normalizeCapturedReviewText(content), byteLength };
 }
 
 export function createUnavailableSnapshot(

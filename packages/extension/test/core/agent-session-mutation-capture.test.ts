@@ -6,6 +6,13 @@ import { Type } from '@sinclair/typebox';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentSession } from '../../src/core/agent-session.ts';
 import type { ScoutExtensionRunner } from '../../src/core/extensions/index.ts';
+import {
+  MutationJournal,
+  runDiffWorkerRequest,
+  type DiffWorkerClientPort,
+  type DiffWorkerRequest,
+  type DiffWorkerResponseListener,
+} from '../../src/core/review/index.ts';
 import { createSyntheticSourceInfo } from '../../src/core/source-info.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
 import type { ToolDefinition } from '../../src/core/tools/index.ts';
@@ -24,6 +31,14 @@ interface AgentSessionInternals {
 
 const tempDirs: string[] = [];
 
+class InlineDiffWorkerClient implements DiffWorkerClientPort {
+  request(request: DiffWorkerRequest, listener: DiffWorkerResponseListener): void {
+    listener(runDiffWorkerRequest(request));
+  }
+
+  dispose(): void {}
+}
+
 function makeTempDir(): string {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'scout-agent-session-mutation-'));
   tempDirs.push(cwd);
@@ -38,6 +53,9 @@ function makeSession(cwd: string, extensionRunner?: ScoutExtensionRunner): Agent
     logger: { appendLine: vi.fn() },
     skills: [],
     extensionRunner,
+    mutationJournal: new MutationJournal({
+      diffWorkerClient: new InlineDiffWorkerClient(),
+    }),
   });
 }
 
