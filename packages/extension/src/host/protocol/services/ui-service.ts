@@ -13,7 +13,7 @@ import type {
 import { SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE } from '@scout-agent/shared';
 import type { ExtensionUIContext } from '../../../core/extensions/index.ts';
 import type { FileReviewTurnSnapshot } from '../../../core/review/file-review.ts';
-import type { FileReviewArtifact } from '../../review/file-review-artifact.ts';
+import type { FileReviewArtifact } from '../../../core/review/file-review-artifact.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
 import type { ProtocolPayload, ProtocolResponder, UiProtocolHost } from './types.ts';
 import { ExtensionUIRequestBroker } from './extension-ui-request-broker.ts';
@@ -295,10 +295,13 @@ export class UiProtocolService implements UiProtocolHost {
         });
         return;
       }
-      const artifact = await this.getChangesReviewArtifact?.(message.turnId);
-      const runtimeReview = artifact ? undefined : this.getChangesReview?.(message.turnId);
-      const review =
-        artifact ?? (runtimeReview && !runtimeReview.contentReleased ? runtimeReview : undefined);
+      const runtimeReview = this.getChangesReview?.(message.turnId);
+      const usableRuntimeReview =
+        runtimeReview && !runtimeReview.contentReleased ? runtimeReview : undefined;
+      const artifact = usableRuntimeReview
+        ? undefined
+        : await this.getChangesReviewArtifact?.(message.turnId);
+      const review = usableRuntimeReview ?? (artifact?.complete ? artifact : undefined);
       if (!review) {
         respond({
           type: 'open_changes_review_result',

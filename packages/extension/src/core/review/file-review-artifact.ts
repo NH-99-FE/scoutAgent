@@ -1,6 +1,6 @@
 // ============================================================
-// File review artifact — 宿主持久化 canonical DiffDocument
-// 负责：只写 v2、集中解码 v1，并对 session artifact 做边界校验与限流。
+// File review artifact — core session 持久化 canonical DiffDocument
+// 负责：只写 v2、集中解码 v1，并对标准 custom entry payload 做边界校验与限流。
 // ============================================================
 
 import {
@@ -11,10 +11,9 @@ import {
   type DiffUnavailableReason,
   type DiffHunk,
   type DiffLine,
-  type FileReviewOperation,
-  type FileReviewTurnSnapshot,
-} from '../../core/review/index.ts';
-import type { SessionTreeEntry } from '../../core/session/index.ts';
+} from './diff-document.ts';
+import type { FileReviewOperation, FileReviewTurnSnapshot } from './file-review.ts';
+import type { SessionTreeEntry } from '../session/index.ts';
 
 // ---------- 常量 ----------
 
@@ -52,6 +51,8 @@ export interface FileReviewArtifact {
   sessionId: string;
   turnId: string;
   createdAt: string;
+  /** true 表示 artifact 来自已封口且所有 revision 均 terminal 的最终快照。 */
+  complete: boolean;
   records: FileReviewArtifactRecord[];
   files: FileReviewArtifactFile[];
 }
@@ -107,6 +108,8 @@ export interface FileReviewArtifactIndex {
 
 export interface BoundedFileReviewArtifactResult {
   artifact: FileReviewArtifact;
+  /** true 表示持久化 artifact 相对 runtime document 有折叠或裁剪。 */
+  degraded: boolean;
   warnings: string[];
 }
 
@@ -124,13 +127,15 @@ export function createFileReviewArtifact(
   review: FileReviewTurnSnapshot,
   options: { createdAt?: string } = {},
 ): FileReviewArtifact {
-  const settledFiles = review.files.filter(
-    (file) =>
-      file.document !== undefined &&
-      (file.projectionStatus === undefined || file.projectionStatus !== 'pending'),
-  );
+  if (
+    review.phase !== 'finalized' ||
+    review.files.some((file) => file.document === undefined || file.projectionStatus === 'pending')
+  ) {
+    throw new Error(`Changes review turn 尚未完成，不能持久化 artifact: ${review.turnId}`);
+  }
+
   const fileByRecordId = new Map<string, FileReviewArtifactFile>();
-  const files = settledFiles.map((file, index): FileReviewArtifactFile => {
+  const files = review.files.map((file, index): FileReviewArtifactFile => {
     const persisted: FileReviewArtifactFile = {
       fileId: file.fileId ?? createLegacyRuntimeFileId(file.absolutePath, index),
       path: file.path,
@@ -151,6 +156,7 @@ export function createFileReviewArtifact(
     sessionId,
     turnId: review.turnId,
     createdAt: options.createdAt ?? new Date().toISOString(),
+    complete: true,
     records: review.records.flatMap((record) => {
       const file = fileByRecordId.get(record.recordId);
       if (!file) return [];
@@ -178,6 +184,7 @@ export function isFileReviewArtifact(value: unknown): value is FileReviewArtifac
     typeof value.sessionId !== 'string' ||
     typeof value.turnId !== 'string' ||
     typeof value.createdAt !== 'string' ||
+    typeof value.complete !== 'boolean' ||
     !Array.isArray(value.files) ||
     !value.files.every(isFileReviewArtifactFile) ||
     !Array.isArray(value.records) ||
@@ -205,6 +212,14 @@ export function isFileReviewArtifactV1(value: unknown): value is FileReviewArtif
 /** 任何 artifact 版本都在此处收敛为内存 v2，v1 语义不泄漏到调用方。 */
 export function decodeFileReviewArtifact(value: unknown): FileReviewArtifact | undefined {
   if (isFileReviewArtifact(value)) return value;
+  if (
+    isRecord(value) &&
+    value.version === FILE_REVIEW_ARTIFACT_VERSION &&
+    value.complete === undefined
+  ) {
+    const legacyV2 = { ...value, complete: false };
+    if (isFileReviewArtifact(legacyV2)) return legacyV2;
+  }
   if (isFileReviewArtifactV1(value)) return convertFileReviewArtifactV1(value);
   return undefined;
 }
@@ -316,6 +331,7 @@ function convertFileReviewArtifactV1(artifact: FileReviewArtifactV1): FileReview
     sessionId: artifact.sessionId,
     turnId: artifact.turnId,
     createdAt: artifact.createdAt,
+    complete: true,
     files,
     records: artifact.records.flatMap((record) => {
       const file = fileByRecordId.get(record.recordId);
@@ -490,7 +506,7 @@ export function collectFileReviewArtifacts(
   for (const entry of entries ?? []) {
     if (entry.type !== 'custom' || entry.customType !== FILE_REVIEW_ARTIFACT_CUSTOM_TYPE) continue;
     const artifact = decodeFileReviewArtifact(entry.data);
-    if (!artifact) continue;
+    if (!artifact?.complete) continue;
     artifactsByTurnId.set(artifact.turnId, artifact);
     latestArtifact = artifact;
     latestTurnId = artifact.turnId;
@@ -558,8 +574,10 @@ export function prepareFileReviewArtifactForSession(
   const maxRows = options.maxRows ?? MAX_REVIEW_ARTIFACT_ROWS;
   const warnings: string[] = [];
   let bounded = cloneFileReviewArtifact(artifact);
+  let degraded = false;
 
   if (bounded.files.length > maxFiles) {
+    degraded = true;
     warnings.push(
       `Changes review artifact has ${bounded.files.length} files; only ${maxFiles} were persisted.`,
     );
@@ -568,6 +586,7 @@ export function prepareFileReviewArtifactForSession(
   }
 
   if (countArtifactLines(bounded) > maxRows) {
+    degraded = true;
     warnings.push(
       `Changes review artifact has ${countArtifactLines(bounded)} hunk lines; large file diffs were marked unavailable.`,
     );
@@ -575,17 +594,19 @@ export function prepareFileReviewArtifactForSession(
   }
 
   if (getArtifactByteLength(bounded) > maxBytes) {
+    degraded = true;
     warnings.push('Changes review artifact diffs were collapsed to fit the session limit.');
     bounded = collapseLargestFilesUntilByteLimit(bounded, maxBytes);
   }
 
   while (getArtifactByteLength(bounded) > maxBytes && bounded.files.length > 0) {
+    degraded = true;
     warnings.push('Changes review artifact dropped an overflow file to fit the session limit.');
     bounded.files = bounded.files.slice(0, -1);
     bounded = filterArtifactRecordsToFiles(bounded);
   }
 
-  return { artifact: bounded, warnings };
+  return { artifact: bounded, degraded, warnings };
 }
 
 function collapseLargestFilesUntilLineLimit(

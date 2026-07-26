@@ -33,6 +33,12 @@ function makeCoordinator(journal: MutationJournal, getTurnId = () => 'turn-1') {
   return new MutationCaptureCoordinator({ journal, getTurnId });
 }
 
+function getRecordAggregate(journal: MutationJournal, recordId: string) {
+  const aggregate = journal.getAggregateByRecordId(recordId);
+  if (!aggregate) throw new Error(`Missing aggregate for ${recordId}`);
+  return aggregate;
+}
+
 function makeEditOperations(overrides: Partial<EditOperations> = {}): EditOperations {
   return {
     access: vi.fn(async () => undefined),
@@ -77,11 +83,12 @@ describe('edit review capture', () => {
 
     expect(operations.readFile).toHaveBeenCalledTimes(1);
     const [record] = journal.getRecords();
-    expect(record.before).toEqual({
+    const aggregate = getRecordAggregate(journal, record!.recordId);
+    expect(aggregate.baseline).toEqual({
       content: 'first\r\n你好\r\n',
       byteLength: buffer.byteLength,
     });
-    expect(record.after).toEqual({
+    expect(aggregate.latest).toEqual({
       content: 'second\r\n你好\r\n',
       byteLength: Buffer.byteLength(after),
     });
@@ -137,9 +144,10 @@ describe('edit review capture', () => {
     ]);
 
     expect(
-      journal
-        .getRecords()
-        .map((record) => [record.toolCallId, record.before.content, record.after.content]),
+      journal.getRecords().map((record) => {
+        const aggregate = getRecordAggregate(journal, record.recordId);
+        return [record.toolCallId, aggregate.baseline.content, aggregate.latest.content];
+      }),
     ).toEqual(
       expect.arrayContaining([
         ['tool-a', 'a-before', 'a-after'],
@@ -176,12 +184,9 @@ describe('edit review capture', () => {
     ]);
 
     expect(content).toBe('gamma');
-    expect(
-      journal.getRecords().map((record) => [record.before.content, record.after.content]),
-    ).toEqual([
-      ['alpha', 'beta'],
-      ['beta', 'gamma'],
-    ]);
+    expect(journal.getRecords()).toHaveLength(2);
+    const aggregate = journal.getAggregateByRecordId(journal.getRecords()[0]!.recordId);
+    expect([aggregate?.baseline.content, aggregate?.latest.content]).toEqual(['alpha', 'gamma']);
   });
 
   it('freezes turnId when run starts', async () => {
@@ -299,8 +304,9 @@ describe('write review capture', () => {
 
     expect(provider.readBefore).toHaveBeenCalledTimes(1);
     expect(provider.readBefore).toHaveBeenCalledWith(scope.absolutePath);
-    expect(journal.getRecords()[0].before.content).toBe('before');
-    expect(journal.getRecords()[0].after.content).toBe('after');
+    const aggregate = getRecordAggregate(journal, journal.getRecords()[0]!.recordId);
+    expect(aggregate.baseline.content).toBe('before');
+    expect(aggregate.latest.content).toBe('after');
   });
 
   it('uses null as a new-file baseline', async () => {
@@ -314,7 +320,10 @@ describe('write review capture', () => {
       await decorated.writeFile(resolve('file.txt'), 'created');
     });
 
-    expect(journal.getRecords()[0].before).toEqual({ content: null, byteLength: 0 });
+    expect(getRecordAggregate(journal, journal.getRecords()[0]!.recordId).baseline).toEqual({
+      content: null,
+      byteLength: 0,
+    });
   });
 
   it('never falls back to local fs without a provider', async () => {
@@ -327,7 +336,7 @@ describe('write review capture', () => {
       await decorated.writeFile(resolve('file.txt'), 'remote content');
     });
 
-    expect(journal.getRecords()[0].before).toEqual({
+    expect(getRecordAggregate(journal, journal.getRecords()[0]!.recordId).baseline).toEqual({
       content: null,
       byteLength: 0,
       unavailableReason: 'original_unavailable',
@@ -400,7 +409,9 @@ describe('write review capture', () => {
       ),
     ).rejects.toThrow('Operation aborted');
     expect(journal.getRecords()[0].toolOutcome).toBe('error_after_write');
-    expect(journal.getRecords()[0].after.content).toBe('after abort');
+    expect(getRecordAggregate(journal, journal.getRecords()[0]!.recordId).latest.content).toBe(
+      'after abort',
+    );
   });
 
   it('does not read a provider or block write operations without a scope', async () => {
@@ -436,7 +447,9 @@ describe('write review capture', () => {
         await decorated.writeFile(resolve('file.txt'), 'after');
       }),
     ).resolves.toBeUndefined();
-    expect(journal.getRecords()[0].before.unavailableReason).toBe('original_unavailable');
+    expect(
+      getRecordAggregate(journal, journal.getRecords()[0]!.recordId).baseline.unavailableReason,
+    ).toBe('original_unavailable');
   });
 
   it('keeps the exact Pi write result when provider capture and Journal publication fail', async () => {
@@ -461,11 +474,14 @@ describe('write review capture', () => {
     });
     expect(operations.mkdir).toHaveBeenCalledTimes(1);
     expect(operations.writeFile).toHaveBeenCalledTimes(1);
-    expect(journal.getRecords()[0]).toMatchObject({
-      before: { content: null, unavailableReason: 'original_unavailable' },
-      after: { content: 'after' },
-      toolOutcome: 'success',
+    const record = journal.getRecords()[0]!;
+    const aggregate = getRecordAggregate(journal, record.recordId);
+    expect(record.toolOutcome).toBe('success');
+    expect(aggregate.baseline).toMatchObject({
+      content: null,
+      unavailableReason: 'original_unavailable',
     });
+    expect(aggregate.latest).toMatchObject({ content: 'after' });
 
     journal.dispose();
     await expect(
@@ -497,6 +513,8 @@ describe('write review capture', () => {
       ),
     ).resolves.toMatchObject({ details: undefined });
     expect(operations.writeFile).toHaveBeenCalledTimes(1);
-    expect(journal.getRecords()[0].before.unavailableReason).toBe('binary_or_unsupported');
+    expect(
+      getRecordAggregate(journal, journal.getRecords()[0]!.recordId).baseline.unavailableReason,
+    ).toBe('binary_or_unsupported');
   });
 });

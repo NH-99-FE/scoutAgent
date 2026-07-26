@@ -48,6 +48,8 @@ export interface FileReviewTurnSnapshot {
   turnId: string;
   files: FileReviewFile[];
   records: FileReviewRecord[];
+  /** active 可继续追加 mutation；finalized 已封口且所有当前 revision 均为 terminal。 */
+  phase: 'active' | 'finalized';
   contentReleased?: boolean;
 }
 

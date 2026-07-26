@@ -8,7 +8,7 @@ import {
   projectDiffDocumentSummary,
   type FileReviewTurnSnapshot,
 } from '../../core/review/index.ts';
-import type { FileReviewArtifact } from './file-review-artifact.ts';
+import type { FileReviewArtifact } from '../../core/review/file-review-artifact.ts';
 
 // ---------- 类型 ----------
 

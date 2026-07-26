@@ -37,8 +37,6 @@ export interface MutationRecord {
   absolutePath: string;
   displayPath?: string;
   sequence: number;
-  before: CapturedTextSnapshot;
-  after: CapturedTextSnapshot;
   toolOutcome: MutationToolOutcome;
 }
 
@@ -96,10 +94,16 @@ export interface MutationJournalOptions {
   onUpdated?: MutationJournalListener;
 }
 
+export interface FinalizeMutationTurnOptions {
+  timeoutMs?: number;
+}
+
 interface AggregateEntry {
   ownerId: string;
   aggregate: TurnFileAggregate;
 }
+
+const DEFAULT_FINALIZE_TIMEOUT_MS = 2_000;
 
 // ---------- 路径 ----------
 
@@ -122,6 +126,11 @@ export class MutationJournal {
   private readonly aggregateEntries = new Map<string, AggregateEntry>();
   private readonly aggregateKeyByRecordId = new Map<string, string>();
   private readonly aggregateKeyByFileId = new Map<string, string>();
+  private readonly sealedTurnIds = new Set<string>();
+  private readonly finalizationByTurnId = new Map<
+    string,
+    Promise<FileReviewTurnSnapshot | undefined>
+  >();
   private readonly listeners = new Set<MutationJournalListener>();
   private readonly diffWorkerClient: DiffWorkerClientPort;
   private readonly maxBytes: number;
@@ -143,6 +152,9 @@ export class MutationJournal {
     if (this.disposed) {
       throw new Error(`MutationJournal 已销毁，无法追加工具调用: ${input.toolCallId}`);
     }
+    if (this.sealedTurnIds.has(input.turnId)) {
+      throw new Error(`MutationJournal turn 已封口，无法追加工具调用: ${input.turnId}`);
+    }
 
     const normalizedAbsolutePath = normalizeMutationAbsolutePath(input.absolutePath);
     const key = aggregateKey(input.ownerId, input.turnId, normalizedAbsolutePath);
@@ -158,8 +170,6 @@ export class MutationJournal {
       absolutePath: input.absolutePath,
       displayPath: input.displayPath,
       sequence: ++this.nextSequence,
-      before: input.before,
-      after: input.after,
       toolOutcome: input.toolOutcome,
     };
 
@@ -266,7 +276,12 @@ export class MutationJournal {
       // 没有聚合但有 record（例如已 release）时仍返回 records
       const records = this.records.filter((record) => record.turnId === turnId);
       if (records.length === 0) return undefined;
-      return { turnId, files: [], records: records.map(toReviewRecord) };
+      return {
+        turnId,
+        files: [],
+        records: records.map(toReviewRecord),
+        phase: this.sealedTurnIds.has(turnId) ? 'finalized' : 'active',
+      };
     }
 
     const records = this.records.filter((record) => record.turnId === turnId);
@@ -280,7 +295,45 @@ export class MutationJournal {
       turnId,
       files,
       records: records.map(toReviewRecord),
+      phase:
+        this.sealedTurnIds.has(turnId) &&
+        aggregates.every((aggregate) => aggregate.projection.status === 'settled')
+          ? 'finalized'
+          : 'active',
     };
+  }
+
+  isTurnSealed(turnId: string): boolean {
+    return this.sealedTurnIds.has(turnId);
+  }
+
+  sealTurn(turnId: string): boolean {
+    if (this.disposed) return false;
+    const wasSealed = this.sealedTurnIds.has(turnId);
+    this.sealedTurnIds.add(turnId);
+    return !wasSealed;
+  }
+
+  /**
+   * 封口并终态化一个 review turn。超时 revision 原子降级为 generation_failed，
+   * 后续同 revision Worker 响应会被 setProjection 的 pending guard 丢弃。
+   */
+  finalizeTurn(
+    turnId: string,
+    options: FinalizeMutationTurnOptions = {},
+  ): Promise<FileReviewTurnSnapshot | undefined> {
+    const existing = this.finalizationByTurnId.get(turnId);
+    if (existing) return existing;
+
+    this.sealTurn(turnId);
+    const finalization = this.finalizeSealedTurn(
+      turnId,
+      options.timeoutMs ?? DEFAULT_FINALIZE_TIMEOUT_MS,
+    ).finally(() => {
+      this.finalizationByTurnId.delete(turnId);
+    });
+    this.finalizationByTurnId.set(turnId, finalization);
+    return finalization;
   }
 
   setProjectionSettled(fileId: string, revision: number, document: DiffDocument): boolean {
@@ -299,12 +352,6 @@ export class MutationJournal {
 
       releaseSnapshot(aggregate.baseline, 'content_released', releasedSnapshotSet);
       releaseSnapshot(aggregate.latest, 'content_released', releasedSnapshotSet);
-      for (const recordId of aggregate.recordIds) {
-        const record = this.recordsById.get(recordId);
-        if (!record) continue;
-        releaseSnapshot(record.before, 'content_released', releasedSnapshotSet);
-        releaseSnapshot(record.after, 'content_released', releasedSnapshotSet);
-      }
       released = true;
     }
 
@@ -313,6 +360,45 @@ export class MutationJournal {
 
   releaseTurnSnapshots(turnId: string): boolean {
     return this.releaseSnapshots(turnId);
+  }
+
+  /**
+   * 完整 artifact 已提交后驱逐一个 turn 的 runtime payload。
+   * sealed identity 保留，确保任何迟到 capture 仍被拒绝。
+   */
+  evictTurn(turnId: string): boolean {
+    if (this.disposed) return false;
+    const entries = [...this.aggregateEntries.entries()].filter(
+      ([, entry]) => entry.aggregate.turnId === turnId,
+    );
+    const records = this.records.filter((record) => record.turnId === turnId);
+    if (entries.length === 0 && records.length === 0) return false;
+
+    this.releaseTurnSnapshots(turnId);
+    for (const [key, entry] of entries) {
+      const aggregate = entry.aggregate;
+      this.publish({
+        type: 'release',
+        ownerId: entry.ownerId,
+        turnId,
+        fileId: aggregate.fileId,
+        revision: aggregate.revision,
+      });
+      this.aggregateEntries.delete(key);
+      this.aggregateKeyByFileId.delete(aggregate.fileId);
+      for (const recordId of aggregate.recordIds) {
+        this.aggregateKeyByRecordId.delete(recordId);
+      }
+    }
+    for (const record of records) {
+      this.recordsById.delete(record.recordId);
+      if (this.recordsByToolCallId.get(record.toolCallId)?.recordId === record.recordId) {
+        this.recordsByToolCallId.delete(record.toolCallId);
+      }
+    }
+    const retainedRecords = this.records.filter((record) => record.turnId !== turnId);
+    this.records.splice(0, this.records.length, ...retainedRecords);
+    return true;
   }
 
   onUpdated(listener: MutationJournalListener): () => void {
@@ -410,7 +496,13 @@ export class MutationJournal {
     if (this.disposed) return false;
     const key = this.aggregateKeyByFileId.get(fileId);
     const entry = key ? this.aggregateEntries.get(key) : undefined;
-    if (!entry || entry.aggregate.revision !== revision) return false;
+    if (
+      !entry ||
+      entry.aggregate.revision !== revision ||
+      entry.aggregate.projection.status !== 'pending'
+    ) {
+      return false;
+    }
     entry.aggregate.projection = projection;
     this.publish({
       type: 'projection',
@@ -420,6 +512,54 @@ export class MutationJournal {
       revision,
     });
     return true;
+  }
+
+  private async finalizeSealedTurn(
+    turnId: string,
+    timeoutMs: number,
+  ): Promise<FileReviewTurnSnapshot | undefined> {
+    const aggregates = this.getTurnAggregates(turnId);
+    if (aggregates.length === 0) return this.toReviewTurnSnapshot(turnId);
+
+    const settled = await this.waitForTurnSettlement(turnId, Math.max(0, timeoutMs));
+    if (!settled) {
+      for (const aggregate of this.getTurnAggregates(turnId)) {
+        if (aggregate.projection.status !== 'pending') continue;
+        this.setProjection(aggregate.fileId, aggregate.revision, {
+          status: 'settled',
+          revision: aggregate.revision,
+          document: createUnavailableDiffDocument('generation_failed'),
+        });
+      }
+    }
+    return this.toReviewTurnSnapshot(turnId);
+  }
+
+  private waitForTurnSettlement(turnId: string, timeoutMs: number): Promise<boolean> {
+    const isSettled = (): boolean =>
+      this.getTurnAggregates(turnId).every(
+        (aggregate) => aggregate.projection.status === 'settled',
+      );
+    if (isSettled()) return Promise.resolve(true);
+    if (timeoutMs === 0) return Promise.resolve(false);
+
+    return new Promise<boolean>((resolveWait) => {
+      let completed = false;
+      let unsubscribe = (): void => undefined;
+      const complete = (settled: boolean): void => {
+        if (completed) return;
+        completed = true;
+        clearTimeout(timer);
+        unsubscribe();
+        resolveWait(settled);
+      };
+      unsubscribe = this.onUpdated((update) => {
+        if (update.turnId === turnId && isSettled()) complete(true);
+      });
+      const timer = setTimeout(() => complete(false), timeoutMs);
+      // 防止 projection 在初次检查和 listener 注册之间完成。
+      if (isSettled()) complete(true);
+    });
   }
 
   private publish(update: MutationJournalUpdate): void {

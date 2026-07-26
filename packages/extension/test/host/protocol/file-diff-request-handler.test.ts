@@ -4,7 +4,7 @@ import { createDiffDocument } from '../../../src/core/review/diff-document.ts';
 import type { FileReviewTurnSnapshot } from '../../../src/core/review/file-review.ts';
 import { FileDiffRequestHandler } from '../../../src/host/protocol/file-diff-request-handler.ts';
 import { DiffDocumentProjector } from '../../../src/host/review/diff-document-projector.ts';
-import type { FileReviewArtifact } from '../../../src/host/review/file-review-artifact.ts';
+import type { FileReviewArtifact } from '../../../src/core/review/file-review-artifact.ts';
 
 const REQUEST: RequestFileDiffMessage = {
   type: 'request_file_diff',
@@ -120,6 +120,7 @@ function makeRuntimeReview(status: 'pending' | 'ready' | 'unavailable'): FileRev
   const document = createDiffDocument('const value = 1;\n', 'const value = 2;\n');
   return {
     turnId: 'turn-1',
+    phase: 'active',
     records: [],
     files: [
       {
@@ -148,6 +149,7 @@ function makeArtifact(): FileReviewArtifact {
     sessionId: 'session-1',
     turnId: 'turn-1',
     createdAt: '2026-01-01T00:00:00.000Z',
+    complete: true,
     records: [
       {
         recordId: 'record-1',

@@ -21,7 +21,7 @@ import {
   FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
   MAX_REVIEW_ARTIFACT_FILES,
   type FileReviewArtifact,
-} from '../../src/host/review/file-review-artifact.ts';
+} from '../../src/core/review/file-review-artifact.ts';
 import { assistantMessage, userMessage } from '../core/test-utils.ts';
 
 function createOutputChannel() {
@@ -92,6 +92,7 @@ function createFakeAgentSession(session: Session, calls: string[] = []): AgentSe
     emitSessionBeforeSwitch: vi.fn(async () => false),
     emitSessionShutdown: vi.fn(async () => undefined),
     bindExtensions: vi.fn(async () => []),
+    getFileReviewTurn: vi.fn(() => undefined),
     subscribe: vi.fn(() => () => undefined),
     dispose: vi.fn(() => undefined),
     createReplacedSessionContext: vi.fn(() => ({
@@ -108,6 +109,7 @@ function createFakeAgentSession(session: Session, calls: string[] = []): AgentSe
 function makeReviewSnapshot(): FileReviewTurnSnapshot {
   return {
     turnId: 'turn-1',
+    phase: 'finalized',
     records: [
       {
         recordId: 'review-1',
@@ -155,6 +157,44 @@ function makeUnavailableReviewSnapshot(): FileReviewTurnSnapshot {
   };
 }
 
+function makeTwoFileReviewSnapshot(): FileReviewTurnSnapshot {
+  const first = makeReviewSnapshot();
+  return {
+    turnId: 'turn-1',
+    phase: 'finalized',
+    records: [
+      ...first.records,
+      {
+        recordId: 'review-2',
+        turnId: 'turn-1',
+        toolCallId: 'tool-2',
+        operation: 'write',
+        path: 'src/second.ts',
+        absolutePath: '/workspace/src/second.ts',
+        sequence: 2,
+      },
+    ],
+    files: [
+      ...first.files,
+      {
+        fileId: 'file-2',
+        absolutePath: '/workspace/src/second.ts',
+        path: 'src/second.ts',
+        originalContent: 'before\n',
+        modifiedContent: 'after\n',
+        recordIds: ['review-2'],
+        latestRecordId: 'review-2',
+        latestSequence: 2,
+        revision: 1,
+        projectionStatus: 'ready',
+        document: createDiffDocument('before\n', 'after\n'),
+        additions: 1,
+        deletions: 1,
+      },
+    ],
+  };
+}
+
 function makeLargeFileCountReviewSnapshot(): FileReviewTurnSnapshot {
   const records = Array.from({ length: MAX_REVIEW_ARTIFACT_FILES + 1 }, (_, index) => {
     const sequence = index + 1;
@@ -170,6 +210,7 @@ function makeLargeFileCountReviewSnapshot(): FileReviewTurnSnapshot {
   });
   return {
     turnId: 'turn-large',
+    phase: 'finalized',
     records,
     files: records.map((record) => ({
       fileId: `file-${record.sequence}`,
@@ -357,159 +398,6 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     expect(result.leafId).toBe('root');
   });
 
-  it('persists review artifacts as hidden custom entries and releases runtime content', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const branch: SessionTreeEntry[] = [
-      {
-        type: 'message',
-        id: 'assistant',
-        parentId: null,
-        timestamp: '2026-01-01T00:00:00.000Z',
-        message: assistantMessage('done'),
-      },
-    ];
-    const releaseFileReviewTurnContent = vi.fn();
-    const appendEntry = vi.fn(async (customType: string, data: unknown) => {
-      branch.push({
-        type: 'custom',
-        customType,
-        data,
-        id: 'review-artifact',
-        parentId: 'assistant',
-        timestamp: '2026-01-01T00:00:01.000Z',
-      });
-    });
-    (coordinator as unknown as { agentSession: unknown }).agentSession = {
-      appendEntry,
-      getSessionEntries: () => branch,
-      getSessionBranch: () => branch,
-      isStreaming: false,
-      releaseFileReviewFileContent: releaseFileReviewTurnContent,
-      sessionId: 'session-1',
-    };
-    const review = makeReviewSnapshot();
-    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).scheduleFileReviewArtifactSave(agentSession, review);
-    await (
-      coordinator as unknown as {
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).flushFileReviewArtifactSaves();
-
-    expect(appendEntry).toHaveBeenCalledWith(
-      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-      expect.objectContaining({ turnId: 'turn-1' }),
-    );
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
-    await expect(coordinator.getFileReviewArtifact('turn-1')).resolves.toMatchObject({
-      turnId: 'turn-1',
-      files: [expect.objectContaining({ path: 'src/app.ts' })],
-    });
-    expect(coordinator.isLatestFileReviewArtifact('turn-1')).toBe(true);
-  });
-
-  it('persists canonical unavailable documents before releasing runtime content', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const releaseFileReviewFileContent = vi.fn();
-    const appendEntry = vi.fn(async () => undefined);
-    (coordinator as unknown as { agentSession: unknown }).agentSession = {
-      appendEntry,
-      releaseFileReviewFileContent,
-      sessionId: 'session-1',
-    };
-    const review = makeUnavailableReviewSnapshot();
-    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).scheduleFileReviewArtifactSave(agentSession, review);
-    await (
-      coordinator as unknown as {
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).flushFileReviewArtifactSaves();
-
-    expect(appendEntry).toHaveBeenCalledWith(
-      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-      expect.objectContaining({
-        files: [
-          expect.objectContaining({
-            document: expect.objectContaining({
-              unavailableReason: 'binary_or_unsupported',
-            }),
-          }),
-        ],
-      }),
-    );
-    expect(releaseFileReviewFileContent).toHaveBeenCalledWith('file-1');
-    expect(appendEntry.mock.invocationCallOrder[0]).toBeLessThan(
-      releaseFileReviewFileContent.mock.invocationCallOrder[0]!,
-    );
-  });
-
-  it('retains runtime content when artifact persistence fails', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const releaseFileReviewFileContent = vi.fn();
-    const appendEntry = vi.fn(async () => {
-      throw new Error('disk full');
-    });
-    (coordinator as unknown as { agentSession: unknown }).agentSession = {
-      appendEntry,
-      releaseFileReviewFileContent,
-      sessionId: 'session-1',
-    };
-    const review = makeReviewSnapshot();
-    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).scheduleFileReviewArtifactSave(agentSession, review);
-    await (
-      coordinator as unknown as {
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).flushFileReviewArtifactSaves();
-
-    expect(appendEntry).toHaveBeenCalledOnce();
-    expect(releaseFileReviewFileContent).not.toHaveBeenCalled();
-  });
-
   it('finds hidden review artifact children after navigating back to the visible branch entry', async () => {
     const coordinator = new ExtensionSessionCoordinator({
       cwd,
@@ -548,250 +436,6 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       turnId: 'turn-1',
     });
     expect(coordinator.isLatestFileReviewArtifact('turn-1')).toBe(true);
-  });
-
-  it('persists bounded review artifacts and releases runtime content when raw artifacts exceed limits', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const branch: SessionTreeEntry[] = [
-      {
-        type: 'message',
-        id: 'assistant',
-        parentId: null,
-        timestamp: '2026-01-01T00:00:00.000Z',
-        message: assistantMessage('done'),
-      },
-    ];
-    const releaseFileReviewTurnContent = vi.fn();
-    let persistedArtifact: FileReviewArtifact | undefined;
-    const appendEntry = vi.fn(async (customType: string, data: unknown) => {
-      persistedArtifact = data as FileReviewArtifact;
-      branch.push({
-        type: 'custom',
-        customType,
-        data,
-        id: 'bounded-review-artifact',
-        parentId: 'assistant',
-        timestamp: '2026-01-01T00:00:01.000Z',
-      });
-    });
-    (coordinator as unknown as { agentSession: unknown }).agentSession = {
-      appendEntry,
-      getSessionEntries: () => branch,
-      getSessionBranch: () => branch,
-      isStreaming: false,
-      releaseFileReviewFileContent: releaseFileReviewTurnContent,
-      sessionId: 'session-1',
-    };
-    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
-    const review = makeLargeFileCountReviewSnapshot();
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).scheduleFileReviewArtifactSave(agentSession, review);
-    await (
-      coordinator as unknown as {
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).flushFileReviewArtifactSaves();
-
-    expect(appendEntry).toHaveBeenCalledWith(
-      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-      expect.objectContaining({ turnId: 'turn-large' }),
-    );
-    expect(persistedArtifact?.files).toHaveLength(MAX_REVIEW_ARTIFACT_FILES);
-    expect(persistedArtifact?.records).toHaveLength(MAX_REVIEW_ARTIFACT_FILES);
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
-  });
-
-  it('does not persist a late review update into a newer active session', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const staleAppendEntry = vi.fn(async () => undefined);
-    const staleReleaseFileReviewTurnContent = vi.fn();
-    const staleSession = {
-      appendEntry: staleAppendEntry,
-      isStreaming: false,
-      releaseFileReviewFileContent: staleReleaseFileReviewTurnContent,
-      sessionId: 'old-session',
-    } as unknown as AgentSession;
-    const activeAppendEntry = vi.fn(async () => undefined);
-    (coordinator as unknown as { agentSession: unknown }).agentSession = {
-      appendEntry: activeAppendEntry,
-      getSessionEntries: () => [],
-      getSessionBranch: () => [],
-      isStreaming: false,
-      releaseFileReviewFileContent: vi.fn(),
-      sessionId: 'new-session',
-    };
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).scheduleFileReviewArtifactSave(staleSession, makeReviewSnapshot());
-    await (
-      coordinator as unknown as {
-        flushFileReviewArtifactSaves: () => Promise<void>;
-      }
-    ).flushFileReviewArtifactSaves();
-
-    expect(staleAppendEntry).not.toHaveBeenCalled();
-    expect(activeAppendEntry).not.toHaveBeenCalled();
-    expect(staleReleaseFileReviewTurnContent).not.toHaveBeenCalled();
-  });
-
-  it('flushes pending review artifacts before clearing the active session on dispose', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const releaseFileReviewTurnContent = vi.fn();
-    const appendEntry = vi.fn(async () => undefined);
-    const dispose = vi.fn();
-    (coordinator as unknown as { agentSession: unknown }).agentSession = {
-      appendEntry,
-      dispose,
-      getSessionEntries: () => [],
-      getSessionBranch: () => [],
-      isStreaming: false,
-      releaseFileReviewFileContent: releaseFileReviewTurnContent,
-      sessionId: 'session-1',
-    };
-    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-      }
-    ).scheduleFileReviewArtifactSave(agentSession, makeReviewSnapshot());
-
-    await coordinator.disposeAsync();
-
-    expect(appendEntry).toHaveBeenCalledWith(
-      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-      expect.objectContaining({ turnId: 'turn-1' }),
-    );
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
-    expect(dispose).toHaveBeenCalledOnce();
-  });
-
-  it('flushes debounced review artifacts from the idle lifecycle state', async () => {
-    vi.useFakeTimers();
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const releaseFileReviewTurnContent = vi.fn();
-    const appendEntry = vi.fn(async () => undefined);
-    let isStreaming = true;
-    const agentSession = {
-      appendEntry,
-      getSessionEntries: () => [],
-      getSessionBranch: () => [],
-      get isStreaming() {
-        return isStreaming;
-      },
-      releaseFileReviewFileContent: releaseFileReviewTurnContent,
-      sessionId: 'session-1',
-    } as unknown as AgentSession;
-    (coordinator as unknown as { agentSession: AgentSession }).agentSession = agentSession;
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-      }
-    ).scheduleFileReviewArtifactSave(agentSession, makeReviewSnapshot());
-
-    vi.advanceTimersByTime(100);
-    await flushPromises();
-
-    expect(appendEntry).not.toHaveBeenCalled();
-
-    isStreaming = false;
-    (
-      coordinator as unknown as {
-        forwardAgentSessionEvent: (event: { type: 'state_change' }) => void;
-      }
-    ).forwardAgentSessionEvent({ type: 'state_change' });
-    await flushPromises();
-
-    expect(appendEntry).toHaveBeenCalledWith(
-      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-      expect.objectContaining({ turnId: 'turn-1' }),
-    );
-    expect(releaseFileReviewTurnContent).toHaveBeenCalledWith('file-1');
-  });
-
-  it('flushes pending review artifacts before exporting the active session', async () => {
-    const coordinator = new ExtensionSessionCoordinator({
-      cwd,
-      agentDir,
-      outputChannel: createOutputChannel() as never,
-      configManager: createConfiguredConfigManager(cwd, userConfigDir),
-    });
-    const appendEntry = vi.fn(async () => undefined);
-    const exportToJsonl = vi.fn(() => '/workspace/export.jsonl');
-    (coordinator as unknown as { agentSession: unknown }).agentSession = {
-      appendEntry,
-      exportToJsonl,
-      getSessionEntries: () => [],
-      getSessionBranch: () => [],
-      isStreaming: false,
-      releaseFileReviewFileContent: vi.fn(),
-      sessionId: 'session-1',
-    };
-    const agentSession = (coordinator as unknown as { agentSession: AgentSession }).agentSession;
-
-    (
-      coordinator as unknown as {
-        scheduleFileReviewArtifactSave: (
-          agentSession: AgentSession,
-          review: FileReviewTurnSnapshot,
-        ) => void;
-      }
-    ).scheduleFileReviewArtifactSave(agentSession, makeReviewSnapshot());
-
-    await expect(coordinator.exportSessionToJsonl('/workspace/export.jsonl')).resolves.toBe(
-      '/workspace/export.jsonl',
-    );
-
-    expect(appendEntry).toHaveBeenCalledWith(
-      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-      expect.objectContaining({ turnId: 'turn-1' }),
-    );
-    expect(exportToJsonl).toHaveBeenCalledWith('/workspace/export.jsonl');
-    expect(appendEntry.mock.invocationCallOrder[0]).toBeLessThan(
-      exportToJsonl.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
-    );
   });
 
   it('rejects concurrent session replacement operations instead of queueing them', async () => {
@@ -837,9 +481,7 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     });
 
     const newSessionPromise = coordinator.newSession();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(calls).toEqual(['new:start']);
+    await vi.waitFor(() => expect(calls).toEqual(['new:start']));
 
     await expect(
       coordinator.restore({

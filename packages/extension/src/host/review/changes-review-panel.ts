@@ -15,7 +15,10 @@ import type {
 import type { FileReviewFile, FileReviewTurnSnapshot } from '../../core/review/index.ts';
 import { formatPathRelativeToCwd } from '../../core/tools/shared/path-utils.ts';
 import { configureScoutWebview, getScoutWebviewHtml } from '../../webview-content.ts';
-import type { FileReviewArtifact, FileReviewArtifactFile } from './file-review-artifact.ts';
+import type {
+  FileReviewArtifact,
+  FileReviewArtifactFile,
+} from '../../core/review/file-review-artifact.ts';
 
 // ---------- 类型 ----------
 

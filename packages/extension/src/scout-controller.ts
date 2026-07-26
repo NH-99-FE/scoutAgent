@@ -13,7 +13,7 @@ import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 import { WebviewSurfaceRegistry } from './host/webview-surface-registry.ts';
 import { SessionIndex } from './host/session-index.ts';
 import type { FileReviewTurnSnapshot } from './core/review/file-review.ts';
-import type { FileReviewArtifact } from './host/review/file-review-artifact.ts';
+import type { FileReviewArtifact } from './core/review/file-review-artifact.ts';
 import { ProtocolServer } from './host/protocol/protocol-server.ts';
 import {
   createScoutProtocolHostServices,

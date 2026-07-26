@@ -15,18 +15,33 @@ import {
 } from '@scout-agent/ai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentSession, type AgentSessionEvent } from '../../src/core/agent-session.ts';
+import {
+  ScoutExtensionRunner,
+  createExtensionRuntime,
+  loadExtensionFromFactory,
+} from '../../src/core/extensions/index.ts';
 import type {
   SessionExecutionActivity,
   SessionExecutionPort,
 } from '../../src/core/session-execution.ts';
 import {
+  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+  FileReviewExtensionController,
   MutationJournal,
   runDiffWorkerRequest,
   type DiffWorkerClientPort,
+  type FileReviewArtifact,
 } from '../../src/core/review/index.ts';
 import type { FileReviewTurnSnapshot } from '../../src/core/review/file-review.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
-import { createConfigManager, mockModel, userMessage, assistantMessage } from './test-utils.ts';
+import {
+  assistantMessage,
+  createConfigManager,
+  createExtensionActions,
+  createExtensionContextActions,
+  mockModel,
+  userMessage,
+} from './test-utils.ts';
 import { ConfigManager } from '../../src/config-manager.ts';
 
 const STREAM_OPTIONS_TEST_SOURCE = 'agent-session-compaction-stream-options-test';
@@ -1222,22 +1237,53 @@ describe('AgentSession', () => {
     fs.writeFileSync(path.join(tempDir, 'a.txt'), 'old-a\n', 'utf-8');
     fs.writeFileSync(path.join(tempDir, 'b.txt'), 'old-b\n', 'utf-8');
     const reviews: FileReviewTurnSnapshot[] = [];
-    const session = new AgentSession({
-      session: SessionManager.inMemory(tempDir),
-      configManager: createConfigManagerWithValues(tempDir, {
-        anthropicProviderApiKey: 'test-key',
-        defaultModel: `${model.provider}/${model.id}`,
-      }),
-      cwd: tempDir,
-      logger: { appendLine: vi.fn() },
-      skills: [],
-      mutationJournal: createTestMutationJournal(),
-      onFileReviewUpdated: (_session, review) => {
+    const backingSession = SessionManager.inMemory(tempDir);
+    const configManager = createConfigManagerWithValues(tempDir, {
+      anthropicProviderApiKey: 'test-key',
+      defaultModel: `${model.provider}/${model.id}`,
+    });
+    const fileReviewExtension = new FileReviewExtensionController({
+      sessionId: backingSession.getSessionId(),
+      journal: createTestMutationJournal(),
+      onUpdated: (review) => {
         reviews.push(review);
       },
     });
+    const extensionRuntime = createExtensionRuntime();
+    const builtInExtension = await loadExtensionFromFactory(
+      fileReviewExtension.createFactory(),
+      extensionRuntime,
+      undefined,
+      '<builtin:file-review:test>',
+    );
+    const extensionRunner = new ScoutExtensionRunner(
+      [builtInExtension],
+      extensionRuntime,
+      tempDir,
+      backingSession,
+      configManager,
+    );
+    const session = new AgentSession({
+      session: backingSession,
+      configManager,
+      cwd: tempDir,
+      logger: { appendLine: vi.fn() },
+      skills: [],
+      extensionRunner,
+      fileReviewExtension,
+    });
 
     await session.initialize();
+    extensionRunner.bindCore(
+      {
+        ...createExtensionActions(),
+        appendEntry: async (customType, data) => {
+          await session.appendEntry(customType, data);
+        },
+      },
+      createExtensionContextActions(),
+    );
+    await session.bindExtensions();
     try {
       await session.sendUserMessage('edit first pair');
       await session.sendUserMessage('edit again');
@@ -1252,8 +1298,18 @@ describe('AgentSession', () => {
           ? [entry.message.details as { kind?: string; path?: string; displayPath?: string }]
           : [],
       );
+    const artifacts = session.sessionManager
+      .getEntries()
+      .flatMap((entry) =>
+        entry.type === 'custom' && entry.customType === FILE_REVIEW_ARTIFACT_CUSTOM_TYPE
+          ? [entry.data as FileReviewArtifact]
+          : [],
+      );
 
     expect(toolResultDetails).toHaveLength(3);
+    expect(artifacts).toHaveLength(2);
+    expect(artifacts.map((artifact) => artifact.files.length)).toEqual([2, 1]);
+    expect(artifacts.every((artifact) => artifact.complete)).toBe(true);
     expect(toolResultDetails.every((details) => details.kind === 'file_change')).toBe(true);
     expect(toolResultDetails.map((details) => details.path).sort()).toEqual([
       path.join(tempDir, 'a.txt'),
@@ -1265,12 +1321,20 @@ describe('AgentSession', () => {
       'a.txt',
       'b.txt',
     ]);
-    expect(reviews).toHaveLength(3);
-    expect(reviews[1]?.turnId).toBe(reviews[0]?.turnId);
+    expect(reviews).toHaveLength(6);
+    expect(reviews.map((review) => review.files[0]?.projectionStatus)).toEqual([
+      'pending',
+      'ready',
+      'pending',
+      'ready',
+      'pending',
+      'ready',
+    ]);
+    expect(reviews[2]?.turnId).toBe(reviews[0]?.turnId);
     expect(reviews[0]?.records).toHaveLength(1);
-    expect(reviews[1]?.records).toHaveLength(2);
-    expect(reviews[2]?.turnId).not.toBe(reviews[0]?.turnId);
-    expect(reviews[2]?.records).toHaveLength(1);
+    expect(reviews[2]?.records).toHaveLength(2);
+    expect(reviews[4]?.turnId).not.toBe(reviews[0]?.turnId);
+    expect(reviews[4]?.records).toHaveLength(1);
     expect(reviews[0]?.turnId).toContain(':run-');
   });
 
@@ -1795,19 +1859,28 @@ describe('AgentSession', () => {
     expect(stats.toolResults).toBe(1);
   });
 
-  it('exports the current branch as a linear JSONL session', () => {
+  it('flushes pending review artifacts before exporting the current branch', async () => {
+    const outputPath = path.join(tempDir, 'exported.jsonl');
+    const flushPendingArtifacts = vi.fn(async () => {
+      expect(fs.existsSync(outputPath)).toBe(false);
+    });
     const session = createSession(tempDir);
+    (session as unknown as { fileReviewExtension: unknown }).fileReviewExtension = {
+      flushPendingArtifacts,
+      dispose: vi.fn(),
+    };
     const backingSession = session.sessionManager;
     backingSession.appendMessage(userMessage('first'));
     backingSession.appendMessage(assistantMessage('second'));
 
-    const filePath = session.exportToJsonl('exported.jsonl');
+    const filePath = await session.exportToJsonl('exported.jsonl');
     const lines = fs
       .readFileSync(filePath, 'utf-8')
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
 
+    expect(flushPendingArtifacts).toHaveBeenCalledOnce();
     expect(lines[0]).toMatchObject({ type: 'session', cwd: tempDir });
     expect(lines[1]).toMatchObject({ type: 'message', parentId: null });
     expect(lines[2]).toMatchObject({ type: 'message', parentId: lines[1].id });

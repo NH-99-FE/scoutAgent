@@ -3,8 +3,8 @@ import {
   MutationJournal,
   captureStringSnapshot,
   projectDiffDocumentRows,
-} from '../../../src/core/review/index.ts';
-import { runDiffWorkerRequest, type DiffWorkerClientPort } from '../../../src/core/review/index.ts';
+} from '../../src/core/review/index.ts';
+import { runDiffWorkerRequest, type DiffWorkerClientPort } from '../../src/core/review/index.ts';
 import {
   collectCurrentBranchFileReviewArtifacts,
   collectFileReviewArtifacts,
@@ -15,8 +15,8 @@ import {
   isFileReviewArtifactV1,
   prepareFileReviewArtifactForSession,
   type FileReviewArtifactV1,
-} from '../../../src/host/review/file-review-artifact.ts';
-import type { SessionTreeEntry } from '../../../src/core/session/index.ts';
+} from '../../src/core/review/file-review-artifact.ts';
+import type { SessionTreeEntry } from '../../src/core/session/index.ts';
 
 /** 同步 fake worker：append 后 projection 立即 ready，无需等待异步 Worker。 */
 function createSyncMutationJournal(): MutationJournal {
@@ -76,6 +76,7 @@ describe('file review artifact v2', () => {
       after: captureStringSnapshot('line-1\nline-2\nline-3\n'),
       toolOutcome: 'success',
     });
+    journal.sealTurn('turn-1');
     const review = journal.toReviewTurnSnapshot('turn-1');
     if (!review) throw new Error('Expected review turn');
 
@@ -119,6 +120,25 @@ describe('file review artifact v2', () => {
     expect(decodeFileReviewArtifact({ ...artifact, version: 99 })).toBeUndefined();
   });
 
+  it('rejects snapshots that are not finalized', () => {
+    const journal = createSyncMutationJournal();
+    journal.append({
+      ownerId: 'session-1',
+      turnId: 'turn-pending',
+      toolCallId: 'tool-pending',
+      operation: 'edit',
+      path: 'src/app.ts',
+      absolutePath: '/workspace/src/app.ts',
+      before: captureStringSnapshot('old\n'),
+      after: captureStringSnapshot('new\n'),
+      toolOutcome: 'success',
+    });
+    const review = journal.toReviewTurnSnapshot('turn-pending');
+    if (!review) throw new Error('Expected review turn');
+
+    expect(() => createFileReviewArtifact('session-1', review)).toThrow(/尚未完成/);
+  });
+
   it('reads v1 rows through a centralized adapter and drops persisted tokens', () => {
     const legacy = makeV1Artifact();
 
@@ -153,10 +173,15 @@ describe('file review artifact v2', () => {
       Array.from({ length: 40 }, (_, index) => `new-${index}`).join('\n'),
     );
 
-    const { artifact: bounded, warnings } = prepareFileReviewArtifactForSession(artifact, {
+    const {
+      artifact: bounded,
+      degraded,
+      warnings,
+    } = prepareFileReviewArtifactForSession(artifact, {
       maxRows: 1,
     });
 
+    expect(degraded).toBe(true);
     expect(warnings).toEqual(expect.arrayContaining([expect.stringContaining('hunk lines')]));
     expect(isFileReviewArtifact(bounded)).toBe(true);
     expect(bounded.files[0]?.document).toMatchObject({
@@ -165,6 +190,15 @@ describe('file review artifact v2', () => {
       unavailableReason: 'diff_too_large',
       hunks: [],
     });
+  });
+
+  it('reports when an artifact remains fully faithful to the runtime review', () => {
+    const artifact = makeArtifact();
+    const result = prepareFileReviewArtifactForSession(artifact);
+
+    expect(result.degraded).toBe(false);
+    expect(result.warnings).toEqual([]);
+    expect(result.artifact).toEqual(artifact);
   });
 
   it('persists and restores canonical unavailable documents', () => {
@@ -184,6 +218,7 @@ describe('file review artifact v2', () => {
       after: captureStringSnapshot('replacement'),
       toolOutcome: 'success',
     });
+    journal.sealTurn('turn-1');
     const review = journal.toReviewTurnSnapshot('turn-1');
     if (!review) throw new Error('Expected review turn');
 
@@ -261,6 +296,7 @@ function makeArtifact(originalContent = 'old\n', modifiedContent = 'new\n') {
     after: captureStringSnapshot(modifiedContent),
     toolOutcome: 'success',
   });
+  journal.sealTurn('turn-1');
   const review = journal.toReviewTurnSnapshot('turn-1');
   if (!review) throw new Error('Expected review turn');
   return createFileReviewArtifact('session-1', review, {

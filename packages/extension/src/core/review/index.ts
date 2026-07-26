@@ -45,6 +45,37 @@ export type {
   FileReviewTurnSnapshot,
   FileReviewUnavailableReason,
 } from './file-review.ts';
+export {
+  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+  FILE_REVIEW_ARTIFACT_V1_VERSION,
+  FILE_REVIEW_ARTIFACT_VERSION,
+  MAX_REVIEW_ARTIFACT_BYTES,
+  MAX_REVIEW_ARTIFACT_FILES,
+  MAX_REVIEW_ARTIFACT_ROWS,
+  collectCurrentBranchFileReviewArtifacts,
+  collectFileReviewArtifacts,
+  createFileReviewArtifact,
+  decodeFileReviewArtifact,
+  isFileReviewArtifact,
+  isFileReviewArtifactV1,
+  prepareFileReviewArtifactForSession,
+} from './file-review-artifact.ts';
+export type {
+  BoundedFileReviewArtifactResult,
+  FileReviewArtifact,
+  FileReviewArtifactFile,
+  FileReviewArtifactIndex,
+  FileReviewArtifactLimitOptions,
+  FileReviewArtifactRecord,
+  FileReviewArtifactV1,
+  FileReviewArtifactV1File,
+  FileReviewArtifactV1Record,
+} from './file-review-artifact.ts';
+export { FileReviewExtensionController } from './file-review-extension.ts';
+export type {
+  FileReviewExtensionControllerOptions,
+  FileReviewUpdatedListener,
+} from './file-review-extension.ts';
 export { normalizeReviewLineEndings, splitReviewLines } from './review-text.ts';
 export {
   addReviewRowTokens,
@@ -77,6 +108,7 @@ export type {
 export { MutationJournal, normalizeMutationAbsolutePath } from './mutation-journal.ts';
 export type {
   AppendMutationInput,
+  FinalizeMutationTurnOptions,
   MutationAppendResult,
   MutationJournalListener,
   MutationJournalOptions,

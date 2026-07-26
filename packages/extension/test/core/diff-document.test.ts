@@ -18,7 +18,7 @@ import {
   type DiffWorkerClientPort,
 } from '../../src/core/review/index.ts';
 import { DiffDocumentProjector } from '../../src/host/review/diff-document-projector.ts';
-import { createFileReviewArtifact } from '../../src/host/review/file-review-artifact.ts';
+import { createFileReviewArtifact } from '../../src/core/review/file-review-artifact.ts';
 import { createRuntimeChangesReviewSummary } from '../../src/host/review/changes-review-summary-projector.ts';
 
 function makeMutationJournal(): MutationJournal {
@@ -130,6 +130,7 @@ describe('DiffDocument', () => {
       after: captureStringSnapshot('const value = 2;\nkeep\n'),
       toolOutcome: 'success',
     });
+    journal.sealTurn('turn-1');
     const review = journal.toReviewTurnSnapshot('turn-1');
     expect(review).toBeDefined();
     const document = review?.files[0]?.document;

@@ -3,12 +3,13 @@ import * as vscode from 'vscode';
 import { join } from 'node:path';
 import { createDiffDocument } from '../../../../src/core/review/diff-document.ts';
 import type { FileReviewTurnSnapshot } from '../../../../src/core/review/file-review.ts';
-import type { FileReviewArtifact } from '../../../../src/host/review/file-review-artifact.ts';
+import type { FileReviewArtifact } from '../../../../src/core/review/file-review-artifact.ts';
 import { UiProtocolService } from '../../../../src/host/protocol/services/ui-service.ts';
 
 function makeReviewSnapshot(turnId: string, recordId: string): FileReviewTurnSnapshot {
   return {
     turnId,
+    phase: 'active',
     records: [
       {
         recordId,
@@ -42,6 +43,7 @@ function makeReviewArtifact(turnId: string, recordId: string): FileReviewArtifac
     sessionId: 'session-1',
     turnId,
     createdAt: '2026-01-01T00:00:00.000Z',
+    complete: true,
     records: [
       {
         recordId,
@@ -280,7 +282,36 @@ describe('UiProtocolService', () => {
     });
   });
 
-  it('prefers a persisted artifact over the requested runtime review', async () => {
+  it('does not open an artifact that is not marked complete', async () => {
+    const artifact = { ...makeReviewArtifact('turn-1', 'review-1'), complete: false };
+    const openChangesReviewPanel = vi.fn(async () => undefined);
+    const respond = vi.fn();
+    const service = new UiProtocolService({
+      getExtensionCommands: () => [],
+      publishEvent: vi.fn(),
+      getChangesReview: () => undefined,
+      getChangesReviewArtifact: () => artifact,
+      openChangesReviewPanel,
+    });
+
+    await service.openChangesReview(
+      {
+        type: 'open_changes_review',
+        turnId: 'turn-1',
+        recordId: 'review-1',
+      },
+      respond,
+    );
+
+    expect(openChangesReviewPanel).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      type: 'open_changes_review_result',
+      success: false,
+      error: 'Changes are no longer available',
+    });
+  });
+
+  it('prefers a more complete runtime review over a persisted artifact', async () => {
     const requestedReview = makeReviewSnapshot('turn-1', 'review-1');
     const artifact = makeReviewArtifact('turn-1', 'review-1');
     const openChangesReviewPanel = vi.fn(async () => undefined);
@@ -304,7 +335,7 @@ describe('UiProtocolService', () => {
       respond,
     );
 
-    expect(openChangesReviewPanel).toHaveBeenCalledWith(artifact, {
+    expect(openChangesReviewPanel).toHaveBeenCalledWith(requestedReview, {
       allowCurrentFileContextExpansion: true,
       recordId: 'review-1',
       sessionId: 'session-1',

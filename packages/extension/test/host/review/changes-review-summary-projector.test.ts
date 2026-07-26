@@ -5,12 +5,13 @@ import {
   createArtifactChangesReviewSummary,
   createRuntimeChangesReviewSummary,
 } from '../../../src/host/review/changes-review-summary-projector.ts';
-import type { FileReviewArtifact } from '../../../src/host/review/file-review-artifact.ts';
+import type { FileReviewArtifact } from '../../../src/core/review/file-review-artifact.ts';
 
 describe('createRuntimeChangesReviewSummary', () => {
   it('projects locatable review files with display paths and stable latest-first order', () => {
     const review: FileReviewTurnSnapshot = {
       turnId: 'turn-1',
+      phase: 'active',
       records: [],
       files: [
         {
@@ -69,6 +70,7 @@ describe('createArtifactChangesReviewSummary', () => {
       sessionId: 'session-1',
       turnId: 'turn-1',
       createdAt: '2026-01-01T00:00:00.000Z',
+      complete: true,
       records: ['test.c', 'test.py', 'Test.java', 'test.js'].map((_path, index) => ({
         recordId: `review-${index + 1}`,
         toolCallId: `tool-${index + 1}`,

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { createDiffDocument } from '../../../src/core/review/diff-document.ts';
 import type { FileReviewTurnSnapshot } from '../../../src/core/review/file-review.ts';
-import type { FileReviewArtifact } from '../../../src/host/review/file-review-artifact.ts';
+import type { FileReviewArtifact } from '../../../src/core/review/file-review-artifact.ts';
 import { ScoutChangesReviewPanelManager } from '../../../src/host/review/changes-review-panel.ts';
 import { getScoutWebviewHtml } from '../../../src/webview-content.ts';
 
@@ -184,6 +184,7 @@ function makeReviewSnapshot(): FileReviewTurnSnapshot {
   const document = createDiffDocument('const value = 1;\n', 'const value = 2;\n');
   return {
     turnId: 'turn-1',
+    phase: 'active',
     files: [
       {
         absolutePath: '/workspace/src/app.ts',
@@ -213,6 +214,7 @@ function makeArtifact(): FileReviewArtifact {
     sessionId: 'session-1',
     turnId: 'turn-1',
     createdAt: '2026-01-01T00:00:00.000Z',
+    complete: true,
     records: [
       {
         recordId: 'record-1',

@@ -142,9 +142,21 @@ describe('MutationJournal', () => {
     expect(second.aggregate.projection.status).toBe('settled');
   });
 
+  it('seals a finalized turn against later mutations', async () => {
+    const journal = new MutationJournal();
+    const { aggregate } = journal.append(makeMutation());
+    journal.setProjectionSettled(aggregate.fileId, aggregate.revision, makeDocument());
+
+    const review = await journal.finalizeTurn('turn-1');
+
+    expect(review?.phase).toBe('finalized');
+    expect(journal.isTurnSealed('turn-1')).toBe(true);
+    expect(() => journal.append(makeMutation({ toolCallId: 'tool-late' }))).toThrow(/turn 已封口/);
+  });
+
   it('releases snapshot strings while retaining ready DiffDocument', () => {
     const journal = new MutationJournal();
-    const { record, aggregate } = journal.append(makeMutation());
+    const { aggregate } = journal.append(makeMutation());
     const document = makeDocument();
     journal.setProjectionSettled(aggregate.fileId, aggregate.revision, document);
 
@@ -157,9 +169,37 @@ describe('MutationJournal', () => {
       content: null,
       unavailableReason: 'content_released',
     });
-    expect(record.before.content).toBeNull();
-    expect(record.after.content).toBeNull();
     expect(aggregate.projection).toEqual({ status: 'settled', revision: 1, document });
+  });
+
+  it('does not retain a finalized snapshot through the finalization cache', async () => {
+    const journal = new MutationJournal();
+    const { aggregate } = journal.append(makeMutation());
+    journal.setProjectionSettled(aggregate.fileId, aggregate.revision, makeDocument());
+
+    const finalized = await journal.finalizeTurn('turn-1');
+    expect(finalized?.files[0]?.originalContent).toBe('before');
+    journal.releaseTurnSnapshots('turn-1');
+
+    const rebuilt = await journal.finalizeTurn('turn-1');
+    expect(rebuilt?.files[0]).toMatchObject({
+      originalContent: null,
+      modifiedContent: null,
+      document: makeDocument(),
+    });
+  });
+
+  it('evicts a persisted turn while keeping its sealed identity', async () => {
+    const journal = new MutationJournal();
+    const { aggregate } = journal.append(makeMutation());
+    journal.setProjectionSettled(aggregate.fileId, aggregate.revision, makeDocument());
+    await journal.finalizeTurn('turn-1');
+
+    expect(journal.evictTurn('turn-1')).toBe(true);
+    expect(journal.toReviewTurnSnapshot('turn-1')).toBeUndefined();
+    expect(journal.getRecords()).toHaveLength(0);
+    expect(journal.getAggregates()).toHaveLength(0);
+    expect(() => journal.append(makeMutation({ toolCallId: 'tool-late' }))).toThrow(/turn 已封口/);
   });
 
   it('does not publish or accept projection results after dispose', () => {
@@ -266,6 +306,41 @@ describe('MutationJournal worker projection', () => {
     });
     expect(first.aggregate.projection.status).toBe('pending');
 
+    journal.dispose();
+  });
+
+  it('falls back pending revisions on finalize timeout and drops the late worker response', async () => {
+    const worker = new FakeDiffWorkerClient();
+    const journal = new MutationJournal({ diffWorkerClient: worker });
+    const { aggregate } = journal.append(makeMutation());
+
+    const review = await journal.finalizeTurn('turn-1', { timeoutMs: 0 });
+
+    expect(review).toMatchObject({
+      phase: 'finalized',
+      files: [
+        {
+          fileId: aggregate.fileId,
+          revision: 1,
+          projectionStatus: 'unavailable',
+          document: { unavailableReason: 'generation_failed' },
+        },
+      ],
+    });
+
+    worker.emit({
+      requestId: worker.posted[0]!.requestId,
+      fileId: aggregate.fileId,
+      revision: 1,
+      status: 'settled',
+      document: makeDocument(),
+    });
+
+    expect(aggregate.projection).toMatchObject({
+      status: 'settled',
+      revision: 1,
+      document: { unavailableReason: 'generation_failed' },
+    });
     journal.dispose();
   });
 

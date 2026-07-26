@@ -8,7 +8,10 @@ import type {
   ScoutFileDiffView,
 } from '@scout-agent/shared';
 import type { FileReviewTurnSnapshot } from '../../core/review/index.ts';
-import type { FileReviewArtifact, FileReviewArtifactFile } from '../review/file-review-artifact.ts';
+import type {
+  FileReviewArtifact,
+  FileReviewArtifactFile,
+} from '../../core/review/file-review-artifact.ts';
 import { DiffDocumentProjector } from '../review/diff-document-projector.ts';
 
 // ---------- 类型 ----------
@@ -141,7 +144,8 @@ export class FileDiffRequestHandler {
     message: RequestFileDiffMessage,
   ): Promise<ResolvedDiffSource | undefined> {
     const artifact = await this.getArtifact(message.turnId);
-    const file = artifact?.files.find((candidate) => candidate.fileId === message.fileId);
+    if (!artifact?.complete) return undefined;
+    const file = artifact.files.find((candidate) => candidate.fileId === message.fileId);
     if (!file || file.latestRevision !== message.revision) return undefined;
     return { filePath: file.absolutePath, document: file.document };
   }

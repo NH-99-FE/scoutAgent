@@ -5,7 +5,11 @@
 
 import type { ScoutCoreConfig } from './config.ts';
 import { AgentSession } from './agent-session.ts';
-import { ScoutExtensionRunner, type SessionStartEvent } from './extensions/index.ts';
+import {
+  ScoutExtensionRunner,
+  loadExtensionFromFactory,
+  type SessionStartEvent,
+} from './extensions/index.ts';
 import { ScoutResourceLoader, type LoadedScoutResources } from './resource-loader.ts';
 import type {
   AgentSessionRuntimeDiagnostic,
@@ -16,6 +20,7 @@ import type { CoreLogger } from './logger.ts';
 import type { Api, Model } from '@scout-agent/ai';
 import type { ThinkingLevel } from '@scout-agent/agent';
 import type { FileReviewProjectionUpdate, FileReviewTurnSnapshot } from './review/file-review.ts';
+import { FileReviewExtensionController } from './review/file-review-extension.ts';
 import type { ActiveToolSelection } from './tools/index.ts';
 import type { SessionExecutionPort } from './session-execution.ts';
 
@@ -28,6 +33,7 @@ export interface AgentSessionServices {
   resourceLoader: ScoutResourceLoader;
   resources: LoadedScoutResources;
   extensionRunner: ScoutExtensionRunner;
+  fileReviewExtension: FileReviewExtensionController;
   diagnostics: AgentSessionRuntimeDiagnostic[];
 }
 
@@ -68,6 +74,15 @@ export async function createAgentSessionServices(
   });
   const resources = await resourceLoader.load();
   const extensionResult = resourceLoader.getExtensions();
+  const fileReviewExtension = new FileReviewExtensionController({
+    sessionId: options.session.getSessionId(),
+  });
+  const builtInFileReviewExtension = await loadExtensionFromFactory(
+    fileReviewExtension.createFactory(),
+    extensionResult.runtime,
+    undefined,
+    '<builtin:file-review>',
+  );
 
   for (const error of extensionResult.errors) {
     diagnostics.push({
@@ -77,7 +92,7 @@ export async function createAgentSessionServices(
   }
 
   const extensionRunner = new ScoutExtensionRunner(
-    extensionResult.extensions,
+    [builtInFileReviewExtension, ...extensionResult.extensions],
     extensionResult.runtime,
     options.cwd,
     options.session,
@@ -92,6 +107,7 @@ export async function createAgentSessionServices(
     resourceLoader,
     resources,
     extensionRunner,
+    fileReviewExtension,
     diagnostics,
   };
 }
@@ -137,8 +153,18 @@ export async function createAgentSessionFromServices(
     initialModel: options.initialModel,
     initialThinkingLevel: options.initialThinkingLevel,
     sessionStartEvent: options.sessionStartEvent,
-    onFileReviewUpdated: options.onFileReviewUpdated,
+    fileReviewExtension: options.services.fileReviewExtension,
     sessionExecution: options.sessionExecution,
+  });
+  options.services.fileReviewExtension.setUpdatedListener((review, projectionUpdate) => {
+    options.onFileReviewUpdated?.(agentSession, review, projectionUpdate);
+  });
+  options.services.fileReviewExtension.setDiagnosticListener((message, error) => {
+    options.logger.appendLine(
+      `[scout] ${message}${
+        error ? `: ${error instanceof Error ? error.message : String(error)}` : ''
+      }`,
+    );
   });
 
   try {

@@ -15,6 +15,7 @@ import {
   ScoutExtensionRunner,
 } from '../../src/core/extensions/index.ts';
 import { ScoutPackageManager } from '../../src/core/package-manager.ts';
+import { FileReviewExtensionController } from '../../src/core/review/index.ts';
 
 function writePrompt(filePath: string, description: string, body = 'Prompt body'): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -364,6 +365,9 @@ describe('createAgentSessionServices', () => {
         resourceLoader,
         resources,
         extensionRunner,
+        fileReviewExtension: new FileReviewExtensionController({
+          sessionId: session.getSessionId(),
+        }),
         diagnostics: [],
       },
       session,
@@ -427,6 +431,9 @@ describe('createAgentSessionServices', () => {
         resourceLoader,
         resources,
         extensionRunner,
+        fileReviewExtension: new FileReviewExtensionController({
+          sessionId: session.getSessionId(),
+        }),
         diagnostics: [],
       },
       session,
@@ -489,6 +496,9 @@ describe('createAgentSessionServices', () => {
         resourceLoader,
         resources,
         extensionRunner,
+        fileReviewExtension: new FileReviewExtensionController({
+          sessionId: session.getSessionId(),
+        }),
         diagnostics: [],
       },
       session,
@@ -546,6 +556,9 @@ describe('createAgentSessionServices', () => {
         resourceLoader,
         resources,
         extensionRunner,
+        fileReviewExtension: new FileReviewExtensionController({
+          sessionId: session.getSessionId(),
+        }),
         diagnostics: [],
       },
       session,

@@ -7,7 +7,7 @@ import type { ExtensionMessage } from '@scout-agent/shared';
 import type { ConfigManager } from '../../config-manager.ts';
 import type { FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
 import { ensureTool } from '../../core/tools/shared/tools-manager.ts';
-import type { FileReviewArtifact } from '../review/file-review-artifact.ts';
+import type { FileReviewArtifact } from '../../core/review/file-review-artifact.ts';
 import type { ExtensionSessionCoordinator } from '../session-coordinator.ts';
 import type { SessionIndex } from '../session-index.ts';
 import type { ScoutWebviewSurface } from '../webview-surface.ts';

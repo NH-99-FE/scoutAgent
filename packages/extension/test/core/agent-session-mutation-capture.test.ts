@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentSession } from '../../src/core/agent-session.ts';
 import type { ScoutExtensionRunner } from '../../src/core/extensions/index.ts';
 import {
+  FileReviewExtensionController,
   MutationJournal,
   runDiffWorkerRequest,
   type DiffWorkerClientPort,
@@ -30,6 +31,7 @@ interface AgentSessionInternals {
 }
 
 const tempDirs: string[] = [];
+const fileReviewExtensions = new WeakMap<AgentSession, FileReviewExtensionController>();
 
 class InlineDiffWorkerClient implements DiffWorkerClientPort {
   request(request: DiffWorkerRequest, listener: DiffWorkerResponseListener): void {
@@ -46,17 +48,29 @@ function makeTempDir(): string {
 }
 
 function makeSession(cwd: string, extensionRunner?: ScoutExtensionRunner): AgentSession {
-  return new AgentSession({
+  const fileReviewExtension = new FileReviewExtensionController({
+    sessionId: `test-${path.basename(cwd)}`,
+    journal: new MutationJournal({
+      diffWorkerClient: new InlineDiffWorkerClient(),
+    }),
+  });
+  const session = new AgentSession({
     session: SessionManager.inMemory(cwd),
     configManager: createConfigManager(cwd),
     cwd,
     logger: { appendLine: vi.fn() },
     skills: [],
     extensionRunner,
-    mutationJournal: new MutationJournal({
-      diffWorkerClient: new InlineDiffWorkerClient(),
-    }),
+    fileReviewExtension,
   });
+  fileReviewExtensions.set(session, fileReviewExtension);
+  return session;
+}
+
+function getFileReviewExtension(session: AgentSession): FileReviewExtensionController {
+  const extension = fileReviewExtensions.get(session);
+  if (!extension) throw new Error('Missing test file review extension');
+  return extension;
 }
 
 function getInternals(session: AgentSession): AgentSessionInternals {
@@ -74,7 +88,7 @@ describe('AgentSession mutation capture assembly', () => {
     const first = makeSession(makeTempDir());
     const second = makeSession(makeTempDir());
 
-    expect(first.getMutationCaptureOwnerId()).not.toBe(second.getMutationCaptureOwnerId());
+    expect(getFileReviewExtension(first).ownerId).not.toBe(getFileReviewExtension(second).ownerId);
 
     first.dispose();
     second.dispose();
@@ -101,17 +115,19 @@ describe('AgentSession mutation capture assembly', () => {
       patch: expect.any(String),
       firstChangedLine: expect.any(Number),
     });
-    const records = session.getMutationJournal().getRecords();
+    const journal = getFileReviewExtension(session).getJournal();
+    const records = journal.getRecords();
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
-      ownerId: session.getMutationCaptureOwnerId(),
+      ownerId: getFileReviewExtension(session).ownerId,
       toolCallId: 'builtin-edit',
       operation: 'edit',
       path: 'sample.txt',
       toolOutcome: 'success',
     });
-    expect(records[0].before.content).toBe('before\n');
-    expect(records[0].after.content).toBe('after\n');
+    const aggregate = journal.getAggregateByRecordId(records[0]!.recordId);
+    expect(aggregate?.baseline.content).toBe('before\n');
+    expect(aggregate?.latest.content).toBe('after\n');
     expect(fs.readFileSync(target, 'utf8')).toBe('after\n');
 
     session.dispose();
@@ -133,9 +149,11 @@ describe('AgentSession mutation capture assembly', () => {
 
     // 阶段 4：write 工具返回 details: undefined，capture 由 Journal 处理
     expect(result.details).toBeUndefined();
-    const [record] = session.getMutationJournal().getRecords();
-    expect(record.before.content).toBeNull();
-    expect(record.after.content).toBe(after);
+    const journal = getFileReviewExtension(session).getJournal();
+    const [record] = journal.getRecords();
+    const aggregate = journal.getAggregateByRecordId(record!.recordId);
+    expect(aggregate?.baseline.content).toBeNull();
+    expect(aggregate?.latest.content).toBe(after);
     expect(record.toolOutcome).toBe('success');
     expect(fs.readFileSync(target, 'utf8')).toBe(after);
 
@@ -181,7 +199,7 @@ describe('AgentSession mutation capture assembly', () => {
     });
 
     expect(fs.readFileSync(target, 'utf8')).toBe('written outside builtin capture');
-    expect(session.getMutationJournal().getRecords()).toHaveLength(0);
+    expect(getFileReviewExtension(session).getJournal().getRecords()).toHaveLength(0);
 
     session.dispose();
   });
