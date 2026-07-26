@@ -19,6 +19,11 @@ import type {
   SessionExecutionActivity,
   SessionExecutionPort,
 } from '../../src/core/session-execution.ts';
+import {
+  MutationJournal,
+  runDiffWorkerRequest,
+  type DiffWorkerClientPort,
+} from '../../src/core/review/index.ts';
 import type { FileReviewTurnSnapshot } from '../../src/core/review/file-review.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
 import { createConfigManager, mockModel, userMessage, assistantMessage } from './test-utils.ts';
@@ -26,6 +31,14 @@ import { ConfigManager } from '../../src/config-manager.ts';
 
 const STREAM_OPTIONS_TEST_SOURCE = 'agent-session-compaction-stream-options-test';
 const STREAM_OPTIONS_TEST_API = 'test-agent-session-compaction-api';
+
+function createTestMutationJournal(): MutationJournal {
+  const client: DiffWorkerClientPort = {
+    request: (request, listener) => listener(runDiffWorkerRequest(request)),
+    dispose: () => undefined,
+  };
+  return new MutationJournal({ diffWorkerClient: client });
+}
 
 function createSession(
   tempDir: string,
@@ -1218,6 +1231,7 @@ describe('AgentSession', () => {
       cwd: tempDir,
       logger: { appendLine: vi.fn() },
       skills: [],
+      mutationJournal: createTestMutationJournal(),
       onFileReviewUpdated: (_session, review) => {
         reviews.push(review);
       },
@@ -1251,8 +1265,6 @@ describe('AgentSession', () => {
       'a.txt',
       'b.txt',
     ]);
-    expect(JSON.stringify(toolResultDetails)).not.toContain('file_review_payload');
-
     expect(reviews).toHaveLength(3);
     expect(reviews[1]?.turnId).toBe(reviews[0]?.turnId);
     expect(reviews[0]?.records).toHaveLength(1);

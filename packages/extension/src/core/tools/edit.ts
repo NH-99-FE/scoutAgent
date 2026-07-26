@@ -12,22 +12,19 @@ import {
 } from 'node:fs/promises';
 import { type Static, Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '../extensions/types.ts';
-import {
-  decodeReviewContent,
-  FILE_REVIEW_PAYLOAD_KIND,
-  type FileReviewPayload,
-} from '../review/file-review.ts';
 import { wrapToolDefinition } from './tool-definition-wrapper.ts';
 import {
   applyEditsToNormalizedContent,
   detectLineEnding,
+  generateDiffString,
+  generateUnifiedPatch,
   type Edit,
   normalizeToLF,
   restoreLineEndings,
   stripBom,
 } from './shared/edit-diff.ts';
 import { withFileMutationQueue } from './shared/file-mutation-queue.ts';
-import { formatPathRelativeToCwd, resolveToCwd } from './shared/path-utils.ts';
+import { resolveToCwd } from './shared/path-utils.ts';
 
 // ---------- Schema ----------
 
@@ -64,15 +61,12 @@ type LegacyEditToolInput = EditToolInput & {
 };
 
 export interface EditToolDetails {
-  /** 内部 review payload。AgentSession 会捕获并替换为轻量 file_change details。 */
-  kind: typeof FILE_REVIEW_PAYLOAD_KIND;
-  operation: 'edit';
-  path: string;
-  absolutePath: string;
-  displayPath?: string;
-  originalContent: string | null;
-  modifiedContent: string | null;
-  unavailableReason?: FileReviewPayload['unavailableReason'];
+  /** Display-oriented diff of the changes made */
+  diff: string;
+  /** Standard unified patch of the changes made */
+  patch: string;
+  /** Line number of the first change in the new file (for editor navigation) */
+  firstChangedLine?: number;
 }
 
 // ---------- 可插拔操作接口 ----------
@@ -90,7 +84,7 @@ export interface EditOperations {
   access: (absolutePath: string) => Promise<void>;
 }
 
-const defaultEditOperations: EditOperations = {
+export const DEFAULT_EDIT_OPERATIONS: EditOperations = {
   readFile: (path) => fsReadFile(path),
   writeFile: (path, content) => fsWriteFile(path, content, 'utf-8'),
   access: (path) => fsAccess(path, constants.R_OK | constants.W_OK),
@@ -150,7 +144,7 @@ export function createEditToolDefinition(
   cwd: string,
   options?: EditToolOptions,
 ): ToolDefinition<typeof editSchema, EditToolDetails> {
-  const ops = options?.operations ?? defaultEditOperations;
+  const ops = options?.operations ?? DEFAULT_EDIT_OPERATIONS;
 
   return {
     name: 'edit',
@@ -171,7 +165,6 @@ export function createEditToolDefinition(
     async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?) {
       const { path, edits } = validateEditInput(input);
       const absolutePath = resolveToCwd(path, cwd);
-      const displayPath = formatPathRelativeToCwd(absolutePath, cwd);
 
       return withFileMutationQueue(absolutePath, async () => {
         // 不要在 abort 事件监听器中 reject：那会在飞行中的文件系统操作
@@ -198,21 +191,26 @@ export function createEditToolDefinition(
 
         // 读取文件
         const buffer = await ops.readFile(absolutePath);
-        const decodedReviewOriginal = decodeReviewContent(buffer);
-        const rawContent = decodedReviewOriginal.content ?? buffer.toString('utf-8');
+        const rawContent = buffer.toString('utf-8');
         throwIfAborted();
 
         // 匹配前去除 BOM — 模型不会在 oldText 中包含不可见的 BOM
         const { bom, text: content } = stripBom(rawContent);
         const originalEnding = detectLineEnding(content);
         const normalizedContent = normalizeToLF(content);
-        const { newContent } = applyEditsToNormalizedContent(normalizedContent, edits, path);
+        const { baseContent, newContent } = applyEditsToNormalizedContent(
+          normalizedContent,
+          edits,
+          path,
+        );
         throwIfAborted();
 
         const finalContent = bom + restoreLineEndings(newContent, originalEnding);
         await ops.writeFile(absolutePath, finalContent);
         throwIfAborted();
 
+        const diffResult = generateDiffString(baseContent, newContent);
+        const patch = generateUnifiedPatch(path, baseContent, newContent);
         return {
           content: [
             {
@@ -221,14 +219,9 @@ export function createEditToolDefinition(
             },
           ],
           details: {
-            kind: FILE_REVIEW_PAYLOAD_KIND,
-            operation: 'edit',
-            path,
-            absolutePath,
-            displayPath,
-            originalContent: decodedReviewOriginal.content,
-            modifiedContent: decodedReviewOriginal.unavailableReason ? null : finalContent,
-            unavailableReason: decodedReviewOriginal.unavailableReason,
+            diff: diffResult.diff,
+            patch,
+            firstChangedLine: diffResult.firstChangedLine,
           },
         };
       });

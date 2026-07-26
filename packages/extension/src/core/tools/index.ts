@@ -28,14 +28,15 @@ export {
   type EditToolDetails,
   type EditToolOptions,
   type EditOperations,
+  DEFAULT_EDIT_OPERATIONS,
 } from './edit.ts';
 export {
   createWriteTool,
   createWriteToolDefinition,
   type WriteToolInput,
-  type WriteToolDetails,
   type WriteToolOptions,
   type WriteOperations,
+  DEFAULT_WRITE_OPERATIONS,
 } from './write.ts';
 export {
   createGrepTool,
@@ -98,7 +99,12 @@ export {
   truncateTail,
   truncateLine,
 } from './shared/truncate.ts';
-export { resolveToCwd, resolveReadPathAsync, pathExists } from './shared/path-utils.ts';
+export {
+  formatPathRelativeToCwd,
+  pathExists,
+  resolveReadPathAsync,
+  resolveToCwd,
+} from './shared/path-utils.ts';
 export {
   OutputAccumulator,
   type OutputAccumulatorOptions,
@@ -106,7 +112,6 @@ export {
 } from './shared/output-accumulator.ts';
 export {
   applyEditsToNormalizedContent,
-  computeEditsDiff,
   detectLineEnding,
   generateDiffString,
   generateUnifiedPatch,
@@ -114,8 +119,6 @@ export {
   restoreLineEndings,
   stripBom,
   type Edit,
-  type EditDiffResult,
-  type EditDiffError,
   type AppliedEditsResult,
   type FuzzyMatchResult,
 } from './shared/edit-diff.ts';

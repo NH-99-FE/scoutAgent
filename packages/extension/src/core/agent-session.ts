@@ -32,7 +32,11 @@ import type {
   StreamFn,
   ThinkingLevel,
 } from '@scout-agent/agent';
-import type { ScoutTreeNavigationAdmission, ToolPresentationMetadata } from '@scout-agent/shared';
+import type {
+  ScoutFileChangeDetails,
+  ScoutTreeNavigationAdmission,
+  ToolPresentationMetadata,
+} from '@scout-agent/shared';
 import {
   Agent,
   type BashExecutionMessage,
@@ -45,10 +49,14 @@ import type { ScoutCoreConfig, ScoutStreamOptions } from './config.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import {
   ALL_TOOL_NAMES,
+  DEFAULT_EDIT_OPERATIONS,
+  DEFAULT_WRITE_OPERATIONS,
   createBuiltinToolDefinitionEntries,
   findToolProfile,
+  formatPathRelativeToCwd,
   getConfiguredToolProfiles,
   resolveDefaultToolProfileId,
+  resolveToCwd,
   resolveToolProfileNames,
   type ActiveToolSelection,
   type ToolProfileDefinition,
@@ -87,11 +95,15 @@ import {
   type QueuedRuntimeSnapshot,
 } from './queued-message-policy.ts';
 import type { CoreDisposable, CoreLogger } from './logger.ts';
+import type { FileReviewProjectionUpdate, FileReviewTurnSnapshot } from './review/file-review.ts';
 import {
-  FileReviewStore,
-  isFileReviewPayload,
-  type FileReviewTurnSnapshot,
-} from './review/file-review.ts';
+  MutationCaptureCoordinator,
+  MutationJournal,
+  createLocalReviewSnapshotProvider,
+  withEditReviewCapture,
+  withWriteReviewCapture,
+  type MutationJournalUpdate,
+} from './review/index.ts';
 import {
   ScoutResourceLoader,
   type DiscoveredExtensionResources,
@@ -241,7 +253,12 @@ export interface AgentSessionOptions {
   initialModel?: Model<Api>;
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
-  onFileReviewUpdated?: (session: AgentSession, review: FileReviewTurnSnapshot) => void;
+  onFileReviewUpdated?: (
+    session: AgentSession,
+    review: FileReviewTurnSnapshot,
+    projectionUpdate?: FileReviewProjectionUpdate,
+  ) => void;
+  mutationJournal?: MutationJournal;
   sessionExecution?: SessionExecutionPort;
 }
 
@@ -369,6 +386,7 @@ export class AgentSession implements CoreDisposable {
   private readonly onFileReviewUpdated?: (
     session: AgentSession,
     review: FileReviewTurnSnapshot,
+    projectionUpdate?: FileReviewProjectionUpdate,
   ) => void;
   private toolRegistry = new Map<string, ToolRegistryEntry>();
   private toolRegistryVersion = 0;
@@ -401,7 +419,10 @@ export class AgentSession implements CoreDisposable {
   private turnIndex = 0;
   /** 当前 agent_start 运行 id，用于生成一次 assistant 回复范围内的 review turnId。 */
   private currentReviewRunId = createReviewRunId();
-  private readonly fileReviewStore = new FileReviewStore();
+  private readonly unsubscribeFileReviewProjection: () => void;
+  private readonly mutationOwnerId = `agent-session-runtime:${randomUUID()}`;
+  private readonly mutationJournal: MutationJournal;
+  private readonly mutationCapture: MutationCaptureCoordinator;
 
   /** 从当前 session branch 缓存原始路径；provider runtime context 由 agent.state.messages 持有。 */
   private cachedBranch: SessionTreeEntry[] = [];
@@ -462,6 +483,20 @@ export class AgentSession implements CoreDisposable {
     this.initialModel = options.initialModel;
     this.initialThinkingLevel = options.initialThinkingLevel;
     this.onFileReviewUpdated = options.onFileReviewUpdated;
+    this.mutationJournal = options.mutationJournal ?? new MutationJournal();
+    this.unsubscribeFileReviewProjection = this.mutationJournal.onUpdated((update) => {
+      if (update.type === 'projection') {
+        this.emitFileReviewUpdated(update);
+      }
+    });
+    this.mutationCapture = new MutationCaptureCoordinator({
+      journal: this.mutationJournal,
+      getTurnId: () => this.getCurrentFileReviewTurnId(),
+      onCaptureError: (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.appendLine(`[scout] Mutation capture failed: ${message}`);
+      },
+    });
     this.sessionExecution = options.sessionExecution;
   }
 
@@ -526,11 +561,25 @@ export class AgentSession implements CoreDisposable {
   }
 
   getFileReviewTurn(turnId: string): FileReviewTurnSnapshot | undefined {
-    return this.fileReviewStore.getTurn(turnId);
+    return this.mutationJournal.toReviewTurnSnapshot(turnId);
   }
 
   releaseFileReviewTurnContent(turnId: string): boolean {
-    return this.fileReviewStore.releaseTurnContent(turnId);
+    return this.mutationJournal.releaseTurnSnapshots(turnId);
+  }
+
+  releaseFileReviewFileContent(fileId: string): boolean {
+    return this.mutationJournal.releaseSnapshots(undefined, fileId);
+  }
+
+  /** @internal MutationJournal 单 Worker 事实源，供 host/测试消费。 */
+  getMutationJournal(): MutationJournal {
+    return this.mutationJournal;
+  }
+
+  /** @internal 用于验证多个 AgentSession runtime 的 capture owner 隔离。 */
+  getMutationCaptureOwnerId(): string {
+    return this.mutationOwnerId;
   }
 
   // ---------- 运行时操作 ----------
@@ -2168,6 +2217,8 @@ export class AgentSession implements CoreDisposable {
 
   dispose(): void {
     this.rejectAllPromptAcceptances(new Error('Agent session disposed before prompt acceptance'));
+    this.unsubscribeFileReviewProjection();
+    this.mutationJournal.dispose();
     this.operations.dispose();
     this.extensionRunner?.invalidate();
     this.unsubscribeAgent?.();
@@ -2260,14 +2311,35 @@ export class AgentSession implements CoreDisposable {
     const builtinEntries = createBuiltinToolDefinitionEntries(
       this.cwd,
       Array.from(ALL_TOOL_NAMES),
-      { read: readOptions },
+      {
+        read: readOptions,
+        edit: {
+          operations: withEditReviewCapture(DEFAULT_EDIT_OPERATIONS, this.mutationCapture),
+        },
+        write: {
+          operations: withWriteReviewCapture(
+            DEFAULT_WRITE_OPERATIONS,
+            this.mutationCapture,
+            createLocalReviewSnapshotProvider({
+              onError: (error) => {
+                this.logger.appendLine(
+                  `[scout] Review baseline capture degraded: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                );
+              },
+            }),
+          ),
+        },
+      },
     );
     const registry = new Map<string, ToolRegistryEntry>();
 
     for (const entry of builtinEntries) {
-      const tool = wrapToolDefinition(entry.definition);
-      registry.set(entry.definition.name, {
-        definition: entry.definition,
+      const definition = this.withBuiltinMutationCapture(entry.definition, entry.sourceInfo);
+      const tool = wrapToolDefinition(definition);
+      registry.set(definition.name, {
+        definition,
         tool,
         sourceInfo: entry.sourceInfo,
         sourceType: 'builtin',
@@ -2290,6 +2362,41 @@ export class AgentSession implements CoreDisposable {
 
     this.toolRegistry = registry;
     this.toolRegistryVersion += 1;
+  }
+
+  private withBuiltinMutationCapture(
+    definition: ToolDefinition,
+    sourceInfo: SourceInfo,
+  ): ToolDefinition {
+    if (
+      sourceInfo.source !== 'builtin' ||
+      (definition.name !== 'edit' && definition.name !== 'write')
+    ) {
+      return definition;
+    }
+
+    const operation = definition.name;
+    const execute = definition.execute;
+    return {
+      ...definition,
+      execute: (toolCallId, params, signal, onUpdate, ctx) => {
+        const rawPath = (params as { path?: unknown }).path;
+        const path = typeof rawPath === 'string' ? rawPath : '';
+        const absolutePath = resolveToCwd(path, this.cwd);
+        const displayPath = formatPathRelativeToCwd(absolutePath, this.cwd);
+        return this.mutationCapture.run(
+          {
+            ownerId: this.mutationOwnerId,
+            toolCallId,
+            operation,
+            path,
+            absolutePath,
+            displayPath,
+          },
+          () => execute.call(definition, toolCallId, params, signal, onUpdate, ctx),
+        );
+      },
+    };
   }
 
   private normalizeActiveToolState(previousRegistryNames?: ReadonlySet<string>): void {
@@ -2884,35 +2991,67 @@ export class AgentSession implements CoreDisposable {
     return `${this.sessionId || 'session'}:${this.currentReviewRunId}`;
   }
 
+  /**
+   * 以 MutationJournal 为唯一事实源：capture.run 已在工具 execute 外层把真实写入
+   * 追加为 record。这里只按 toolCallId 关联已提交的 record，返回轻量 file_change
+   * details。tool result 不携带完整内容，review 数据只来自 Mutation Journal。
+   *
+   * write 前 error（无 record）不产生 review；write 后 error_after_write 仍返回
+   * file_change 引用，UI 显示“文件已修改，工具随后失败/中止”。
+   */
   private captureFileReviewResult(
     context: AfterToolCallContext,
   ): Promise<AfterToolCallResult | undefined> {
-    if (context.isError || !isFileReviewPayload(context.result.details)) {
-      return Promise.resolve(undefined);
-    }
-    return this.captureFileReviewPayload(context);
+    const record = this.mutationJournal.getRecordByToolCallId(context.toolCall.id);
+    if (!record) return Promise.resolve(undefined);
+
+    const aggregate = this.mutationJournal.getAggregateByRecordId(record.recordId);
+    if (!aggregate) return Promise.resolve(undefined);
+
+    const projection = aggregate.projection;
+    const projectionStatus =
+      projection.status === 'pending'
+        ? 'pending'
+        : projection.document.unavailableReason
+          ? 'unavailable'
+          : 'ready';
+    const details: ScoutFileChangeDetails = {
+      kind: 'file_change',
+      path: record.absolutePath,
+      displayPath: record.displayPath,
+      review: {
+        turnId: record.turnId,
+        recordId: record.recordId,
+        fileId: aggregate.fileId,
+        revision: aggregate.revision,
+        status: projectionStatus,
+      },
+      toolOutcome: record.toolOutcome,
+    };
+    return Promise.resolve({ details });
   }
 
-  private async captureFileReviewPayload(
-    context: AfterToolCallContext,
-  ): Promise<AfterToolCallResult | undefined> {
-    if (!isFileReviewPayload(context.result.details)) return undefined;
-    const turnId = this.getCurrentFileReviewTurnId();
-    const details = this.fileReviewStore.addRecord(
-      turnId,
-      context.toolCall.id,
-      context.result.details,
-    );
-    this.emitFileReviewUpdated(turnId);
-    return { details };
-  }
-
-  private emitFileReviewUpdated(turnId: string): void {
+  private emitFileReviewUpdated(update: MutationJournalUpdate): void {
     if (!this.onFileReviewUpdated) return;
-    const review = this.fileReviewStore.getTurn(turnId);
+    const review = this.mutationJournal.toReviewTurnSnapshot(update.turnId);
     if (!review) return;
+    const file = review.files.find(
+      (candidate) =>
+        candidate.fileId === update.fileId &&
+        candidate.revision === update.revision &&
+        candidate.projectionStatus !== 'pending',
+    );
+    const projectionUpdate: FileReviewProjectionUpdate | undefined = file?.fileId
+      ? {
+          ownerId: update.ownerId,
+          turnId: update.turnId,
+          fileId: file.fileId,
+          revision: update.revision,
+          status: file.projectionStatus === 'ready' ? 'ready' : 'unavailable',
+        }
+      : undefined;
     try {
-      this.onFileReviewUpdated(this, review);
+      this.onFileReviewUpdated(this, review, projectionUpdate);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.appendLine(`[scout] Failed to schedule changes review artifact: ${message}`);

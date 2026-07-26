@@ -15,7 +15,7 @@ import type { Session } from './session/index.ts';
 import type { CoreLogger } from './logger.ts';
 import type { Api, Model } from '@scout-agent/ai';
 import type { ThinkingLevel } from '@scout-agent/agent';
-import type { FileReviewTurnSnapshot } from './review/file-review.ts';
+import type { FileReviewProjectionUpdate, FileReviewTurnSnapshot } from './review/file-review.ts';
 import type { ActiveToolSelection } from './tools/index.ts';
 import type { SessionExecutionPort } from './session-execution.ts';
 
@@ -46,7 +46,11 @@ export interface CreateAgentSessionFromServicesOptions {
   initialModel?: Model<Api>;
   initialThinkingLevel?: ThinkingLevel;
   sessionStartEvent?: SessionStartEvent;
-  onFileReviewUpdated?: (session: AgentSession, review: FileReviewTurnSnapshot) => void;
+  onFileReviewUpdated?: (
+    session: AgentSession,
+    review: FileReviewTurnSnapshot,
+    projectionUpdate?: FileReviewProjectionUpdate,
+  ) => void;
   sessionExecution?: SessionExecutionPort;
 }
 

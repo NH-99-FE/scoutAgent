@@ -11,7 +11,7 @@ import type {
   ToolInfo,
 } from './protocol-core.ts';
 import type { ScoutExtensionUIRequest } from './protocol-extension-ui.ts';
-import type { ScoutChangesReviewRow, ScoutChangesReviewSummary } from './protocol-review.ts';
+import type { ScoutChangesReviewSummary } from './protocol-review.ts';
 import type { ScoutActiveToolSelection, ScoutToolProfileInfo } from './settings.ts';
 
 // ---------- 消息内容块 ----------
@@ -291,48 +291,26 @@ export interface ScoutToolExecutionResult {
 export interface ScoutFileChangeReviewRef {
   turnId: string;
   recordId: string;
+  /** Journal 文件聚合 id，用于 lazy diff 请求定位。 */
+  fileId: string;
+  /** 当前聚合 revision，防止 stale 投影覆盖最新状态。 */
+  revision: number;
+  /** projection 状态：pending(Worker 计算中) | ready | unavailable。 */
+  status: 'pending' | 'ready' | 'unavailable';
 }
 
-export interface ScoutFileChangeDiffPreview {
-  rows: ScoutChangesReviewRow[];
-  truncated?: boolean;
-  unavailableReason?: string;
-}
-
+/**
+ * 轻量 file_change details：仅携带定位与 projection 状态引用。
+ * 不再内嵌统计或 diff rows；
+ * 内联 diff 由 webview 按 review.status 渲染，完整 diff 由 Changes Review 面板按 turnId 加载。
+ */
 export interface ScoutFileChangeDetails {
   kind: 'file_change';
   /** 可定位的业务路径，通常为 host/core 规范化后的绝对路径；不要当作 UI 展示规则来源。 */
   path: string;
   /** UI-only 展示路径，由 host/core 格式化；webview 只负责渲染与截断。 */
   displayPath?: string;
-  additions: number;
-  deletions: number;
-  firstChangedLine?: number;
   review: ScoutFileChangeReviewRef;
-  /** Host 在协议边界附加的轻量最终 diff 预览；不进入 provider runtime context。 */
-  diffPreview?: ScoutFileChangeDiffPreview;
-}
-
-export interface ScoutFileEditPreview {
-  kind: 'file_edit';
-  /** 预览关联的业务 path，用于标识文件；展示优先使用 displayPath。 */
-  path: string;
-  /** UI-only 展示路径，由 core preview 根据当前 cwd 格式化。 */
-  displayPath?: string;
-  diff?: string;
-  additions: number;
-  deletions: number;
-  firstChangedLine?: number;
-  error?: string;
-}
-
-export type ScoutToolCallPreview = ScoutFileEditPreview;
-
-export interface ScoutToolCallPreviewUpdateEvent {
-  type: 'tool_call_preview_update';
-  sessionId: string;
-  sessionFile?: string;
-  toolCallId: string;
-  toolName: string;
-  preview: ScoutToolCallPreview;
+  /** 工具最终结果：success 表示工具成功；error_after_write 表示写入已提交但工具随后抛错/中止。 */
+  toolOutcome?: 'success' | 'error_after_write';
 }

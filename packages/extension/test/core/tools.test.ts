@@ -12,7 +12,6 @@ import {
   createTools,
   DEFAULT_ACTIVE_TOOL_NAMES,
 } from '../../src/core/tools/index.ts';
-import { MAX_REVIEW_TEXT_BYTES } from '../../src/core/text-size.ts';
 
 describe('builtin tools', () => {
   let cwd: string;
@@ -80,7 +79,7 @@ describe('builtin tools', () => {
     expect(definitions.write.presentation).toEqual({ pathArguments: ['path'] });
   });
 
-  it('keeps the core edit review payload contract for AgentSession capture', async () => {
+  it('returns Pi-style edit details with diff, patch, and firstChangedLine', async () => {
     const target = path.join(cwd, 'sample.txt');
     fs.writeFileSync(target, 'old value\n', 'utf-8');
     const definition = createToolDefinition('edit', cwd);
@@ -91,14 +90,11 @@ describe('builtin tools', () => {
     });
 
     expect(result.details).toMatchObject({
-      kind: 'file_review_payload',
-      operation: 'edit',
-      path: 'sample.txt',
-      absolutePath: target,
-      displayPath: 'sample.txt',
-      originalContent: 'old value\n',
-      modifiedContent: 'new value\n',
+      diff: expect.any(String),
+      patch: expect.any(String),
+      firstChangedLine: expect.any(Number),
     });
+    expect(fs.readFileSync(target, 'utf-8')).toBe('new value\n');
   });
 
   it('writes new and overwritten files', async () => {
@@ -136,14 +132,11 @@ describe('builtin tools', () => {
     ]);
   });
 
-  it('does not read existing write targets that exceed the review size cap', async () => {
+  it('does not read existing write targets in the write tool itself', async () => {
     const target = path.join(cwd, 'large.txt');
-    const readFile = vi.fn(async () => Buffer.from('should not be read'));
     const writeFile = vi.fn(async () => undefined);
     const definition = createWriteToolDefinition(cwd, {
       operations: {
-        stat: vi.fn(async () => ({ size: MAX_REVIEW_TEXT_BYTES + 1 })),
-        readFile,
         mkdir: vi.fn(async () => undefined),
         writeFile,
       },
@@ -154,30 +147,16 @@ describe('builtin tools', () => {
       content: 'replacement\n',
     });
 
-    expect(readFile).not.toHaveBeenCalled();
     expect(writeFile).toHaveBeenCalledWith(target, 'replacement\n');
-    expect(result.details).toMatchObject({
-      kind: 'file_review_payload',
-      operation: 'write',
-      path: 'large.txt',
-      absolutePath: target,
-      displayPath: 'large.txt',
-      originalContent: null,
-      modifiedContent: null,
-      unavailableReason: 'Diff too large to review',
-    });
+    expect(result.details).toBeUndefined();
   });
 
   it('keeps write tool successful when existing content cannot be read for review', async () => {
     const target = path.join(cwd, 'locked.txt');
-    const readError = Object.assign(new Error('denied'), { code: 'EACCES' });
     const mkdir = vi.fn(async () => undefined);
     const writeFile = vi.fn(async () => undefined);
     const definition = createWriteToolDefinition(cwd, {
       operations: {
-        readFile: vi.fn(async () => {
-          throw readError;
-        }),
         mkdir,
         writeFile,
       },

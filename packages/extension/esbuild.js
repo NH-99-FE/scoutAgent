@@ -52,32 +52,51 @@ const copyWebviewPlugin = {
   },
 };
 
+/** @type {import('esbuild').BuildOptions} */
+const commonBuildOptions = {
+  bundle: true,
+  format: 'esm',
+  minify: production,
+  sourcemap: !production,
+  sourcesContent: false,
+  platform: 'node',
+  banner: {
+    js: "import { createRequire as __scoutCreateRequire } from 'node:module';\nconst require = __scoutCreateRequire(import.meta.url);",
+  },
+  logLevel: 'silent',
+};
+
 async function main() {
   const extensionCtx = await esbuild.context({
-    entryPoints: ['src/extension.ts'],
-    bundle: true,
-    format: 'esm',
-    minify: production,
-    sourcemap: !production,
-    sourcesContent: false,
-    platform: 'node',
-    banner: {
-      js: "import { createRequire as __scoutCreateRequire } from 'node:module';\nconst require = __scoutCreateRequire(import.meta.url);",
-    },
-    outfile: 'dist/extension.js',
+    ...commonBuildOptions,
+    entryPoints: [path.resolve(import.meta.dirname, 'src/extension.ts')],
+    outfile: path.resolve(import.meta.dirname, 'dist/extension.js'),
     external: ['vscode'],
-    logLevel: 'silent',
     plugins: [esbuildProblemMatcherPlugin, copyWebviewPlugin],
   });
+  const diffWorkerCtx = await esbuild.context({
+    ...commonBuildOptions,
+    entryPoints: [
+      path.resolve(import.meta.dirname, 'src/core/review/diff-worker/diff-worker-entry.ts'),
+    ],
+    outfile: path.resolve(import.meta.dirname, 'dist/diff-worker.js'),
+    plugins: [esbuildProblemMatcherPlugin],
+  });
+  const contexts = [extensionCtx, diffWorkerCtx];
+
   if (watch) {
-    await extensionCtx.watch();
-  } else {
-    await extensionCtx.rebuild();
-    await extensionCtx.dispose();
+    await Promise.all(contexts.map((context) => context.watch()));
+    return;
+  }
+
+  try {
+    await Promise.all(contexts.map((context) => context.rebuild()));
+  } finally {
+    await Promise.all(contexts.map((context) => context.dispose()));
   }
 }
 
-main().catch((e) => {
-  console.error(e);
+main().catch((error) => {
+  console.error(error);
   process.exit(1);
 });
