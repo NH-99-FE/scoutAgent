@@ -11,8 +11,10 @@ flowchart LR
   Capture --> Journal["MutationJournal"]
   Journal --> Worker["single Diff Worker"]
   Worker --> Document["canonical DiffDocument"]
+  Journal --> Extension["built-in FileReviewExtension"]
+  Extension -->|"awaited agent_end"| Entry["one hidden custom entry"]
   Document --> Summary["summary projection"]
-  Document --> Artifact["artifact v2"]
+  Document --> Entry
   Document --> Resolver["lazy file-diff resolver"]
   Resolver --> Chat["expanded tool row"]
   Resolver --> Panel["expanded review file"]
@@ -21,9 +23,9 @@ flowchart LR
 分层职责：
 
 - `extension/core/tools` 保持 Pi 的 edit/write 参数、执行顺序、返回值与错误语义，不包含 Scout UI/review payload。
-- `extension/core/review` 装饰 Operations，捕获 before/after snapshot，写入 append-only `MutationJournal`，并把 diff 交给单 Worker。
-- `extension/core/agent-session` 冻结 mutation scope 的 session/turn/tool identity，并把 Journal record 投影为轻量 `file_change` details。
-- `extension/host/review` 负责 summary、artifact、bounded rows 与 syntax tokens 等 host 投影。
+- `extension/core/review` 是内置 Pi-style extension：装饰 Operations，捕获 before/after snapshot，写入 append-only `MutationJournal`，把 diff 交给单 Worker，并通过 extension hook 投影 tool result 和持久化 artifact。
+- `extension/core/agent-session` 只为内置 edit/write 提供 mutation 提交点的窄接入；不拥有 review run、Journal、finalization 或持久化调度。
+- `extension/host/review` 只负责 summary、bounded rows 与 syntax tokens 等 host/UI 投影，不参与 review 生命周期。
 - `extension/host/protocol` 只按 shared 协议解析 `(sessionId, turnId, fileId, revision)`，不接受任意文件路径。
 - `webview` 只保存轻量 identity/status；用户展开文件或工具行时才请求 rows。
 
@@ -37,7 +39,7 @@ flowchart LR
 - 同一路径的写入仍由 file mutation queue 串行化。
 - snapshot 使用 fatal UTF-8 解码；二进制、非法编码和超限内容以 unavailable metadata 表达，不阻止工具写入。
 
-`MutationJournal` 的聚合键是 owner、turn 与规范化 absolute path。一个 turn 内同一文件的多次写入保留第一份 baseline 和最后一份 after，并递增 revision；每个工具调用仍保留独立 record。
+`MutationJournal` 的聚合键是 owner、turn 与规范化 absolute path。一个 turn 内同一文件的多次写入只保留第一份 baseline 和最后一份 after，并递增 revision；每个工具调用仍保留独立轻量 record，不重复持有 snapshot。
 
 ## Canonical DiffDocument
 
@@ -58,7 +60,7 @@ interface DiffDocument {
 }
 ```
 
-Diff Worker 对某个 file revision 只执行一次 line diff。Worker 响应必须同时匹配 fileId 和 revision；旧 revision 的迟到结果直接丢弃。Extension Host 的 summary、artifact encode 与 lazy row 投影不得重新执行 line diff，也不得读取当前工作区文件来伪造历史上下文。
+Diff Worker 使用单 Worker、按 owner/turn/file latest-wins 合并待处理 revision。Worker 响应必须同时匹配 fileId 和 revision；旧 revision 的迟到结果直接丢弃。内置 review extension 在 awaited `agent_end` hook 中只封口事件对应的确定 turn，有界等待所有当前 revision 完成，超时 revision 原子降级为 `generation_failed`，同 revision 的迟到响应不能覆盖该 terminal fallback。Host 的 summary 与 lazy row 投影不得重新执行 line diff，也不得读取当前工作区文件来伪造历史上下文。
 
 `DiffDocument` 不保存 syntax tokens。tokens 只在 lazy 请求要求时由 host 生成并进入 bounded LRU。
 
@@ -122,7 +124,11 @@ Artifact v2 只持久化 records、file identity/revision 和 canonical `DiffDoc
 - syntax tokens；
 - 当前磁盘文件内容。
 
-写入前会校验结构、交叉引用和规模上限。持久化成功后 runtime 按文件释放 snapshot 字符串，ready `DiffDocument` 与轻量 metadata 保留。
+Artifact 必须带 `complete: true`，表示它来自已封口且所有当前 revision 均 terminal 的最终快照。projection 事件只更新 runtime/UI，不触发持久化；内置 extension 在 awaited `agent_end` 中通过标准 `appendEntry()` 为每个 run 追加一次 hidden custom entry，成功后才释放 snapshot。`session_shutdown` 负责重试尚未提交的精确 turn；导出也会先等待同一个 pending flush 边界，避免生成缺少 review artifact 的 JSONL。host 不再维护 debounce、idle scheduler、write tail 或 session 级 finalization 集合。
+
+正常 `agent_end`、abort、replacement、dispose 与 `session_shutdown` 都经过该 awaited 路径；操作系统强杀进程不承诺把尚未到达 hook 的内存态 review 同步落盘。
+
+写入前会校验结构、交叉引用和规模上限。bounded encoder 显式返回 `degraded`；只有完全未降级的 artifact 持久化成功后，才会逐 turn 驱逐 runtime snapshot、record 与 `DiffDocument`，只保留 sealed identity 防止迟到 mutation。若 hunk 因 rows/bytes 限额被折叠，或 files/records 被裁剪，则只释放 snapshot 字符串并保留更完整的 terminal document。只要更完整的 runtime review 仍可用，UI 和 lazy resolver 都优先使用 runtime；artifact 仅在标记完整且 runtime 不可用时作为恢复来源。
 
 只写 v2；v1 通过 `decodeFileReviewArtifact()` 的集中 adapter 只读恢复为内存 v2，旧 rows 会转换成 canonical hunks，旧 tokens 被丢弃。其余生产路径不保留 v1 分支。
 
@@ -139,9 +145,12 @@ Artifact v2 只持久化 records、file identity/revision 和 canonical `DiffDoc
 相关测试必须覆盖：
 
 - edit 无额外 baseline read，write provider/fallback 语义与 error-after-write；
-- Journal 聚合、revision、stale Worker response 与 snapshot release；
+- Journal 聚合、turn seal、revision、timeout fallback、迟到 Worker response 与 snapshot release；
+- 相邻 run 竞态只封口 `agent_end` 捕获的 turn，多文件 projection 分批完成仍只 append 一个 artifact；
+- artifact append 失败保留 snapshot，`session_shutdown` 与导出可重试 pending turn；
+- rows/bytes 折叠会标记 artifact degraded，并保留完整 runtime document；
 - canonical diff 的 CRLF、create/delete、fold 与单次 diff；
-- artifact v2 encode、v1 decode、规模/引用校验；
+- artifact v2 单次完整写入、v1 decode、规模/引用校验；
 - lazy resolver 的 runtime/artifact、pending/stale、range/token/cache；
 - Webview 未展开不请求、展开请求、dedupe/cancel、projection event 重试；
 - panel model 不含 eager rows，聊天协议不含预测 preview。
