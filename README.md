@@ -6,6 +6,11 @@ Scout Agent 是一个运行在 VS Code 中的轻量 AI Coding Agent。它以对�
 
 > 项目核心功能已开发完成，可直接从 VS Code 插件市场安装，也可以使用仓库内提供的 VSIX 安装包离线安装。
 
+<p align="center">
+  <img src="docs/pictures/home-page.png" alt="Scout Agent 任务首页" width="420">
+  <img src="docs/pictures/assistant-responsed.png" alt="Scout Agent 在 VS Code 中完成代码修改并展示变更摘要" width="420">
+</p>
+
 ## 核心设计
 
 Scout 的目标，不是做一个只能连续对话的 AI 侧边栏，而是在 VS Code 中提供一套完整的 **coding-agent harness**。模型接入、上下文构建、工具执行、会话持久化、错误恢复和界面交互都由 Scout 统一组织，让 Agent 能够在真实项目中持续工作，而不是停留在一次问答或一次代码生成。
@@ -67,7 +72,11 @@ Scout 不会把一次开发任务压平成只能向前滚动的聊天记录。�
 - 切换分支时选择不摘要、自动摘要被放弃的分支，或提供自定义摘要指令；
 - 随时定位当前叶子，确认 Agent 当前实际沿哪条路径工作。
 
+![Scout Tree 会话树面板](docs/pictures/tree.png)
+
 切换节点不会删除或覆盖原历史。后续消息会从目标节点生长为新分支，因此可以安全比较多个实现方向，并在失败后回到稳定节点继续。
+
+![切换 Tree 分支并选择上下文摘要策略](<docs/pictures/tree(move%20to%20other%20leaf).png>)
 
 ### Fork：从历史需求派生独立任务
 
@@ -115,6 +124,11 @@ Compaction 提供三层保障：
 - 附加 PNG、JPEG、WebP 等图片作为多模态上下文；单张最大 2 MB，单次最多 6 张。
 - 实时预览文件写入与编辑 diff，并在独立 Changes Review 面板中按 unified/split 模式审查本轮改动。
 - 在模型回复期间发送 steering 消息或排队 follow-up，也可以停止当前生成与自动重试。
+
+<p align="center">
+  <img src="docs/pictures/@file.png" alt="通过 @ 添加工作区文件或图片" width="420">
+  <img src="docs/pictures/%20composer-selected-file-image.png" alt="输入区中已选择的文件和图片附件" width="420">
+</p>
 
 ### 模型与运行策略
 
@@ -184,6 +198,8 @@ API Key 字段可以填写：
 
 如果填写的是环境变量名，需要确保启动 VS Code 的 Extension Host 能读取该变量。模型页也可以直接配置 Base URL、自定义模型和兼容参数，无需手动编辑 JSON。
 
+![在 Scout Settings 中配置 Provider 和自定义模型](docs/pictures/custom-model-by-settings.png)
+
 ### 3. 开始任务
 
 1. 打开 Activity Bar 中的 **Scout Agent**，在任务首页输入需求，按 Enter 创建会话。
@@ -234,9 +250,9 @@ Skill 使用 `SKILL.md` 和 frontmatter 描述名称与用途。设置页可以�
 
 设置了 `disable-model-invocation: true` 的 Skill 不会自动出现在模型上下文中，但仍可通过 slash command 手动调用。
 
-### Prompts
-
-项目级或用户级 `prompts` 目录中的提示词模板会成为 slash command。选择后由 runtime 展开并提交，不需要 Webview 理解模板内部结构。
+<p align="center">
+  <img src="docs/pictures/slash.png" alt="在输入区调用内置命令、Skills 和提示词模板" width="420">
+</p>
 
 ### Extensions
 
