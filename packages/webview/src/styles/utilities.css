@@ -79,6 +79,10 @@
   animation: scout-process-collapse-up 180ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
+.scout-assistant-content > [data-slot='collapsible'][data-state='closed'] {
+  margin-block: 0;
+}
+
 .scout-settings-collapse-content {
   overflow: hidden;
   transform-origin: top;

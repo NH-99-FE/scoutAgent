@@ -78,6 +78,9 @@ describe('webview style smoke', () => {
       'color: var(--scout-diff-added);',
       'background-color: color-mix(in srgb, var(--scout-diff-added) 8%, transparent);',
     ]);
+    expectCssRule(".scout-assistant-content > [data-slot='collapsible'][data-state='closed']", [
+      'margin-block: 0;',
+    ]);
     expectCssRule('.scout-review-split-code .scout-review-token-diff-added', [
       'background: var(--scout-review-token-diff-added);',
     ]);
