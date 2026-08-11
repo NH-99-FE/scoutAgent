@@ -323,6 +323,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   // ---------- 核心生命周期 ----------
 
   async initialize(): Promise<void> {
+    if (this.sessionRuntime) return;
     await this.runSessionReplacement(async () => {
       if (this.sessionRuntime) return;
       await this.createInitialRuntime('startup');

@@ -15,6 +15,7 @@ import {
   projectSessionTreeToScout,
   resolveVisibleSessionLeafId,
 } from '../../src/host/protocol/session-tree-mapper.ts';
+import type { SessionExecutionGate } from '../../src/host/session-execution-gate.ts';
 import type { Session, SessionTreeEntry, SessionTreeNode } from '../../src/core/session/index.ts';
 import {
   createFileReviewArtifact,
@@ -498,6 +499,51 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     expect(calls).toEqual(['new:start', 'new:end']);
     expect(fakeRuntime.switchSession).not.toHaveBeenCalled();
 
+    await coordinator.disposeAsync();
+  });
+
+  it('does not request session replacement when an initialized runtime is busy', async () => {
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: createConfiguredConfigManager(cwd, userConfigDir),
+    });
+    const session = {
+      sessionId: 'session-1',
+      sessionPath: path.join(tempDir, 'session-1.jsonl'),
+    };
+    const runtime = {
+      dispose: vi.fn(async () => undefined),
+    };
+    const events: string[] = [];
+    const unsubscribe = coordinator.subscribe((event) => events.push(event.type));
+    const internals = coordinator as unknown as {
+      sessionRuntime: typeof runtime;
+      agentSession: { sessionId: string; sessionFile: string };
+      sessionExecutionGate: SessionExecutionGate;
+    };
+    internals.sessionRuntime = runtime;
+    internals.agentSession = {
+      sessionId: session.sessionId,
+      sessionFile: session.sessionPath,
+    };
+    const executionGate = internals.sessionExecutionGate;
+    executionGate.setCurrentSession(session);
+    events.length = 0;
+    const turn = executionGate.tryBegin({
+      kind: 'agent_turn',
+      operationId: 'turn-1',
+      session,
+    });
+    expect(turn.ok).toBe(true);
+    events.length = 0;
+
+    await expect(coordinator.initialize()).resolves.toBeUndefined();
+
+    expect(events).toEqual([]);
+    if (turn.ok) turn.lease.finish();
+    unsubscribe();
     await coordinator.disposeAsync();
   });
 

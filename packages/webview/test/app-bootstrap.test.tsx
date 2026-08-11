@@ -172,7 +172,7 @@ describe('App bootstrap', () => {
   it('does not render the chat surface before bootstrap state arrives', () => {
     render(<App />);
 
-    expect(screen.getByText('Scout 正在启动')).toBeInTheDocument();
+    expect(screen.getByText('正在恢复 Scout 会话')).toBeInTheDocument();
     expect(screen.queryByLabelText('随心输入')).not.toBeInTheDocument();
 
     act(() => {
@@ -209,7 +209,7 @@ describe('App bootstrap', () => {
 
     render(<App />);
 
-    expect(screen.queryByText('Scout 正在启动')).not.toBeInTheDocument();
+    expect(screen.queryByText('正在恢复 Scout 会话')).not.toBeInTheDocument();
     expect(document.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 

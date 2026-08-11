@@ -12,7 +12,7 @@ export function BootstrapPendingState() {
     >
       <section className="grid justify-items-center gap-3 text-center">
         <Loader2 className="size-5 animate-spin" />
-        <p className="text-sm">Scout 正在启动</p>
+        <p className="text-sm">正在恢复 Scout 会话</p>
       </section>
     </main>
   );
