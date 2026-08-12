@@ -14,6 +14,7 @@ export interface FileDiffProjectionPolicy {
   hunkOffset: number;
   hunkLimit: number;
   maxRows: number;
+  foldIdentity?: string;
 }
 
 export interface DiffDocumentProjectorOptions {
@@ -45,6 +46,7 @@ export class DiffDocumentProjector {
       selectedHunks,
       hunkOffset === 0,
       hunkOffset + selectedHunks.length === totalHunks,
+      policy.foldIdentity,
     );
     const rows = allRows.slice(0, Math.max(0, policy.maxRows));
     const projectedRows = policy.includeTokens ? this.tokenCache.tokenize(rows, filePath) : rows;
@@ -66,6 +68,10 @@ export class DiffDocumentProjector {
   clear(): void {
     this.tokenCache.clear();
   }
+
+  tokenizeRows(rows: readonly ScoutChangesReviewRow[], filePath: string) {
+    return this.tokenCache.tokenize(rows, filePath);
+  }
 }
 
 function projectHunks(
@@ -73,6 +79,7 @@ function projectHunks(
   hunks: readonly DiffHunk[],
   includeLeadingContext: boolean,
   includeTrailingContext: boolean,
+  foldIdentity?: string,
 ): ScoutChangesReviewRow[] {
   const rows: ScoutChangesReviewRow[] = [];
   let previousOldEnd: number | undefined;
@@ -80,10 +87,10 @@ function projectHunks(
 
   for (const hunk of hunks) {
     if (previousOldEnd === undefined && previousNewEnd === undefined && includeLeadingContext) {
-      appendFold(rows, 1, 1, hunk.oldStart, hunk.newStart);
+      appendFold(rows, 1, 1, hunk.oldStart, hunk.newStart, foldIdentity);
     }
     if (previousOldEnd !== undefined && previousNewEnd !== undefined) {
-      appendFold(rows, previousOldEnd, previousNewEnd, hunk.oldStart, hunk.newStart);
+      appendFold(rows, previousOldEnd, previousNewEnd, hunk.oldStart, hunk.newStart, foldIdentity);
     }
 
     let oldLineNumber = hunk.oldStart;
@@ -112,6 +119,7 @@ function projectHunks(
       previousNewEnd,
       document.beforeLineCount + 1,
       document.afterLineCount + 1,
+      foldIdentity,
     );
   }
 
@@ -124,10 +132,27 @@ function appendFold(
   newStartLine: number,
   oldEndLine: number,
   newEndLine: number,
+  foldIdentity?: string,
 ): void {
   const oldCount = Math.max(0, oldEndLine - oldStartLine);
   const newCount = Math.max(0, newEndLine - newStartLine);
   const count = Math.max(oldCount, newCount);
   if (count <= 0) return;
-  rows.push({ type: 'fold', oldStartLine, newStartLine, count });
+  rows.push({
+    type: 'fold',
+    oldStartLine,
+    newStartLine,
+    count,
+    foldId: createDiffFoldId(foldIdentity ?? 'diff', oldStartLine, newStartLine, count),
+    foldTotal: count,
+  });
+}
+
+export function createDiffFoldId(
+  identity: string,
+  oldStartLine: number,
+  newStartLine: number,
+  count: number,
+): string {
+  return `${identity}:${oldStartLine}:${newStartLine}:${count}`;
 }

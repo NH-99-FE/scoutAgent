@@ -17,6 +17,7 @@ export type {
   ScoutProtocolRoute,
   ScoutProtocolService,
   RequestFileDiffMessage,
+  RequestFileDiffContextMessage,
   WebviewMessage,
   WebviewRequestPayload,
 } from './protocol-requests.ts';
@@ -131,6 +132,7 @@ export type {
   ScoutForkCandidate,
   ScoutForkCandidatesResult,
   FileDiffResultMessage,
+  FileDiffContextResultMessage,
   ScoutForkResult,
   ScoutNavigateTreeResult,
   ScoutGenericCommandResult,

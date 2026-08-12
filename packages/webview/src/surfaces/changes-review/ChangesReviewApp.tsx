@@ -19,8 +19,6 @@ declare global {
   }
 }
 
-const FOLD_EXPAND_STEP = 10;
-
 export function ChangesReviewApp() {
   const initialModel = window.__SCOUT_CHANGES_REVIEW__;
   const [model, setModel] = useState<ScoutChangesReviewModel | undefined>(initialModel);
@@ -30,7 +28,6 @@ export function ChangesReviewApp() {
   const [expandedFileKeys, setExpandedFileKeys] = useState<Set<string>>(
     () => new Set(initialModel?.files.map((file) => getChangesReviewFileKey(file)) ?? []),
   );
-  const [foldRevealCounts, setFoldRevealCounts] = useState<Record<string, number>>({});
   const seenFileKeysRef = useRef<Set<string>>(
     new Set(initialModel?.files.map((file) => getChangesReviewFileKey(file)) ?? []),
   );
@@ -54,7 +51,6 @@ export function ChangesReviewApp() {
     if (!nextModel) {
       seenFileKeysRef.current = new Set();
       setExpandedFileKeys(new Set());
-      setFoldRevealCounts({});
       return;
     }
 
@@ -73,12 +69,6 @@ export function ChangesReviewApp() {
         if (!previousFileKeys.has(fileKey)) next.add(fileKey);
       }
       return next;
-    });
-    setFoldRevealCounts((current) => {
-      const entries = Object.entries(current).filter(([id]) =>
-        nextModel.files.some((file) => id.startsWith(`${getChangesReviewFileKey(file)}:`)),
-      );
-      return Object.fromEntries(entries);
     });
     seenFileKeysRef.current = validFileKeys;
   }, []);
@@ -125,12 +115,6 @@ export function ChangesReviewApp() {
           return next;
         });
       },
-      expandFold: (id: string, total: number) => {
-        setFoldRevealCounts((current) => ({
-          ...current,
-          [id]: Math.min(total, (current[id] ?? 0) + FOLD_EXPAND_STEP),
-        }));
-      },
     }),
     [postPanelMessage],
   );
@@ -139,7 +123,6 @@ export function ChangesReviewApp() {
     <ChangesReviewPanel
       actions={actions}
       expandedFileKeys={expandedFileKeys}
-      foldRevealCounts={foldRevealCounts}
       model={model}
       viewMode={viewMode}
     />

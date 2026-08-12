@@ -74,14 +74,13 @@ import {
   resolveVisibleSessionLeafId,
 } from './protocol/session-tree-mapper.ts';
 import {
-  collectCurrentBranchFileReviewArtifacts,
-  type FileReviewArtifact,
-  type FileReviewArtifactIndex,
-} from '../core/review/file-review-artifact.ts';
-import {
-  createArtifactChangesReviewSummary,
-  createRuntimeChangesReviewSummary,
-} from './review/changes-review-summary-projector.ts';
+  collectCurrentBranchReviewArtifactRefs,
+  loadReviewArtifact,
+  type ReviewArtifactManifest,
+  type ReviewArtifactRefIndex,
+} from '../core/review/review-artifact.ts';
+import { ReviewArtifactStore } from '../core/review/review-artifact-store.ts';
+import { createRuntimeChangesReviewSummary } from './review/changes-review-summary-projector.ts';
 import { SessionExecutionGate } from './session-execution-gate.ts';
 
 // ---------- 配置接口 ----------
@@ -148,6 +147,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private isInitializing = false;
   private disposePromise?: Promise<void>;
   private readonly sessionExecutionGate: SessionExecutionGate;
+  private readonly reviewArtifactStore: ReviewArtifactStore;
   private readonly pendingComposerIntents = new Map<string, ScoutPendingComposerIntent>();
   private readonly agentEventCorrelator = new AgentEventCorrelator();
   private extensionUIContext: ExtensionUIContext | undefined;
@@ -169,6 +169,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.agentDir = options.agentDir;
     this.outputChannel = options.outputChannel;
     this.configManager = options.configManager;
+    this.reviewArtifactStore = new ReviewArtifactStore({ agentDir: options.agentDir });
     this.sessionExecutionGate = new SessionExecutionGate();
     this.sessionExecutionGate.setOnExecutionChange(() => {
       this.emit({ type: 'state_change' });
@@ -800,12 +801,28 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     return review && !review.contentReleased ? review : undefined;
   }
 
-  async getFileReviewArtifact(turnId: string): Promise<FileReviewArtifact | undefined> {
-    return this.getFileReviewArtifactIndex().artifactsByTurnId.get(turnId);
+  async getFileReviewArtifact(turnId: string): Promise<ReviewArtifactManifest | undefined> {
+    const ref = this.getFileReviewArtifactIndex().refsByTurnId.get(turnId);
+    if (!ref) return undefined;
+    try {
+      return await loadReviewArtifact(this.reviewArtifactStore, ref);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.outputChannel.appendLine(`[review-artifact] unavailable ${turnId}: ${message}`);
+      throw new Error(`Review artifact is unavailable: ${message}`, { cause: error });
+    }
   }
 
   isLatestFileReviewArtifact(turnId: string): boolean {
     return this.getFileReviewArtifactIndex().latestTurnId === turnId;
+  }
+
+  getReviewArtifactStore(): ReviewArtifactStore {
+    return this.reviewArtifactStore;
+  }
+
+  computeExactFileDiff(input: import('../core/review/mutation-journal.ts').ExactMutationDiffInput) {
+    return this.agentSession?.computeExactFileDiff(input);
   }
 
   /**
@@ -1081,7 +1098,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   }
 
   private getFileReviewArtifactIndex() {
-    return collectCurrentBranchFileReviewArtifacts(
+    return collectCurrentBranchReviewArtifactRefs(
       this.agentSession?.getSessionEntries(),
       this.agentSession?.getSessionBranch(),
     );
@@ -1092,7 +1109,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     | undefined {
     if (!this.agentSession) return undefined;
     const agentSession = this.agentSession;
-    let artifactIndex: FileReviewArtifactIndex | undefined;
+    let artifactIndex: ReviewArtifactRefIndex | undefined;
     const runtimeSummaries = new Map<string, ScoutChangesReviewSummary | undefined>();
     const releasedRuntimeSummaries = new Map<string, ScoutChangesReviewSummary | undefined>();
     const artifactSummaries = new Map<string, ScoutChangesReviewSummary | undefined>();
@@ -1114,11 +1131,8 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
       if (!artifactSummaries.has(turnId)) {
         artifactIndex ??= this.getFileReviewArtifactIndex();
-        const artifact = artifactIndex.artifactsByTurnId.get(turnId);
-        artifactSummaries.set(
-          turnId,
-          artifact?.complete ? createArtifactChangesReviewSummary(artifact) : undefined,
-        );
+        const ref = artifactIndex.refsByTurnId.get(turnId);
+        artifactSummaries.set(turnId, ref?.summary);
       }
       return artifactSummaries.get(turnId) ?? releasedRuntimeSummaries.get(turnId);
     };

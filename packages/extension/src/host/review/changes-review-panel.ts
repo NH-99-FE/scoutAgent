@@ -16,9 +16,9 @@ import type { FileReviewFile, FileReviewTurnSnapshot } from '../../core/review/i
 import { formatPathRelativeToCwd } from '../../core/tools/shared/path-utils.ts';
 import { configureScoutWebview, getScoutWebviewHtml } from '../../webview-content.ts';
 import type {
-  FileReviewArtifact,
-  FileReviewArtifactFile,
-} from '../../core/review/file-review-artifact.ts';
+  ReviewArtifactFile,
+  ReviewArtifactManifest,
+} from '../../core/review/review-artifact.ts';
 
 // ---------- 类型 ----------
 
@@ -26,13 +26,13 @@ export interface OpenChangesReviewPanelInput {
   allowCurrentFileContextExpansion?: boolean;
   cwd: string;
   recordId?: string;
-  review: FileReviewTurnSnapshot | FileReviewArtifact;
+  review: FileReviewTurnSnapshot | ReviewArtifactManifest;
   sessionId: string;
 }
 
 export interface OpenCurrentChangesReviewPanelInput {
   cwd: string;
-  review?: FileReviewTurnSnapshot | FileReviewArtifact;
+  review?: FileReviewTurnSnapshot | ReviewArtifactManifest;
   sessionId: string;
 }
 
@@ -269,7 +269,7 @@ async function createReviewPanelModel(
 }
 
 function createReviewPanelFile(
-  file: FileReviewFile | FileReviewArtifactFile,
+  file: FileReviewFile | ReviewArtifactFile,
   cwd: string,
   sessionId: string,
 ): ScoutChangesReviewFile {
@@ -289,10 +289,10 @@ function createReviewPanelFile(
       ...common,
       fileId: file.fileId,
       revision: file.latestRevision,
-      projectionStatus: file.document.unavailableReason ? 'unavailable' : 'ready',
-      additions: file.document.additions,
-      deletions: file.document.deletions,
-      unavailableReason: file.document.unavailableReason,
+      projectionStatus: file.unavailableReason ? 'unavailable' : 'ready',
+      additions: file.additions,
+      deletions: file.deletions,
+      unavailableReason: file.unavailableReason,
     };
   }
 
@@ -307,9 +307,7 @@ function createReviewPanelFile(
   };
 }
 
-function isArtifactFile(
-  file: FileReviewFile | FileReviewArtifactFile,
-): file is FileReviewArtifactFile {
+function isArtifactFile(file: FileReviewFile | ReviewArtifactFile): file is ReviewArtifactFile {
   return 'latestRevision' in file;
 }
 

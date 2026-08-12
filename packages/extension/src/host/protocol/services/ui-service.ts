@@ -13,7 +13,7 @@ import type {
 import { SCOUT_IMAGE_EXTENSION_BY_MIME_TYPE } from '@scout-agent/shared';
 import type { ExtensionUIContext } from '../../../core/extensions/index.ts';
 import type { FileReviewTurnSnapshot } from '../../../core/review/file-review.ts';
-import type { FileReviewArtifact } from '../../../core/review/file-review-artifact.ts';
+import type { ReviewArtifactManifest } from '../../../core/review/review-artifact.ts';
 import type { ScoutWebviewSurface } from '../../webview-surface.ts';
 import type { ProtocolPayload, ProtocolResponder, UiProtocolHost } from './types.ts';
 import { ExtensionUIRequestBroker } from './extension-ui-request-broker.ts';
@@ -100,13 +100,13 @@ export interface UiProtocolServiceOptions {
   getChangesReview?: (turnId: string) => FileReviewTurnSnapshot | undefined;
   getChangesReviewArtifact?: (
     turnId: string,
-  ) => FileReviewArtifact | undefined | Promise<FileReviewArtifact | undefined>;
+  ) => ReviewArtifactManifest | undefined | Promise<ReviewArtifactManifest | undefined>;
   getCurrentChangesReview?: () => FileReviewTurnSnapshot | undefined;
   getCurrentCwd?: () => string;
   getCurrentSessionId?: () => string;
   canExpandChangesReviewContext?: (turnId: string) => boolean;
   openChangesReviewPanel?: (
-    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    review: FileReviewTurnSnapshot | ReviewArtifactManifest,
     options: {
       allowCurrentFileContextExpansion?: boolean;
       recordId?: string;
@@ -132,13 +132,13 @@ export class UiProtocolService implements UiProtocolHost {
   private readonly getChangesReview?: (turnId: string) => FileReviewTurnSnapshot | undefined;
   private readonly getChangesReviewArtifact?: (
     turnId: string,
-  ) => FileReviewArtifact | undefined | Promise<FileReviewArtifact | undefined>;
+  ) => ReviewArtifactManifest | undefined | Promise<ReviewArtifactManifest | undefined>;
   private readonly getCurrentChangesReview?: () => FileReviewTurnSnapshot | undefined;
   private readonly getCurrentCwd?: () => string;
   private readonly getCurrentSessionId?: () => string;
   private readonly canExpandChangesReviewContext?: (turnId: string) => boolean;
   private readonly openChangesReviewPanelCallback?: (
-    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    review: FileReviewTurnSnapshot | ReviewArtifactManifest,
     options: {
       allowCurrentFileContextExpansion?: boolean;
       recordId?: string;
@@ -301,7 +301,7 @@ export class UiProtocolService implements UiProtocolHost {
       const artifact = usableRuntimeReview
         ? undefined
         : await this.getChangesReviewArtifact?.(message.turnId);
-      const review = usableRuntimeReview ?? (artifact?.complete ? artifact : undefined);
+      const review = usableRuntimeReview ?? artifact;
       if (!review) {
         respond({
           type: 'open_changes_review_result',

@@ -162,6 +162,7 @@ export type WebviewRequestPayload =
   | { type: 'open_changes_review'; turnId: string; recordId?: string }
   | { type: 'open_current_changes_review' }
   | RequestFileDiffMessage
+  | RequestFileDiffContextMessage
   | {
       type: 'fork_session';
       session: ScoutSessionIdentity;
@@ -241,10 +242,24 @@ export interface RequestFileDiffMessage {
   turnId: string;
   fileId: string;
   revision: number;
+  recordId?: string;
   view: 'inline' | 'panel';
   mode: 'unified' | 'split';
   includeTokens: boolean;
   range?: { hunkOffset: number; hunkLimit: number };
+}
+
+export interface RequestFileDiffContextMessage {
+  type: 'request_file_diff_context';
+  sessionId: string;
+  turnId: string;
+  fileId: string;
+  revision: number;
+  recordId?: string;
+  foldId: string;
+  revealHead: number;
+  revealTail: number;
+  includeTokens: boolean;
 }
 
 export const SCOUT_PROTOCOL = {
@@ -500,6 +515,13 @@ export const SCOUT_PROTOCOL = {
     method: 'request_file_diff',
     response: 'file_diff_result',
     surfaces: ['chat', 'changes-review'],
+  },
+  request_file_diff_context: {
+    kind: 'query',
+    service: 'review',
+    method: 'request_file_diff_context',
+    response: 'file_diff_context_result',
+    surfaces: ['changes-review'],
   },
   fork_session: {
     kind: 'command',

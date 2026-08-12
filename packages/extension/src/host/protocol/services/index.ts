@@ -225,6 +225,13 @@ export function registerScoutProtocolServices(
         context.signal,
       );
     },
+    request_file_diff_context: async (message, context) => {
+      await services.review.requestFileDiffContext(
+        payload<'request_file_diff_context'>(message),
+        context.respond,
+        context.signal,
+      );
+    },
   });
 
   registerProtocolServiceHandlers(server, 'extensions', {

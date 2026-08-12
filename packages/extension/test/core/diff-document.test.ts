@@ -18,7 +18,6 @@ import {
   type DiffWorkerClientPort,
 } from '../../src/core/review/index.ts';
 import { DiffDocumentProjector } from '../../src/host/review/diff-document-projector.ts';
-import { createFileReviewArtifact } from '../../src/core/review/file-review-artifact.ts';
 import { createRuntimeChangesReviewSummary } from '../../src/host/review/changes-review-summary-projector.ts';
 
 function makeMutationJournal(): MutationJournal {
@@ -152,16 +151,11 @@ describe('DiffDocument', () => {
       includeTokens: false,
     });
     const summary = createRuntimeChangesReviewSummary(review!);
-    const artifact = createFileReviewArtifact('session-1', review!, {
-      createdAt: '2026-01-01T00:00:00.000Z',
-    });
 
     expect(inlineRows.some((row) => row.tokens !== undefined)).toBe(false);
     expect(panelRows.some((row) => row.tokens?.length)).toBe(true);
     expect(lazyView.rows).toEqual(inlineRows);
     expect(summary).toMatchObject({ additions: 1, deletions: 1 });
-    expect(artifact.files[0]?.document).toEqual(document);
-    expect(JSON.stringify(artifact)).not.toContain('"tokens"');
     expect(lineDiff).toHaveBeenCalledTimes(1);
   });
 });

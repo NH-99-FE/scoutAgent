@@ -57,33 +57,28 @@ describe('split-diff-model', () => {
     expect(model.added.cells).toMatchObject([{ kind: 'fold', row: { count: 42 } }]);
   });
 
-  it('expands fold context symmetrically before projecting split columns', () => {
+  it('projects already revealed fold context consistently into both columns', () => {
     const rows: ScoutChangesReviewRow[] = [
+      { type: 'context', oldLineNumber: 1, newLineNumber: 1, text: 'one' },
       {
         type: 'fold',
-        count: 4,
-        hiddenRows: [
-          { type: 'context', oldLineNumber: 1, newLineNumber: 1, text: 'one' },
-          { type: 'context', oldLineNumber: 2, newLineNumber: 2, text: 'two' },
-          { type: 'context', oldLineNumber: 3, newLineNumber: 3, text: 'three' },
-          { type: 'context', oldLineNumber: 4, newLineNumber: 4, text: 'four' },
-        ],
+        count: 2,
+        foldId: 'fold-1',
+        foldTotal: 4,
       },
+      { type: 'context', oldLineNumber: 4, newLineNumber: 4, text: 'four' },
     ];
 
-    const model = createSplitDiffModel(rows, {
-      foldRevealCounts: { 'file-1:fold:0': 2 },
-      rowScopeId: 'file-1',
-    });
+    const model = createSplitDiffModel(rows);
 
     expect(model.removed.cells).toMatchObject([
       { kind: 'line', lineType: 'context', row: { text: 'one' } },
-      { kind: 'fold', row: { count: 2, foldId: 'file-1:fold:0', foldTotal: 4 } },
+      { kind: 'fold', row: { count: 2, foldId: 'fold-1', foldTotal: 4 } },
       { kind: 'line', lineType: 'context', row: { text: 'four' } },
     ]);
     expect(model.added.cells).toMatchObject([
       { kind: 'line', lineType: 'context', row: { text: 'one' } },
-      { kind: 'fold', row: { count: 2, foldId: 'file-1:fold:0', foldTotal: 4 } },
+      { kind: 'fold', row: { count: 2, foldId: 'fold-1', foldTotal: 4 } },
       { kind: 'line', lineType: 'context', row: { text: 'four' } },
     ]);
   });

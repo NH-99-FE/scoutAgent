@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createDiffDocument } from '../../../src/core/review/diff-document.ts';
 import type { FileReviewTurnSnapshot } from '../../../src/core/review/file-review.ts';
 import {
   createArtifactChangesReviewSummary,
   createRuntimeChangesReviewSummary,
 } from '../../../src/host/review/changes-review-summary-projector.ts';
-import type { FileReviewArtifact } from '../../../src/core/review/file-review-artifact.ts';
+import type { ReviewArtifactManifest } from '../../../src/core/review/review-artifact.ts';
 
 describe('createRuntimeChangesReviewSummary', () => {
   it('projects locatable review files with display paths and stable latest-first order', () => {
@@ -65,19 +64,21 @@ describe('createRuntimeChangesReviewSummary', () => {
 
 describe('createArtifactChangesReviewSummary', () => {
   it('projects persisted artifact files without carrying row previews into the summary', () => {
-    const artifact: FileReviewArtifact = {
-      version: 2,
+    const artifact: ReviewArtifactManifest = {
+      version: 1,
       sessionId: 'session-1',
       turnId: 'turn-1',
       createdAt: '2026-01-01T00:00:00.000Z',
-      complete: true,
       records: ['test.c', 'test.py', 'Test.java', 'test.js'].map((_path, index) => ({
         recordId: `review-${index + 1}`,
         toolCallId: `tool-${index + 1}`,
         operation: 'edit',
         fileId: `file-${index + 1}`,
+        revision: 1,
         sequence: index + 1,
         toolOutcome: 'success',
+        before: { kind: 'absent' as const },
+        after: { kind: 'absent' as const },
       })),
       files: ['test.c', 'test.py', 'Test.java', 'test.js'].map((path, index) => ({
         fileId: `file-${index + 1}`,
@@ -86,10 +87,10 @@ describe('createArtifactChangesReviewSummary', () => {
         displayPath: path,
         recordIds: [`review-${index + 1}`],
         latestRevision: 1,
-        document: {
-          ...createDiffDocument(`old ${path}\n`, `new ${path}\n`),
-          additions: index + 1,
-        },
+        additions: index + 1,
+        deletions: 1,
+        baseline: { kind: 'absent' as const },
+        final: { kind: 'absent' as const },
       })),
     };
 

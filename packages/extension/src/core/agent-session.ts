@@ -525,6 +525,10 @@ export class AgentSession implements CoreDisposable {
     return this.fileReviewExtension?.getReviewTurn(turnId);
   }
 
+  computeExactFileDiff(input: import('./review/mutation-journal.ts').ExactMutationDiffInput) {
+    return this.fileReviewExtension?.computeExactDiff(input);
+  }
+
   // ---------- 运行时操作 ----------
 
   getQueueSnapshot(): QueuedRuntimeSnapshot {

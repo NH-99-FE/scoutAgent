@@ -13,13 +13,15 @@ import type { ScoutWebviewSurface } from './host/webview-surface.ts';
 import { WebviewSurfaceRegistry } from './host/webview-surface-registry.ts';
 import { SessionIndex } from './host/session-index.ts';
 import type { FileReviewTurnSnapshot } from './core/review/file-review.ts';
-import type { FileReviewArtifact } from './core/review/file-review-artifact.ts';
+import type { ReviewArtifactManifest } from './core/review/review-artifact.ts';
 import { ProtocolServer } from './host/protocol/protocol-server.ts';
 import {
   createScoutProtocolHostServices,
   type ScoutProtocolHostServices,
 } from './host/protocol/scout-protocol-host-services.ts';
 import { registerScoutProtocolServices } from './host/protocol/services/index.ts';
+import { runReviewArtifactGarbageCollection } from './core/review/review-artifact.ts';
+import { getSessionsRoot } from './host/session-paths.ts';
 
 // ---------- 接口 ----------
 
@@ -31,7 +33,7 @@ export interface ScoutControllerOptions {
   openTreePanel?: () => void | Promise<void>;
   openChatSurface?: () => void | Promise<void>;
   openChangesReviewPanel?: (
-    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    review: FileReviewTurnSnapshot | ReviewArtifactManifest,
     options: {
       allowCurrentFileContextExpansion?: boolean;
       cwd: string;
@@ -88,6 +90,26 @@ export class ScoutController implements vscode.Disposable {
       outputChannel: this.outputChannel,
       configManager: this.configManager,
     });
+    void runReviewArtifactGarbageCollection({
+      agentDir: this.agentDir,
+      sessionsRoot: getSessionsRoot(this.agentDir),
+    })
+      .then((report) => {
+        if (report.skipped) return;
+        this.outputChannel.appendLine(
+          `[review-artifact] GC scan found ${report.reclaimableFiles} reclaimable objects (${report.reclaimableBytes} bytes); cleaned ${report.deletedFiles} expired temporary files (${report.deletedBytes} bytes)`,
+        );
+        if (report.overSoftLimit) {
+          this.outputChannel.appendLine(
+            `[review-artifact] artifact store remains above the 1 GiB soft target (${report.retainedBytes} bytes); automatic CAS sweep is disabled until commits and GC share a cross-process lock`,
+          );
+        }
+      })
+      .catch((error) =>
+        this.outputChannel.appendLine(
+          `[review-artifact] GC failed: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
     this.sessionIndex = new SessionIndex({
       listWorkspace: () => this.sessionManager.listSessions(),
       listAll: () => this.sessionManager.listSessions({ all: true }),

@@ -38,6 +38,10 @@ export interface MutationRecord {
   displayPath?: string;
   sequence: number;
   toolOutcome: MutationToolOutcome;
+  fileId: string;
+  revision: number;
+  before: CapturedTextSnapshot;
+  after: CapturedTextSnapshot;
 }
 
 export type MutationProjection =
@@ -96,6 +100,17 @@ export interface MutationJournalOptions {
 
 export interface FinalizeMutationTurnOptions {
   timeoutMs?: number;
+}
+
+export interface ExactMutationDiffInput {
+  turnId: string;
+  fileId: string;
+  revision: number;
+  filePath: string;
+  originalContent: string | null;
+  modifiedContent: string | null;
+  unavailableReason?: import('./diff-document.ts').DiffUnavailableReason;
+  contextLines?: number;
 }
 
 interface AggregateEntry {
@@ -160,6 +175,9 @@ export class MutationJournal {
     const key = aggregateKey(input.ownerId, input.turnId, normalizedAbsolutePath);
     const recordId = `mutation-${++this.nextRecordId}`;
     // absolutePath 保留原始大小写用于展示和文件打开；归一化仅用于聚合键。
+    let entry = this.aggregateEntries.get(key);
+    const fileId = entry?.aggregate.fileId ?? `mutation-file-${++this.nextFileId}`;
+    const revision = (entry?.aggregate.revision ?? 0) + 1;
     const record: MutationRecord = {
       recordId,
       ownerId: input.ownerId,
@@ -171,15 +189,17 @@ export class MutationJournal {
       displayPath: input.displayPath,
       sequence: ++this.nextSequence,
       toolOutcome: input.toolOutcome,
+      fileId,
+      revision,
+      before: input.before,
+      after: input.after,
     };
 
     this.records.push(record);
     this.recordsById.set(recordId, record);
     this.recordsByToolCallId.set(record.toolCallId, record);
 
-    let entry = this.aggregateEntries.get(key);
     if (!entry) {
-      const fileId = `mutation-file-${++this.nextFileId}`;
       entry = {
         ownerId: input.ownerId,
         aggregate: {
@@ -193,8 +213,8 @@ export class MutationJournal {
           latestRecordId: recordId,
           baseline: input.before,
           latest: input.after,
-          revision: 1,
-          projection: { status: 'pending', revision: 1 },
+          revision,
+          projection: { status: 'pending', revision },
         },
       };
       this.aggregateEntries.set(key, entry);
@@ -204,7 +224,7 @@ export class MutationJournal {
       aggregate.recordIds.push(recordId);
       aggregate.latestRecordId = recordId;
       aggregate.latest = input.after;
-      aggregate.revision += 1;
+      aggregate.revision = revision;
       aggregate.projection = { status: 'pending', revision: aggregate.revision };
     }
 
@@ -305,6 +325,46 @@ export class MutationJournal {
 
   isTurnSealed(turnId: string): boolean {
     return this.sealedTurnIds.has(turnId);
+  }
+
+  /**
+   * 在同一个 Worker 上执行不可合并的精确 snapshot pair。该请求用于历史查看，
+   * 后续 aggregate revision 不得覆盖它。
+   */
+  computeExact(input: ExactMutationDiffInput): Promise<DiffDocument> {
+    if (this.disposed) return Promise.resolve(createUnavailableDiffDocument('generation_failed'));
+    const requestId = `mutation-exact-diff-${++this.nextRequestId}`;
+    return new Promise((resolveDocument) => {
+      const request = {
+        requestId,
+        ownerId: `exact:${input.turnId}:${input.fileId}:${input.revision}`,
+        turnId: input.turnId,
+        fileId: input.fileId,
+        revision: input.revision,
+        filePath: input.filePath,
+        originalContent: input.originalContent,
+        modifiedContent: input.modifiedContent,
+        unavailableReason: input.unavailableReason,
+        maxBytes: this.maxBytes,
+        contextLines: input.contextLines ?? this.contextLines,
+      };
+      const listener: DiffWorkerResponseListener = (response) => {
+        resolveDocument(
+          response.status === 'settled'
+            ? response.document
+            : createUnavailableDiffDocument(response.reason),
+        );
+      };
+      try {
+        (this.diffWorkerClient.requestExact ?? this.diffWorkerClient.request).call(
+          this.diffWorkerClient,
+          request,
+          listener,
+        );
+      } catch {
+        resolveDocument(createUnavailableDiffDocument('generation_failed'));
+      }
+    });
   }
 
   sealTurn(turnId: string): boolean {
@@ -611,6 +671,8 @@ function toReviewFile(
     displayPath: aggregate.displayPath,
     originalContent: aggregate.baseline.content,
     modifiedContent: aggregate.latest.content,
+    originalReason: aggregate.baseline.unavailableReason,
+    modifiedReason: aggregate.latest.unavailableReason,
     document,
     fileId: aggregate.fileId,
     revision: aggregate.revision,
@@ -635,6 +697,10 @@ function toReviewRecord(record: MutationRecord): FileReviewRecord {
     absolutePath: record.absolutePath,
     displayPath: record.displayPath,
     sequence: record.sequence,
+    fileId: record.fileId,
+    revision: record.revision,
+    before: record.before,
+    after: record.after,
     toolOutcome: record.toolOutcome,
   };
 }

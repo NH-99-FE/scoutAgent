@@ -25,12 +25,13 @@ import type {
   SessionExecutionPort,
 } from '../../src/core/session-execution.ts';
 import {
-  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+  REVIEW_ARTIFACT_CUSTOM_TYPE,
   FileReviewExtensionController,
   MutationJournal,
   runDiffWorkerRequest,
   type DiffWorkerClientPort,
-  type FileReviewArtifact,
+  loadReviewArtifact,
+  type ReviewArtifactRef,
 } from '../../src/core/review/index.ts';
 import type { FileReviewTurnSnapshot } from '../../src/core/review/file-review.ts';
 import { SessionManager } from '../../src/core/session/index.ts';
@@ -1298,18 +1299,21 @@ describe('AgentSession', () => {
           ? [entry.message.details as { kind?: string; path?: string; displayPath?: string }]
           : [],
       );
-    const artifacts = session.sessionManager
+    const artifactRefs = session.sessionManager
       .getEntries()
       .flatMap((entry) =>
-        entry.type === 'custom' && entry.customType === FILE_REVIEW_ARTIFACT_CUSTOM_TYPE
-          ? [entry.data as FileReviewArtifact]
+        entry.type === 'custom' && entry.customType === REVIEW_ARTIFACT_CUSTOM_TYPE
+          ? [entry.data as ReviewArtifactRef]
           : [],
       );
+    const artifacts = await Promise.all(
+      artifactRefs.map((ref) => loadReviewArtifact(fileReviewExtension.getArtifactStore(), ref)),
+    );
 
     expect(toolResultDetails).toHaveLength(3);
     expect(artifacts).toHaveLength(2);
     expect(artifacts.map((artifact) => artifact.files.length)).toEqual([2, 1]);
-    expect(artifacts.every((artifact) => artifact.complete)).toBe(true);
+    expect(artifactRefs.every((artifact) => artifact.complete)).toBe(true);
     expect(toolResultDetails.every((details) => details.kind === 'file_change')).toBe(true);
     expect(toolResultDetails.map((details) => details.path).sort()).toEqual([
       path.join(tempDir, 'a.txt'),

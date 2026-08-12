@@ -4,6 +4,7 @@
 // ============================================================
 
 import type { DiffDocument, DiffUnavailableReason } from './diff-document.ts';
+import type { CapturedTextSnapshot } from './mutation-capture-context.ts';
 
 // ---------- 类型 ----------
 
@@ -20,6 +21,10 @@ export interface FileReviewRecord {
   absolutePath: string;
   displayPath?: string;
   sequence: number;
+  fileId: string;
+  revision: number;
+  before: CapturedTextSnapshot;
+  after: CapturedTextSnapshot;
   toolOutcome?: 'success' | 'error_after_write';
   unavailableReason?: FileReviewUnavailableReason;
 }
@@ -30,6 +35,8 @@ export interface FileReviewFile {
   displayPath?: string;
   originalContent: string | null;
   modifiedContent: string | null;
+  originalReason?: DiffUnavailableReason;
+  modifiedReason?: DiffUnavailableReason;
   document?: DiffDocument;
   fileId?: string;
   revision?: number;

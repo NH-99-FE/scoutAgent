@@ -4,6 +4,8 @@
 // ============================================================
 
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ScoutFileChangeDetails } from '@scout-agent/shared';
 import type {
   ScoutExtensionAPI,
@@ -12,15 +14,16 @@ import type {
   ToolResultEventResult,
 } from '../extensions/types.ts';
 import {
-  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-  createFileReviewArtifact,
-  prepareFileReviewArtifactForSession,
-  type FileReviewArtifactLimitOptions,
-} from './file-review-artifact.ts';
+  REVIEW_ARTIFACT_CUSTOM_TYPE,
+  createReviewArtifactSummary,
+  persistReviewArtifact,
+} from './review-artifact.ts';
+import { ReviewArtifactStore } from './review-artifact-store.ts';
 import type { FileReviewProjectionUpdate, FileReviewTurnSnapshot } from './file-review.ts';
 import { MutationCaptureCoordinator } from './mutation-capture-coordinator.ts';
 import {
   MutationJournal,
+  type ExactMutationDiffInput,
   type MutationJournalOptions,
   type MutationJournalUpdate,
 } from './mutation-journal.ts';
@@ -34,10 +37,11 @@ export type FileReviewUpdatedListener = (
 
 export interface FileReviewExtensionControllerOptions {
   sessionId: string;
+  agentDir?: string;
+  artifactStore?: ReviewArtifactStore;
   journal?: MutationJournal;
   journalOptions?: MutationJournalOptions;
   finalizeTimeoutMs?: number;
-  artifactLimitOptions?: FileReviewArtifactLimitOptions;
   onUpdated?: FileReviewUpdatedListener;
   onDiagnostic?: (message: string, error?: unknown) => void;
 }
@@ -59,7 +63,7 @@ export class FileReviewExtensionController {
   private readonly sessionId: string;
   private readonly journal: MutationJournal;
   private readonly finalizeTimeoutMs: number;
-  private readonly artifactLimitOptions: FileReviewArtifactLimitOptions;
+  private readonly artifactStore: ReviewArtifactStore;
   private onDiagnostic?: (message: string, error?: unknown) => void;
   private readonly pendingTurnIds = new Set<string>();
   private readonly committedTurnIds = new Set<string>();
@@ -76,7 +80,11 @@ export class FileReviewExtensionController {
     this.activeTurnId = `${this.sessionId}:run-${randomUUID()}`;
     this.journal = options.journal ?? new MutationJournal(options.journalOptions);
     this.finalizeTimeoutMs = options.finalizeTimeoutMs ?? DEFAULT_FINALIZE_TIMEOUT_MS;
-    this.artifactLimitOptions = options.artifactLimitOptions ?? {};
+    this.artifactStore =
+      options.artifactStore ??
+      new ReviewArtifactStore({
+        agentDir: options.agentDir ?? join(tmpdir(), 'scout-agent-review-tests'),
+      });
     this.onUpdated = options.onUpdated;
     this.onDiagnostic = options.onDiagnostic;
     this.unsubscribeJournal = this.journal.onUpdated((update) => this.handleJournalUpdate(update));
@@ -117,9 +125,18 @@ export class FileReviewExtensionController {
     return this.journal.toReviewTurnSnapshot(turnId);
   }
 
+  computeExactDiff(input: ExactMutationDiffInput) {
+    return this.journal.computeExact(input);
+  }
+
   /** @internal 供 review 单元测试检查 canonical Journal。 */
   getJournal(): MutationJournal {
     return this.journal;
+  }
+
+  /** @internal 供 host/test 解析同一全局 CAS。 */
+  getArtifactStore(): ReviewArtifactStore {
+    return this.artifactStore;
   }
 
   /** 等待并重试已封口但尚未写入 session tree 的 review artifact。 */
@@ -168,8 +185,8 @@ export class FileReviewExtensionController {
       review: {
         turnId: record.turnId,
         recordId: record.recordId,
-        fileId: aggregate.fileId,
-        revision: aggregate.revision,
+        fileId: record.fileId,
+        revision: record.revision,
         status,
       },
       toolOutcome: record.toolOutcome,
@@ -209,26 +226,20 @@ export class FileReviewExtensionController {
       return;
     }
 
-    const bounded = prepareFileReviewArtifactForSession(
-      createFileReviewArtifact(this.sessionId, review),
-      this.artifactLimitOptions,
+    const persisted = await persistReviewArtifact(
+      this.artifactStore,
+      this.sessionId,
+      review,
+      createReviewArtifactSummary(review),
     );
-    for (const warning of bounded.warnings) {
-      this.reportDiagnostic(warning);
-    }
     if (!this.appendEntry) {
       throw new Error(`File review extension 尚未绑定 appendEntry: ${turnId}`);
     }
-    await this.appendEntry(FILE_REVIEW_ARTIFACT_CUSTOM_TYPE, bounded.artifact);
+    await this.appendEntry(REVIEW_ARTIFACT_CUSTOM_TYPE, persisted.ref);
 
     this.committedTurnIds.add(turnId);
     this.pendingTurnIds.delete(turnId);
-    if (!bounded.degraded) {
-      this.journal.evictTurn(turnId);
-    } else {
-      // 裁剪 artifact 不得反过来降低当前 runtime review 的完整度。
-      this.journal.releaseTurnSnapshots(turnId);
-    }
+    this.journal.evictTurn(turnId);
   }
 
   // ---------- Journal 投影 ----------

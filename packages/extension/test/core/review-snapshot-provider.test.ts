@@ -40,7 +40,7 @@ describe('local review snapshot provider', () => {
       kind: 'captured',
       snapshot: {
         content: 'before\r\n',
-        byteLength: Buffer.byteLength('\ufeffbefore\r\n'),
+        byteLength: Buffer.byteLength('before\r\n'),
       },
     });
     await expect(provider.readBefore(join(cwd, 'missing.txt'))).resolves.toEqual({

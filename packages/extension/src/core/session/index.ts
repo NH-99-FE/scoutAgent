@@ -10,6 +10,7 @@ export {
   buildSessionContext,
   findMostRecentSession,
   getLatestCompactionEntry,
+  isSessionMetadataEntry,
   loadEntriesFromFile,
   migrateSessionEntries,
   parseSessionEntries,

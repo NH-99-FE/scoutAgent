@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as vscode from 'vscode';
 import { createDiffDocument } from '../../../src/core/review/diff-document.ts';
 import type { FileReviewTurnSnapshot } from '../../../src/core/review/file-review.ts';
-import type { FileReviewArtifact } from '../../../src/core/review/file-review-artifact.ts';
+import type { ReviewArtifactManifest } from '../../../src/core/review/review-artifact.ts';
 import { ScoutChangesReviewPanelManager } from '../../../src/host/review/changes-review-panel.ts';
 import { getScoutWebviewHtml } from '../../../src/webview-content.ts';
 
@@ -208,21 +208,23 @@ function makeReviewSnapshot(): FileReviewTurnSnapshot {
   };
 }
 
-function makeArtifact(): FileReviewArtifact {
+function makeArtifact(): ReviewArtifactManifest {
   return {
-    version: 2,
+    version: 1,
     sessionId: 'session-1',
     turnId: 'turn-1',
     createdAt: '2026-01-01T00:00:00.000Z',
-    complete: true,
     records: [
       {
         recordId: 'record-1',
         toolCallId: 'tool-1',
         operation: 'edit',
         fileId: 'file-1',
+        revision: 1,
         sequence: 1,
         toolOutcome: 'success',
+        before: { kind: 'absent' },
+        after: { kind: 'absent' },
       },
     ],
     files: [
@@ -233,7 +235,10 @@ function makeArtifact(): FileReviewArtifact {
         displayPath: 'src/app.ts',
         recordIds: ['record-1'],
         latestRevision: 2,
-        document: createDiffDocument('const value = 1;\n', 'const value = 2;\n'),
+        additions: 1,
+        deletions: 1,
+        baseline: { kind: 'absent' },
+        final: { kind: 'absent' },
       },
     ],
   };

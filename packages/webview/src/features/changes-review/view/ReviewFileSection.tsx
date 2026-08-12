@@ -3,8 +3,13 @@
 // ============================================================
 
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
-import type { ScoutChangesReviewFile, ScoutChangesReviewViewMode } from '@scout-agent/shared';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type {
+  ScoutChangesReviewFile,
+  ScoutChangesReviewRow,
+  ScoutChangesReviewViewMode,
+} from '@scout-agent/shared';
+import { protocolClient } from '@/bridge/protocol-client';
 import { useFileDiff } from '../model/use-file-diff';
 import { ReviewDiff } from './ReviewDiff';
 import { ReviewPath } from './ReviewPath';
@@ -13,8 +18,6 @@ export function ReviewFileSection({
   expanded,
   file,
   fileKey,
-  foldRevealCounts,
-  onExpandFold,
   onOpenFile,
   onToggleFile,
   turnId,
@@ -23,8 +26,6 @@ export function ReviewFileSection({
   expanded: boolean;
   file: ScoutChangesReviewFile;
   fileKey: string;
-  foldRevealCounts: Record<string, number>;
-  onExpandFold: (id: string, total: number) => void;
   onOpenFile: (path: string) => void;
   onToggleFile: (key: string) => void;
   turnId: string;
@@ -70,14 +71,7 @@ export function ReviewFileSection({
         </div>
       </header>
       {expanded ? (
-        <LazyReviewDiff
-          file={file}
-          fileKey={fileKey}
-          foldRevealCounts={foldRevealCounts}
-          onExpandFold={onExpandFold}
-          turnId={turnId}
-          viewMode={viewMode}
-        />
+        <LazyReviewDiff file={file} fileKey={fileKey} turnId={turnId} viewMode={viewMode} />
       ) : null}
     </article>
   );
@@ -86,15 +80,11 @@ export function ReviewFileSection({
 function LazyReviewDiff({
   file,
   fileKey,
-  foldRevealCounts,
-  onExpandFold,
   turnId,
   viewMode,
 }: {
   file: ScoutChangesReviewFile;
   fileKey: string;
-  foldRevealCounts: Record<string, number>;
-  onExpandFold: (id: string, total: number) => void;
   turnId: string;
   viewMode: ScoutChangesReviewViewMode;
 }) {
@@ -112,6 +102,13 @@ function LazyReviewDiff({
     mode: viewMode,
     includeTokens: true,
     range: { hunkOffset: 0, hunkLimit },
+  });
+  const foldContext = useLazyFoldContext({
+    rows: state.status === 'ready' ? state.diff.rows : [],
+    sessionId: file.sessionId ?? '',
+    turnId,
+    fileId: file.fileId ?? '',
+    revision: file.revision ?? 0,
   });
 
   if (file.unavailableReason || file.projectionStatus === 'unavailable') {
@@ -140,23 +137,22 @@ function LazyReviewDiff({
     ...file,
     additions: state.diff.additions,
     deletions: state.diff.deletions,
-    rows: state.diff.rows,
+    rows: foldContext.rows,
   };
-  const canLoadMore = Boolean(state.diff.truncated) && hunkLimit < 200;
+  const canLoadMore = Boolean(state.diff.truncated) && hunkLimit < state.diff.totalHunks;
   return (
     <>
       <ReviewDiff
         file={projectedFile}
         fileKey={fileKey}
-        foldRevealCounts={foldRevealCounts}
-        onExpandFold={onExpandFold}
+        onExpandFold={foldContext.expandFold}
         viewMode={viewMode}
       />
       {canLoadMore ? (
         <div className="px-[22px] py-2">
           <button
             className="border-border bg-control hover:bg-control-hover cursor-pointer rounded border px-2 py-1"
-            onClick={() => setHunkLimit((value) => Math.min(200, value + 50))}
+            onClick={() => setHunkLimit((value) => Math.min(state.diff.totalHunks, value + 50))}
             type="button"
           >
             加载更多变更
@@ -164,10 +160,190 @@ function LazyReviewDiff({
         </div>
       ) : null}
       {state.diff.truncated && !canLoadMore ? (
-        <ReviewStatus message="变更过长，仅显示前 200 个 hunk" />
+        <ReviewStatus message="变更过长，已达到可展示行数上限" />
       ) : null}
     </>
   );
+}
+
+const FOLD_EXPAND_STEP = 20;
+
+interface FoldContextState {
+  headRows: ScoutChangesReviewRow[];
+  tailRows: ScoutChangesReviewRow[];
+  total: number;
+  revealed: number;
+  requestedReveal: number;
+  requestVersion: number;
+  status: 'idle' | 'loading' | 'error';
+}
+
+interface FoldContextStore {
+  sourceKey: string;
+  contexts: Record<string, FoldContextState>;
+}
+
+function useLazyFoldContext(options: {
+  rows: ScoutChangesReviewRow[];
+  sessionId: string;
+  turnId: string;
+  fileId: string;
+  revision: number;
+}): {
+  rows: ScoutChangesReviewRow[];
+  expandFold: (foldId: string, total: number) => void;
+} {
+  const sourceKey = `${options.sessionId}:${options.turnId}:${options.fileId}:${options.revision}`;
+  const [store, setStore] = useState<FoldContextStore>({ sourceKey, contexts: {} });
+  const contexts = useMemo(
+    () => (store.sourceKey === sourceKey ? store.contexts : {}),
+    [sourceKey, store],
+  );
+  const activeVersionsRef = useRef(new Map<string, number>());
+  const activeRequestsRef = useRef(new Map<string, { cancel: () => void }>());
+
+  const expandFold = useCallback(
+    (foldId: string, total: number) => {
+      setStore((current) => {
+        const currentContexts = current.sourceKey === sourceKey ? current.contexts : {};
+        const previous = currentContexts[foldId] ?? {
+          headRows: [],
+          tailRows: [],
+          total,
+          revealed: 0,
+          requestedReveal: 0,
+          requestVersion: 0,
+          status: 'idle' as const,
+        };
+        if (previous.status === 'loading' || previous.revealed >= total) return current;
+        const requestedReveal =
+          previous.status === 'error'
+            ? previous.requestedReveal
+            : Math.min(total, previous.revealed + FOLD_EXPAND_STEP);
+        return {
+          sourceKey,
+          contexts: {
+            ...currentContexts,
+            [foldId]: {
+              ...previous,
+              total,
+              requestedReveal,
+              requestVersion: previous.requestVersion + 1,
+              status: 'loading',
+            },
+          },
+        };
+      });
+    },
+    [sourceKey],
+  );
+
+  useEffect(() => {
+    for (const [foldId, context] of Object.entries(contexts)) {
+      const requestKey = `${sourceKey}:${foldId}`;
+      if (
+        context.status !== 'loading' ||
+        activeVersionsRef.current.get(requestKey) === context.requestVersion
+      ) {
+        continue;
+      }
+      activeVersionsRef.current.set(requestKey, context.requestVersion);
+      const requestVersion = context.requestVersion;
+      const revealHead = Math.ceil(context.requestedReveal / 2);
+      const revealTail = Math.floor(context.requestedReveal / 2);
+      const settleError = () => {
+        activeRequestsRef.current.delete(requestKey);
+        setStore((current) => {
+          if (current.sourceKey !== sourceKey) return current;
+          const latest = current.contexts[foldId];
+          if (!latest || latest.requestVersion !== requestVersion) return current;
+          return {
+            ...current,
+            contexts: {
+              ...current.contexts,
+              [foldId]: { ...latest, status: 'error' },
+            },
+          };
+        });
+      };
+      const handle = protocolClient.requestFileDiffContext({
+        payload: {
+          sessionId: options.sessionId,
+          turnId: options.turnId,
+          fileId: options.fileId,
+          revision: options.revision,
+          foldId,
+          revealHead,
+          revealTail,
+          includeTokens: true,
+        },
+        onResult: (result) => {
+          if (result.status !== 'ready') {
+            settleError();
+            return;
+          }
+          activeRequestsRef.current.delete(requestKey);
+          setStore((current) => {
+            if (current.sourceKey !== sourceKey) return current;
+            const latest = current.contexts[foldId];
+            if (!latest || latest.requestVersion !== requestVersion) return current;
+            return {
+              ...current,
+              contexts: {
+                ...current.contexts,
+                [foldId]: {
+                  ...latest,
+                  headRows: result.headRows,
+                  tailRows: result.tailRows,
+                  total: result.total,
+                  revealed: result.headRows.length + result.tailRows.length,
+                  status: 'idle',
+                },
+              },
+            };
+          });
+        },
+        onError: settleError,
+      });
+      activeRequestsRef.current.set(requestKey, handle);
+    }
+  }, [contexts, options.fileId, options.revision, options.sessionId, options.turnId, sourceKey]);
+
+  useEffect(() => {
+    const requests = activeRequestsRef.current;
+    const versions = activeVersionsRef.current;
+    return () => {
+      for (const request of requests.values()) request.cancel();
+      requests.clear();
+      versions.clear();
+    };
+  }, [sourceKey]);
+
+  const rows = useMemo(
+    () =>
+      options.rows.flatMap((row): ScoutChangesReviewRow[] => {
+        if (row.type !== 'fold' || !row.foldId) return [row];
+        const context = contexts[row.foldId];
+        if (!context) return [{ ...row, foldTotal: row.count }];
+        const visible = context.headRows.length + context.tailRows.length;
+        const remaining = Math.max(0, context.total - visible);
+        const foldRow: ScoutChangesReviewRow = {
+          ...row,
+          count: remaining,
+          foldTotal: context.total,
+          text:
+            context.status === 'loading'
+              ? '正在加载…'
+              : context.status === 'error'
+                ? '数据异常，点击重试'
+                : undefined,
+          foldId: context.status === 'loading' ? undefined : row.foldId,
+        };
+        return [...context.headRows, ...(remaining > 0 ? [foldRow] : []), ...context.tailRows];
+      }),
+    [contexts, options.rows],
+  );
+  return { rows, expandFold };
 }
 
 const UNAVAILABLE_REASON_LABELS: Record<string, string> = {

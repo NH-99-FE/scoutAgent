@@ -44,6 +44,7 @@ export function useFileDiff(options: UseFileDiffOptions): FileDiffLoadState {
     turnId,
     fileId,
     revision,
+    recordId,
     view,
     mode,
     includeTokens,
@@ -58,13 +59,25 @@ export function useFileDiff(options: UseFileDiffOptions): FileDiffLoadState {
       turnId,
       fileId,
       revision,
+      recordId,
       view,
       mode,
       includeTokens,
       range:
         hunkOffset !== undefined && hunkLimit !== undefined ? { hunkOffset, hunkLimit } : undefined,
     }),
-    [sessionId, turnId, fileId, revision, view, mode, includeTokens, hunkOffset, hunkLimit],
+    [
+      sessionId,
+      turnId,
+      fileId,
+      revision,
+      recordId,
+      view,
+      mode,
+      includeTokens,
+      hunkOffset,
+      hunkLimit,
+    ],
   );
   const key = useMemo(() => createFileDiffCacheKey(params), [params]);
   const subscribe = useCallback(
@@ -207,6 +220,7 @@ function createFileDiffCacheKey(options: Omit<RequestFileDiffMessage, 'type'>): 
     options.turnId,
     options.fileId,
     options.revision,
+    options.recordId ?? '',
     options.view,
     options.mode,
     options.includeTokens,

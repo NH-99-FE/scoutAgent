@@ -45,32 +45,6 @@ export type {
   FileReviewTurnSnapshot,
   FileReviewUnavailableReason,
 } from './file-review.ts';
-export {
-  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-  FILE_REVIEW_ARTIFACT_V1_VERSION,
-  FILE_REVIEW_ARTIFACT_VERSION,
-  MAX_REVIEW_ARTIFACT_BYTES,
-  MAX_REVIEW_ARTIFACT_FILES,
-  MAX_REVIEW_ARTIFACT_ROWS,
-  collectCurrentBranchFileReviewArtifacts,
-  collectFileReviewArtifacts,
-  createFileReviewArtifact,
-  decodeFileReviewArtifact,
-  isFileReviewArtifact,
-  isFileReviewArtifactV1,
-  prepareFileReviewArtifactForSession,
-} from './file-review-artifact.ts';
-export type {
-  BoundedFileReviewArtifactResult,
-  FileReviewArtifact,
-  FileReviewArtifactFile,
-  FileReviewArtifactIndex,
-  FileReviewArtifactLimitOptions,
-  FileReviewArtifactRecord,
-  FileReviewArtifactV1,
-  FileReviewArtifactV1File,
-  FileReviewArtifactV1Record,
-} from './file-review-artifact.ts';
 export { FileReviewExtensionController } from './file-review-extension.ts';
 export type {
   FileReviewExtensionControllerOptions,
@@ -85,6 +59,27 @@ export {
   detectReviewLanguage,
 } from './review-syntax-tokens.ts';
 export type { ReviewTokenizableRow, ReviewTokenRange } from './review-syntax-tokens.ts';
+
+export {
+  REVIEW_ARTIFACT_CUSTOM_TYPE,
+  collectCurrentBranchReviewArtifactRefs,
+  createReviewArtifactSummary,
+  decodeReviewArtifactRef,
+  loadReviewArtifact,
+  loadStoredSnapshot,
+  persistReviewArtifact,
+  runReviewArtifactGarbageCollection,
+} from './review-artifact.ts';
+export type {
+  ReviewArtifactFile,
+  ReviewArtifactGarbageCollectionReport,
+  ReviewArtifactManifest,
+  ReviewArtifactRecord,
+  ReviewArtifactRef,
+  ReviewArtifactRefIndex,
+  StoredSnapshotRef,
+} from './review-artifact.ts';
+export { ReviewArtifactStore } from './review-artifact-store.ts';
 
 export {
   captureStringSnapshot,

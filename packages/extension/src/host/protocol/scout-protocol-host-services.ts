@@ -7,7 +7,7 @@ import type { ExtensionMessage } from '@scout-agent/shared';
 import type { ConfigManager } from '../../config-manager.ts';
 import type { FileReviewTurnSnapshot } from '../../core/review/file-review.ts';
 import { ensureTool } from '../../core/tools/shared/tools-manager.ts';
-import type { FileReviewArtifact } from '../../core/review/file-review-artifact.ts';
+import type { ReviewArtifactManifest } from '../../core/review/review-artifact.ts';
 import type { ExtensionSessionCoordinator } from '../session-coordinator.ts';
 import type { SessionIndex } from '../session-index.ts';
 import type { ScoutWebviewSurface } from '../webview-surface.ts';
@@ -25,6 +25,7 @@ import { StateProtocolService } from './services/state-service.ts';
 import { TaskProtocolService } from './services/task-service.ts';
 import { TreeProtocolService } from './services/tree-service.ts';
 import { UiProtocolService } from './services/ui-service.ts';
+import { ReviewArtifactStore } from '../../core/review/review-artifact-store.ts';
 
 // ---------- 类型 ----------
 
@@ -39,7 +40,7 @@ export interface ScoutProtocolHostServicesOptions {
   openTreePanel?: () => void | Promise<void>;
   openChatSurface?: () => void | Promise<void>;
   openChangesReviewPanel?: (
-    review: FileReviewTurnSnapshot | FileReviewArtifact,
+    review: FileReviewTurnSnapshot | ReviewArtifactManifest,
     options: {
       allowCurrentFileContextExpansion?: boolean;
       cwd: string;
@@ -117,8 +118,7 @@ export function createScoutProtocolHostServices(
     getCurrentChangesReview: () => options.sessionManager.getActiveFileReviewTurn(),
     getCurrentCwd: () => options.sessionManager.currentCwd,
     getCurrentSessionId: () => options.sessionManager.sessionId,
-    canExpandChangesReviewContext: (turnId) =>
-      options.sessionManager.isLatestFileReviewArtifact(turnId),
+    canExpandChangesReviewContext: () => true,
     openChangesReviewPanel: options.openChangesReviewPanel
       ? (review, panelOptions) =>
           options.openChangesReviewPanel?.(review, {
@@ -144,6 +144,8 @@ export function createScoutProtocolHostServices(
     getCurrentSessionId: () => options.sessionManager.sessionId,
     getRuntimeReview: (turnId) => options.sessionManager.getFileReviewTurn(turnId),
     getArtifact: (turnId) => options.sessionManager.getFileReviewArtifact(turnId),
+    artifactStore: new ReviewArtifactStore({ agentDir: options.agentDir }),
+    computeDiff: (input) => options.sessionManager.computeExactFileDiff?.(input),
   });
 
   bundle.state = new StateProtocolService({
@@ -337,6 +339,12 @@ export function createScoutProtocolHostServices(
       requestFileDiff: async (message, respond, signal) => {
         if (signal?.aborted) return;
         const result = await bundle.fileDiffRequestHandler.handle(message);
+        if (signal?.aborted) return;
+        respond(result);
+      },
+      requestFileDiffContext: async (message, respond, signal) => {
+        if (signal?.aborted) return;
+        const result = await bundle.fileDiffRequestHandler.handleContext(message);
         if (signal?.aborted) return;
         respond(result);
       },

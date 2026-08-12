@@ -15,13 +15,11 @@ const CHANGES_REVIEW_PANEL_CLASS =
 export function ChangesReviewPanel({
   actions,
   expandedFileKeys,
-  foldRevealCounts,
   model,
   viewMode,
 }: {
   actions: ChangesReviewActions;
   expandedFileKeys: ReadonlySet<string>;
-  foldRevealCounts: Record<string, number>;
   model?: ScoutChangesReviewModel;
   viewMode: ScoutChangesReviewViewMode;
 }) {
@@ -49,9 +47,7 @@ export function ChangesReviewPanel({
               expanded={expandedFileKeys.has(fileKey)}
               file={file}
               fileKey={fileKey}
-              foldRevealCounts={foldRevealCounts}
               key={fileKey}
-              onExpandFold={actions.expandFold}
               onOpenFile={actions.openFile}
               onToggleFile={actions.toggleFile}
               turnId={model.turnId}

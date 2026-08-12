@@ -126,6 +126,20 @@ export interface SessionInfoEntry extends SessionEntryBase {
 }
 
 /**
+ * Session metadata that does not create a new visible conversation branch point.
+ * Consumers that traverse hidden descendants of a visible branch should share this predicate.
+ */
+export function isSessionMetadataEntry(entry: SessionTreeEntry): boolean {
+  return (
+    entry.type === 'custom' ||
+    entry.type === 'label' ||
+    entry.type === 'session_info' ||
+    entry.type === 'model_change' ||
+    entry.type === 'thinking_level_change'
+  );
+}
+
+/**
  * Custom message entry for extensions to inject messages into LLM context.
  * Use customType to identify your extension's entries.
  *

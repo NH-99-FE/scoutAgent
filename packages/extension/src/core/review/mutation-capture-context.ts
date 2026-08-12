@@ -56,23 +56,30 @@ export function normalizeCapturedReviewText(content: string): string {
  * 从实际 readFile Buffer 创建 before 快照。Buffer 本身只被解码，不复制到运行态。
  */
 export function captureTextSnapshot(buffer: Buffer): CapturedTextSnapshot {
-  const byteLength = buffer.byteLength;
-  if (byteLength > MAX_REVIEW_TEXT_BYTES) {
+  if (buffer.byteLength > MAX_REVIEW_TEXT_BYTES + 3) {
     return {
       content: null,
-      byteLength,
+      byteLength: buffer.byteLength,
       unavailableReason: 'content_too_large',
     };
   }
 
   try {
     const content = normalizeCapturedReviewText(UTF8_DECODER.decode(buffer));
+    const byteLength = Buffer.byteLength(content, 'utf8');
+    if (byteLength > MAX_REVIEW_TEXT_BYTES) {
+      return { content: null, byteLength, unavailableReason: 'content_too_large' };
+    }
     if (content.includes(String.fromCharCode(0))) {
       return { content: null, byteLength, unavailableReason: 'binary_or_unsupported' };
     }
     return { content, byteLength };
   } catch {
-    return { content: null, byteLength, unavailableReason: 'binary_or_unsupported' };
+    return {
+      content: null,
+      byteLength: buffer.byteLength,
+      unavailableReason: 'binary_or_unsupported',
+    };
   }
 }
 
@@ -80,7 +87,8 @@ export function captureTextSnapshot(buffer: Buffer): CapturedTextSnapshot {
  * 从 write/edit 的字符串参数创建 after 快照。字符串内容直接引用入参，不主动复制。
  */
 export function captureStringSnapshot(content: string): CapturedTextSnapshot {
-  const byteLength = Buffer.byteLength(content, 'utf8');
+  const normalized = normalizeCapturedReviewText(content);
+  const byteLength = Buffer.byteLength(normalized, 'utf8');
   if (byteLength > MAX_REVIEW_TEXT_BYTES) {
     return {
       content: null,
@@ -91,7 +99,7 @@ export function captureStringSnapshot(content: string): CapturedTextSnapshot {
   if (content.includes(String.fromCharCode(0))) {
     return { content: null, byteLength, unavailableReason: 'binary_or_unsupported' };
   }
-  return { content: normalizeCapturedReviewText(content), byteLength };
+  return { content: normalized, byteLength };
 }
 
 export function createUnavailableSnapshot(

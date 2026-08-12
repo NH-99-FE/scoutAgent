@@ -510,6 +510,7 @@ function LazyFileDiffPanel({ detail }: { detail: LazyDiffToolDisplayDetail }) {
     turnId: detail.review.turnId,
     fileId: detail.review.fileId,
     revision: detail.review.revision,
+    recordId: detail.review.recordId,
     view: 'inline',
     mode: 'unified',
     includeTokens: false,

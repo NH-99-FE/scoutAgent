@@ -76,6 +76,7 @@ export async function createAgentSessionServices(
   const extensionResult = resourceLoader.getExtensions();
   const fileReviewExtension = new FileReviewExtensionController({
     sessionId: options.session.getSessionId(),
+    agentDir: options.agentDir,
   });
   const builtInFileReviewExtension = await loadExtensionFromFactory(
     fileReviewExtension.createFactory(),

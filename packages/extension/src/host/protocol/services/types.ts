@@ -183,6 +183,11 @@ export interface ReviewProtocolHost {
     respond: ProtocolResponder,
     signal?: AbortSignal,
   ) => Promise<void>;
+  requestFileDiffContext: (
+    message: ProtocolPayload<'request_file_diff_context'>,
+    respond: ProtocolResponder,
+    signal?: AbortSignal,
+  ) => Promise<void>;
 }
 
 export interface ExtensionManagementProtocolHost {

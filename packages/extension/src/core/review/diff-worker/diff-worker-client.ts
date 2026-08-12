@@ -24,6 +24,8 @@ export type DiffWorkerResponseListener = (response: DiffWorkerResponse) => void;
 
 export interface DiffWorkerClientPort {
   request(request: DiffWorkerRequest, listener: DiffWorkerResponseListener): void;
+  /** 精确请求不会被后续 revision 合并；用户打开历史 Diff 时使用。 */
+  requestExact?(request: DiffWorkerRequest, listener: DiffWorkerResponseListener): void;
   dispose(): void;
 }
 
@@ -33,6 +35,7 @@ export interface DiffWorkerClientOptions {
 }
 
 interface DiffWorkerTask {
+  kind: 'latest' | 'exact';
   key: string;
   request: DiffWorkerRequest;
   listener: DiffWorkerResponseListener;
@@ -52,6 +55,7 @@ export class DiffWorkerClient implements DiffWorkerClientPort {
   private readonly latestRevisionByKey = new Map<string, number>();
   private readonly pendingByKey = new Map<string, DiffWorkerTask>();
   private readonly pendingKeys: string[] = [];
+  private readonly pendingExact: DiffWorkerTask[] = [];
   private worker: DiffWorkerTransport | undefined;
   private workerListeners: WorkerListeners | undefined;
   private activeTask: DiffWorkerTask | undefined;
@@ -72,7 +76,7 @@ export class DiffWorkerClient implements DiffWorkerClientPort {
     if (latestRevision !== undefined && request.revision < latestRevision) return;
     this.latestRevisionByKey.set(key, request.revision);
 
-    const task = { key, request, listener };
+    const task: DiffWorkerTask = { kind: 'latest', key, request, listener };
     if (!this.activeTask) {
       this.startTask(task);
       return;
@@ -84,12 +88,29 @@ export class DiffWorkerClient implements DiffWorkerClientPort {
     this.pendingByKey.set(key, task);
   }
 
+  requestExact(request: DiffWorkerRequest, listener: DiffWorkerResponseListener): void {
+    if (this.disposed) return;
+    const task: DiffWorkerTask = {
+      kind: 'exact',
+      key: `${createDiffWorkerTaskKey(request)}::${request.requestId}`,
+      request,
+      listener,
+    };
+    if (!this.activeTask) {
+      this.startTask(task);
+      return;
+    }
+    // 用户触发的历史读取优先于可合并的后台 aggregate。
+    this.pendingExact.push(task);
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.activeTask = undefined;
     this.pendingByKey.clear();
     this.pendingKeys.length = 0;
+    this.pendingExact.length = 0;
     this.latestRevisionByKey.clear();
     this.releaseWorker();
   }
@@ -153,7 +174,7 @@ export class DiffWorkerClient implements DiffWorkerClientPort {
     if (
       response.fileId === task.request.fileId &&
       response.revision === task.request.revision &&
-      this.isLatest(task)
+      (task.kind === 'exact' || this.isLatest(task))
     ) {
       task.listener(response);
     }
@@ -201,6 +222,12 @@ export class DiffWorkerClient implements DiffWorkerClientPort {
   private startNextTask(): void {
     if (this.disposed || this.activeTask) return;
 
+    const exactTask = this.pendingExact.shift();
+    if (exactTask) {
+      this.startTask(exactTask);
+      return;
+    }
+
     while (this.pendingKeys.length > 0) {
       const key = this.pendingKeys.shift();
       if (!key) continue;
@@ -213,7 +240,8 @@ export class DiffWorkerClient implements DiffWorkerClientPort {
   }
 
   private failPendingTasks(message: string): void {
-    const tasks = Array.from(this.pendingByKey.values());
+    const tasks = [...this.pendingExact, ...this.pendingByKey.values()];
+    this.pendingExact.length = 0;
     this.pendingByKey.clear();
     this.pendingKeys.length = 0;
     for (const task of tasks) {
@@ -222,7 +250,7 @@ export class DiffWorkerClient implements DiffWorkerClientPort {
   }
 
   private publishTaskError(task: DiffWorkerTask, message: string): void {
-    if (this.disposed || !this.isLatest(task)) return;
+    if (this.disposed || (task.kind === 'latest' && !this.isLatest(task))) return;
     task.listener({
       requestId: task.request.requestId,
       fileId: task.request.fileId,

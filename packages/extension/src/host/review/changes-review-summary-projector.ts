@@ -8,7 +8,7 @@ import {
   projectDiffDocumentSummary,
   type FileReviewTurnSnapshot,
 } from '../../core/review/index.ts';
-import type { FileReviewArtifact } from '../../core/review/file-review-artifact.ts';
+import type { ReviewArtifactManifest } from '../../core/review/review-artifact.ts';
 
 // ---------- 类型 ----------
 
@@ -52,7 +52,7 @@ export function createRuntimeChangesReviewSummary(
 }
 
 export function createArtifactChangesReviewSummary(
-  artifact: FileReviewArtifact,
+  artifact: ReviewArtifactManifest,
 ): ScoutChangesReviewSummary {
   const sequenceByRecordId = new Map(
     artifact.records.map((record) => [record.recordId, record.sequence]),
@@ -62,8 +62,8 @@ export function createArtifactChangesReviewSummary(
     files: artifact.files.map((file) => ({
       path: file.absolutePath,
       displayPath: file.displayPath ?? file.path,
-      additions: file.document.additions,
-      deletions: file.document.deletions,
+      additions: file.additions,
+      deletions: file.deletions,
       latestSequence: Math.max(
         ...file.recordIds.map((recordId) => sequenceByRecordId.get(recordId) ?? -1),
       ),

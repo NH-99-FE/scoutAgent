@@ -31,13 +31,11 @@ const SPLIT_LINE_HEIGHT_CLASS =
 export function ReviewDiff({
   file,
   fileKey,
-  foldRevealCounts,
   onExpandFold,
   viewMode,
 }: {
   file: ScoutChangesReviewFile;
   fileKey: string;
-  foldRevealCounts: Record<string, number>;
   onExpandFold: (id: string, total: number) => void;
   viewMode: ScoutChangesReviewViewMode;
 }) {
@@ -66,7 +64,6 @@ export function ReviewDiff({
       >
         {file.rows.length ? (
           <ReviewRows
-            foldRevealCounts={foldRevealCounts}
             onExpandFold={onExpandFold}
             rowScopeId={fileKey}
             rows={file.rows}
@@ -81,139 +78,56 @@ export function ReviewDiff({
 }
 
 function ReviewRows({
-  foldRevealCounts,
   onExpandFold,
   rowScopeId,
   rows,
   viewMode,
 }: {
-  foldRevealCounts: Record<string, number>;
   onExpandFold: (id: string, total: number) => void;
   rowScopeId: string;
   rows: ScoutChangesReviewRow[];
   viewMode: ScoutChangesReviewViewMode;
 }) {
   if (viewMode === 'split') {
-    return (
-      <ReviewSplitRows
-        foldRevealCounts={foldRevealCounts}
-        onExpandFold={onExpandFold}
-        rowScopeId={rowScopeId}
-        rows={rows}
-      />
-    );
+    return <ReviewSplitRows onExpandFold={onExpandFold} rows={rows} />;
   }
 
   return (
     <>
       {rows.map((row, index) => (
-        <ReviewRow
-          foldRevealCounts={foldRevealCounts}
-          index={index}
-          key={`${rowScopeId}:row:${index}`}
-          onExpandFold={onExpandFold}
-          row={row}
-          rowScopeId={rowScopeId}
-          viewMode={viewMode}
-        />
+        <ReviewRow key={`${rowScopeId}:row:${index}`} onExpandFold={onExpandFold} row={row} />
       ))}
     </>
   );
 }
 
 function ReviewRow({
-  foldRevealCounts,
-  index,
   onExpandFold,
   row,
-  rowScopeId,
-  viewMode,
 }: {
-  foldRevealCounts: Record<string, number>;
-  index: number;
   onExpandFold: (id: string, total: number) => void;
   row: ScoutChangesReviewRow;
-  rowScopeId: string;
-  viewMode: ScoutChangesReviewViewMode;
 }) {
   if (row.type === 'fold') {
-    return (
-      <ReviewFold
-        foldRevealCounts={foldRevealCounts}
-        index={index}
-        onExpandFold={onExpandFold}
-        row={row}
-        rowScopeId={rowScopeId}
-        viewMode={viewMode}
-      />
-    );
+    return <ReviewFold onExpandFold={onExpandFold} row={row} />;
   }
   return <ReviewDataRow row={row} />;
 }
 
 function ReviewFold({
-  foldRevealCounts,
-  index,
   onExpandFold,
   row,
-  rowScopeId,
-  viewMode,
 }: {
-  foldRevealCounts: Record<string, number>;
-  index: number;
   onExpandFold: (id: string, total: number) => void;
   row: ScoutChangesReviewRow;
-  rowScopeId: string;
-  viewMode: ScoutChangesReviewViewMode;
 }) {
-  const hiddenRows = Array.isArray(row.hiddenRows) ? row.hiddenRows : [];
   const staticCount = Number(row.count || 0);
-  if (!hiddenRows.length) {
-    return <ReviewFoldBar label={renderFoldLabel(staticCount)} />;
-  }
-
-  const foldId = `${rowScopeId}:fold:${index}`;
-  const total = hiddenRows.length;
-  const revealed = Math.min(Number(foldRevealCounts[foldId] || 0), total);
-  if (revealed >= total) {
-    return (
-      <ReviewRows
-        foldRevealCounts={foldRevealCounts}
-        onExpandFold={onExpandFold}
-        rowScopeId={`${foldId}:all`}
-        rows={hiddenRows}
-        viewMode={viewMode}
-      />
-    );
-  }
-
-  const topCount = Math.ceil(revealed / 2);
-  const bottomCount = revealed - topCount;
-  const remaining = total - revealed;
-  const beforeRows = hiddenRows.slice(0, topCount);
-  const afterRows = bottomCount > 0 ? hiddenRows.slice(total - bottomCount) : [];
-
+  const total = Number(row.foldTotal ?? staticCount);
   return (
-    <>
-      <ReviewRows
-        foldRevealCounts={foldRevealCounts}
-        onExpandFold={onExpandFold}
-        rowScopeId={`${foldId}:before`}
-        rows={beforeRows}
-        viewMode={viewMode}
-      />
-      <ReviewFoldBar
-        label={renderFoldLabel(remaining)}
-        onClick={() => onExpandFold(foldId, total)}
-      />
-      <ReviewRows
-        foldRevealCounts={foldRevealCounts}
-        onExpandFold={onExpandFold}
-        rowScopeId={`${foldId}:after`}
-        rows={afterRows}
-        viewMode={viewMode}
-      />
-    </>
+    <ReviewFoldBar
+      label={row.text ?? renderFoldLabel(staticCount)}
+      onClick={row.foldId ? () => onExpandFold(row.foldId!, total) : undefined}
+    />
   );
 }
 
@@ -224,35 +138,47 @@ function ReviewFoldBar({ label, onClick }: { label: string; onClick?: () => void
     'min-w-max',
     onClick && 'hover:text-foreground cursor-pointer',
   );
-  const children = (
-    <>
-      <span
-        className={cn(
-          'grid min-h-[30px] place-items-center text-[13px] leading-none',
-          GUTTER_GAP_CLASS,
-          onClick && 'grid-rows-2',
-        )}
-      >
-        {onClick ? (
-          <>
+  if (onClick) {
+    return (
+      <div className="min-w-max">
+        <div className={className}>
+          <button
+            aria-label="展开更多上下文"
+            className={cn(
+              'grid min-h-[30px] cursor-pointer place-items-center border-0 bg-transparent p-0 text-inherit',
+              GUTTER_GAP_CLASS,
+              'grid-rows-2',
+            )}
+            onClick={onClick}
+            type="button"
+          >
             <ChevronDown className="size-3" />
             <ChevronUp className="size-3" />
-          </>
-        ) : null}
-      </span>
-      <span className="inline-block px-3">{label}</span>
-    </>
-  );
-
+          </button>
+          <span className="flex items-center px-3">
+            <button
+              className="cursor-pointer border-0 bg-transparent p-0 text-inherit"
+              onClick={onClick}
+              type="button"
+            >
+              {label}
+            </button>
+          </span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="min-w-max">
-      {onClick ? (
-        <button className={className} onClick={onClick} type="button">
-          {children}
-        </button>
-      ) : (
-        <div className={className}>{children}</div>
-      )}
+      <div className={className}>
+        <span
+          className={cn(
+            'grid min-h-[30px] place-items-center text-[13px] leading-none',
+            GUTTER_GAP_CLASS,
+          )}
+        />
+        <span className="inline-block px-3">{label}</span>
+      </div>
     </div>
   );
 }
@@ -262,20 +188,13 @@ function renderFoldLabel(count: number): string {
 }
 
 function ReviewSplitRows({
-  foldRevealCounts,
   onExpandFold,
-  rowScopeId,
   rows,
 }: {
-  foldRevealCounts: Record<string, number>;
   onExpandFold: (id: string, total: number) => void;
-  rowScopeId: string;
   rows: ScoutChangesReviewRow[];
 }) {
-  const model = useMemo(
-    () => createSplitDiffModel(rows, { foldRevealCounts, rowScopeId }),
-    [foldRevealCounts, rowScopeId, rows],
-  );
+  const model = useMemo(() => createSplitDiffModel(rows), [rows]);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [splitCodeScrollLeft, setSplitCodeScrollLeft] = useState(0);
   const [splitCodeScrollMax, setSplitCodeScrollMax] = useState(0);
@@ -483,7 +402,7 @@ function ReviewSplitFoldCell({
   side: SplitDiffSide;
 }) {
   const showLabel = side === 'removed';
-  const label = showLabel ? renderFoldLabel(Number(cell.row.count || 0)) : '';
+  const label = showLabel ? (cell.row.text ?? renderFoldLabel(Number(cell.row.count || 0))) : '';
   const canExpand = showLabel && Boolean(cell.row.foldId && cell.row.foldTotal);
   const contentClass = cn(
     'bg-muted text-muted-foreground flex min-h-[30px] min-w-0 items-center px-3 text-[13px]',
@@ -511,14 +430,15 @@ function ReviewSplitFoldCell({
         ) : null}
       </span>
       {canExpand ? (
-        <button
-          className={contentClass}
-          data-split-fold-content-side={side}
-          onClick={() => onExpandFold(cell.row.foldId!, cell.row.foldTotal!)}
-          type="button"
-        >
-          {content}
-        </button>
+        <div className={contentClass} data-split-fold-content-side={side}>
+          <button
+            className="min-w-0 flex-1 cursor-pointer border-0 bg-transparent p-0 text-left text-inherit"
+            onClick={() => onExpandFold(cell.row.foldId!, cell.row.foldTotal!)}
+            type="button"
+          >
+            {content}
+          </button>
+        </div>
       ) : (
         <div className={contentClass} data-split-fold-content-side={side}>
           {content}

@@ -45,16 +45,8 @@ export interface SplitDiffModel {
   removed: SplitDiffColumn;
 }
 
-export interface SplitDiffModelOptions {
-  foldRevealCounts: Record<string, number>;
-  rowScopeId: string;
-}
-
-export function createSplitDiffModel(
-  rows: readonly ScoutChangesReviewRow[],
-  options: SplitDiffModelOptions,
-): SplitDiffModel {
-  return projectSplitDiffRows(createSplitRenderableRows(rows, options));
+export function createSplitDiffModel(rows: readonly ScoutChangesReviewRow[]): SplitDiffModel {
+  return projectSplitDiffRows(rows);
 }
 
 export function projectSplitDiffRows(rows: readonly SplitDiffSourceRow[]): SplitDiffModel {
@@ -95,59 +87,6 @@ export function projectSplitDiffRows(rows: readonly SplitDiffSourceRow[]): Split
     added: { cells: added, side: 'added' },
     removed: { cells: removed, side: 'removed' },
   };
-}
-
-function createSplitRenderableRows(
-  rows: readonly ScoutChangesReviewRow[],
-  options: SplitDiffModelOptions,
-): SplitDiffSourceRow[] {
-  const renderedRows: SplitDiffSourceRow[] = [];
-
-  rows.forEach((row, index) => {
-    if (row.type !== 'fold') {
-      renderedRows.push(row);
-      return;
-    }
-
-    const hiddenRows = Array.isArray(row.hiddenRows) ? row.hiddenRows : [];
-    const staticCount = Number(row.count || 0);
-    if (!hiddenRows.length) {
-      renderedRows.push({ ...row, count: staticCount });
-      return;
-    }
-
-    const foldId = `${options.rowScopeId}:fold:${index}`;
-    const total = hiddenRows.length;
-    const revealed = Math.min(Number(options.foldRevealCounts[foldId] || 0), total);
-    if (revealed >= total) {
-      renderedRows.push(
-        ...createSplitRenderableRows(hiddenRows, {
-          ...options,
-          rowScopeId: `${foldId}:all`,
-        }),
-      );
-      return;
-    }
-
-    const topCount = Math.ceil(revealed / 2);
-    const bottomCount = revealed - topCount;
-    const beforeRows = hiddenRows.slice(0, topCount);
-    const afterRows = bottomCount > 0 ? hiddenRows.slice(total - bottomCount) : [];
-
-    renderedRows.push(
-      ...createSplitRenderableRows(beforeRows, {
-        ...options,
-        rowScopeId: `${foldId}:before`,
-      }),
-      { ...row, count: total - revealed, foldId, foldTotal: total },
-      ...createSplitRenderableRows(afterRows, {
-        ...options,
-        rowScopeId: `${foldId}:after`,
-      }),
-    );
-  });
-
-  return renderedRows;
 }
 
 function appendChangedRun(

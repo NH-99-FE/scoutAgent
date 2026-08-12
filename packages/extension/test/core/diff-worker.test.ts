@@ -188,6 +188,32 @@ describe('DiffWorkerClient', () => {
     client.dispose();
   });
 
+  it('prioritizes exact history requests and never drops them for a newer aggregate revision', () => {
+    const worker = new FakeDiffWorker();
+    const client = new DiffWorkerClient({ workerFactory: () => worker });
+    const responses: DiffWorkerResponse[] = [];
+    const active = makeRequest({ requestId: 'active', fileId: 'file-a' });
+    const background = makeRequest({ requestId: 'background', fileId: 'file-b' });
+    const exact = makeRequest({ requestId: 'exact', fileId: 'file-c', revision: 1 });
+    const newer = makeRequest({ requestId: 'newer', fileId: 'file-c', revision: 2 });
+
+    client.request(active, () => undefined);
+    client.request(background, () => undefined);
+    client.requestExact(exact, (response) => responses.push(response));
+    client.request(newer, () => undefined);
+
+    worker.emitMessage(settledResponse(active));
+    expect(worker.posted.map((request) => request.requestId)).toEqual(['active', 'exact']);
+    worker.emitMessage(settledResponse(exact));
+    expect(responses).toHaveLength(1);
+    expect(worker.posted.map((request) => request.requestId)).toEqual([
+      'active',
+      'exact',
+      'background',
+    ]);
+    client.dispose();
+  });
+
   it('fails the flight, rebuilds once, and never restarts indefinitely', () => {
     const workers = [new FakeDiffWorker(), new FakeDiffWorker()];
     let factoryCalls = 0;

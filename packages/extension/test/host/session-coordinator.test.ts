@@ -6,10 +6,7 @@ import { ExtensionSessionCoordinator } from '../../src/host/session-coordinator.
 import { ConfigManager } from '../../src/config-manager.ts';
 import type { AgentSession } from '../../src/core/agent-session.ts';
 import type { FileReviewTurnSnapshot } from '../../src/core/review/file-review.ts';
-import {
-  createDiffDocument,
-  createUnavailableDiffDocument,
-} from '../../src/core/review/diff-document.ts';
+import { createDiffDocument } from '../../src/core/review/diff-document.ts';
 import {
   mapSessionTreeToScout,
   projectSessionTreeToScout,
@@ -18,11 +15,11 @@ import {
 import type { SessionExecutionGate } from '../../src/host/session-execution-gate.ts';
 import type { Session, SessionTreeEntry, SessionTreeNode } from '../../src/core/session/index.ts';
 import {
-  createFileReviewArtifact,
-  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-  MAX_REVIEW_ARTIFACT_FILES,
-  type FileReviewArtifact,
-} from '../../src/core/review/file-review-artifact.ts';
+  REVIEW_ARTIFACT_CUSTOM_TYPE,
+  createReviewArtifactSummary,
+  persistReviewArtifact,
+} from '../../src/core/review/review-artifact.ts';
+import { ReviewArtifactStore } from '../../src/core/review/review-artifact-store.ts';
 import { assistantMessage, userMessage } from '../core/test-utils.ts';
 
 function createOutputChannel() {
@@ -73,11 +70,6 @@ function createDeferred<T = void>() {
   return { promise, resolve, reject };
 }
 
-async function flushPromises(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
 function createFakeAgentSession(session: Session, calls: string[] = []): AgentSession {
   const fake = {
     sessionManager: session,
@@ -120,6 +112,10 @@ function makeReviewSnapshot(): FileReviewTurnSnapshot {
         path: 'src/app.ts',
         absolutePath: '/workspace/src/app.ts',
         sequence: 1,
+        fileId: 'file-1',
+        revision: 1,
+        before: { content: 'old\n', byteLength: 4 },
+        after: { content: 'new\n', byteLength: 4 },
       },
     ],
     files: [
@@ -139,95 +135,6 @@ function makeReviewSnapshot(): FileReviewTurnSnapshot {
         deletions: 1,
       },
     ],
-  };
-}
-
-function makeUnavailableReviewSnapshot(): FileReviewTurnSnapshot {
-  const snapshot = makeReviewSnapshot();
-  return {
-    ...snapshot,
-    files: snapshot.files.map((file) => ({
-      ...file,
-      originalContent: null,
-      modifiedContent: null,
-      projectionStatus: 'unavailable' as const,
-      document: createUnavailableDiffDocument('binary_or_unsupported'),
-      additions: 0,
-      deletions: 0,
-    })),
-  };
-}
-
-function makeTwoFileReviewSnapshot(): FileReviewTurnSnapshot {
-  const first = makeReviewSnapshot();
-  return {
-    turnId: 'turn-1',
-    phase: 'finalized',
-    records: [
-      ...first.records,
-      {
-        recordId: 'review-2',
-        turnId: 'turn-1',
-        toolCallId: 'tool-2',
-        operation: 'write',
-        path: 'src/second.ts',
-        absolutePath: '/workspace/src/second.ts',
-        sequence: 2,
-      },
-    ],
-    files: [
-      ...first.files,
-      {
-        fileId: 'file-2',
-        absolutePath: '/workspace/src/second.ts',
-        path: 'src/second.ts',
-        originalContent: 'before\n',
-        modifiedContent: 'after\n',
-        recordIds: ['review-2'],
-        latestRecordId: 'review-2',
-        latestSequence: 2,
-        revision: 1,
-        projectionStatus: 'ready',
-        document: createDiffDocument('before\n', 'after\n'),
-        additions: 1,
-        deletions: 1,
-      },
-    ],
-  };
-}
-
-function makeLargeFileCountReviewSnapshot(): FileReviewTurnSnapshot {
-  const records = Array.from({ length: MAX_REVIEW_ARTIFACT_FILES + 1 }, (_, index) => {
-    const sequence = index + 1;
-    return {
-      recordId: `review-${sequence}`,
-      turnId: 'turn-large',
-      toolCallId: `tool-${sequence}`,
-      operation: 'edit' as const,
-      path: `src/file-${sequence}.ts`,
-      absolutePath: `/workspace/src/file-${sequence}.ts`,
-      sequence,
-    };
-  });
-  return {
-    turnId: 'turn-large',
-    phase: 'finalized',
-    records,
-    files: records.map((record) => ({
-      fileId: `file-${record.sequence}`,
-      absolutePath: record.absolutePath,
-      path: record.path,
-      originalContent: 'old\n',
-      modifiedContent: 'new\n',
-      recordIds: [record.recordId],
-      latestRecordId: record.recordId,
-      latestSequence: record.sequence,
-      revision: 1,
-      projectionStatus: 'ready' as const,
-      document: createDiffDocument('old\n', 'new\n'),
-      additions: 1,
-      deletions: 1,
-    })),
   };
 }
 
@@ -413,15 +320,50 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
       timestamp: '2026-01-01T00:00:00.000Z',
       message: assistantMessage('done'),
     };
-    const artifact = createFileReviewArtifact('session-1', makeReviewSnapshot());
+    const persisted = await persistReviewArtifact(
+      new ReviewArtifactStore({ agentDir }),
+      'session-1',
+      makeReviewSnapshot(),
+      createReviewArtifactSummary(makeReviewSnapshot()),
+    );
     const allEntries: SessionTreeEntry[] = [
       assistantEntry,
       {
-        type: 'custom',
-        customType: FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
-        data: artifact,
-        id: 'review-artifact',
+        type: 'label',
+        id: 'review-label',
         parentId: 'assistant',
+        timestamp: '2026-01-01T00:00:00.100Z',
+        targetId: 'assistant',
+        label: 'reviewed',
+      },
+      {
+        type: 'session_info',
+        id: 'review-session-info',
+        parentId: 'review-label',
+        timestamp: '2026-01-01T00:00:00.200Z',
+        name: 'Review session',
+      },
+      {
+        type: 'model_change',
+        id: 'review-model-change',
+        parentId: 'review-session-info',
+        timestamp: '2026-01-01T00:00:00.300Z',
+        provider: 'openai',
+        modelId: 'test-model',
+      },
+      {
+        type: 'thinking_level_change',
+        id: 'review-thinking-change',
+        parentId: 'review-model-change',
+        timestamp: '2026-01-01T00:00:00.400Z',
+        thinkingLevel: 'medium',
+      },
+      {
+        type: 'custom',
+        customType: REVIEW_ARTIFACT_CUSTOM_TYPE,
+        data: persisted.ref,
+        id: 'review-artifact',
+        parentId: 'review-thinking-change',
         timestamp: '2026-01-01T00:00:01.000Z',
       },
     ];

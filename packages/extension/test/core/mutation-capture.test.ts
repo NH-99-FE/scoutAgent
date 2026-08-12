@@ -86,11 +86,11 @@ describe('edit review capture', () => {
     const aggregate = getRecordAggregate(journal, record!.recordId);
     expect(aggregate.baseline).toEqual({
       content: 'first\r\n你好\r\n',
-      byteLength: buffer.byteLength,
+      byteLength: Buffer.byteLength('first\r\n你好\r\n'),
     });
     expect(aggregate.latest).toEqual({
       content: 'second\r\n你好\r\n',
-      byteLength: Buffer.byteLength(after),
+      byteLength: Buffer.byteLength('second\r\n你好\r\n'),
     });
     expect(record.toolOutcome).toBe('success');
   });
@@ -234,7 +234,7 @@ describe('captured text snapshots', () => {
     const content = '﻿line 1\r\n中文\r\n';
     expect(captureTextSnapshot(Buffer.from(content))).toEqual({
       content: 'line 1\r\n中文\r\n',
-      byteLength: Buffer.byteLength(content),
+      byteLength: Buffer.byteLength('line 1\r\n中文\r\n'),
     });
   });
 

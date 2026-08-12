@@ -6,14 +6,16 @@ import type {
   ToolResultEvent,
 } from '../../src/core/extensions/types.ts';
 import {
-  FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+  REVIEW_ARTIFACT_CUSTOM_TYPE,
   FileReviewExtensionController,
   MutationJournal,
   runDiffWorkerRequest,
   type DiffWorkerClientPort,
   type DiffWorkerRequest,
   type DiffWorkerResponseListener,
-  type FileReviewArtifact,
+  loadReviewArtifact,
+  type ReviewArtifactManifest,
+  type ReviewArtifactRef,
 } from '../../src/core/review/index.ts';
 
 interface ExtensionHarness {
@@ -130,13 +132,16 @@ describe('FileReviewExtensionController', () => {
     expect(updates).toEqual(['pending', 'ready']);
     expect(harness.appendEntry).toHaveBeenCalledTimes(1);
     expect(harness.appendEntry).toHaveBeenCalledWith(
-      FILE_REVIEW_ARTIFACT_CUSTOM_TYPE,
+      REVIEW_ARTIFACT_CUSTOM_TYPE,
       expect.objectContaining({
         complete: true,
         turnId: expect.stringContaining('session-1:run-'),
-        records: [expect.objectContaining({ toolCallId: 'tool-1' })],
+        manifestHash: expect.any(String),
+        summary: expect.objectContaining({ fileCount: 1 }),
       }),
     );
+    const artifact = await loadAppendedManifest(controller, harness);
+    expect(artifact.records).toEqual([expect.objectContaining({ toolCallId: 'tool-1' })]);
     expect(controller.getJournal().getAggregates()).toHaveLength(0);
     controller.dispose();
   });
@@ -158,13 +163,13 @@ describe('FileReviewExtensionController', () => {
     worker.settle(0);
     await firstEnd;
 
-    const firstArtifact = harness.appendEntry.mock.calls[0]?.[1] as FileReviewArtifact;
+    const firstArtifact = await loadAppendedManifest(controller, harness, 0);
     expect(firstArtifact.records.map((record) => record.toolCallId)).toEqual(['first-tool']);
 
     const secondEnd = emit(harness, 'agent_end', { type: 'agent_end', messages: [] });
     worker.settle(1);
     await secondEnd;
-    const secondArtifact = harness.appendEntry.mock.calls[1]?.[1] as FileReviewArtifact;
+    const secondArtifact = await loadAppendedManifest(controller, harness, 1);
     expect(secondArtifact.records.map((record) => record.toolCallId)).toEqual(['second-tool']);
     expect(secondArtifact.turnId).not.toBe(firstArtifact.turnId);
     controller.dispose();
@@ -190,7 +195,7 @@ describe('FileReviewExtensionController', () => {
     await end;
 
     expect(harness.appendEntry).toHaveBeenCalledTimes(1);
-    const artifact = harness.appendEntry.mock.calls[0]?.[1] as FileReviewArtifact;
+    const artifact = await loadAppendedManifest(controller, harness);
     expect(artifact.files).toHaveLength(2);
     expect(artifact.records.map((record) => record.toolCallId).sort()).toEqual([
       'tool-a',
@@ -212,12 +217,12 @@ describe('FileReviewExtensionController', () => {
     await captureMutation(controller, 'tool-timeout', 'timeout.ts', 'old', 'new');
     await emit(harness, 'agent_end', { type: 'agent_end', messages: [] });
 
-    const artifact = harness.appendEntry.mock.calls[0]?.[1] as FileReviewArtifact;
-    expect(artifact.files[0]?.document.unavailableReason).toBe('generation_failed');
+    const artifact = await loadAppendedManifest(controller, harness);
+    expect(artifact.files[0]?.unavailableReason).toBeUndefined();
     worker.settle(0);
     expect(controller.getJournal().getAggregates()).toHaveLength(0);
     expect(harness.appendEntry).toHaveBeenCalledTimes(1);
-    expect(artifact.files[0]?.document.unavailableReason).toBe('generation_failed');
+    expect(artifact.files[0]?.unavailableReason).toBeUndefined();
     controller.dispose();
   });
 
@@ -249,7 +254,7 @@ describe('FileReviewExtensionController', () => {
     controller.dispose();
   });
 
-  it('retains the complete runtime document when artifact limits degrade persisted hunks', async () => {
+  it('stores only a lightweight ref in JSONL and full snapshots in the external manifest', async () => {
     const worker: DiffWorkerClientPort = {
       request: (request, listener) => listener(runDiffWorkerRequest(request)),
       dispose: () => undefined,
@@ -257,7 +262,6 @@ describe('FileReviewExtensionController', () => {
     const controller = new FileReviewExtensionController({
       sessionId: 'session-degraded',
       journal: new MutationJournal({ diffWorkerClient: worker }),
-      artifactLimitOptions: { maxRows: 1 },
     });
     const harness = await createHarness(controller);
 
@@ -265,15 +269,13 @@ describe('FileReviewExtensionController', () => {
     await captureMutation(controller, 'tool-large', 'large.ts', 'old-1\nold-2\n', 'new-1\nnew-2\n');
     await emit(harness, 'agent_end', { type: 'agent_end', messages: [] });
 
-    const artifact = harness.appendEntry.mock.calls[0]?.[1] as FileReviewArtifact;
-    const runtime = controller.getReviewTurn(artifact.turnId);
-    expect(artifact.files[0]?.document).toMatchObject({
-      hunks: [],
-      unavailableReason: 'diff_too_large',
-    });
-    expect(runtime?.files[0]?.document?.hunks.length).toBeGreaterThan(0);
-    expect(controller.getJournal().getAggregates()).toHaveLength(1);
-    expect(controller.getJournal().getAggregates()[0]?.baseline.content).toBeNull();
+    const ref = harness.appendEntry.mock.calls[0]?.[1] as ReviewArtifactRef;
+    expect(ref).not.toHaveProperty('files');
+    expect(ref).not.toHaveProperty('records');
+    const artifact = await loadAppendedManifest(controller, harness);
+    expect(artifact.files[0]).toMatchObject({ latestRevision: 1 });
+    expect(artifact.records[0]).toMatchObject({ toolCallId: 'tool-large' });
+    expect(controller.getJournal().getAggregates()).toHaveLength(0);
     controller.dispose();
   });
 
@@ -305,3 +307,12 @@ describe('FileReviewExtensionController', () => {
     controller.dispose();
   });
 });
+
+async function loadAppendedManifest(
+  controller: FileReviewExtensionController,
+  harness: ExtensionHarness,
+  index = 0,
+): Promise<ReviewArtifactManifest> {
+  const ref = harness.appendEntry.mock.calls[index]?.[1] as ReviewArtifactRef;
+  return loadReviewArtifact(controller.getArtifactStore(), ref);
+}

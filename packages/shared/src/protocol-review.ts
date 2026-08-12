@@ -21,6 +21,10 @@ export interface ScoutChangesReviewRow {
   text?: string;
   tokens?: ScoutChangesReviewToken[];
   count?: number;
+  /** 由 snapshot pair 与区间坐标生成，历史展开请求使用。 */
+  foldId?: string;
+  foldTotal?: number;
+  /** @deprecated 历史内嵌上下文，仅保留组件输入兼容；新协议按需请求。 */
   hiddenRows?: ScoutChangesReviewRow[];
 }
 
