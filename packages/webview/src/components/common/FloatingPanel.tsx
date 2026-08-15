@@ -27,6 +27,7 @@ interface FloatingPanelOptionProps extends Omit<
   'aria-selected' | 'children' | 'role' | 'type'
 > {
   active: boolean;
+  argumentHint?: string;
   description?: string;
   icon: ReactNode;
   label: string;
@@ -100,7 +101,16 @@ function FloatingPanelGroup({ children, className, label, ...props }: FloatingPa
 
 const FloatingPanelOption = forwardRef<HTMLButtonElement, FloatingPanelOptionProps>(
   function FloatingPanelOption(
-    { 'aria-label': ariaLabel, active, className, description, icon, label, ...props },
+    {
+      'aria-label': ariaLabel,
+      active,
+      argumentHint,
+      className,
+      description,
+      icon,
+      label,
+      ...props
+    },
     ref,
   ) {
     const accessibleLabel = ariaLabel ?? (description ? `${label} ${description}` : label);
@@ -141,6 +151,14 @@ const FloatingPanelOption = forwardRef<HTMLButtonElement, FloatingPanelOptionPro
         >
           {label}
         </span>
+        {argumentHint ? (
+          <span
+            className="text-muted-foreground max-w-[35%] min-w-0 shrink truncate"
+            title={argumentHint}
+          >
+            {argumentHint}
+          </span>
+        ) : null}
         {description ? (
           <span
             className={cn(

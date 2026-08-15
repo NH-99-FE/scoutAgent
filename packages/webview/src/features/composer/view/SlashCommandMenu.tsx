@@ -17,18 +17,22 @@ interface SlashCommandMenuProps {
 
 export function SlashCommandMenu({ activeIndex, items, onHover, onSelect }: SlashCommandMenuProps) {
   const activeKey = items[activeIndex]?.key ?? null;
-  const skillStartIndex = items.findIndex((item) => item.command.source === 'skill');
-  const primaryItems = skillStartIndex === -1 ? items : items.slice(0, skillStartIndex);
-  const skillItems = skillStartIndex === -1 ? [] : items.slice(skillStartIndex);
+  const primaryItems = items.filter(
+    (item) => item.command.source !== 'prompt' && item.command.source !== 'skill',
+  );
+  const promptItems = items.filter((item) => item.command.source === 'prompt');
+  const skillItems = items.filter((item) => item.command.source === 'skill');
   const { setOptionElement } = useSuggestionOptionScroll(activeKey);
 
-  const renderRow = (item: SlashCommandMenuItem, index: number) => {
+  const renderRow = (item: SlashCommandMenuItem) => {
+    const index = items.indexOf(item);
     const Icon = item.icon;
     return (
       <FloatingPanel.Option
         ref={(element) => setOptionElement(item.key, element)}
         key={item.key}
         active={index === activeIndex}
+        argumentHint={item.argumentHint}
         description={item.description}
         icon={<Icon />}
         label={item.label}
@@ -56,10 +60,11 @@ export function SlashCommandMenu({ activeIndex, items, onHover, onSelect }: Slas
   return (
     <FloatingPanel aria-label="Slash commands" role="listbox">
       {primaryItems.map(renderRow)}
+      {promptItems.length > 0 ? (
+        <FloatingPanel.Group label="提示词">{promptItems.map(renderRow)}</FloatingPanel.Group>
+      ) : null}
       {skillItems.length > 0 ? (
-        <FloatingPanel.Group label="技能">
-          {skillItems.map((item, index) => renderRow(item, skillStartIndex + index))}
-        </FloatingPanel.Group>
+        <FloatingPanel.Group label="技能">{skillItems.map(renderRow)}</FloatingPanel.Group>
       ) : null}
     </FloatingPanel>
   );

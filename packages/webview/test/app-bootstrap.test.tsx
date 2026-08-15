@@ -213,6 +213,17 @@ describe('App bootstrap', () => {
     expect(document.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 
+  it('matches the settings skeleton to the current settings layout', () => {
+    window.__SCOUT_WEBVIEW_SURFACE__ = 'settings';
+
+    render(<App />);
+
+    expect(screen.getByRole('navigation', { name: '设置分类加载中' }).children).toHaveLength(5);
+    expect(screen.getByRole('region', { name: 'Provider 设置加载中' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '模型列表加载中' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '模型详情加载中' })).toBeInTheDocument();
+  });
+
   it('renders the changes review surface from injected data without lifecycle bootstrap', () => {
     window.__SCOUT_WEBVIEW_SURFACE__ = 'changes-review';
     window.__SCOUT_CHANGES_REVIEW__ = makeChangesReviewModel();

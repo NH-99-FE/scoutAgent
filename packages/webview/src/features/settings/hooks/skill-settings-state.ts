@@ -2,7 +2,7 @@
 // Skill Settings State — Skills 管理协议状态
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import type {
   ScoutSkillListItem,
   ScoutSkillResourceScope,
@@ -16,6 +16,17 @@ import {
   toEditableSkillSettingsState,
   type EditableSkillSettingsState,
 } from '../model/skill-settings-draft';
+import {
+  appendEditableResourcePathEntry,
+  getEditableResourcePathEntries,
+  removeEditableResourcePathEntry,
+  updateEditableResourcePathEntry,
+} from '../model/resource-path-draft';
+import { areSettingsDraftValuesEqual } from '../model/settings-draft-utils';
+import { useSettingsDraftMachine, type SavedDraftMergeContext } from './use-settings-draft-machine';
+import { useLazySettingsLoad, useSettingsRequestLifecycle } from './use-settings-request-lifecycle';
+
+const SKILL_SETTINGS_SCOPES = ['global', 'project'] as const;
 
 export interface SkillSettingsController {
   draft: EditableSkillSettingsState;
@@ -23,9 +34,11 @@ export interface SkillSettingsController {
   isLoading: boolean;
   isSaving: boolean;
   isDirty: boolean;
+  hasUnsavedChanges: boolean;
   saved: boolean;
   error: string;
   load: () => void;
+  discard: () => void;
   save: () => void;
   setScope: (scope: ScoutSkillScope) => void;
   addEntry: () => void;
@@ -39,80 +52,104 @@ export interface SkillSettingsController {
 type DirtyScopes = Record<ScoutSkillScope, boolean>;
 type SkillToggleIntentsByScope = Record<ScoutSkillScope, ScoutSkillToggleIntent[]>;
 
-export function useSkillSettingsController(): SkillSettingsController {
-  const [draft, setDraft] = useState<EditableSkillSettingsState>(EMPTY_SKILL_SETTINGS_STATE);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [dirtyScopes, setDirtyScopes] = useState<DirtyScopes>({ global: false, project: false });
-  const [toggleIntentsByScope, setToggleIntentsByScope] = useState<SkillToggleIntentsByScope>(
-    createEmptySkillToggleIntentsByScope,
-  );
-  const [error, setError] = useState('');
-  const [savedScope, setSavedScope] = useState<ScoutSkillScope | null>(null);
-  const mountedRef = useRef(true);
-  const loadRequestRef = useRef(0);
-  const saveRequestRef = useRef(0);
-  const draftVersionRef = useRef(0);
-  const draftVersionByScopeRef = useRef<Record<ScoutSkillScope, number>>({
-    global: 0,
-    project: 0,
-  });
+interface SkillSettingsMachineDraft {
+  value: EditableSkillSettingsState;
+  toggles: SkillToggleIntentsByScope;
+}
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+const EMPTY_SKILL_SETTINGS_MACHINE_DRAFT: SkillSettingsMachineDraft = {
+  value: EMPTY_SKILL_SETTINGS_STATE,
+  toggles: createEmptySkillToggleIntentsByScope(),
+};
+
+export function useSkillSettingsController(enabled = true): SkillSettingsController {
+  const draftMachine = useSettingsDraftMachine({
+    initialDraft: EMPTY_SKILL_SETTINGS_MACHINE_DRAFT,
+    scopes: SKILL_SETTINGS_SCOPES,
+    isScopeDirty: isSkillScopeDirty,
+  });
+  const {
+    draft: machineDraft,
+    dirtyScopes: machineDirtyScopes,
+    hasUnsavedChanges,
+    hydrate,
+    edit,
+    replace,
+    discard: discardDraft,
+    commitSaved,
+    getSnapshot,
+    getScopeRevision,
+  } = draftMachine;
+  const draft = machineDraft.value;
+  const toggleIntentsByScope = machineDraft.toggles;
+  const dirtyScopes: DirtyScopes = machineDirtyScopes;
+  const {
+    isLoading,
+    isSaving,
+    error,
+    savedScope,
+    beginRequest,
+    isCurrentRequest,
+    isMounted,
+    beginLoad,
+    finishLoad,
+    beginSave,
+    finishSave,
+    clearFeedback,
+    reportError,
+  } = useSettingsRequestLifecycle<ScoutSkillScope>();
 
   const requestSettings = useCallback(() => {
-    const requestId = loadRequestRef.current + 1;
-    loadRequestRef.current = requestId;
+    const requestId = beginRequest('load');
 
     protocolClient.requestSkills(
       (result) => {
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        setDraft((current) => toEditableSkillSettingsState(result.settings, current));
-        draftVersionRef.current += 1;
-        draftVersionByScopeRef.current.global += 1;
-        draftVersionByScopeRef.current.project += 1;
-        setDirtyScopes({ global: false, project: false });
-        setToggleIntentsByScope(createEmptySkillToggleIntentsByScope());
-        setSavedScope(null);
-        setError('');
-        setIsLoading(false);
+        if (!isCurrentRequest('load', requestId)) return;
+        const current = getSnapshot().draft.value;
+        hydrate({
+          value: toEditableSkillSettingsState(result.settings, current),
+          toggles: createEmptySkillToggleIntentsByScope(),
+        });
+        finishLoad();
       },
       (message) => {
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        setError(message);
-        setSavedScope(null);
-        setIsLoading(false);
+        if (!isCurrentRequest('load', requestId)) return;
+        finishLoad(message);
       },
     );
-  }, []);
+  }, [beginRequest, finishLoad, getSnapshot, hydrate, isCurrentRequest]);
 
-  useEffect(() => {
-    requestSettings();
-  }, [requestSettings]);
+  const requestLoad = useLazySettingsLoad(enabled, requestSettings);
 
   const load = useCallback(() => {
-    setIsLoading(true);
-    setError('');
-    setSavedScope(null);
-    requestSettings();
-  }, [requestSettings]);
+    beginLoad();
+    requestLoad();
+  }, [beginLoad, requestLoad]);
 
-  const setScope = useCallback((scope: ScoutSkillScope) => {
-    setDraft((current) => ({ ...current, scope }));
-  }, []);
+  const discard = useCallback(() => {
+    discardDraft((baseline, current) => ({
+      ...baseline,
+      value: { ...baseline.value, scope: current.value.scope },
+    }));
+    clearFeedback();
+  }, [clearFeedback, discardDraft]);
 
-  const markChanged = useCallback((scope: ScoutSkillScope) => {
-    draftVersionRef.current += 1;
-    draftVersionByScopeRef.current[scope] += 1;
-    setDirtyScopes((current) => ({ ...current, [scope]: true }));
-    setSavedScope((current) => (current === scope ? null : current));
-    setError('');
-  }, []);
+  const setScope = useCallback(
+    (scope: ScoutSkillScope) => {
+      replace((current) => ({
+        ...current,
+        value: { ...current.value, scope },
+      }));
+    },
+    [replace],
+  );
+
+  const markChanged = useCallback(
+    (scope: ScoutSkillScope) => {
+      clearFeedback(scope);
+    },
+    [clearFeedback],
+  );
 
   const updateEntriesForScope = useCallback(
     (
@@ -121,37 +158,40 @@ export function useSkillSettingsController(): SkillSettingsController {
       options: { selectScope?: boolean } = {},
     ) => {
       const key = scope === 'global' ? 'globalEntries' : 'projectEntries';
-      setDraft((current) => ({
+      edit(scope, (current) => ({
         ...current,
-        scope: options.selectScope ? scope : current.scope,
-        [key]: updater(current[key]),
+        value: {
+          ...current.value,
+          scope: options.selectScope ? scope : current.value.scope,
+          [key]: updater(current.value[key]),
+        },
       }));
       markChanged(scope);
     },
-    [markChanged],
+    [edit, markChanged],
   );
 
   const updateEntries = useCallback(
     (updater: (entries: string[]) => string[]) => {
-      updateEntriesForScope(draft.scope, updater);
+      updateEntriesForScope(getSnapshot().draft.value.scope, updater);
     },
-    [draft.scope, updateEntriesForScope],
+    [getSnapshot, updateEntriesForScope],
   );
 
   const addEntry = useCallback(() => {
-    updateEntries(appendEditableSkillPathEntry);
+    updateEntries(appendEditableResourcePathEntry);
   }, [updateEntries]);
 
   const updateEntry = useCallback(
     (index: number, value: string) => {
-      updateEntries((entries) => updateEditableSkillPathEntry(entries, index, value));
+      updateEntries((entries) => updateEditableResourcePathEntry(entries, index, value));
     },
     [updateEntries],
   );
 
   const removeEntry = useCallback(
     (index: number) => {
-      updateEntries((entries) => removeEditableSkillPathEntry(entries, index));
+      updateEntries((entries) => removeEditableResourcePathEntry(entries, index));
     },
     [updateEntries],
   );
@@ -171,95 +211,105 @@ export function useSkillSettingsController(): SkillSettingsController {
     (skill: ScoutSkillListItem, enabled: boolean) => {
       if (!skill.canToggle) return;
       const scope = toSkillToggleScope(skill.scope);
-      if (!scope || scope !== draft.scope) return;
+      if (!scope || scope !== getSnapshot().draft.value.scope) return;
 
-      setToggleIntentsByScope((current) => ({
+      edit(scope, (current) => ({
         ...current,
-        [scope]: upsertSkillToggleIntent(
-          current[scope],
-          skill.path,
-          enabled,
-          skill.status !== 'disabled',
-        ),
+        toggles: {
+          ...current.toggles,
+          [scope]: upsertSkillToggleIntent(
+            current.toggles[scope],
+            skill.path,
+            enabled,
+            skill.status !== 'disabled',
+          ),
+        },
       }));
       markChanged(scope);
-      setError('');
     },
-    [draft.scope, markChanged],
+    [edit, getSnapshot, markChanged],
   );
 
   const save = useCallback(() => {
-    const saveScope = draft.scope;
+    const saveDraft = getSnapshot().draft;
+    const saveScope = saveDraft.value.scope;
     const entries =
       saveScope === 'global'
-        ? normalizeSkillEntries(draft.globalEntries)
-        : normalizeSkillEntries(draft.projectEntries);
-    const requestId = saveRequestRef.current + 1;
-    const saveDraftVersion = draftVersionRef.current;
-    const saveScopeVersion = draftVersionByScopeRef.current[saveScope];
-    saveRequestRef.current = requestId;
-    setIsSaving(true);
-    setError('');
-    setSavedScope((current) => (current === saveScope ? null : current));
+        ? normalizeSkillEntries(saveDraft.value.globalEntries)
+        : normalizeSkillEntries(saveDraft.value.projectEntries);
+    const requestId = beginRequest('save');
+    const submittedScopeRevision = getScopeRevision(saveScope);
+    beginSave(saveScope);
 
     protocolClient.saveSkillsSettings(
       saveScope,
       entries,
-      toggleIntentsByScope[saveScope],
+      saveDraft.toggles[saveScope],
       (result) => {
-        if (!mountedRef.current || requestId !== saveRequestRef.current) return;
-        setIsSaving(false);
+        if (!isCurrentRequest('save', requestId)) return;
         if (!result.success) {
-          setError(result.error ?? '保存 Skills 设置失败');
-          setSavedScope((current) => (current === saveScope ? null : current));
+          finishSave(saveScope, { error: result.error ?? '保存 Skills 设置失败' });
           return;
         }
-        if (saveScopeVersion === draftVersionByScopeRef.current[saveScope]) {
-          if (result.settings) {
-            const hasNewerDraftEdits = saveDraftVersion !== draftVersionRef.current;
-            setDraft((current) =>
-              mergeSavedSkillSettings(current, result.settings!, saveScope, hasNewerDraftEdits),
-            );
-            draftVersionRef.current += 1;
-            draftVersionByScopeRef.current[saveScope] += 1;
-          }
-          setDirtyScopes((current) => ({ ...current, [saveScope]: false }));
-          setToggleIntentsByScope((current) => clearSkillToggleIntentsForScope(current, saveScope));
-          setSavedScope(saveScope);
-          setError(result.error ?? '');
+        const scopeUnchanged = submittedScopeRevision === getScopeRevision(saveScope);
+        if (result.settings) {
+          const currentBaseline = getSnapshot().baseline.value;
+          commitSaved({
+            scope: saveScope,
+            submittedScopeRevision,
+            baseline: {
+              value: toEditableSkillSettingsState(result.settings, currentBaseline),
+              toggles: createEmptySkillToggleIntentsByScope(),
+            },
+            merge: mergeSavedSkillDraft,
+          });
+        }
+        if (scopeUnchanged) {
+          finishSave(saveScope, { error: result.error ?? '', saved: true });
         } else {
-          setSavedScope((current) => (current === saveScope ? null : current));
+          finishSave(saveScope);
         }
       },
       (message) => {
-        if (!mountedRef.current || requestId !== saveRequestRef.current) return;
-        setError(message);
-        setIsSaving(false);
-        setSavedScope((current) => (current === saveScope ? null : current));
+        if (!isCurrentRequest('save', requestId)) return;
+        finishSave(saveScope, { error: message });
       },
     );
-  }, [draft, toggleIntentsByScope]);
+  }, [
+    beginSave,
+    beginRequest,
+    commitSaved,
+    finishSave,
+    getScopeRevision,
+    getSnapshot,
+    isCurrentRequest,
+  ]);
 
-  const openSkillFile = useCallback((filePath: string) => {
-    protocolClient.openSkillFile(filePath, (result) => {
-      if (!mountedRef.current) return;
-      if (!result.success) {
-        setError(result.error ?? '打开 Skill 失败');
-      }
-    });
-  }, []);
+  const openSkillFile = useCallback(
+    (filePath: string) => {
+      protocolClient.openSkillFile(filePath, (result) => {
+        if (!isMounted()) return;
+        if (!result.success) {
+          reportError(result.error ?? '打开 Skill 失败');
+        }
+      });
+    },
+    [isMounted, reportError],
+  );
 
   return {
     draft,
-    currentEntries: getEditableSkillPathEntries(
+    currentEntries: getEditableResourcePathEntries(
       draft.scope === 'global' ? draft.globalEntries : draft.projectEntries,
     ),
     isLoading,
     isSaving,
     isDirty: dirtyScopes[draft.scope],
+    hasUnsavedChanges,
     saved: savedScope === draft.scope,
     error,
     load,
+    discard,
     save,
     setScope,
     addEntry,
@@ -269,6 +319,18 @@ export function useSkillSettingsController(): SkillSettingsController {
     toggleSkillEnabled,
     openSkillFile,
   };
+}
+
+function isSkillScopeDirty(
+  draft: SkillSettingsMachineDraft,
+  baseline: SkillSettingsMachineDraft,
+  scope: ScoutSkillScope,
+): boolean {
+  const key = scope === 'global' ? 'globalEntries' : 'projectEntries';
+  return (
+    draft.toggles[scope].length > 0 ||
+    !areSettingsDraftValuesEqual(draft.value[key], baseline.value[key])
+  );
 }
 
 function createEmptySkillToggleIntentsByScope(): SkillToggleIntentsByScope {
@@ -300,70 +362,23 @@ function upsertSkillToggleIntent(
   return [...next, { path: skillPath, enabled }];
 }
 
-function clearSkillToggleIntentsForScope(
-  current: SkillToggleIntentsByScope,
-  scope: ScoutSkillScope,
-): SkillToggleIntentsByScope {
-  return {
-    ...current,
-    [scope]: [],
+function mergeSavedSkillDraft({
+  draft,
+  nextBaseline,
+  saveScope,
+  scopeUnchanged,
+  dirtyScopesBeforeSave,
+}: SavedDraftMergeContext<SkillSettingsMachineDraft, ScoutSkillScope>): SkillSettingsMachineDraft {
+  const next: SkillSettingsMachineDraft = {
+    value: { ...nextBaseline.value, scope: draft.value.scope },
+    toggles: { ...nextBaseline.toggles },
   };
-}
-
-function mergeSavedSkillSettings(
-  current: EditableSkillSettingsState,
-  settings: Parameters<typeof toEditableSkillSettingsState>[0],
-  saveScope: ScoutSkillScope,
-  preserveOtherScope: boolean,
-): EditableSkillSettingsState {
-  const next = toEditableSkillSettingsState(settings, current);
-  if (!preserveOtherScope) return next;
-  const otherScope: ScoutSkillScope = saveScope === 'global' ? 'project' : 'global';
-  const otherKey = otherScope === 'global' ? 'globalEntries' : 'projectEntries';
-  return {
-    ...next,
-    scope: current.scope,
-    [otherKey]: current[otherKey],
-  };
-}
-
-function getEditableSkillPathEntries(entries: string[]): string[] {
-  return entries.filter((entry) => !isResourceOverrideEntry(entry));
-}
-
-function appendEditableSkillPathEntry(entries: string[]): string[] {
-  const firstOverrideIndex = entries.findIndex(isResourceOverrideEntry);
-  if (firstOverrideIndex < 0) return [...entries, ''];
-  return [...entries.slice(0, firstOverrideIndex), '', ...entries.slice(firstOverrideIndex)];
-}
-
-function updateEditableSkillPathEntry(entries: string[], index: number, value: string): string[] {
-  let editableIndex = 0;
-  let updated = false;
-  const nextEntries = entries.map((entry) => {
-    if (isResourceOverrideEntry(entry)) return entry;
-    if (editableIndex === index) {
-      updated = true;
-      editableIndex += 1;
-      return value;
-    }
-    editableIndex += 1;
-    return entry;
-  });
-  return updated ? nextEntries : entries;
-}
-
-function removeEditableSkillPathEntry(entries: string[], index: number): string[] {
-  let editableIndex = 0;
-  return entries.filter((entry) => {
-    if (isResourceOverrideEntry(entry)) return true;
-    const shouldRemove = editableIndex === index;
-    editableIndex += 1;
-    return !shouldRemove;
-  });
-}
-
-function isResourceOverrideEntry(entry: string): boolean {
-  const trimmed = entry.trim();
-  return trimmed.startsWith('!') || trimmed.startsWith('+') || trimmed.startsWith('-');
+  for (const scope of SKILL_SETTINGS_SCOPES) {
+    const preserve = scope === saveScope ? !scopeUnchanged : dirtyScopesBeforeSave[scope];
+    if (!preserve) continue;
+    const key = scope === 'global' ? 'globalEntries' : 'projectEntries';
+    next.value[key] = draft.value[key];
+    next.toggles[scope] = draft.toggles[scope];
+  }
+  return next;
 }

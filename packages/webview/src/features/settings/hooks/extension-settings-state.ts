@@ -2,13 +2,14 @@
 // Extension Settings State — 扩展管理协议状态
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import type {
   ScoutExtensionScope,
   ScoutExtensionsSettings,
   ScoutExtensionTemplateId,
 } from '@scout-agent/shared';
 import { protocolClient } from '@/bridge/protocol-client';
+import { useLazySettingsLoad, useSettingsRequestLifecycle } from './use-settings-request-lifecycle';
 
 const EMPTY_EXTENSIONS_SETTINGS: ScoutExtensionsSettings = {
   projectDir: '',
@@ -23,9 +24,11 @@ export interface ExtensionSettingsController {
   isLoading: boolean;
   isSaving: boolean;
   isDirty: boolean;
+  hasUnsavedChanges: boolean;
   saved: boolean;
   error: string;
   load: () => void;
+  discard: () => void;
   save: () => void;
   createExtensionFromTemplate: (
     templateId: ScoutExtensionTemplateId,
@@ -34,105 +37,94 @@ export interface ExtensionSettingsController {
   openExtensionFile: (path: string) => void;
 }
 
-export function useExtensionSettingsController(): ExtensionSettingsController {
+export function useExtensionSettingsController(enabled = true): ExtensionSettingsController {
   const [settings, setSettings] = useState<ScoutExtensionsSettings>(EMPTY_EXTENSIONS_SETTINGS);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
-  const mountedRef = useRef(true);
-  const loadRequestRef = useRef(0);
-  const saveRequestRef = useRef(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+  const {
+    isLoading,
+    isSaving,
+    error,
+    savedScope,
+    beginRequest,
+    isCurrentRequest,
+    isMounted,
+    beginLoad,
+    finishLoad,
+    beginSave,
+    finishSave,
+    reportError,
+  } = useSettingsRequestLifecycle<'extensions'>();
 
   const requestSettings = useCallback(() => {
-    const requestId = loadRequestRef.current + 1;
-    loadRequestRef.current = requestId;
+    const requestId = beginRequest('load');
 
     protocolClient.requestExtensions(
       (result) => {
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
+        if (!isCurrentRequest('load', requestId)) return;
         setSettings(result.settings);
-        setError('');
-        setSaved(false);
-        setIsLoading(false);
+        finishLoad();
       },
       (message) => {
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        setError(message);
-        setSaved(false);
-        setIsLoading(false);
+        if (!isCurrentRequest('load', requestId)) return;
+        finishLoad(message);
       },
     );
-  }, []);
+  }, [beginRequest, finishLoad, isCurrentRequest]);
 
-  useEffect(() => {
-    requestSettings();
-  }, [requestSettings]);
+  const requestLoad = useLazySettingsLoad(enabled, requestSettings);
 
   const load = useCallback(() => {
-    setIsLoading(true);
-    setError('');
-    setSaved(false);
-    requestSettings();
-  }, [requestSettings]);
+    beginLoad();
+    requestLoad();
+  }, [beginLoad, requestLoad]);
 
   const createExtensionFromTemplate = useCallback(
     (templateId: ScoutExtensionTemplateId, scope: ScoutExtensionScope) => {
-      const requestId = saveRequestRef.current + 1;
-      saveRequestRef.current = requestId;
-      setIsSaving(true);
-      setError('');
-      setSaved(false);
+      const requestId = beginRequest('save');
+      beginSave('extensions');
 
       protocolClient.createExtensionFromTemplate(
         templateId,
         scope,
         (result) => {
-          if (!mountedRef.current || requestId !== saveRequestRef.current) return;
-          setIsSaving(false);
+          if (!isCurrentRequest('save', requestId)) return;
           if (!result.success) {
-            setError(result.error ?? '创建扩展失败');
-            setSaved(false);
+            finishSave('extensions', { error: result.error ?? '创建扩展失败' });
             return;
           }
-          setSaved(true);
+          finishSave('extensions', { saved: true });
           requestSettings();
         },
         (message) => {
-          if (!mountedRef.current || requestId !== saveRequestRef.current) return;
-          setError(message);
-          setIsSaving(false);
-          setSaved(false);
+          if (!isCurrentRequest('save', requestId)) return;
+          finishSave('extensions', { error: message });
         },
       );
     },
-    [requestSettings],
+    [beginRequest, beginSave, finishSave, isCurrentRequest, requestSettings],
   );
 
-  const openExtensionFile = useCallback((filePath: string) => {
-    protocolClient.openExtensionFile(filePath, (result) => {
-      if (!mountedRef.current) return;
-      if (!result.success) {
-        setError(result.error ?? '打开扩展失败');
-      }
-    });
-  }, []);
+  const openExtensionFile = useCallback(
+    (filePath: string) => {
+      protocolClient.openExtensionFile(filePath, (result) => {
+        if (!isMounted()) return;
+        if (!result.success) {
+          reportError(result.error ?? '打开扩展失败');
+        }
+      });
+    },
+    [isMounted, reportError],
+  );
 
   return {
     settings,
     isLoading,
     isSaving,
     isDirty: false,
-    saved,
+    hasUnsavedChanges: false,
+    saved: savedScope === 'extensions',
     error,
     load,
+    discard: load,
     save: () => undefined,
     createExtensionFromTemplate,
     openExtensionFile,

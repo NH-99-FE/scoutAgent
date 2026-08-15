@@ -114,6 +114,7 @@ type RuntimeSettingsResultPayload = Extract<
 >;
 type ExtensionsResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'extensions_result' }>;
 type SkillsResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'skills_result' }>;
+type PromptsResultPayload = Extract<ScoutProtocolResponsePayload, { type: 'prompts_result' }>;
 type SaveRuntimeSettingsResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'save_runtime_settings_result' }
@@ -133,6 +134,18 @@ type OpenExtensionFileResultPayload = Extract<
 type OpenSkillFileResultPayload = Extract<
   ScoutProtocolResponsePayload,
   { type: 'open_skill_file_result' }
+>;
+type OpenPromptFileResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'open_prompt_file_result' }
+>;
+type CreatePromptTemplateResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'create_prompt_template_result' }
+>;
+type OpenPromptsDirectoryResultPayload = Extract<
+  ScoutProtocolResponsePayload,
+  { type: 'open_prompts_directory_result' }
 >;
 type OpenMentionedFileResultPayload = Extract<
   ScoutProtocolResponsePayload,
@@ -354,6 +367,36 @@ export const protocolClient = {
       (payload) => {
         projectProtocolResponsePayload(payload);
         if (payload.type === 'skills_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  requestPrompts: (
+    onResult?: (payload: PromptsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'request_prompts' },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'prompts_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  refreshPrompts: (
+    onResult?: (payload: PromptsResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'refresh_prompts' },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'prompts_result') onResult?.(payload);
       },
       (message) => {
         reportProtocolError(message);
@@ -721,6 +764,53 @@ export const protocolClient = {
       (payload) => {
         projectProtocolResponsePayload(payload);
         if (payload.type === 'open_skill_file_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  openPromptFile: (
+    path: string,
+    onResult?: (payload: OpenPromptFileResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'open_prompt_file', path },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'open_prompt_file_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  createPromptTemplate: (
+    name: string,
+    onResult?: (payload: CreatePromptTemplateResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'create_prompt_template', name },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'create_prompt_template_result') onResult?.(payload);
+      },
+      (message) => {
+        reportProtocolError(message);
+        onError?.(message);
+      },
+    ),
+  openPromptsDirectory: (
+    onResult?: (payload: OpenPromptsDirectoryResultPayload) => void,
+    onError?: (message: string) => void,
+  ) =>
+    sendRouted(
+      { type: 'open_prompts_directory' },
+      (payload) => {
+        projectProtocolResponsePayload(payload);
+        if (payload.type === 'open_prompts_directory_result') onResult?.(payload);
       },
       (message) => {
         reportProtocolError(message);

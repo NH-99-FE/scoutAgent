@@ -80,7 +80,9 @@ describe('ChatComposer command effects', () => {
   });
 
   it('opens slash suggestions in a portal and applies the active option from the textarea', async () => {
-    useConfigStore.getState().actions.setCommands([promptCommand('review')]);
+    useConfigStore
+      .getState()
+      .actions.setCommands([{ ...promptCommand('review'), argumentHint: '<file> [focus]' }]);
     useComposerStore.getState().actions.setText(DRAFT_KEY, '/re');
     render(<ChatComposer draftSessionId="session-1" placeholder="要求后续变更" />);
 
@@ -90,6 +92,8 @@ describe('ChatComposer command effects', () => {
     expect(await screen.findByRole('listbox', { name: 'Slash commands' })).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.getByRole('option')).toHaveTextContent('review');
+    const argumentHint = screen.getByText('<file> [focus]');
+    expect(argumentHint).toHaveClass('min-w-0', 'max-w-[35%]', 'shrink', 'truncate');
     expect(editor).toHaveFocus();
 
     fireEvent.keyDown(editor, { key: 'Enter' });

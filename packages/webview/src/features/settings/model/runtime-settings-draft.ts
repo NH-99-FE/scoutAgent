@@ -21,6 +21,7 @@ import type {
   ThinkingLevel,
 } from '@scout-agent/shared';
 import { parseOptionalJsonObject, stringifyOptionalJsonObject } from './json-draft-utils';
+import { areSettingsDraftValuesEqual } from './settings-draft-utils';
 
 const SCOUT_MODEL_PROVIDER_SET = new Set<string>(SCOUT_MODEL_PROVIDERS);
 const SCOUT_TRANSPORT_SET = new Set<string>(SCOUT_TRANSPORTS);
@@ -92,6 +93,19 @@ export function toRuntimeSettingsPatch(
     }
   }
   return { operations };
+}
+
+export function isRuntimeSettingsPathEqual(
+  left: EditableRuntimeSettings,
+  right: EditableRuntimeSettings,
+  path: ScoutRuntimeSettingsPath,
+): boolean {
+  if (path === 'thinkingBudgets') return left.thinkingBudgetsJson === right.thinkingBudgetsJson;
+  if (path === 'extensions') return left.extensionsText === right.extensionsText;
+  return areSettingsDraftValuesEqual(
+    getPathValue(left as unknown as Record<string, unknown>, path),
+    getPathValue(right as unknown as Record<string, unknown>, path),
+  );
 }
 
 export function updateNested<TObject extends object, TKey extends keyof TObject>(

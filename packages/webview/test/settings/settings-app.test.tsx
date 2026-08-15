@@ -6,6 +6,7 @@ import type {
   ScoutConfig,
   ScoutCustomModelsSettings,
   ScoutRuntimeSettingsState,
+  ScoutPromptsSettings,
   ScoutSkillsSettings,
   ScoutWebviewState,
 } from '@scout-agent/shared';
@@ -118,6 +119,14 @@ function makeSkillsSettings(): ScoutSkillsSettings {
         canToggle: true,
       },
     ],
+  };
+}
+
+function makePromptsSettings(): ScoutPromptsSettings {
+  return {
+    globalDir: '/home/me/.scout/agent/prompts',
+    diagnostics: [],
+    prompts: [],
   };
 }
 
@@ -243,6 +252,18 @@ function installImmediateSettingsHost(): void {
         }),
       );
     }
+
+    if (request.payload?.type === 'request_prompts') {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: {
+            type: 'protocol_response',
+            requestId: request.requestId,
+            payload: { type: 'prompts_result', settings: makePromptsSettings() },
+          },
+        }),
+      );
+    }
   });
 }
 
@@ -282,10 +303,20 @@ async function resolveSkills(settings = makeSkillsSettings()): Promise<void> {
   });
 }
 
+async function resolvePrompts(settings = makePromptsSettings()): Promise<void> {
+  const request = getPostedRequests('request_prompts').at(-1);
+  expect(request).toBeDefined();
+  await act(async () => {
+    routeProtocolResponse({
+      type: 'protocol_response',
+      requestId: request!.requestId as string,
+      payload: { type: 'prompts_result', settings },
+    });
+  });
+}
+
 async function resolveInitialSettings(): Promise<void> {
   await resolveCustomModels();
-  await resolveRuntimeSettings();
-  await resolveSkills();
 }
 
 async function resolveSaveCustomModels(
@@ -411,7 +442,94 @@ describe('SettingsApp', () => {
       (button) => button.textContent?.trim(),
     );
 
-    expect(labels).toEqual(['模型管理', 'Skills', '运行设置', '扩展']);
+    expect(labels).toEqual(['模型管理', 'Skills', 'Prompts', '运行设置', '扩展']);
+  });
+
+  it('confirms before discarding a dirty settings tab', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    fireEvent.change(
+      screen.getByDisplayValue('https://dashscope.aliyuncs.com/compatible-mode/v1'),
+      { target: { value: 'https://proxy.example.test/v1' } },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    expect(screen.getByText(/“模型管理”中还有未保存的修改/)).toBeInTheDocument();
+    expect(document.querySelector('h1')).toHaveTextContent('模型管理');
+
+    fireEvent.click(screen.getByRole('button', { name: '继续编辑' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('https://proxy.example.test/v1')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    fireEvent.click(screen.getByRole('button', { name: '放弃并切换' }));
+    await resolveSkills();
+
+    expect(screen.getByRole('heading', { name: 'Skills' })).toBeInTheDocument();
+    expect(getPostedRequests('request_custom_models')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '模型管理' }));
+    expect(
+      screen.getByDisplayValue('https://dashscope.aliyuncs.com/compatible-mode/v1'),
+    ).toBeInTheDocument();
+  });
+
+  it('discards Runtime and Skills drafts locally without reloading from the host', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings();
+    fireEvent.change(screen.getByDisplayValue('qwen3.7-max'), {
+      target: { value: 'qwen3.7-draft' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    fireEvent.click(screen.getByRole('button', { name: '放弃并切换' }));
+    await resolveSkills();
+    expect(getPostedRequests('request_runtime_settings')).toHaveLength(1);
+
+    fireEvent.change(screen.getByLabelText('Skill path 1'), {
+      target: { value: './skills/draft' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Prompts' }));
+    fireEvent.click(screen.getByRole('button', { name: '放弃并切换' }));
+    await resolvePrompts();
+    expect(getPostedRequests('request_skills')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    expect(screen.getByDisplayValue('qwen3.7-max')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    expect(screen.getByDisplayValue('./skills/project-skill')).toBeInTheDocument();
+  });
+
+  it('does not treat values changed back to their saved baseline as drafts', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    const baseUrl = screen.getByDisplayValue('https://dashscope.aliyuncs.com/compatible-mode/v1');
+    fireEvent.change(baseUrl, { target: { value: 'https://proxy.example.test/v1' } });
+    fireEvent.change(baseUrl, {
+      target: { value: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+
+    const defaultModel = screen.getByDisplayValue('qwen3.7-max');
+    fireEvent.change(defaultModel, { target: { value: 'qwen3.7-plus' } });
+    fireEvent.change(defaultModel, { target: { value: 'qwen3.7-max' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    await resolveSkills();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+
+    const reviewSwitch = screen.getByRole('switch', { name: '启用 review' });
+    fireEvent.click(reviewSwitch);
+    fireEvent.click(reviewSwitch);
+    fireEvent.click(screen.getByRole('button', { name: 'Prompts' }));
+    await resolvePrompts();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 
   it('loads first-run settings through App bootstrap when the host responds immediately', async () => {
@@ -431,9 +549,10 @@ describe('SettingsApp', () => {
       </StrictMode>,
     );
 
-    expect(getPostedRequests('request_custom_models').length).toBeGreaterThan(1);
-    expect(getPostedRequests('request_runtime_settings').length).toBeGreaterThan(1);
-    expect(getPostedRequests('request_skills').length).toBeGreaterThan(1);
+    expect(getPostedRequests('request_custom_models')).toHaveLength(1);
+    expect(getPostedRequests('request_runtime_settings')).toHaveLength(0);
+    expect(getPostedRequests('request_skills')).toHaveLength(0);
+    expect(getPostedRequests('request_prompts')).toHaveLength(0);
 
     await resolveInitialSettings();
 
@@ -447,12 +566,9 @@ describe('SettingsApp', () => {
     expect(getLatestPostedPayload('request_custom_models')).toEqual({
       type: 'request_custom_models',
     });
-    expect(getLatestPostedPayload('request_runtime_settings')).toEqual({
-      type: 'request_runtime_settings',
-    });
-    expect(getLatestPostedPayload('request_skills')).toEqual({
-      type: 'request_skills',
-    });
+    expect(getPostedRequests('request_runtime_settings')).toHaveLength(0);
+    expect(getPostedRequests('request_skills')).toHaveLength(0);
+    expect(getPostedRequests('request_prompts')).toHaveLength(0);
 
     await resolveInitialSettings();
 
@@ -498,12 +614,39 @@ describe('SettingsApp', () => {
     expect(getPostedRequests('save_runtime_settings')).toHaveLength(0);
   });
 
+  it('loads each settings tab only when it is first opened', async () => {
+    render(<SettingsApp />);
+
+    expect(getPostedRequests('request_custom_models')).toHaveLength(1);
+    expect(getPostedRequests('request_skills')).toHaveLength(0);
+    await resolveCustomModels();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    expect(getPostedRequests('request_skills')).toHaveLength(1);
+    await resolveSkills();
+
+    fireEvent.click(screen.getByRole('button', { name: '模型管理' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+
+    expect(getPostedRequests('request_custom_models')).toHaveLength(1);
+    expect(getPostedRequests('request_skills')).toHaveLength(1);
+  });
+
+  it('does not show a save action for the read-only prompt inventory', async () => {
+    render(<SettingsApp />);
+    fireEvent.click(screen.getByRole('button', { name: 'Prompts' }));
+    await resolvePrompts();
+
+    expect(await screen.findByRole('heading', { name: 'Prompt 模板' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '新建 Prompt' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument();
+  });
+
   it('adds a custom model row from the model management tab', async () => {
     render(<SettingsApp />);
     const settings = makeCustomModelsSettings();
     settings.providers.openai!.models = [];
     await resolveCustomModels(settings);
-    await resolveRuntimeSettings();
 
     fireEvent.click(screen.getAllByRole('button', { name: '添加模型' })[0]!);
 
@@ -534,6 +677,7 @@ describe('SettingsApp', () => {
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings();
     expect(screen.getAllByText('开发模式').length).toBeGreaterThan(0);
     expect(screen.getAllByText('审查模式').length).toBeGreaterThan(0);
     expect(screen.getByText('未设置（开发模式）')).toBeInTheDocument();
@@ -557,6 +701,31 @@ describe('SettingsApp', () => {
     expect(getPostedRequests('save_custom_models')).toHaveLength(0);
   });
 
+  it('preserves an existing project Runtime draft when global settings are saved', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings();
+    fireEvent.click(screen.getByRole('button', { name: '当前项目' }));
+    fireEvent.change(screen.getByLabelText('Default Model'), {
+      target: { value: 'project-draft' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '全局' }));
+    fireEvent.change(screen.getByLabelText('Default Model'), {
+      target: { value: 'global-saved' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    const saved = makeRuntimeSettings();
+    saved.global.defaultModel = 'global-saved';
+    saved.effective.defaultModel = 'global-saved';
+    await resolveSaveRuntimeSettings(saved);
+
+    fireEvent.click(screen.getByRole('button', { name: '当前项目' }));
+    expect(screen.getByLabelText('Default Model')).toHaveValue('project-draft');
+  });
+
   it('pins the project default when project profiles hide the inherited default', async () => {
     render(<SettingsApp />);
     await resolveCustomModels();
@@ -571,10 +740,8 @@ describe('SettingsApp', () => {
       defaultToolProfile: 'custom-1',
       toolProfiles: [{ id: 'custom-1', name: '全局搜索', tools: ['read', 'grep'] }],
     };
-    await resolveRuntimeSettings(settings);
-    await resolveSkills();
-
     fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings(settings);
     fireEvent.click(screen.getByRole('button', { name: '当前项目' }));
     expect(screen.getByText('未设置（继承：全局搜索）')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '新增' }));
@@ -608,10 +775,8 @@ describe('SettingsApp', () => {
       ...settings.effective,
       defaultToolProfile: 'review',
     };
-    await resolveRuntimeSettings(settings);
-    await resolveSkills();
-
     fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings(settings);
     fireEvent.click(screen.getByRole('button', { name: '当前项目' }));
 
     expect(screen.getByText('未设置（继承：审查模式）')).toBeInTheDocument();
@@ -623,6 +788,7 @@ describe('SettingsApp', () => {
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    await resolveSkills();
     expect(screen.getByRole('heading', { name: '额外 Skills 路径' })).toBeInTheDocument();
     expect(screen.getByText('Review code changes')).toBeInTheDocument();
 
@@ -647,11 +813,37 @@ describe('SettingsApp', () => {
     expect(screen.getByRole('button', { name: '已保存' })).toBeDisabled();
   });
 
+  it('preserves an existing project Skills draft when global Skills are saved', async () => {
+    render(<SettingsApp />);
+    await resolveInitialSettings();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    await resolveSkills();
+    fireEvent.change(screen.getByLabelText('Skill path 1'), {
+      target: { value: './skills/project-draft' },
+    });
+    fireEvent.click(screen.getByRole('combobox', { name: '保存位置' }));
+    fireEvent.click(screen.getByRole('option', { name: '全局' }));
+    fireEvent.change(screen.getByLabelText('Skill path 1'), {
+      target: { value: '../global-saved' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    const saved = makeSkillsSettings();
+    saved.globalEntries = ['../global-saved'];
+    await resolveSaveSkills(saved);
+
+    fireEvent.click(screen.getByRole('combobox', { name: '保存位置' }));
+    fireEvent.click(screen.getByRole('option', { name: '当前项目' }));
+    expect(screen.getByDisplayValue('./skills/project-draft')).toBeInTheDocument();
+  });
+
   it('opens resolved skill files from the Skills tab', async () => {
     render(<SettingsApp />);
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    await resolveSkills();
     fireEvent.click(screen.getByRole('button', { name: /review/ }));
 
     expect(getLatestPostedPayload('open_skill_file')).toEqual({
@@ -665,6 +857,7 @@ describe('SettingsApp', () => {
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    await resolveSkills();
     const reviewSwitch = screen.getByRole('switch', { name: '启用 review' });
     expect(reviewSwitch).toHaveAttribute('aria-checked', 'true');
 
@@ -702,6 +895,7 @@ describe('SettingsApp', () => {
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings();
     expect(screen.getAllByText('未设置（继承开启）')).toHaveLength(2);
     fireEvent.change(screen.getByDisplayValue('qwen3.7-max'), {
       target: { value: 'openai/qwen3.7-plus' },
@@ -827,11 +1021,15 @@ describe('SettingsApp', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(screen.getByRole('button', { name: '保存中' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Skills' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Skills' }));
+    expect(screen.getByRole('heading', { name: '模型管理' })).toBeInTheDocument();
 
     await rejectLatestRequest('save_custom_models', '保存协议失败');
 
     expect(screen.getByText('保存协议失败')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '保存' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Skills' })).toBeEnabled();
   });
 
   it('uses normalized host runtime settings after a successful save', async () => {
@@ -839,6 +1037,7 @@ describe('SettingsApp', () => {
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings();
     fireEvent.change(screen.getByDisplayValue('qwen3.7-max'), {
       target: { value: 'qwen3.7-plus' },
     });
@@ -858,6 +1057,7 @@ describe('SettingsApp', () => {
     await resolveInitialSettings();
 
     fireEvent.click(screen.getByRole('button', { name: '运行设置' }));
+    await resolveRuntimeSettings();
     fireEvent.change(screen.getByDisplayValue('qwen3.7-max'), {
       target: { value: 'qwen3.7-plus' },
     });

@@ -15,6 +15,7 @@ export interface SlashCommandMenuItem {
   command: ScoutCommandInfo;
   icon: LucideIcon;
   label: string;
+  argumentHint?: string;
   description: string;
   builtinAction?: SlashBuiltinAction;
 }
@@ -50,10 +51,12 @@ export function buildSlashCommandItems(options: {
 }
 
 function orderSlashCommandItems(items: SlashCommandMenuItem[]): SlashCommandMenuItem[] {
+  const primaryItems = items.filter(
+    (item) => item.command.source !== 'prompt' && item.command.source !== 'skill',
+  );
+  const promptItems = items.filter((item) => item.command.source === 'prompt');
   const skillItems = items.filter((item) => item.command.source === 'skill');
-  if (skillItems.length === 0) return items;
-  const primaryItems = items.filter((item) => item.command.source !== 'skill');
-  return [...primaryItems, ...skillItems];
+  return [...primaryItems, ...promptItems, ...skillItems];
 }
 
 function toSlashCommandItem(
@@ -76,6 +79,7 @@ function toSlashCommandItem(
     command,
     icon: iconBySource[command.source],
     label: command.source === 'skill' ? command.name.replace(/^skill:/, '') : command.name,
+    argumentHint: command.argumentHint,
     description: command.description ?? getSourceDescription(command.source),
   };
 }

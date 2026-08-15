@@ -46,7 +46,7 @@ describe('buildSlashCommandItems', () => {
     expect(items).toEqual([]);
   });
 
-  it('keeps skills after non-skill slash commands', () => {
+  it('orders primary commands before prompts and skills', () => {
     const items = buildSlashCommandItems({
       commands: [
         command('handoff', 'skill'),
@@ -58,8 +58,8 @@ describe('buildSlashCommandItems', () => {
     });
 
     expect(items.map((item) => item.key)).toEqual([
-      'prompt:review',
       'builtin:tree',
+      'prompt:review',
       'skill:handoff',
       'skill:diagnosing-bugs',
     ]);

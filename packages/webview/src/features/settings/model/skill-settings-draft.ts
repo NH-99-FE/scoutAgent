@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { ScoutSkillsSettings, ScoutSkillScope } from '@scout-agent/shared';
+import { normalizeResourceEntries } from './resource-path-draft';
 
 export interface EditableSkillSettingsState {
   scope: ScoutSkillScope;
@@ -42,5 +43,5 @@ export function toEditableSkillSettingsState(
 }
 
 export function normalizeSkillEntries(entries: string[]): string[] {
-  return entries.map((entry) => entry.trim()).filter(Boolean);
+  return normalizeResourceEntries(entries);
 }

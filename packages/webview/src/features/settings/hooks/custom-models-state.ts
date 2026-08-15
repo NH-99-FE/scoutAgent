@@ -2,7 +2,7 @@
 // Custom Models State — models.json 设置状态与协议副作用
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { protocolClient } from '@/bridge/protocol-client';
 import {
   createEditableModel,
@@ -13,16 +13,23 @@ import {
   type EditableModel,
   type EditableProvider,
 } from '../model/custom-models-draft';
+import { areSettingsDraftValuesEqual } from '../model/settings-draft-utils';
 import type { ScoutModelProvider } from '@scout-agent/shared';
+import { useSettingsDraftMachine } from './use-settings-draft-machine';
+import { useLazySettingsLoad, useSettingsRequestLifecycle } from './use-settings-request-lifecycle';
+
+const CUSTOM_MODELS_DRAFT_SCOPES = ['models'] as const;
 
 export interface CustomModelsController {
   draft: EditableCustomModels;
   isLoading: boolean;
   isSaving: boolean;
   isDirty: boolean;
+  hasUnsavedChanges: boolean;
   saved: boolean;
   error: string;
   load: () => void;
+  discard: () => void;
   save: () => void;
   updateProvider: (provider: ScoutModelProvider, patch: Partial<EditableProvider>) => void;
   updateModel: (provider: ScoutModelProvider, index: number, patch: Partial<EditableModel>) => void;
@@ -30,82 +37,91 @@ export interface CustomModelsController {
   removeModel: (provider: ScoutModelProvider, index: number) => void;
 }
 
-export function useCustomModelsController(): CustomModelsController {
-  const [draft, setDraft] = useState<EditableCustomModels>(EMPTY_CUSTOM_MODELS);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [error, setError] = useState('');
-  const [saved, setSaved] = useState(false);
-  const mountedRef = useRef(true);
-  const loadRequestRef = useRef(0);
-  const saveRequestRef = useRef(0);
-  const draftVersionRef = useRef(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+export function useCustomModelsController(enabled = true): CustomModelsController {
+  const draftMachine = useSettingsDraftMachine({
+    initialDraft: EMPTY_CUSTOM_MODELS,
+    scopes: CUSTOM_MODELS_DRAFT_SCOPES,
+    isScopeDirty: isCustomModelsDraftDirty,
+  });
+  const {
+    draft,
+    dirtyScopes,
+    hasUnsavedChanges,
+    hydrate,
+    edit,
+    discard: discardDraft,
+    commitSaved,
+    getSnapshot,
+    getScopeRevision,
+  } = draftMachine;
+  const {
+    isLoading,
+    isSaving,
+    error,
+    savedScope,
+    beginRequest,
+    isCurrentRequest,
+    beginLoad,
+    finishLoad,
+    beginSave,
+    finishSave,
+    clearFeedback,
+    reportError,
+  } = useSettingsRequestLifecycle<'models'>();
 
   const requestSettings = useCallback(() => {
-    const requestId = loadRequestRef.current + 1;
-    loadRequestRef.current = requestId;
+    const requestId = beginRequest('load');
 
     protocolClient.requestCustomModels(
       (result) => {
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        setDraft((current) => toEditableCustomModels(result.settings, current));
-        draftVersionRef.current += 1;
-        setIsDirty(false);
-        setSaved(false);
-        setError(result.settings.error ?? '');
-        setIsLoading(false);
+        if (!isCurrentRequest('load', requestId)) return;
+        const next = toEditableCustomModels(result.settings, getSnapshot().draft);
+        hydrate(next);
+        finishLoad(result.settings.error ?? '');
       },
       (message) => {
-        if (!mountedRef.current || requestId !== loadRequestRef.current) return;
-        setError(message);
-        setSaved(false);
-        setIsLoading(false);
+        if (!isCurrentRequest('load', requestId)) return;
+        finishLoad(message);
       },
     );
-  }, []);
+  }, [beginRequest, finishLoad, getSnapshot, hydrate, isCurrentRequest]);
 
-  useEffect(() => {
-    requestSettings();
-  }, [requestSettings]);
+  const requestLoad = useLazySettingsLoad(enabled, requestSettings);
 
   const load = useCallback(() => {
-    setIsLoading(true);
-    setError('');
-    requestSettings();
-  }, [requestSettings]);
+    beginLoad();
+    requestLoad();
+  }, [beginLoad, requestLoad]);
 
-  const markChanged = useCallback(() => {
-    draftVersionRef.current += 1;
-    setIsDirty(true);
-    setSaved(false);
-    setError('');
-  }, []);
+  const discard = useCallback(() => {
+    discardDraft((baseline) => baseline);
+    clearFeedback();
+  }, [clearFeedback, discardDraft]);
+
+  const updateDraft = useCallback(
+    (updater: (current: EditableCustomModels) => EditableCustomModels) => {
+      edit('models', updater);
+      clearFeedback();
+    },
+    [clearFeedback, edit],
+  );
 
   const updateProvider = useCallback(
     (provider: ScoutModelProvider, patch: Partial<EditableProvider>) => {
-      setDraft((current) => ({
+      updateDraft((current) => ({
         ...current,
         providers: {
           ...current.providers,
           [provider]: { ...current.providers[provider], ...patch },
         },
       }));
-      markChanged();
     },
-    [markChanged],
+    [updateDraft],
   );
 
   const updateModel = useCallback(
     (provider: ScoutModelProvider, index: number, patch: Partial<EditableModel>) => {
-      setDraft((current) => {
+      updateDraft((current) => {
         const currentProvider = current.providers[provider];
         return {
           ...current,
@@ -120,15 +136,14 @@ export function useCustomModelsController(): CustomModelsController {
           },
         };
       });
-      markChanged();
     },
-    [markChanged],
+    [updateDraft],
   );
 
   const addModel = useCallback(
     (provider: ScoutModelProvider) => {
       const model = createEditableModel(provider);
-      setDraft((current) => {
+      updateDraft((current) => {
         const currentProvider = current.providers[provider];
         return {
           ...current,
@@ -141,15 +156,14 @@ export function useCustomModelsController(): CustomModelsController {
           },
         };
       });
-      markChanged();
       return model.clientId;
     },
-    [markChanged],
+    [updateDraft],
   );
 
   const removeModel = useCallback(
     (provider: ScoutModelProvider, index: number) => {
-      setDraft((current) => {
+      updateDraft((current) => {
         const currentProvider = current.providers[provider];
         return {
           ...current,
@@ -162,71 +176,84 @@ export function useCustomModelsController(): CustomModelsController {
           },
         };
       });
-      markChanged();
     },
-    [markChanged],
+    [updateDraft],
   );
 
   const save = useCallback(() => {
-    const next = toCustomModelsSettings(draft);
+    const saveDraft = getSnapshot().draft;
+    const next = toCustomModelsSettings(saveDraft);
     if (typeof next === 'string') {
-      setError(next);
-      setSaved(false);
+      clearFeedback('models');
+      reportError(next);
       return;
     }
 
-    const requestId = saveRequestRef.current + 1;
-    const saveDraftVersion = draftVersionRef.current;
-    saveRequestRef.current = requestId;
-    setIsSaving(true);
-    setError('');
-    setSaved(false);
+    const requestId = beginRequest('save');
+    const submittedScopeRevision = getScopeRevision('models');
+    beginSave('models');
 
     protocolClient.saveCustomModels(
       next,
       (result) => {
-        if (!mountedRef.current || requestId !== saveRequestRef.current) return;
-        setIsSaving(false);
+        if (!isCurrentRequest('save', requestId)) return;
         if (!result.success) {
-          setError(result.error ?? '保存模型配置失败');
-          setSaved(false);
+          finishSave('models', { error: result.error ?? '保存模型配置失败' });
           return;
         }
-        setError(result.error ?? '');
-        if (saveDraftVersion === draftVersionRef.current) {
-          if (result.settings) {
-            setDraft((current) => toEditableCustomModels(result.settings!, current));
-            draftVersionRef.current += 1;
-          }
-          setIsDirty(false);
-          setSaved(true);
-        } else {
-          setIsDirty(true);
-          setSaved(false);
-        }
+        const savedBaseline = result.settings
+          ? toEditableCustomModels(result.settings, saveDraft)
+          : saveDraft;
+        const scopeUnchanged = submittedScopeRevision === getScopeRevision('models');
+        commitSaved({
+          scope: 'models',
+          submittedScopeRevision,
+          baseline: savedBaseline,
+          merge: ({ draft: current, nextBaseline, scopeUnchanged: unchanged }) =>
+            unchanged ? nextBaseline : current,
+        });
+        finishSave('models', { error: result.error ?? '', saved: scopeUnchanged });
       },
       (message) => {
-        if (!mountedRef.current || requestId !== saveRequestRef.current) return;
-        setError(message);
-        setIsSaving(false);
-        setSaved(false);
-        setIsDirty(true);
+        if (!isCurrentRequest('save', requestId)) return;
+        finishSave('models', { error: message });
       },
     );
-  }, [draft]);
+  }, [
+    beginSave,
+    beginRequest,
+    clearFeedback,
+    commitSaved,
+    finishSave,
+    getScopeRevision,
+    getSnapshot,
+    isCurrentRequest,
+    reportError,
+  ]);
+
+  const isDirty = dirtyScopes.models;
 
   return {
     draft,
     isLoading,
     isSaving,
     isDirty,
-    saved,
+    hasUnsavedChanges,
+    saved: savedScope === 'models',
     error,
     load,
+    discard,
     save,
     updateProvider,
     updateModel,
     addModel,
     removeModel,
   };
+}
+
+function isCustomModelsDraftDirty(
+  draft: EditableCustomModels,
+  baseline: EditableCustomModels,
+): boolean {
+  return !areSettingsDraftValuesEqual(draft.providers, baseline.providers);
 }

@@ -15,3 +15,6 @@ export { ModelManagementTab } from './view/ModelManagementTab';
 export { RuntimeSettingsTab } from './view/RuntimeSettingsTab';
 export { SettingsActionsMenu } from './view/SettingsActionsMenu';
 export { SkillsTab } from './view/SkillsTab';
+export { PromptsTab } from './view/PromptsTab';
+export { usePromptSettingsController } from './hooks/prompt-settings-state';
+export type { PromptSettingsController } from './hooks/prompt-settings-state';

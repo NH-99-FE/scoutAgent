@@ -1333,10 +1333,11 @@ describe('ChatApp', () => {
     expect(screen.queryByRole('option', { name: /deploy/ })).not.toBeInTheDocument();
   });
 
-  it('groups skill slash commands below other commands', () => {
+  it('groups prompt and skill slash commands below primary commands', () => {
     routeCommands([
       makeCommand('handoff', 'skill', 'Create a handoff'),
       makeCommand('review', 'prompt', 'Review pending changes'),
+      makeCommand('deploy', 'extension', 'Run extension command'),
       makeCommand('docs', 'skill', 'Use docs skill'),
     ]);
     render(<ChatApp />);
@@ -1344,12 +1345,20 @@ describe('ChatApp', () => {
     typeComposerText('随心输入', '/');
 
     const menu = screen.getByRole('listbox', { name: 'Slash commands' });
-    expect(within(menu).getByText('技能')).toBeInTheDocument();
+    expect(within(menu).getByRole('group', { name: '提示词' })).toHaveTextContent('review');
+    const skillGroup = within(menu).getByRole('group', { name: '技能' });
+    expect(skillGroup).toHaveTextContent('handoff');
+    expect(skillGroup).toHaveTextContent('docs');
     expect(
       within(menu)
         .getAllByRole('option')
         .map((option) => option.textContent),
-    ).toEqual(['reviewReview pending changes', 'handoffCreate a handoff', 'docsUse docs skill']);
+    ).toEqual([
+      'deployRun extension command',
+      'reviewReview pending changes',
+      'handoffCreate a handoff',
+      'docsUse docs skill',
+    ]);
   });
 
   it('selects slash commands with the keyboard without sending the message', async () => {
