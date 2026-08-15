@@ -257,7 +257,26 @@ Skill 使用 `SKILL.md` 和 frontmatter 描述名称与用途。设置页可以�
 
 ### Prompts
 
-`~/.scout/agent/prompts/` 顶层的 Markdown 模板会成为 slash command。Extension 也可以在运行期间注册临时 Prompt；同名时全局模板优先。设置页用于查看、创建和打开模板，不提供项目作用域或额外路径配置。
+Scout 会把 `~/.scout/agent/prompts/` 顶层的 Markdown 文件注册为 slash command，文件名就是命令名。例如 `review.md` 可通过 `/review` 调用。Prompt 只支持这个全局目录，不扫描子目录，也不支持项目级目录、自定义路径或通过 `settings.json` 配置路径。
+
+模板可以直接写正文，也可以用 YAML frontmatter 提供命令说明和参数提示：
+
+```markdown
+---
+description: 根据目标检查当前改动
+argument-hint: <检查目标>
+---
+请检查当前代码改动，重点关注 $ARGUMENTS。
+```
+
+调用 `/review 并发安全` 时，Scout 会先展开模板，再把生成的内容作为用户消息发送。模板支持以下参数占位符：
+
+- `$ARGUMENTS` 或 `$@`：全部参数；
+- `$1`、`$2`：按位置取单个参数；
+- `${@:2}`：从第二个参数开始取剩余参数；
+- `${@:2:3}`：从第二个参数开始取三个参数。
+
+设置页的 **Prompts** 标签可查看模板来源和解析诊断、新建模板、打开模板文件或全局 Prompt 目录。外部编辑并保存文件后，点击设置页顶部的 **刷新** 会重新扫描目录，并将最新模板同步到当前活动会话，无需重启会话。Extension 也可以在运行期间注册临时 Prompt；同名时全局模板优先。
 
 ### Extensions
 
