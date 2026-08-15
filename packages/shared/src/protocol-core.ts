@@ -45,6 +45,7 @@ export type ScoutCommandSource = 'builtin' | 'extension' | 'prompt' | 'skill';
 export interface ScoutCommandInfo {
   name: string;
   description?: string;
+  argumentHint?: string;
   source: ScoutCommandSource;
   sourceInfo: SourceInfo;
 }

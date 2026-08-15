@@ -66,6 +66,10 @@ import {
   type AgentSessionRuntimeNewSessionOptions,
   type CreateAgentSessionRuntimeFactory,
 } from '../core/agent-session-runtime.ts';
+import {
+  PromptResourceCatalog,
+  type PromptResourceSnapshot,
+} from '../core/prompt-resource-catalog.ts';
 import { formatPathRelativeToCwd, resolveToCwd } from '../core/tools/shared/path-utils.ts';
 import { AgentEventCorrelator } from './protocol/agent-event-correlator.ts';
 import { SessionMessageProjectionCache } from './protocol/session-message-projection-cache.ts';
@@ -140,6 +144,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
   private readonly agentDir: string;
   private readonly outputChannel: vscode.OutputChannel;
   private readonly configManager: ConfigManager;
+  private readonly promptResourceCatalog: PromptResourceCatalog;
   private readonly disposables: vscode.Disposable[] = [];
 
   private agentSession?: AgentSession;
@@ -169,6 +174,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
     this.agentDir = options.agentDir;
     this.outputChannel = options.outputChannel;
     this.configManager = options.configManager;
+    this.promptResourceCatalog = new PromptResourceCatalog(this.agentDir);
     this.reviewArtifactStore = new ReviewArtifactStore({ agentDir: options.agentDir });
     this.sessionExecutionGate = new SessionExecutionGate();
     this.sessionExecutionGate.setOnExecutionChange(() => {
@@ -287,6 +293,10 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
 
   getCommands(): ScoutCommandInfo[] {
     return this.agentSession?.getCommands() ?? [];
+  }
+
+  getPromptResourceSnapshot(): PromptResourceSnapshot {
+    return this.promptResourceCatalog.getSnapshot();
   }
 
   async getSessionName(): Promise<string | undefined> {
@@ -679,7 +689,9 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.configManager.reload();
 
       if (!this.sessionRuntime) {
-        return await this.createInitialRuntime('startup');
+        const result = await this.createInitialRuntime('startup');
+        if (result.cancelled) this.promptResourceCatalog.refresh();
+        return result;
       }
 
       const result = await this.sessionRuntime.reload();
@@ -687,6 +699,13 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       this.outputChannel.appendLine('[scout] Extensions and resources reloaded');
       return result;
     });
+  }
+
+  async refreshPromptResources(): Promise<boolean> {
+    const prompts = this.promptResourceCatalog.refresh();
+    if (!this.agentSession) return false;
+    await this.agentSession.setPromptResources(prompts);
+    return true;
   }
 
   async abortRetry(): Promise<void> {
@@ -1024,6 +1043,7 @@ export class ExtensionSessionCoordinator implements vscode.Disposable {
       agentDir: this.agentDir,
       configManager: this.configManager,
       session,
+      promptResourceCatalog: this.promptResourceCatalog,
     });
 
     const result = await createAgentSessionFromServices({

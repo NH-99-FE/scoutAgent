@@ -3,13 +3,16 @@
 // ============================================================
 
 import * as path from 'node:path';
-import type { ResolvedResource } from '../../../../core/package-manager.ts';
+
+interface ResourcePath {
+  path: string;
+}
 
 // ---------- Path guards ----------
 
 export function isKnownResourcePath(
   filePath: string,
-  resources: ResolvedResource[],
+  resources: ResourcePath[],
   knownRoots: string[],
 ): boolean {
   const resolvedPath = path.resolve(filePath);

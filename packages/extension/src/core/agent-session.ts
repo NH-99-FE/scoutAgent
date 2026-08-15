@@ -27,7 +27,6 @@ import type {
   BeforeToolCallContext,
   BeforeToolCallResult,
   CustomMessage,
-  PromptTemplate,
   QueuedAgentMessageDelivery,
   StreamFn,
   ThinkingLevel,
@@ -38,8 +37,6 @@ import {
   type BashExecutionMessage,
   convertToLlm,
   createCustomMessage,
-  formatPromptTemplateInvocation,
-  parseCommandArgs,
 } from '@scout-agent/agent';
 import type { ScoutCoreConfig, ScoutStreamOptions } from './config.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
@@ -81,7 +78,9 @@ import type {
 } from './extensions/types.ts';
 import { stripFrontmatter, type Skill as ScoutSkill } from './skills.ts';
 import { createSyntheticSourceInfo } from './source-info.ts';
+import { formatPromptTemplateInvocation, parseCommandArgs } from './prompt-templates.ts';
 import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
+import type { PromptResourceSnapshot } from './prompt-resource-catalog.ts';
 import { SessionOperationScope } from './session-operation-scope.ts';
 import type { SessionExecutionKind, SessionExecutionPort } from './session-execution.ts';
 import {
@@ -231,7 +230,7 @@ export interface AgentSessionOptions {
   cwd: string;
   logger: CoreLogger;
   skills: ScoutSkill[];
-  promptTemplates?: PromptTemplate[];
+  prompts?: PromptResourceSnapshot;
   contextFiles?: ScoutContextFile[];
   systemPrompt?: string;
   appendSystemPrompt?: string[];
@@ -355,7 +354,7 @@ export class AgentSession implements CoreDisposable {
   private readonly logger: CoreLogger;
   private readonly userMessageDetails = new WeakMap<object, unknown>();
   private skills: ScoutSkill[];
-  private promptTemplates: PromptTemplate[];
+  private prompts: PromptResourceSnapshot;
   private contextFiles: ScoutContextFile[];
   private resourceSystemPrompt?: string;
   private resourceAppendSystemPrompt: string[];
@@ -427,7 +426,7 @@ export class AgentSession implements CoreDisposable {
     this.cwd = options.cwd;
     this.logger = options.logger;
     this.skills = options.skills;
-    this.promptTemplates = options.promptTemplates ?? [];
+    this.prompts = options.prompts ?? { resources: [], activeTemplates: [], diagnostics: [] };
     this.contextFiles = options.contextFiles ?? [];
     this.resourceSystemPrompt = options.systemPrompt;
     this.resourceAppendSystemPrompt = options.appendSystemPrompt ?? [];
@@ -1589,15 +1588,12 @@ export class AgentSession implements CoreDisposable {
         source: 'extension',
         sourceInfo: command.sourceInfo,
       })) ?? [];
-    const templates: SlashCommandInfo[] = this.getPromptTemplates().map((template) => ({
+    const templates: SlashCommandInfo[] = this.prompts.activeTemplates.map((template) => ({
       name: template.name,
       description: template.description,
+      argumentHint: template.argumentHint,
       source: 'prompt',
-      sourceInfo:
-        (template as PromptTemplate & { sourceInfo?: SourceInfo }).sourceInfo ??
-        createSyntheticSourceInfo(`<prompt:${template.name}>`, {
-          source: 'prompt',
-        }),
+      sourceInfo: template.sourceInfo,
     }));
     const skills: SlashCommandInfo[] = this.skills.map((skill) => ({
       name: `skill:${skill.name}`,
@@ -1615,14 +1611,14 @@ export class AgentSession implements CoreDisposable {
 
   async setResources(resources: {
     skills?: ScoutSkill[];
-    promptTemplates?: PromptTemplate[];
+    prompts?: PromptResourceSnapshot;
     contextFiles?: ScoutContextFile[];
     systemPrompt?: string;
     appendSystemPrompt?: string[];
   }): Promise<void> {
     await this.runSessionMutation('session_mutation', async () => {
       this.skills = resources.skills ?? [];
-      this.promptTemplates = resources.promptTemplates ?? [];
+      this.prompts = resources.prompts ?? { resources: [], activeTemplates: [], diagnostics: [] };
       this.contextFiles = resources.contextFiles ?? [];
       this.resourceSystemPrompt = resources.systemPrompt;
       this.resourceAppendSystemPrompt = resources.appendSystemPrompt ?? [];
@@ -1631,6 +1627,13 @@ export class AgentSession implements CoreDisposable {
         this.agent.state.systemPrompt = this.lastSystemPrompt;
         this.agent.state.tools = this.getActiveTools();
       }
+      this.emit({ type: 'state_change' });
+    });
+  }
+
+  async setPromptResources(prompts: PromptResourceSnapshot): Promise<void> {
+    await this.runSessionMutation('session_mutation', async () => {
+      this.prompts = prompts;
       this.emit({ type: 'state_change' });
     });
   }
@@ -1746,7 +1749,7 @@ export class AgentSession implements CoreDisposable {
     this.hasExtensionDiscoveredResources = hasDiscoveredResources;
     await this.setResources({
       skills: loadedResources.skills,
-      promptTemplates: loadedResources.promptTemplates,
+      prompts: loadedResources.prompts,
       contextFiles: loadedResources.contextFiles,
       systemPrompt: loadedResources.systemPrompt,
       appendSystemPrompt: loadedResources.appendSystemPrompt,
@@ -2515,7 +2518,7 @@ export class AgentSession implements CoreDisposable {
         systemPrompt,
         resources: {
           skills: this.skills,
-          promptTemplates: this.promptTemplates,
+          promptTemplates: this.prompts.activeTemplates,
         },
       });
       if (result?.systemPrompt !== undefined) {
@@ -2624,14 +2627,12 @@ export class AgentSession implements CoreDisposable {
     const argsString = spaceIndex === -1 ? '' : withoutSlash.slice(spaceIndex + 1);
     if (!templateName || templateName.startsWith('skill:')) return text;
 
-    const template = this.getPromptTemplates().find((candidate) => candidate.name === templateName);
+    const template = this.prompts.activeTemplates.find(
+      (candidate) => candidate.name === templateName,
+    );
     if (!template) return text;
 
     return formatPromptTemplateInvocation(template, parseCommandArgs(argsString));
-  }
-
-  private getPromptTemplates(): PromptTemplate[] {
-    return [...this.promptTemplates];
   }
 
   private async findLastAssistantMessage(): Promise<AssistantMessage | undefined> {

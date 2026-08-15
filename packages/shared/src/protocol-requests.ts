@@ -29,6 +29,7 @@ export type ScoutProtocolService =
   | 'mention'
   | 'extensions'
   | 'skills'
+  | 'prompts'
   | 'review'
   | 'ui';
 
@@ -87,6 +88,8 @@ export type WebviewRequestPayload =
   | { type: 'request_runtime_settings' }
   | { type: 'request_extensions' }
   | { type: 'request_skills' }
+  | { type: 'request_prompts' }
+  | { type: 'refresh_prompts' }
   | { type: 'request_context_usage' }
   | {
       type: 'user_message';
@@ -155,6 +158,9 @@ export type WebviewRequestPayload =
       toggles?: ScoutSkillToggleIntent[];
     }
   | { type: 'open_skill_file'; path: string }
+  | { type: 'open_prompt_file'; path: string }
+  | { type: 'create_prompt_template'; name: string }
+  | { type: 'open_prompts_directory' }
   | { type: 'open_settings_panel' }
   | { type: 'open_tree_panel' }
   | { type: 'copy_text'; text: string }
@@ -312,6 +318,21 @@ export const SCOUT_PROTOCOL = {
     response: 'skills_result',
     surfaces: ['settings'],
   },
+  request_prompts: {
+    kind: 'query',
+    service: 'prompts',
+    method: 'request_prompts',
+    response: 'prompts_result',
+    surfaces: ['settings'],
+  },
+  refresh_prompts: {
+    kind: 'command',
+    service: 'prompts',
+    method: 'refresh_prompts',
+    response: 'prompts_result',
+    emits: ['commands_update', 'state_update', 'tree_update'],
+    surfaces: ['settings'],
+  },
   request_context_usage: {
     kind: 'query',
     service: 'state',
@@ -466,6 +487,28 @@ export const SCOUT_PROTOCOL = {
     method: 'open_skill_file',
     response: 'open_skill_file_result',
     surfaces: ['chat', 'settings'],
+  },
+  open_prompt_file: {
+    kind: 'command',
+    service: 'prompts',
+    method: 'open_prompt_file',
+    response: 'open_prompt_file_result',
+    surfaces: ['settings'],
+  },
+  create_prompt_template: {
+    kind: 'command',
+    service: 'prompts',
+    method: 'create_prompt_template',
+    response: 'create_prompt_template_result',
+    emits: ['commands_update', 'state_update', 'tree_update'],
+    surfaces: ['settings'],
+  },
+  open_prompts_directory: {
+    kind: 'command',
+    service: 'prompts',
+    method: 'open_prompts_directory',
+    response: 'open_prompts_directory_result',
+    surfaces: ['settings'],
   },
   open_settings_panel: {
     kind: 'command',

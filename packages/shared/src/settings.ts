@@ -68,7 +68,6 @@ export type ScoutPackageSource =
       source: string;
       extensions?: string[];
       skills?: string[];
-      prompts?: string[];
     };
 
 export interface ScoutRuntimeSettings {
@@ -93,7 +92,6 @@ export interface ScoutRuntimeSettings {
   packages?: ScoutPackageSource[];
   extensions?: string[];
   skills?: string[];
-  prompts?: string[];
 }
 
 export const SCOUT_RUNTIME_SETTINGS_PATHS = [
@@ -122,7 +120,6 @@ export const SCOUT_RUNTIME_SETTINGS_PATHS = [
   'packages',
   'extensions',
   'skills',
-  'prompts',
 ] as const;
 
 export type ScoutRuntimeSettingsPath = (typeof SCOUT_RUNTIME_SETTINGS_PATHS)[number];

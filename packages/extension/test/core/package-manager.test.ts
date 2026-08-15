@@ -37,11 +37,6 @@ function writeSkill(filePath: string, name: string, description = name): void {
   fs.writeFileSync(filePath, `---\nname: ${name}\ndescription: ${description}\n---\nContent`);
 }
 
-function writePrompt(filePath: string, description = path.basename(filePath, '.md')): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `---\ndescription: ${description}\n---\nPrompt body`);
-}
-
 describe('ScoutPackageManager', () => {
   let tempDir: string;
   let cwd: string;
@@ -121,31 +116,6 @@ describe('ScoutPackageManager', () => {
     expect(result.skills.some((resource) => isEnabled(resource, 'document/SKILL.md'))).toBe(true);
   });
 
-  it('expands positive glob manifest entries before collecting prompts', () => {
-    const packageDir = path.join(tempDir, 'prompt-glob-package');
-    writePrompt(path.join(packageDir, 'prompts', 'review.md'), 'Review');
-    writePrompt(path.join(packageDir, 'prompts', 'explain.md'), 'Explain');
-    writePrompt(path.join(packageDir, 'prompts', 'nested', 'ignored.md'), 'Ignored');
-    fs.writeFileSync(
-      path.join(packageDir, 'package.json'),
-      JSON.stringify({ scout: { prompts: ['prompts/*.md'] } }),
-    );
-
-    const manager = new ScoutPackageManager({
-      cwd,
-      agentDir,
-      resourceSettings: { global: {}, project: { packages: [packageDir] } },
-    });
-
-    const result = manager.resolve();
-
-    expect(result.prompts.some((resource) => isEnabled(resource, 'prompts/review.md'))).toBe(true);
-    expect(result.prompts.some((resource) => isEnabled(resource, 'prompts/explain.md'))).toBe(true);
-    expect(
-      result.prompts.some((resource) => pathEndsWith(resource.path, 'nested/ignored.md')),
-    ).toBe(false);
-  });
-
   it('applies double-star exclusion patterns to nested manifest resources', () => {
     const packageDir = path.join(tempDir, 'nested-exclude-package');
     fs.mkdirSync(path.join(packageDir, 'extensions'), { recursive: true });
@@ -205,7 +175,6 @@ describe('ScoutPackageManager', () => {
               source: packageDir,
               extensions: ['!**/bar.ts'],
               skills: [],
-              prompts: [],
             },
           ],
         },
@@ -237,7 +206,6 @@ describe('ScoutPackageManager', () => {
               source: packageDir,
               extensions: ['**/alpha.ts', '**/beta.ts', '!**/beta.ts'],
               skills: [],
-              prompts: [],
             },
           ],
         },
@@ -268,7 +236,6 @@ describe('ScoutPackageManager', () => {
               source: packageDir,
               extensions: ['extensions/one.ts'],
               skills: [],
-              prompts: [],
             },
           ],
         },
@@ -279,35 +246,6 @@ describe('ScoutPackageManager', () => {
 
     expect(result.extensions.some((resource) => isEnabled(resource, 'one.ts'))).toBe(true);
     expect(result.extensions.some((resource) => isDisabled(resource, 'two.ts'))).toBe(true);
-  });
-
-  it('treats direct prompt paths in package filters as includes', () => {
-    const packageDir = path.join(tempDir, 'direct-prompt-filter-package');
-    writePrompt(path.join(packageDir, 'prompts', 'one.md'), 'One');
-    writePrompt(path.join(packageDir, 'prompts', 'two.md'), 'Two');
-
-    const manager = new ScoutPackageManager({
-      cwd,
-      agentDir,
-      resourceSettings: {
-        global: {},
-        project: {
-          packages: [
-            {
-              source: packageDir,
-              extensions: [],
-              skills: [],
-              prompts: ['prompts/one.md'],
-            },
-          ],
-        },
-      },
-    });
-
-    const result = manager.resolve();
-
-    expect(result.prompts.some((resource) => isEnabled(resource, 'one.md'))).toBe(true);
-    expect(result.prompts.some((resource) => isDisabled(resource, 'two.md'))).toBe(true);
   });
 
   it('honors force include and force exclude package filter overrides', () => {
@@ -333,7 +271,6 @@ describe('ScoutPackageManager', () => {
                 '-extensions/gamma.ts',
               ],
               skills: [],
-              prompts: [],
             },
           ],
         },
@@ -347,53 +284,17 @@ describe('ScoutPackageManager', () => {
     expect(result.extensions.some((resource) => isDisabled(resource, 'gamma.ts'))).toBe(true);
   });
 
-  it('honors force include and force exclude package prompt filters', () => {
-    const packageDir = path.join(tempDir, 'force-prompt-filter-package');
-    writePrompt(path.join(packageDir, 'prompts', 'alpha.md'), 'Alpha');
-    writePrompt(path.join(packageDir, 'prompts', 'beta.md'), 'Beta');
-    writePrompt(path.join(packageDir, 'prompts', 'gamma.md'), 'Gamma');
-
-    const manager = new ScoutPackageManager({
-      cwd,
-      agentDir,
-      resourceSettings: {
-        global: {},
-        project: {
-          packages: [
-            {
-              source: packageDir,
-              extensions: [],
-              skills: [],
-              prompts: ['!**/*.md', '+prompts/beta.md', '+prompts/gamma.md', '-prompts/gamma.md'],
-            },
-          ],
-        },
-      },
-    });
-
-    const result = manager.resolve();
-
-    expect(result.prompts.some((resource) => isDisabled(resource, 'alpha.md'))).toBe(true);
-    expect(result.prompts.some((resource) => isEnabled(resource, 'beta.md'))).toBe(true);
-    expect(result.prompts.some((resource) => isDisabled(resource, 'gamma.md'))).toBe(true);
-  });
-
-  it('applies top-level exclusion filters to auto-discovered skills and prompts', () => {
+  it('applies top-level exclusion filters to auto-discovered skills', () => {
     const goodSkill = path.join(agentDir, 'skills', 'good-skill', 'SKILL.md');
     const badSkill = path.join(agentDir, 'skills', 'bad-skill', 'SKILL.md');
     writeSkill(goodSkill, 'good-skill', 'Good');
     writeSkill(badSkill, 'bad-skill', 'Bad');
-    fs.mkdirSync(path.join(agentDir, 'prompts'), { recursive: true });
-    fs.writeFileSync(path.join(agentDir, 'prompts', 'review.md'), 'Review');
-    fs.writeFileSync(path.join(agentDir, 'prompts', 'explain.md'), 'Explain');
-
     const manager = new ScoutPackageManager({
       cwd,
       agentDir,
       resourceSettings: {
         global: {
           skills: ['skills', '!**/bad-skill'],
-          prompts: ['prompts', '!explain.md'],
         },
         project: {},
       },
@@ -407,26 +308,6 @@ describe('ScoutPackageManager', () => {
     expect(result.skills.some((resource) => isDisabled(resource, 'bad-skill', 'includes'))).toBe(
       true,
     );
-    expect(result.prompts.some((resource) => isEnabled(resource, 'review.md'))).toBe(true);
-    expect(result.prompts.some((resource) => isDisabled(resource, 'explain.md'))).toBe(true);
-  });
-
-  it('applies pure override entries to auto-discovered resources', () => {
-    fs.mkdirSync(path.join(agentDir, 'prompts'), { recursive: true });
-    fs.writeFileSync(path.join(agentDir, 'prompts', 'auto.md'), 'Auto prompt');
-
-    const manager = new ScoutPackageManager({
-      cwd,
-      agentDir,
-      resourceSettings: {
-        global: { prompts: ['!prompts/auto.md'] },
-        project: {},
-      },
-    });
-
-    const result = manager.resolve();
-
-    expect(result.prompts.some((resource) => isDisabled(resource, 'auto.md'))).toBe(true);
   });
 
   it('honors top-level force include and force exclude overrides', () => {
@@ -458,27 +339,6 @@ describe('ScoutPackageManager', () => {
     expect(result.extensions.some((resource) => isDisabled(resource, 'keep.ts'))).toBe(true);
     expect(result.extensions.some((resource) => isEnabled(resource, 'force-back.ts'))).toBe(true);
     expect(result.extensions.some((resource) => isDisabled(resource, 'force-out.ts'))).toBe(true);
-  });
-
-  it('force-includes prompts from top-level overrides after exclusion', () => {
-    writePrompt(path.join(agentDir, 'prompts', 'review.md'), 'Review');
-    writePrompt(path.join(agentDir, 'prompts', 'explain.md'), 'Explain');
-    writePrompt(path.join(agentDir, 'prompts', 'debug.md'), 'Debug');
-
-    const manager = new ScoutPackageManager({
-      cwd,
-      agentDir,
-      resourceSettings: {
-        global: { prompts: ['prompts', '!prompts/*.md', '+prompts/debug.md'] },
-        project: {},
-      },
-    });
-
-    const result = manager.resolve();
-
-    expect(result.prompts.some((resource) => isDisabled(resource, 'review.md'))).toBe(true);
-    expect(result.prompts.some((resource) => isDisabled(resource, 'explain.md'))).toBe(true);
-    expect(result.prompts.some((resource) => isEnabled(resource, 'debug.md'))).toBe(true);
   });
 
   it('force-includes a specifically excluded top-level extension', () => {
@@ -518,7 +378,6 @@ describe('ScoutPackageManager', () => {
               source: packageDir,
               extensions: ['extensions/*.ts', '+extensions/alpha.ts', '-extensions/alpha.ts'],
               skills: [],
-              prompts: [],
             },
           ],
         },
@@ -535,11 +394,9 @@ describe('ScoutPackageManager', () => {
     const packageDir = path.join(tempDir, 'settings-override-package');
     const extensionPath = path.join(packageDir, 'extensions', 'shared.ts');
     const skillPath = path.join(packageDir, 'skills', 'shared-skill', 'SKILL.md');
-    const promptPath = path.join(packageDir, 'prompts', 'shared.md');
     fs.mkdirSync(path.dirname(extensionPath), { recursive: true });
     fs.writeFileSync(extensionPath, 'export default () => {}');
     writeSkill(skillPath, 'shared-skill', 'Shared skill');
-    writePrompt(promptPath, 'Shared prompt');
 
     const manager = new ScoutPackageManager({
       cwd,
@@ -552,12 +409,10 @@ describe('ScoutPackageManager', () => {
               source: packageDir,
               extensions: ['!**/*.ts'],
               skills: ['!**/shared-skill'],
-              prompts: ['!**/*.md'],
             },
           ],
           extensions: [extensionPath],
           skills: [skillPath],
-          prompts: [promptPath],
         },
       },
     });
@@ -565,7 +420,6 @@ describe('ScoutPackageManager', () => {
     const result = manager.resolve();
     const extension = result.extensions.find((resource) => resource.path === extensionPath);
     const skill = result.skills.find((resource) => resource.path === skillPath);
-    const prompt = result.prompts.find((resource) => resource.path === promptPath);
 
     expect(extension).toEqual(
       expect.objectContaining({
@@ -587,19 +441,8 @@ describe('ScoutPackageManager', () => {
         }),
       }),
     );
-    expect(prompt).toEqual(
-      expect.objectContaining({
-        enabled: true,
-        metadata: expect.objectContaining({
-          source: 'local',
-          scope: 'project',
-          origin: 'top-level',
-        }),
-      }),
-    );
     expect(result.extensions.filter((resource) => resource.path === extensionPath)).toHaveLength(1);
     expect(result.skills.filter((resource) => resource.path === skillPath)).toHaveLength(1);
-    expect(result.prompts.filter((resource) => resource.path === promptPath)).toHaveLength(1);
   });
 
   it('keeps manifest entries starting with tilde package-relative', () => {
@@ -720,7 +563,6 @@ describe('ScoutPackageManager', () => {
               source: packageDir,
               extensions: [],
               skills: ['!**/*', '+skills/skill-a', '+skills/skill-c'],
-              prompts: [],
             },
           ],
         },
@@ -824,23 +666,18 @@ describe('ScoutPackageManager', () => {
     const sharedDir = path.join(tempDir, 'shared-resources');
     const sharedExtensionsDir = path.join(sharedDir, 'extensions');
     const sharedSkillsDir = path.join(sharedDir, 'skills');
-    const sharedPromptsDir = path.join(sharedDir, 'prompts');
     fs.mkdirSync(sharedExtensionsDir, { recursive: true });
     fs.mkdirSync(sharedSkillsDir, { recursive: true });
-    fs.mkdirSync(sharedPromptsDir, { recursive: true });
     fs.writeFileSync(path.join(sharedExtensionsDir, 'shared.ts'), 'export default () => {}');
     writeSkill(path.join(sharedSkillsDir, 'shared-skill', 'SKILL.md'), 'shared-skill', 'Shared');
-    fs.writeFileSync(path.join(sharedPromptsDir, 'shared.md'), 'Shared prompt');
 
     const projectBaseDir = path.join(cwd, '.scout');
     fs.mkdirSync(projectBaseDir, { recursive: true });
     const linkType = process.platform === 'win32' ? 'junction' : 'dir';
     fs.symlinkSync(sharedExtensionsDir, path.join(agentDir, 'extensions'), linkType);
     fs.symlinkSync(sharedSkillsDir, path.join(agentDir, 'skills'), linkType);
-    fs.symlinkSync(sharedPromptsDir, path.join(agentDir, 'prompts'), linkType);
     fs.symlinkSync(sharedExtensionsDir, path.join(projectBaseDir, 'extensions'), linkType);
     fs.symlinkSync(sharedSkillsDir, path.join(projectBaseDir, 'skills'), linkType);
-    fs.symlinkSync(sharedPromptsDir, path.join(projectBaseDir, 'prompts'), linkType);
 
     const manager = new ScoutPackageManager({
       cwd,
@@ -852,10 +689,8 @@ describe('ScoutPackageManager', () => {
 
     expect(result.extensions).toHaveLength(1);
     expect(result.skills).toHaveLength(1);
-    expect(result.prompts).toHaveLength(1);
     expect(result.extensions[0]?.metadata.scope).toBe('project');
     expect(result.skills[0]?.metadata.scope).toBe('project');
-    expect(result.prompts[0]?.metadata.scope).toBe('project');
   });
 
   it('scans .agents skills from cwd up to git root and ignores root markdown files', () => {
@@ -1090,7 +925,6 @@ describe('ScoutPackageManager', () => {
       'manifest-skill',
       'Manifest',
     );
-    writePrompt(path.join(manifestPackageDir, 'prompts', 'manifest-prompt.md'), 'Manifest prompt');
     fs.writeFileSync(path.join(manifestPackageDir, 'src', 'index.ts'), 'export default () => {}');
     fs.writeFileSync(
       path.join(manifestPackageDir, 'package.json'),
@@ -1098,7 +932,6 @@ describe('ScoutPackageManager', () => {
         scout: {
           extensions: ['./src/index.ts'],
           skills: ['./skills'],
-          prompts: ['./prompts/*.md'],
         },
       }),
     );
@@ -1124,11 +957,6 @@ describe('ScoutPackageManager', () => {
     expect(
       manifestResult.skills.some(
         (resource) => pathEndsWith(resource.path, 'manifest-skill/SKILL.md') && resource.enabled,
-      ),
-    ).toBe(true);
-    expect(
-      manifestResult.prompts.some(
-        (resource) => pathEndsWith(resource.path, 'manifest-prompt.md') && resource.enabled,
       ),
     ).toBe(true);
     expect(

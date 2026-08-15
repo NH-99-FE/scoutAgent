@@ -195,8 +195,9 @@ Scout 内置两种工具 profile，也支持在设置中创建自定义 profile�
 | `~/.scout/agent/settings.json` | 全局运行设置 |
 | `<workspace>/.scout/settings.json` | 项目运行设置，覆盖全局设置 |
 | `~/.scout/agent/sessions/` | 按工作目录分组的 JSONL 会话 |
-| `~/.scout/agent/{skills,prompts,extensions}/` | 用户级资源 |
-| `<workspace>/.scout/{skills,prompts,extensions}/` | 项目级资源 |
+| `~/.scout/agent/{skills,extensions}/` | 用户级 Skills 与 Extensions |
+| `<workspace>/.scout/{skills,extensions}/` | 项目级 Skills 与 Extensions |
+| `~/.scout/agent/prompts/` | 全局 Prompt 模板 |
 | `~/.agents/skills/`、`<workspace>/.agents/skills/` | 自动扫描的兼容 Skills 目录 |
 
 项目设置会深度覆盖全局设置；数组类配置按 scope 整体覆盖，不会隐式拼接。设置页可以在 Global 与 Project 两个 scope 之间切换并查看最终生效值。
@@ -208,7 +209,7 @@ Scout 内置两种工具 profile，也支持在设置中创建自定义 profile�
 - compaction 与 branch summary token 预算；
 - transport、超时、重试和 WebSocket 连接策略；
 - shell 路径；
-- packages、extensions、skills、prompts 资源路径。
+- packages、extensions、skills 资源路径。
 
 ## Skills、Prompts 与 Extensions
 
@@ -220,7 +221,7 @@ Skill 使用 `SKILL.md` 和 frontmatter 描述名称与用途。设置页可以�
 
 ### Prompts
 
-项目级或用户级 `prompts` 目录中的提示词模板会成为 slash command。选择后由 runtime 展开并提交，不需要 Webview 理解模板内部结构。
+`~/.scout/agent/prompts/` 顶层的 Markdown 模板会成为 slash command。Extension 也可以在运行期间注册临时 Prompt；同名时全局模板优先。设置页用于查看、创建和打开模板，不提供项目作用域或额外路径配置。
 
 ### Extensions
 

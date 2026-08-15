@@ -135,6 +135,9 @@ export class ScoutController implements vscode.Disposable {
         const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
         await vscode.window.showTextDocument(document);
       },
+      revealPath: async (filePath) => {
+        await vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(filePath));
+      },
       showErrorMessage: (message) => {
         void vscode.window.showErrorMessage(message);
       },

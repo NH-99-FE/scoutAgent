@@ -18,7 +18,7 @@ import { NodeExecutionEnv } from '../../src/harness/env/nodejs.ts';
 import { JsonlSessionStorage } from '../../src/harness/session/jsonl-storage.ts';
 import { InMemorySessionStorage } from '../../src/harness/session/memory-storage.ts';
 import { Session } from '../../src/harness/session/session.ts';
-import type { ExecutionEnv, PromptTemplate, Skill } from '../../src/harness/types.ts';
+import type { ExecutionEnv, Skill } from '../../src/harness/types.ts';
 import type { AgentEvent, AgentMessage, AgentTool } from '../../src/types.ts';
 import { createTempDir } from './session-test-utils.ts';
 
@@ -27,10 +27,6 @@ type HarnessWithEventHandler = {
 };
 
 interface AppSkill extends Skill {
-  source: 'project' | 'user';
-}
-
-interface AppPromptTemplate extends PromptTemplate {
   source: 'project' | 'user';
 }
 
@@ -670,7 +666,7 @@ describe('AgentHarness lifecycle', () => {
         return makeProviderAssistantMessage('done');
       },
     ]);
-    const harness = new AgentHarness<Skill, PromptTemplate, AgentTool>({
+    const harness = new AgentHarness<Skill, AgentTool>({
       env: new NodeExecutionEnv({ cwd: process.cwd() }),
       session: new Session(new InMemorySessionStorage()),
       model: firstModel,
@@ -727,7 +723,7 @@ describe('AgentHarness lifecycle', () => {
   it('preserves app resource types for getters and update events', async () => {
     const session = new Session(new InMemorySessionStorage());
     const env = new NodeExecutionEnv({ cwd: process.cwd() });
-    const harness = new AgentHarness<AppSkill, AppPromptTemplate, AppTool>({
+    const harness = new AgentHarness<AppSkill, AppTool>({
       env,
       session,
       model: makeModel(),
@@ -739,12 +735,7 @@ describe('AgentHarness lifecycle', () => {
       filePath: '/skills/inspect/SKILL.md',
       source: 'project',
     };
-    const promptTemplate: AppPromptTemplate = {
-      name: 'review',
-      content: 'Review $1',
-      source: 'user',
-    };
-    const resources = { skills: [skill], promptTemplates: [promptTemplate] };
+    const resources = { skills: [skill] };
     const updates: Array<{ resourcesSource?: string; previousSource?: string }> = [];
     harness.subscribe((event) => {
       if (event.type === 'resources_update') {
@@ -764,9 +755,7 @@ describe('AgentHarness lifecycle', () => {
       { resourcesSource: 'project', previousSource: 'project' },
     ]);
     expect(resolved.skills?.[0]?.source).toBe('project');
-    expect(resolved.promptTemplates?.[0]?.source).toBe('user');
     expect(resolved.skills).not.toBe(resources.skills);
-    expect(resolved.promptTemplates).not.toBe(resources.promptTemplates);
   });
 
   it('persists message_end hook replacements', async () => {

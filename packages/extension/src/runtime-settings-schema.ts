@@ -54,7 +54,6 @@ export const RUNTIME_SETTINGS_KEYS = new Set<keyof ScoutRuntimeSettings>([
   'packages',
   'extensions',
   'skills',
-  'prompts',
 ]);
 
 export interface RuntimeSettingsReadResult {
@@ -185,9 +184,6 @@ export function readRuntimeSettings(value: unknown): RuntimeSettingsReadResult {
 
   const skills = readStringArray(record.skills, 'skills', errors);
   if (skills) settings.skills = skills;
-
-  const prompts = readStringArray(record.prompts, 'prompts', errors);
-  if (prompts) settings.prompts = prompts;
 
   return { settings, errors };
 }
@@ -600,7 +596,7 @@ function readPackageSources(
     const source = readNonEmptyString(item.source, `${itemLabel}.source`, errors);
     if (!source) return;
     const packageSource: Extract<ScoutPackageSource, { source: string }> = { source };
-    for (const key of ['extensions', 'skills', 'prompts'] as const) {
+    for (const key of ['extensions', 'skills'] as const) {
       const value = readStringArray(item[key], `${itemLabel}.${key}`, errors);
       if (value) packageSource[key] = value;
     }

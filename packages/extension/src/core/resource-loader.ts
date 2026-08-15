@@ -5,10 +5,8 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
-import type { PromptTemplate } from '@scout-agent/agent';
-import { loadSourcedPromptTemplates } from '@scout-agent/agent';
-import { NodeExecutionEnv } from '@scout-agent/agent/node';
 import { loadSkills, type ResourceDiagnostic, type Skill as ScoutSkill } from './skills.ts';
+import { PromptResourceCatalog, type PromptResourceSnapshot } from './prompt-resource-catalog.ts';
 import {
   createExtensionRuntime,
   loadExtensions,
@@ -25,8 +23,6 @@ import type { AgentSessionRuntimeDiagnostic } from './agent-session-runtime.ts';
 
 // ---------- 类型 ----------
 
-export type SourcedPromptTemplate = PromptTemplate & { sourceInfo?: SourceInfo };
-
 export interface DiscoveredExtensionResources {
   skillPaths: Array<{ path: string; extensionPath: string }>;
   promptPaths: Array<{ path: string; extensionPath: string }>;
@@ -41,7 +37,7 @@ export interface ScoutContextFile {
 
 export interface LoadedScoutResources {
   skills: SourcedScoutSkill[];
-  promptTemplates: SourcedPromptTemplate[];
+  prompts: PromptResourceSnapshot;
   contextFiles: ScoutContextFile[];
   systemPrompt?: string;
   appendSystemPrompt: string[];
@@ -54,6 +50,7 @@ export interface ScoutResourceLoaderOptions {
   resourceSettings?: ScoutResourceSettingsSnapshot;
   systemPrompt?: string;
   appendSystemPrompt?: string[];
+  promptResourceCatalog?: PromptResourceCatalog;
 }
 
 interface ResolvedResourceState {
@@ -138,6 +135,7 @@ export class ScoutResourceLoader {
   private readonly agentDir: string;
   private readonly resourceSettings: ScoutResourceSettingsSnapshot;
   private readonly packageManager: ScoutPackageManager;
+  private readonly promptResourceCatalog: PromptResourceCatalog;
   private readonly systemPromptSource?: string;
   private readonly appendSystemPromptSource?: string[];
   private discoveredResources: DiscoveredExtensionResources = ScoutResourceLoader.emptyDiscovered();
@@ -157,6 +155,8 @@ export class ScoutResourceLoader {
       agentDir: this.agentDir,
       resourceSettings: this.resourceSettings,
     });
+    this.promptResourceCatalog =
+      options.promptResourceCatalog ?? new PromptResourceCatalog(this.agentDir);
     this.systemPromptSource = options.systemPrompt;
     this.appendSystemPromptSource = options.appendSystemPrompt;
   }
@@ -239,26 +239,14 @@ export class ScoutResourceLoader {
         this.getDefaultSourceInfoForPath(skill.filePath),
     }));
 
-    const promptResult = await loadSourcedPromptTemplates(
-      new NodeExecutionEnv({ cwd: this.cwd }),
-      resolved.promptInputs,
-      (promptTemplate, sourceInfo): SourcedPromptTemplate => ({ ...promptTemplate, sourceInfo }),
+    const prompts = this.promptResourceCatalog.replaceExtensionInputs(
+      resolved.promptInputs.map((input) => ({ path: input.path, sourceInfo: input.source })),
     );
-    const dedupedPromptResult = this.dedupePromptTemplates(
-      promptResult.promptTemplates.map((entry) => entry.promptTemplate),
-    );
-    for (const diag of promptResult.diagnostics) {
-      diagnostics.push({
-        type: 'warning',
-        message: `${diag.path}: ${diag.message}`,
-        path: diag.path,
-      });
-    }
-    diagnostics.push(...dedupedPromptResult.diagnostics);
+    diagnostics.push(...prompts.diagnostics);
 
     return {
       skills,
-      promptTemplates: dedupedPromptResult.promptTemplates,
+      prompts,
       contextFiles: loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }),
       systemPrompt: resolvePromptInput(this.systemPromptSource ?? this.discoverSystemPromptFile()),
       appendSystemPrompt: this.resolveAppendSystemPrompt(),
@@ -286,7 +274,6 @@ export class ScoutResourceLoader {
 
     recordMetadata(resolvedPaths.extensions);
     recordMetadata(resolvedPaths.skills);
-    recordMetadata(resolvedPaths.prompts);
 
     const extensionSourceInfos = new Map<string, SourceInfo>();
     const extensionPaths = resolvedPaths.extensions
@@ -308,12 +295,7 @@ export class ScoutResourceLoader {
       skillPaths: resolvedPaths.skills
         .filter((resource) => resource.enabled)
         .map((resource) => resource.path),
-      promptInputs: resolvedPaths.prompts
-        .filter((resource) => resource.enabled)
-        .map((resource) => ({
-          path: resource.path,
-          source: createSourceInfo(resource.path, resource.metadata),
-        })),
+      promptInputs: [],
       metadataByPath,
     };
   }
@@ -441,8 +423,19 @@ export class ScoutResourceLoader {
     }
 
     const normalizedPath = resolve(filePath);
-    const agentRoots = [join(this.agentDir, 'skills'), join(this.agentDir, 'prompts')];
-    const projectRoots = [join(this.cwd, '.scout', 'skills'), join(this.cwd, '.scout', 'prompts')];
+    const globalPromptRoot = join(this.agentDir, 'prompts');
+    if (this.isUnderPath(normalizedPath, globalPromptRoot)) {
+      return {
+        path: filePath,
+        source: 'auto',
+        scope: 'user',
+        origin: 'top-level',
+        baseDir: this.agentDir,
+      };
+    }
+
+    const agentRoots = [join(this.agentDir, 'skills')];
+    const projectRoots = [join(this.cwd, '.scout', 'skills')];
 
     for (const root of agentRoots) {
       if (this.isUnderPath(normalizedPath, root)) {
@@ -502,37 +495,5 @@ export class ScoutResourceLoader {
       merged.push(entry);
     }
     return merged;
-  }
-
-  private dedupePromptTemplates(promptTemplates: SourcedPromptTemplate[]): {
-    promptTemplates: SourcedPromptTemplate[];
-    diagnostics: AgentSessionRuntimeDiagnostic[];
-  } {
-    const seen = new Map<string, SourcedPromptTemplate>();
-    const diagnostics: AgentSessionRuntimeDiagnostic[] = [];
-
-    for (const promptTemplate of promptTemplates) {
-      const existing = seen.get(promptTemplate.name);
-      if (!existing) {
-        seen.set(promptTemplate.name, promptTemplate);
-        continue;
-      }
-
-      const winnerPath = existing.sourceInfo?.path ?? `<prompt:${existing.name}>`;
-      const loserPath = promptTemplate.sourceInfo?.path ?? `<prompt:${promptTemplate.name}>`;
-      diagnostics.push({
-        type: 'collision',
-        message: `name "/${promptTemplate.name}" collision`,
-        path: loserPath,
-        collision: {
-          resourceType: 'prompt',
-          name: promptTemplate.name,
-          winnerPath,
-          loserPath,
-        },
-      });
-    }
-
-    return { promptTemplates: [...seen.values()], diagnostics };
   }
 }

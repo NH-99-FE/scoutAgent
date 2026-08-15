@@ -30,7 +30,6 @@ import {
   prepareCompaction,
 } from './compaction/compaction.ts';
 import { convertToLlm, type CustomMessage } from './messages.ts';
-import { formatPromptTemplateInvocation } from './prompt-templates.ts';
 import { formatSkillInvocation } from './skills.ts';
 import type {
   AbortResult,
@@ -45,7 +44,6 @@ import type {
   ExecutionEnv,
   NavigateTreeResult,
   PendingSessionWrite,
-  PromptTemplate,
   Session,
   Skill,
 } from './types.ts';
@@ -169,10 +167,9 @@ type AgentHarnessHandler = (
   signal?: AbortSignal,
 ) => Promise<unknown> | unknown;
 type MessageEndEvent = Extract<AgentEvent, { type: 'message_end' }>;
-type AgentHarnessHookEvent<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-> = AgentHarnessOwnEvent<TSkill, TPromptTemplate> | MessageEndEvent;
+type AgentHarnessHookEvent<TSkill extends Skill = Skill> =
+  | AgentHarnessOwnEvent<TSkill>
+  | MessageEndEvent;
 
 function normalizeHarnessError(
   error: unknown,
@@ -192,13 +189,9 @@ function normalizeHookError(error: unknown): AgentHarnessError {
   return normalizeHarnessError(error, 'hook');
 }
 
-interface AgentHarnessTurnState<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-  TTool extends AgentTool = AgentTool,
-> {
+interface AgentHarnessTurnState<TSkill extends Skill = Skill, TTool extends AgentTool = AgentTool> {
   messages: AgentMessage[];
-  resources: AgentHarnessResources<TSkill, TPromptTemplate>;
+  resources: AgentHarnessResources<TSkill>;
   streamOptions: AgentHarnessStreamOptions;
   sessionId: string;
   systemPrompt: string;
@@ -208,11 +201,7 @@ interface AgentHarnessTurnState<
   activeTools: TTool[];
 }
 
-export class AgentHarness<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-  TTool extends AgentTool = AgentTool,
-> {
+export class AgentHarness<TSkill extends Skill = Skill, TTool extends AgentTool = AgentTool> {
   readonly env: ExecutionEnv;
   private session: Session;
   private phase: AgentHarnessPhase = 'idle';
@@ -222,10 +211,10 @@ export class AgentHarness<
   private pendingSessionWrites: PendingSessionWrite[] = [];
   private model: Model<Api>;
   private thinkingLevel: ThinkingLevel;
-  private systemPrompt: AgentHarnessOptions<TSkill, TPromptTemplate, TTool>['systemPrompt'];
+  private systemPrompt: AgentHarnessOptions<TSkill, TTool>['systemPrompt'];
   private streamOptions: AgentHarnessStreamOptions;
   private getApiKeyAndHeaders?: AgentHarnessOptions['getApiKeyAndHeaders'];
-  private resources: AgentHarnessResources<TSkill, TPromptTemplate>;
+  private resources: AgentHarnessResources<TSkill>;
   private tools = new Map<string, TTool>();
   private activeToolNames: string[];
   private steerQueue: UserMessage[] = [];
@@ -235,7 +224,7 @@ export class AgentHarness<
   private nextTurnQueue: AgentMessage[] = [];
   private handlers = new Map<string, Set<AgentHarnessHandler>>();
 
-  constructor(options: AgentHarnessOptions<TSkill, TPromptTemplate, TTool>) {
+  constructor(options: AgentHarnessOptions<TSkill, TTool>) {
     this.env = options.env;
     this.session = options.session;
     this.resources = options.resources ?? {};
@@ -257,10 +246,7 @@ export class AgentHarness<
     return this.handlers.get(type);
   }
 
-  private async emitOwn(
-    event: AgentHarnessOwnEvent<TSkill, TPromptTemplate>,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  private async emitOwn(event: AgentHarnessOwnEvent<TSkill>, signal?: AbortSignal): Promise<void> {
     for (const listener of this.getHandlers(SUBSCRIBER_EVENT_TYPE) ?? []) {
       try {
         await listener(event, signal);
@@ -270,10 +256,7 @@ export class AgentHarness<
     }
   }
 
-  private async emitAny(
-    event: AgentHarnessEvent<TSkill, TPromptTemplate>,
-    signal?: AbortSignal,
-  ): Promise<void> {
+  private async emitAny(event: AgentHarnessEvent<TSkill>, signal?: AbortSignal): Promise<void> {
     for (const listener of this.getHandlers(SUBSCRIBER_EVENT_TYPE) ?? []) {
       try {
         await listener(event, signal);
@@ -284,7 +267,7 @@ export class AgentHarness<
   }
 
   private async emitHook<TType extends keyof AgentHarnessEventResultMap>(
-    event: Extract<AgentHarnessHookEvent<TSkill, TPromptTemplate>, { type: TType }>,
+    event: Extract<AgentHarnessHookEvent<TSkill>, { type: TType }>,
   ): Promise<AgentHarnessEventResultMap[TType] | undefined> {
     const handlers = this.getHandlers(event.type as TType);
     if (!handlers || handlers.size === 0) return undefined;
@@ -449,7 +432,7 @@ export class AgentHarness<
     return this.activeRuntimeMessages?.slice();
   }
 
-  private async createTurnState(): Promise<AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>> {
+  private async createTurnState(): Promise<AgentHarnessTurnState<TSkill, TTool>> {
     const context = await this.session.buildContext();
     const resources = this.getResources();
     const sessionMetadata = await this.session.getMetadata();
@@ -484,7 +467,7 @@ export class AgentHarness<
   }
 
   private createContext(
-    turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
+    turnState: AgentHarnessTurnState<TSkill, TTool>,
     systemPrompt?: string,
   ): AgentContext {
     return {
@@ -494,9 +477,7 @@ export class AgentHarness<
     };
   }
 
-  private createStreamFn(
-    getTurnState: () => AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
-  ): StreamFn {
+  private createStreamFn(getTurnState: () => AgentHarnessTurnState<TSkill, TTool>): StreamFn {
     return async (model, context, streamOptions) => {
       const turnState = getTurnState();
       const auth = await this.getApiKeyAndHeaders?.(model);
@@ -543,8 +524,8 @@ export class AgentHarness<
   }
 
   private createLoopConfig(
-    getTurnState: () => AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
-    setTurnState: (turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => void,
+    getTurnState: () => AgentHarnessTurnState<TSkill, TTool>,
+    setTurnState: (turnState: AgentHarnessTurnState<TSkill, TTool>) => void,
     options: { skipInitialSteeringPoll?: boolean } = {},
   ): AgentLoopConfig {
     const turnState = getTurnState();
@@ -719,7 +700,7 @@ export class AgentHarness<
   }
 
   private async executePromptMessages(
-    turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
+    turnState: AgentHarnessTurnState<TSkill, TTool>,
     messages: AgentMessage[],
     options: {
       systemPrompt?: string;
@@ -730,7 +711,7 @@ export class AgentHarness<
     let activeTurnState = turnState;
     const abortController = new AbortController();
     const getTurnState = () => activeTurnState;
-    const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => {
+    const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TTool>) => {
       activeTurnState = nextTurnState;
     };
     this.setActiveRuntimeMessages(turnState.messages);
@@ -784,7 +765,7 @@ export class AgentHarness<
   }
 
   private async executeTurn(
-    turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
+    turnState: AgentHarnessTurnState<TSkill, TTool>,
     text: string,
     options?: { images?: ImageContent[] },
   ): Promise<AssistantMessage> {
@@ -815,12 +796,12 @@ export class AgentHarness<
   }
 
   private async executeContinuation(
-    turnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>,
+    turnState: AgentHarnessTurnState<TSkill, TTool>,
   ): Promise<AssistantMessage> {
     let activeTurnState = turnState;
     const abortController = new AbortController();
     const getTurnState = () => activeTurnState;
-    const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TPromptTemplate, TTool>) => {
+    const setTurnState = (nextTurnState: AgentHarnessTurnState<TSkill, TTool>) => {
       activeTurnState = nextTurnState;
     };
     this.setActiveRuntimeMessages(turnState.messages);
@@ -965,26 +946,6 @@ export class AgentHarness<
         turnState,
         formatSkillInvocation(skill, additionalInstructions),
       );
-    } catch (error) {
-      this.phase = 'idle';
-      throw normalizeHarnessError(error, 'unknown');
-    } finally {
-      finishRunPromise();
-    }
-  }
-
-  async promptFromTemplate(name: string, args: string[] = []): Promise<AssistantMessage> {
-    if (this.phase !== 'idle') throw new AgentHarnessError('busy', 'AgentHarness is busy');
-    this.phase = 'turn';
-    const finishRunPromise = this.startRunPromise();
-    try {
-      const turnState = await this.createTurnState();
-      const template = (turnState.resources.promptTemplates ?? []).find(
-        (candidate) => candidate.name === name,
-      );
-      if (!template)
-        throw new AgentHarnessError('invalid_argument', `Unknown prompt template: ${name}`);
-      return await this.executeTurn(turnState, formatPromptTemplateInvocation(template, args));
     } catch (error) {
       this.phase = 'idle';
       throw normalizeHarnessError(error, 'unknown');
@@ -1320,18 +1281,16 @@ export class AgentHarness<
     this.followUpQueueMode = mode;
   }
 
-  getResources(): AgentHarnessResources<TSkill, TPromptTemplate> {
+  getResources(): AgentHarnessResources<TSkill> {
     return {
       skills: this.resources.skills?.slice(),
-      promptTemplates: this.resources.promptTemplates?.slice(),
     };
   }
 
-  async setResources(resources: AgentHarnessResources<TSkill, TPromptTemplate>): Promise<void> {
+  async setResources(resources: AgentHarnessResources<TSkill>): Promise<void> {
     const previousResources = this.getResources();
     this.resources = {
       skills: resources.skills?.slice(),
-      promptTemplates: resources.promptTemplates?.slice(),
     };
     await this.emitOwn({
       type: 'resources_update',
@@ -1405,10 +1364,7 @@ export class AgentHarness<
   }
 
   subscribe(
-    listener: (
-      event: AgentHarnessEvent<TSkill, TPromptTemplate>,
-      signal?: AbortSignal,
-    ) => Promise<void> | void,
+    listener: (event: AgentHarnessEvent<TSkill>, signal?: AbortSignal) => Promise<void> | void,
   ): () => void {
     let handlers = this.handlers.get(SUBSCRIBER_EVENT_TYPE);
     if (!handlers) {
@@ -1422,7 +1378,7 @@ export class AgentHarness<
   on<TType extends keyof AgentHarnessEventResultMap>(
     type: TType,
     handler: (
-      event: Extract<AgentHarnessHookEvent<TSkill, TPromptTemplate>, { type: TType }>,
+      event: Extract<AgentHarnessHookEvent<TSkill>, { type: TType }>,
     ) => Promise<AgentHarnessEventResultMap[TType]> | AgentHarnessEventResultMap[TType],
   ): () => void {
     let handlers = this.handlers.get(type);

@@ -142,6 +142,9 @@ describe('ScoutResourceLoader', () => {
   it('replaces extension-discovered prompt templates instead of retaining stale paths', async () => {
     const extensionPromptDir = path.join(tempDir, 'extension-prompts');
     writePrompt(path.join(extensionPromptDir, 'extension-prompt.md'), 'Extension prompt');
+    writePrompt(path.join(extensionPromptDir, 'second-prompt.md'), 'Second extension prompt');
+    const invalidPromptPath = path.join(extensionPromptDir, 'invalid.md');
+    fs.writeFileSync(invalidPromptPath, '---\ndescription: [unterminated\n---\nPrompt body');
 
     const loader = new ScoutResourceLoader({ cwd, agentDir });
     const first = await loader.replaceExtensionResources({
@@ -149,17 +152,34 @@ describe('ScoutResourceLoader', () => {
       promptPaths: [{ path: extensionPromptDir, extensionPath: '<extension>' }],
     });
 
-    expect(first.promptTemplates.map((prompt) => prompt.name)).toContain('extension-prompt');
+    expect(first.prompts.activeTemplates.map((prompt) => prompt.name)).toEqual(
+      expect.arrayContaining(['extension-prompt', 'second-prompt']),
+    );
     expect(
-      first.promptTemplates.find((prompt) => prompt.name === 'extension-prompt')?.sourceInfo,
+      first.prompts.activeTemplates.find((prompt) => prompt.name === 'extension-prompt')
+        ?.sourceInfo,
     ).toMatchObject({
+      path: path.join(extensionPromptDir, 'extension-prompt.md'),
       source: 'extension',
       scope: 'temporary',
     });
+    expect(
+      first.prompts.activeTemplates.find((prompt) => prompt.name === 'second-prompt')?.sourceInfo
+        .path,
+    ).toBe(path.join(extensionPromptDir, 'second-prompt.md'));
+    expect(first.prompts.resources).toContainEqual({
+      sourceInfo: expect.objectContaining({ path: invalidPromptPath, source: 'extension' }),
+      template: undefined,
+    });
+    expect(first.prompts.diagnostics).toContainEqual(
+      expect.objectContaining({ type: 'warning', path: invalidPromptPath }),
+    );
 
     const second = await loader.replaceExtensionResources(ScoutResourceLoader.emptyDiscovered());
 
-    expect(second.promptTemplates.map((prompt) => prompt.name)).not.toContain('extension-prompt');
+    expect(second.prompts.activeTemplates.map((prompt) => prompt.name)).not.toContain(
+      'extension-prompt',
+    );
     expect(loader.getDiscoveredResources()).toEqual({ skillPaths: [], promptPaths: [] });
   });
 
@@ -280,78 +300,50 @@ describe('ScoutResourceLoader', () => {
     });
   });
 
-  it('loads package manifest prompt templates with package source info', async () => {
-    const packageDir = path.join(tempDir, 'prompt-package');
-    writePrompt(path.join(packageDir, 'prompts', 'package-prompt.md'), 'Package prompt');
-    fs.writeFileSync(
-      path.join(packageDir, 'package.json'),
-      JSON.stringify({ scout: { prompts: ['prompts/*.md'] } }),
-    );
-
-    const loader = new ScoutResourceLoader({
-      cwd,
-      agentDir,
-      resourceSettings: {
-        global: {},
-        project: { packages: [packageDir] },
-      },
-    });
-    const resources = await loader.load();
-
-    expect(
-      resources.promptTemplates.find((prompt) => prompt.name === 'package-prompt')?.sourceInfo,
-    ).toMatchObject({
-      source: packageDir,
-      scope: 'project',
-      origin: 'package',
-      baseDir: packageDir,
-    });
-  });
-
-  it('prefers project prompt templates over user prompt templates on name collisions', async () => {
+  it('prefers global prompt templates over extension prompts on name collisions', async () => {
     const userPromptPath = path.join(agentDir, 'prompts', 'review.md');
-    const projectPromptPath = path.join(cwd, '.scout', 'prompts', 'review.md');
     writePrompt(userPromptPath, 'User review', 'User body');
-    writePrompt(projectPromptPath, 'Project review', 'Project body');
+    const extensionPromptPath = path.join(tempDir, 'extension-prompts', 'review.md');
+    writePrompt(extensionPromptPath, 'Extension review', 'Extension body');
 
     const loader = new ScoutResourceLoader({ cwd, agentDir });
-    const resources = await loader.load();
+    const resources = await loader.replaceExtensionResources({
+      skillPaths: [],
+      promptPaths: [{ path: extensionPromptPath, extensionPath: '<extension>' }],
+    });
 
-    expect(resources.promptTemplates.find((prompt) => prompt.name === 'review')?.content).toBe(
-      'Project body',
-    );
     expect(
-      resources.promptTemplates.find((prompt) => prompt.name === 'review')?.sourceInfo?.path,
-    ).toBe(projectPromptPath);
+      resources.prompts.activeTemplates.find((prompt) => prompt.name === 'review')?.content,
+    ).toBe('User body');
+    expect(
+      resources.prompts.activeTemplates.find((prompt) => prompt.name === 'review')?.sourceInfo.path,
+    ).toBe(userPromptPath);
+    expect(
+      resources.prompts.resources
+        .filter((resource) => resource.template?.name === 'review')
+        .map((resource) => resource.sourceInfo.path),
+    ).toEqual([userPromptPath, extensionPromptPath]);
     expect(resources.diagnostics).toContainEqual(
       expect.objectContaining({
         type: 'collision',
         collision: expect.objectContaining({
           resourceType: 'prompt',
           name: 'review',
-          winnerPath: projectPromptPath,
-          loserPath: userPromptPath,
+          winnerPath: userPromptPath,
+          loserPath: extensionPromptPath,
         }),
       }),
     );
   });
 
-  it('does not load disabled prompt template resources into runtime resources', async () => {
-    writePrompt(path.join(agentDir, 'prompts', 'keep.md'), 'Keep');
-    writePrompt(path.join(agentDir, 'prompts', 'skip.md'), 'Skip');
+  it('ignores project prompt directories', async () => {
+    writePrompt(path.join(agentDir, 'prompts', 'global.md'), 'Global');
+    writePrompt(path.join(cwd, '.scout', 'prompts', 'project.md'), 'Project');
 
-    const loader = new ScoutResourceLoader({
-      cwd,
-      agentDir,
-      resourceSettings: {
-        global: { prompts: ['!prompts/skip.md'] },
-        project: {},
-      },
-    });
+    const loader = new ScoutResourceLoader({ cwd, agentDir });
     const resources = await loader.load();
 
-    expect(resources.promptTemplates.map((prompt) => prompt.name)).toContain('keep');
-    expect(resources.promptTemplates.map((prompt) => prompt.name)).not.toContain('skip');
+    expect(resources.prompts.activeTemplates.map((prompt) => prompt.name)).toEqual(['global']);
   });
 
   it('discovers project SYSTEM.md before global SYSTEM.md', async () => {

@@ -30,7 +30,6 @@ export interface ResolvedResource {
 export interface ResolvedPaths {
   extensions: ResolvedResource[];
   skills: ResolvedResource[];
-  prompts: ResolvedResource[];
 }
 
 export type ScoutPackageSource =
@@ -39,14 +38,12 @@ export type ScoutPackageSource =
       source: string;
       extensions?: string[];
       skills?: string[];
-      prompts?: string[];
     };
 
 export interface ScoutResourceSettings {
   packages?: ScoutPackageSource[];
   extensions?: string[];
   skills?: string[];
-  prompts?: string[];
 }
 
 export interface ScoutResourceSettingsSnapshot {
@@ -57,19 +54,17 @@ export interface ScoutResourceSettingsSnapshot {
 interface ScoutManifest {
   extensions?: string[];
   skills?: string[];
-  prompts?: string[];
 }
 
 interface ResourceAccumulator {
   extensions: Map<string, { metadata: PathMetadata; enabled: boolean }>;
   skills: Map<string, { metadata: PathMetadata; enabled: boolean }>;
-  prompts: Map<string, { metadata: PathMetadata; enabled: boolean }>;
 }
 
-type ResourceType = 'extensions' | 'skills' | 'prompts';
+type ResourceType = 'extensions' | 'skills';
 type SkillDiscoveryMode = 'scout' | 'agents';
 
-const RESOURCE_TYPES: ResourceType[] = ['extensions', 'skills', 'prompts'];
+const RESOURCE_TYPES: ResourceType[] = ['extensions', 'skills'];
 const IGNORE_FILE_NAMES = ['.gitignore', '.ignore', '.fdignore'];
 
 type IgnoreMatcher = ReturnType<typeof ignore>;
@@ -286,53 +281,6 @@ function resourcePrecedenceRank(metadata: PathMetadata): number {
 
 // ---------- 文件收集 ----------
 
-function collectFiles(
-  dir: string,
-  filePattern: RegExp,
-  skipNodeModules = true,
-  ignoreMatcher?: IgnoreMatcher,
-  rootDir?: string,
-): string[] {
-  const files: string[] = [];
-  if (!existsSync(dir)) return files;
-
-  const root = rootDir ?? dir;
-  const ig = ignoreMatcher ?? ignore();
-  addIgnoreRules(ig, dir, root);
-
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue;
-      if (skipNodeModules && entry.name === 'node_modules') continue;
-
-      const fullPath = join(dir, entry.name);
-      let isDir = entry.isDirectory();
-      let isFile = entry.isFile();
-      if (entry.isSymbolicLink()) {
-        try {
-          const stats = statSync(fullPath);
-          isDir = stats.isDirectory();
-          isFile = stats.isFile();
-        } catch {
-          continue;
-        }
-      }
-
-      const relPath = toPosixPath(relative(root, fullPath));
-      const ignorePath = isDir ? `${relPath}/` : relPath;
-      if (ig.ignores(ignorePath)) continue;
-
-      if (isDir) files.push(...collectFiles(fullPath, filePattern, skipNodeModules, ig, root));
-      else if (isFile && filePattern.test(entry.name)) files.push(fullPath);
-    }
-  } catch {
-    // Ignore unreadable dirs.
-  }
-
-  return files;
-}
-
 function collectSkillEntries(
   dir: string,
   mode: SkillDiscoveryMode,
@@ -416,40 +364,9 @@ function collectAutoSkillEntries(dir: string, mode: SkillDiscoveryMode): string[
   return collectSkillEntries(dir, mode);
 }
 
-function collectAutoPromptEntries(dir: string): string[] {
-  if (!existsSync(dir)) return [];
-  const ig = ignore();
-  addIgnoreRules(ig, dir, dir);
-  const entries: string[] = [];
-
-  try {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
-      const fullPath = join(dir, entry.name);
-      let isFile = entry.isFile();
-      if (entry.isSymbolicLink()) {
-        try {
-          isFile = statSync(fullPath).isFile();
-        } catch {
-          continue;
-        }
-      }
-      const relPath = toPosixPath(relative(dir, fullPath));
-      if (isFile && entry.name.endsWith('.md') && !ig.ignores(relPath)) {
-        entries.push(fullPath);
-      }
-    }
-  } catch {
-    return [];
-  }
-
-  return entries;
-}
-
 function collectResourceFiles(dir: string, resourceType: ResourceType): string[] {
   if (resourceType === 'extensions') return collectAutoExtensionEntries(dir);
-  if (resourceType === 'skills') return collectSkillEntries(dir, 'scout');
-  return collectFiles(dir, /\.md$/);
+  return collectSkillEntries(dir, 'scout');
 }
 
 function findGitRepoRoot(startDir: string): string | null {
@@ -798,23 +715,19 @@ export class ScoutPackageManager {
     const userOverrides = {
       extensions: this.resourceSettings.global.extensions ?? [],
       skills: this.resourceSettings.global.skills ?? [],
-      prompts: this.resourceSettings.global.prompts ?? [],
     };
     const projectOverrides = {
       extensions: this.resourceSettings.project.extensions ?? [],
       skills: this.resourceSettings.project.skills ?? [],
-      prompts: this.resourceSettings.project.prompts ?? [],
     };
 
     const userDirs = {
       extensions: join(globalBaseDir, 'extensions'),
       skills: join(globalBaseDir, 'skills'),
-      prompts: join(globalBaseDir, 'prompts'),
     };
     const projectDirs = {
       extensions: join(projectBaseDir, 'extensions'),
       skills: join(projectBaseDir, 'skills'),
-      prompts: join(projectBaseDir, 'prompts'),
     };
 
     const addResources = (
@@ -861,13 +774,6 @@ export class ScoutPackageManager {
     }
 
     addResources(
-      'prompts',
-      collectAutoPromptEntries(projectDirs.prompts),
-      projectMetadata,
-      projectOverrides.prompts,
-      projectBaseDir,
-    );
-    addResources(
       'extensions',
       collectAutoExtensionEntries(userDirs.extensions),
       userMetadata,
@@ -889,14 +795,6 @@ export class ScoutPackageManager {
       { ...userMetadata, baseDir: userAgentsBaseDir },
       userOverrides.skills,
       userAgentsBaseDir,
-    );
-
-    addResources(
-      'prompts',
-      collectAutoPromptEntries(userDirs.prompts),
-      userMetadata,
-      userOverrides.prompts,
-      globalBaseDir,
     );
   }
 
@@ -933,8 +831,6 @@ export class ScoutPackageManager {
         return accumulator.extensions;
       case 'skills':
         return accumulator.skills;
-      case 'prompts':
-        return accumulator.prompts;
     }
   }
 
@@ -969,7 +865,6 @@ export class ScoutPackageManager {
     return {
       extensions: new Map(),
       skills: new Map(),
-      prompts: new Map(),
     };
   }
 
@@ -998,7 +893,6 @@ export class ScoutPackageManager {
     return {
       extensions: mapToResolved(accumulator.extensions),
       skills: mapToResolved(accumulator.skills),
-      prompts: mapToResolved(accumulator.prompts),
     };
   }
 

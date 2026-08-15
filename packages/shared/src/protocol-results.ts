@@ -5,6 +5,7 @@
 import type { ScoutCustomModelsSettings } from './models.ts';
 import type { ScoutExtensionsSettings } from './protocol-extensions.ts';
 import type { ScoutSkillsSettings } from './protocol-skills.ts';
+import type { ScoutPromptsSettings } from './protocol-prompts.ts';
 import type { ScoutRuntimeSettingsState } from './settings.ts';
 import type {
   ScoutCommandInfo,
@@ -67,6 +68,11 @@ export interface ScoutExtensionsResult {
 export interface ScoutSkillsResult {
   type: 'skills_result';
   settings: ScoutSkillsSettings;
+}
+
+export interface ScoutPromptsResult {
+  type: 'prompts_result';
+  settings: ScoutPromptsSettings;
 }
 
 export interface ScoutContextUsageResult {
@@ -136,6 +142,8 @@ export type ScoutGenericCommandResultType =
   | 'create_extension_from_template_result'
   | 'open_extension_file_result'
   | 'open_skill_file_result'
+  | 'open_prompt_file_result'
+  | 'open_prompts_directory_result'
   | 'open_mentioned_file_result'
   | 'reload_result'
   | 'delete_session_result';
@@ -164,6 +172,12 @@ export interface ScoutSaveRuntimeSettingsResult extends ScoutCommandResultBase {
 export interface ScoutSaveSkillsSettingsResult extends ScoutCommandResultBase {
   type: 'save_skills_settings_result';
   settings?: ScoutSkillsSettings;
+}
+
+export interface ScoutCreatePromptTemplateResult extends ScoutCommandResultBase {
+  type: 'create_prompt_template_result';
+  /** 文件已创建，但运行时未能立即重新加载该 Prompt。 */
+  reloadError?: string;
 }
 
 export interface ScoutForkResult {
@@ -211,6 +225,7 @@ export type ScoutCommandResult =
   | ScoutSaveCustomModelsResult
   | ScoutSaveRuntimeSettingsResult
   | ScoutSaveSkillsSettingsResult
+  | ScoutCreatePromptTemplateResult
   | ScoutForkResult
   | ScoutNavigateTreeResult
   | ScoutUserMessageResult
@@ -278,6 +293,7 @@ export type ScoutProtocolResponsePayload =
   | ScoutRuntimeSettingsResult
   | ScoutExtensionsResult
   | ScoutSkillsResult
+  | ScoutPromptsResult
   | ScoutContextUsageResult
   | ScoutCommandsResult
   | ScoutTreeResult

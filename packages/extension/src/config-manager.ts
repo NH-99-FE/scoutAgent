@@ -228,7 +228,6 @@ export class ConfigManager implements ScoutCoreConfig {
       packages: settings.packages,
       extensions: settings.extensions,
       skills: settings.skills,
-      prompts: settings.prompts,
     });
     return {
       global: pickResourceSettings(this.settingsManager.getGlobalSettings()),

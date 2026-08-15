@@ -58,23 +58,8 @@ export interface Skill {
   disableModelInvocation?: boolean;
 }
 
-/** 可格式化为提示的提示模板，用于显式调用。 */
-export interface PromptTemplate {
-  /** 用于查找或应用命令路由的稳定模板名称。 */
-  name: string;
-  /** 可选描述，用于命令列表或自动补全。 */
-  description?: string;
-  /** 模板内容。参数占位符由 `formatPromptTemplateInvocation` 格式化。 */
-  content: string;
-}
-
 /** 显式调用方法和系统提示回调可访问的资源。 */
-export interface AgentHarnessResources<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-> {
-  /** 可用于显式调用的提示模板。 */
-  promptTemplates?: TPromptTemplate[];
+export interface AgentHarnessResources<TSkill extends Skill = Skill> {
   /** 模型和显式技能调用可用的技能。 */
   skills?: TSkill[];
 }
@@ -523,15 +508,12 @@ export interface SettledEvent {
   nextTurnCount: number;
 }
 
-export interface BeforeAgentStartEvent<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-> {
+export interface BeforeAgentStartEvent<TSkill extends Skill = Skill> {
   type: 'before_agent_start';
   prompt: string;
   images?: ImageContent[];
   systemPrompt: string;
-  resources: AgentHarnessResources<TSkill, TPromptTemplate>;
+  resources: AgentHarnessResources<TSkill>;
 }
 
 export interface ContextEvent {
@@ -616,24 +598,18 @@ export interface ThinkingLevelSelectEvent {
   previousLevel: ThinkingLevel;
 }
 
-export interface ResourcesUpdateEvent<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-> {
+export interface ResourcesUpdateEvent<TSkill extends Skill = Skill> {
   type: 'resources_update';
-  resources: AgentHarnessResources<TSkill, TPromptTemplate>;
-  previousResources: AgentHarnessResources<TSkill, TPromptTemplate>;
+  resources: AgentHarnessResources<TSkill>;
+  previousResources: AgentHarnessResources<TSkill>;
 }
 
-export type AgentHarnessOwnEvent<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-> =
+export type AgentHarnessOwnEvent<TSkill extends Skill = Skill> =
   | QueueUpdateEvent
   | SavePointEvent
   | AbortEvent
   | SettledEvent
-  | BeforeAgentStartEvent<TSkill, TPromptTemplate>
+  | BeforeAgentStartEvent<TSkill>
   | ContextEvent
   | BeforeProviderRequestEvent
   | BeforeProviderPayloadEvent
@@ -646,12 +622,11 @@ export type AgentHarnessOwnEvent<
   | SessionTreeEvent
   | ModelSelectEvent
   | ThinkingLevelSelectEvent
-  | ResourcesUpdateEvent<TSkill, TPromptTemplate>;
+  | ResourcesUpdateEvent<TSkill>;
 
-export type AgentHarnessEvent<
-  TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
-> = AgentEvent | AgentHarnessOwnEvent<TSkill, TPromptTemplate>;
+export type AgentHarnessEvent<TSkill extends Skill = Skill> =
+  | AgentEvent
+  | AgentHarnessOwnEvent<TSkill>;
 
 export interface BeforeAgentStartResult {
   messages?: AgentMessage[];
@@ -795,7 +770,6 @@ export interface BranchSummaryResult {
 
 export interface AgentHarnessOptions<
   TSkill extends Skill = Skill,
-  TPromptTemplate extends PromptTemplate = PromptTemplate,
   TTool extends AgentTool = AgentTool,
 > {
   env: ExecutionEnv;
@@ -805,7 +779,7 @@ export interface AgentHarnessOptions<
    * 显式调用方法和系统提示回调可访问的具体资源。
    * 应用负责加载/重载资源，并应调用 `setResources()` 更新值。
    */
-  resources?: AgentHarnessResources<TSkill, TPromptTemplate>;
+  resources?: AgentHarnessResources<TSkill>;
   systemPrompt?:
     | string
     | ((context: {
@@ -814,7 +788,7 @@ export interface AgentHarnessOptions<
         model: Model<Api>;
         thinkingLevel: ThinkingLevel;
         activeTools: TTool[];
-        resources: AgentHarnessResources<TSkill, TPromptTemplate>;
+        resources: AgentHarnessResources<TSkill>;
       }) => string | Promise<string>);
   getApiKeyAndHeaders?: (
     model: Model<Api>,

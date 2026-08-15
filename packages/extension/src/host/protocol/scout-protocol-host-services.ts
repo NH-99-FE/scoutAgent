@@ -21,6 +21,7 @@ import { LifecycleProtocolService } from './services/lifecycle-service.ts';
 import { MentionProtocolService } from './services/mention-service.ts';
 import { SessionProtocolService } from './services/session-service.ts';
 import { SkillManagementProtocolService } from './services/skill-management-service.ts';
+import { PromptManagementProtocolService } from './services/prompt-management-service.ts';
 import { StateProtocolService } from './services/state-service.ts';
 import { TaskProtocolService } from './services/task-service.ts';
 import { TreeProtocolService } from './services/tree-service.ts';
@@ -53,6 +54,7 @@ export interface ScoutProtocolHostServicesOptions {
     options: { cwd: string; sessionId: string },
   ) => void | Promise<void>;
   openTextFile?: (filePath: string) => Promise<void>;
+  revealPath?: (filePath: string) => Promise<void>;
   postMessage: (message: ExtensionMessage, surface?: ScoutWebviewSurface) => void;
   showErrorMessage?: (message: string) => void;
   log: (message: string) => void;
@@ -64,6 +66,7 @@ export interface ScoutProtocolHostServices {
   config: ConfigProtocolService;
   extensions: ExtensionManagementProtocolService;
   skills: SkillManagementProtocolService;
+  prompts: PromptManagementProtocolService;
   session: SessionProtocolService;
   task: TaskProtocolService;
   tree: TreeProtocolService;
@@ -228,6 +231,16 @@ export function createScoutProtocolHostServices(
     pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
   });
 
+  bundle.prompts = new PromptManagementProtocolService({
+    agentDir: options.agentDir,
+    sessionManager: options.sessionManager,
+    openTextFile: options.openTextFile,
+    revealPath: options.revealPath,
+    requestCommands: (surface) => bundle.ui.pushCommands(surface),
+    pushState: (surface) => bundle.state.pushState(surface),
+    pushTreeData: (surface) => bundle.tree.pushTreeData(surface),
+  });
+
   bundle.lifecycle = new LifecycleProtocolService({
     sessionManager: options.sessionManager,
     getConfig: () => bundle.config.getConfig(),
@@ -295,6 +308,14 @@ export function createScoutProtocolHostServices(
       requestSkills: (respond) => bundle.skills.requestSkills(respond),
       saveSkillsSettings: (message, respond) => bundle.skills.saveSkillsSettings(message, respond),
       openSkillFile: (message, respond) => bundle.skills.openSkillFile(message, respond),
+    },
+    prompts: {
+      requestPrompts: (respond) => bundle.prompts.requestPrompts(respond),
+      refreshPrompts: (respond) => bundle.prompts.refreshPrompts(respond),
+      openPromptFile: (message, respond) => bundle.prompts.openPromptFile(message, respond),
+      createPromptTemplate: (message, respond) =>
+        bundle.prompts.createPromptTemplate(message, respond),
+      openPromptsDirectory: (respond) => bundle.prompts.openPromptsDirectory(respond),
     },
     session: {
       userMessage: (message, respond) => bundle.session.userMessage(message, respond),

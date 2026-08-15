@@ -14,7 +14,6 @@ import type {
   AgentMessage,
   AgentToolResult,
   AgentToolUpdateCallback,
-  PromptTemplate,
   ThinkingLevel,
   ToolExecutionMode,
 } from '@scout-agent/agent';
@@ -32,6 +31,7 @@ import type { Static, TSchema } from '@sinclair/typebox';
 import type { EventBus } from './event-bus.ts';
 import type { ScoutCoreConfig } from '../config.ts';
 import type { SourceInfo } from '../source-info.ts';
+import type { PromptTemplate } from '../prompt-templates.ts';
 import type { Skill } from '../skills.ts';
 
 // ---------- 工具定义 ----------
@@ -471,6 +471,7 @@ export type SlashCommandSource = 'extension' | 'prompt' | 'skill';
 export interface SlashCommandInfo {
   name: string;
   description?: string;
+  argumentHint?: string;
   source: SlashCommandSource;
   sourceInfo: SourceInfo;
 }

@@ -87,6 +87,14 @@ export type {
 } from './protocol-skills.ts';
 
 export type {
+  ScoutPromptListItem,
+  ScoutPromptResourceScope,
+  ScoutPromptSourceKind,
+  ScoutPromptStatus,
+  ScoutPromptsSettings,
+} from './protocol-prompts.ts';
+
+export type {
   ScoutAssistantMessage,
   ScoutBranchSummaryMessage,
   ScoutBusyKind,
@@ -141,6 +149,7 @@ export type {
   ScoutProtocolResponsePayloadType,
   ScoutRuntimeSettingsResult,
   ScoutSaveCustomModelsResult,
+  ScoutCreatePromptTemplateResult,
   ScoutSaveRuntimeSettingsResult,
   ScoutSaveSkillsSettingsResult,
   ScoutAbortTreeNavigationResult,
@@ -148,6 +157,7 @@ export type {
   ScoutUserMessageResult,
   ScoutSessionsResult,
   ScoutSkillsResult,
+  ScoutPromptsResult,
   ScoutStateResult,
   ScoutTaskHistoryResult,
   ScoutTreeResult,

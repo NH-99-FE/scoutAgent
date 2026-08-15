@@ -199,13 +199,11 @@ describe('SettingsManager', () => {
         packages: ['global-package'],
         extensions: undefined,
         skills: ['~/skills/global'],
-        prompts: undefined,
       },
       project: {
         packages: [{ source: '../package', skills: ['skills/*'] }],
         extensions: undefined,
         skills: ['./skills/project'],
-        prompts: undefined,
       },
     });
   });

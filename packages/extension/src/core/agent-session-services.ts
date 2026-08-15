@@ -23,6 +23,7 @@ import type { FileReviewProjectionUpdate, FileReviewTurnSnapshot } from './revie
 import { FileReviewExtensionController } from './review/file-review-extension.ts';
 import type { ActiveToolSelection } from './tools/index.ts';
 import type { SessionExecutionPort } from './session-execution.ts';
+import type { PromptResourceCatalog } from './prompt-resource-catalog.ts';
 
 // ---------- 类型 ----------
 
@@ -42,6 +43,7 @@ export interface CreateAgentSessionServicesOptions {
   agentDir: string;
   configManager: ScoutCoreConfig;
   session: Session;
+  promptResourceCatalog?: PromptResourceCatalog;
 }
 
 export interface CreateAgentSessionFromServicesOptions {
@@ -71,6 +73,7 @@ export async function createAgentSessionServices(
     cwd: options.cwd,
     agentDir: options.agentDir,
     resourceSettings,
+    promptResourceCatalog: options.promptResourceCatalog,
   });
   const resources = await resourceLoader.load();
   const extensionResult = resourceLoader.getExtensions();
@@ -143,7 +146,7 @@ export async function createAgentSessionFromServices(
     cwd: options.services.cwd,
     logger: options.logger,
     skills: options.services.resources.skills,
-    promptTemplates: options.services.resources.promptTemplates,
+    prompts: options.services.resources.prompts,
     contextFiles: options.services.resources.contextFiles,
     systemPrompt: options.services.resources.systemPrompt,
     appendSystemPrompt: options.services.resources.appendSystemPrompt,

@@ -45,6 +45,8 @@ const PAYLOAD_VALIDATORS = {
   request_runtime_settings: fields('type'),
   request_extensions: fields('type'),
   request_skills: fields('type'),
+  request_prompts: fields('type'),
+  refresh_prompts: fields('type'),
   request_context_usage: fields('type'),
   user_message: combine(
     fields('type', 'session', 'text', 'document', 'images', 'deliverAs', 'clearFollowUpQueue'),
@@ -115,9 +117,12 @@ const PAYLOAD_VALIDATORS = {
     fields('type', 'scope', 'entries', 'toggles'),
     requiredEnum('scope', ['project', 'global']),
     requiredStringArray('entries'),
-    optionalSkillToggleIntents('toggles'),
+    optionalResourceToggleIntents('toggles'),
   ),
   open_skill_file: combine(fields('type', 'path'), requiredString('path')),
+  open_prompt_file: combine(fields('type', 'path'), requiredString('path')),
+  create_prompt_template: combine(fields('type', 'name'), requiredString('name')),
+  open_prompts_directory: fields('type'),
   open_settings_panel: fields('type'),
   open_tree_panel: fields('type'),
   copy_text: combine(fields('type', 'text'), requiredString('text')),
@@ -397,14 +402,14 @@ function requiredStringArray(key: string): PayloadValidator {
       : `${key} must be a string array`;
 }
 
-function optionalSkillToggleIntents(key: string): PayloadValidator {
+function optionalResourceToggleIntents(key: string): PayloadValidator {
   return (payload) => {
     const value = payload[key];
     if (value === undefined) return undefined;
-    if (!Array.isArray(value)) return `${key} must be a skill toggle intent array`;
+    if (!Array.isArray(value)) return `${key} must be a resource toggle intent array`;
     for (const item of value) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
-        return `${key} must be a skill toggle intent array`;
+        return `${key} must be a resource toggle intent array`;
       }
       const intent = item as Record<string, unknown>;
       const keys = Object.keys(intent);

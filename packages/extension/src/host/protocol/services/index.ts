@@ -9,6 +9,7 @@ import type {
   ExtensionManagementProtocolHost,
   LifecycleProtocolHost,
   MentionProtocolHost,
+  PromptManagementProtocolHost,
   ProtocolPayload,
   ReviewProtocolHost,
   SessionProtocolHost,
@@ -35,6 +36,7 @@ export interface ScoutProtocolServices {
   review: ReviewProtocolHost;
   extensions: ExtensionManagementProtocolHost;
   skills: SkillManagementProtocolHost;
+  prompts: PromptManagementProtocolHost;
   ui: UiProtocolHost;
 }
 
@@ -264,6 +266,27 @@ export function registerScoutProtocolServices(
     },
     open_skill_file: async (message, context) => {
       await services.skills.openSkillFile(payload<'open_skill_file'>(message), context.respond);
+    },
+  });
+
+  registerProtocolServiceHandlers(server, 'prompts', {
+    request_prompts: async (_message, context) => {
+      await services.prompts.requestPrompts(context.respond);
+    },
+    refresh_prompts: async (_message, context) => {
+      await services.prompts.refreshPrompts(context.respond);
+    },
+    open_prompt_file: async (message, context) => {
+      await services.prompts.openPromptFile(payload<'open_prompt_file'>(message), context.respond);
+    },
+    create_prompt_template: async (message, context) => {
+      await services.prompts.createPromptTemplate(
+        payload<'create_prompt_template'>(message),
+        context.respond,
+      );
+    },
+    open_prompts_directory: async (_message, context) => {
+      await services.prompts.openPromptsDirectory(context.respond);
     },
   });
 

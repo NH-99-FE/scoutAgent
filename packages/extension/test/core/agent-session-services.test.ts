@@ -107,7 +107,6 @@ describe('createAgentSessionServices', () => {
     const packageDir = path.join(tempDir, 'single-resolve-package');
     fs.mkdirSync(path.join(packageDir, 'extensions'), { recursive: true });
     fs.mkdirSync(path.join(packageDir, 'skills', 'package-skill'), { recursive: true });
-    writePrompt(path.join(packageDir, 'prompts', 'package-prompt.md'), 'Package prompt');
     fs.writeFileSync(
       path.join(packageDir, 'extensions', 'package-command.ts'),
       `export default function(scout) {
@@ -124,7 +123,6 @@ describe('createAgentSessionServices', () => {
         scout: {
           extensions: ['extensions/*.ts'],
           skills: ['skills/*'],
-          prompts: ['prompts/*.md'],
         },
       }),
     );
@@ -147,9 +145,6 @@ describe('createAgentSessionServices', () => {
         services.extensionRunner.getRegisteredCommands().map((command) => command.name),
       ).toEqual(['package-command']);
       expect(services.resources.skills.map((skill) => skill.name)).toContain('package-skill');
-      expect(services.resources.promptTemplates.map((prompt) => prompt.name)).toContain(
-        'package-prompt',
-      );
     } finally {
       resolveSpy.mockRestore();
     }

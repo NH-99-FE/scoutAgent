@@ -214,6 +214,20 @@ export interface SkillManagementProtocolHost {
   ) => Promise<void>;
 }
 
+export interface PromptManagementProtocolHost {
+  requestPrompts: (respond: ProtocolResponder) => Promise<void>;
+  refreshPrompts: (respond: ProtocolResponder) => Promise<void>;
+  openPromptFile: (
+    message: ProtocolPayload<'open_prompt_file'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+  createPromptTemplate: (
+    message: ProtocolPayload<'create_prompt_template'>,
+    respond: ProtocolResponder,
+  ) => Promise<void>;
+  openPromptsDirectory: (respond: ProtocolResponder) => Promise<void>;
+}
+
 export interface UiProtocolHost {
   requestCommands: (respond: ProtocolResponder) => void;
   extensionUIResponse: (message: ProtocolPayload<'extension_ui_response'>) => void;

@@ -159,6 +159,59 @@ describe('ExtensionSessionCoordinator lifecycle', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it('keeps global Prompt resources available without an AgentSession', async () => {
+    const promptDir = path.join(agentDir, 'prompts');
+    fs.mkdirSync(promptDir, { recursive: true });
+    fs.writeFileSync(path.join(promptDir, 'existing.md'), 'Existing prompt');
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: new ConfigManager({ cwd, userConfigDir }),
+    });
+
+    expect(
+      coordinator.getPromptResourceSnapshot().activeTemplates.map((prompt) => prompt.name),
+    ).toEqual(['existing']);
+
+    fs.writeFileSync(path.join(promptDir, 'created.md'), 'Created prompt');
+    await expect(coordinator.refreshPromptResources()).resolves.toBe(false);
+
+    expect(
+      coordinator.getPromptResourceSnapshot().activeTemplates.map((prompt) => prompt.name),
+    ).toEqual(['created', 'existing']);
+  });
+
+  it('updates an active AgentSession Prompt snapshot without replacing the runtime', async () => {
+    const promptDir = path.join(agentDir, 'prompts');
+    fs.mkdirSync(promptDir, { recursive: true });
+    fs.writeFileSync(path.join(promptDir, 'existing.md'), 'Existing prompt');
+    const coordinator = new ExtensionSessionCoordinator({
+      cwd,
+      agentDir,
+      outputChannel: createOutputChannel() as never,
+      configManager: new ConfigManager({ cwd, userConfigDir }),
+    });
+    const setPromptResources = vi.fn(async () => undefined);
+    (
+      coordinator as unknown as {
+        agentSession: Pick<AgentSession, 'setPromptResources'>;
+      }
+    ).agentSession = { setPromptResources };
+
+    fs.writeFileSync(path.join(promptDir, 'created.md'), 'Created prompt');
+
+    await expect(coordinator.refreshPromptResources()).resolves.toBe(true);
+    expect(setPromptResources).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeTemplates: expect.arrayContaining([
+          expect.objectContaining({ name: 'created' }),
+          expect.objectContaining({ name: 'existing' }),
+        ]),
+      }),
+    );
+  });
+
   it('preserves newSession options when creating the initial runtime', async () => {
     fs.writeFileSync(
       path.join(cwd, '.scout', 'extensions', 'lifecycle.ts'),

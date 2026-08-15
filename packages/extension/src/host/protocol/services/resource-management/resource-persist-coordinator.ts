@@ -8,7 +8,7 @@ import type { ScoutWebviewSurface } from '../../../webview-surface.ts';
 // ---------- 类型 ----------
 
 export interface ResourcePersistCallbacks {
-  pushConfig: (surface?: ScoutWebviewSurface) => void;
+  pushConfig?: (surface?: ScoutWebviewSurface) => void;
   requestCommands: (surface?: ScoutWebviewSurface) => void;
   pushState: (surface?: ScoutWebviewSurface) => Promise<void>;
   pushTreeData: (surface?: ScoutWebviewSurface) => Promise<void>;
@@ -61,7 +61,7 @@ export class ResourcePersistCoordinator {
   }
 
   async pushAfterPersist(reloadSucceeded: boolean): Promise<void> {
-    this.callbacks.pushConfig();
+    this.callbacks.pushConfig?.();
     if (reloadSucceeded) {
       this.callbacks.requestCommands();
       await this.callbacks.pushState();

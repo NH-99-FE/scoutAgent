@@ -45,6 +45,8 @@ const PAYLOAD_CASES = [
     { service: 'extensions', method: 'request_extensions' },
   ),
   protocolCase({ type: 'request_skills' }, { service: 'skills', method: 'request_skills' }),
+  protocolCase({ type: 'request_prompts' }, { service: 'prompts', method: 'request_prompts' }),
+  protocolCase({ type: 'refresh_prompts' }, { service: 'prompts', method: 'refresh_prompts' }),
   protocolCase(
     { type: 'request_context_usage' },
     { service: 'state', method: 'request_context_usage' },
@@ -152,6 +154,18 @@ const PAYLOAD_CASES = [
   protocolCase(
     { type: 'open_skill_file', path: '/workspace/.scout/skills/review/SKILL.md' },
     { service: 'skills', method: 'open_skill_file' },
+  ),
+  protocolCase(
+    { type: 'open_prompt_file', path: '/workspace/.scout/prompts/review.md' },
+    { service: 'prompts', method: 'open_prompt_file' },
+  ),
+  protocolCase(
+    { type: 'create_prompt_template', name: 'review' },
+    { service: 'prompts', method: 'create_prompt_template' },
+  ),
+  protocolCase(
+    { type: 'open_prompts_directory' },
+    { service: 'prompts', method: 'open_prompts_directory' },
   ),
   protocolCase({ type: 'open_settings_panel' }, { service: 'ui', method: 'open_settings_panel' }),
   protocolCase({ type: 'open_tree_panel' }, { service: 'ui', method: 'open_tree_panel' }),
@@ -539,6 +553,13 @@ function makeServices(): ScoutProtocolServices {
         respond({ type: 'open_skill_file_result', success: true, path: message.path });
       }),
     },
+    prompts: {
+      requestPrompts: vi.fn(async () => undefined),
+      refreshPrompts: vi.fn(async () => undefined),
+      openPromptFile: vi.fn(async () => undefined),
+      createPromptTemplate: vi.fn(async () => undefined),
+      openPromptsDirectory: vi.fn(async () => undefined),
+    },
     ui: {
       requestCommands: vi.fn(),
       extensionUIResponse: vi.fn(),
@@ -571,6 +592,14 @@ function makeServices(): ScoutProtocolServices {
 describe('registerScoutProtocolServices', () => {
   it('declares the actual events emitted by tool profile selection', () => {
     expect(SCOUT_PROTOCOL.set_tool_profile.emits).toEqual(['state_update']);
+  });
+
+  it('declares every event emitted after creating a Prompt template', () => {
+    expect(SCOUT_PROTOCOL.create_prompt_template.emits).toEqual([
+      'commands_update',
+      'state_update',
+      'tree_update',
+    ]);
   });
 
   it('registers a handler for every routed webview payload', async () => {
